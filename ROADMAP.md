@@ -5,20 +5,20 @@
 
 ---
 
-## Fase 0 — Bootstrap ✅ (em andamento)
+## Fase 0 — Bootstrap ✅ (CONCLUÍDA)
 
 **Change**: `openspec/changes/bootstrap-django-ats-core/`
 
 Estrutura base do projeto Django: pyproject, config, User multi-role, Case FSM,
 CaseEvent, PromptTemplate, intranet guard, template base Bootstrap.
 
-- **Slice 1**: Bootstrap projeto Django
-- **Slice 2**: User + Role + autenticação + troca de papel
-- **Slice 3**: Case FSM 17 estados + CaseEvent auditoria
-- **Slice 4**: Middleware intranet guard
-- **Slice 5**: Template base Bootstrap 5.3
-- **Slice 6**: PromptTemplate versionado
-- **Slice 7**: Quality gate completo (ruff + mypy + pytest)
+- [x] **Slice 1**: Bootstrap projeto Django
+- [x] **Slice 2**: User + Role + autenticação + troca de papel
+- [x] **Slice 3**: Case FSM 17 estados + CaseEvent auditoria
+- [x] **Slice 4**: Middleware intranet guard
+- [x] **Slice 5**: Template base Bootstrap 5.3
+- [x] **Slice 6**: PromptTemplate versionado
+- [x] **Slice 7**: Quality gate completo (ruff + mypy + pytest)
 
 ---
 
@@ -167,9 +167,9 @@ Transformar em PWA instalável e refinamentos de UX.
 ## Dependências entre fases
 
 ```
-Fase 0 (bootstrap) ← estamos aqui
-  ├── Fase 1 (intake NIR) ← precisa de Case + upload
-  │     └── Fase 2 (pipeline LLM) ← precisa de intake + PromptTemplate
+Fase 0 (bootstrap) ✅ CONCLUÍDA
+  ├── Fase 1 (intake NIR) ← próxima
+    │     └── Fase 2 (pipeline LLM) ← precisa de intake + PromptTemplate
   │           └── Fase 3 (fila médica) ← precisa de LLM artifacts
   │                 ├── Fase 4 (fila agendador) ← precisa de decisão médica
   │                 └── Fase 5 (resultado NIR) ← precisa de decisão + agendamento
@@ -187,4 +187,7 @@ Fase 10 (PWA) ← pode ser feito a qualquer momento após Fase 5
 
 - `docs/DOMAIN_ANALYSIS.md` — análise completa de domínio
 - `docs/adr/ADR-0001-arquitetura-django-web-ssr-ats-triagem-eda.md` — decisão arquitetural
-- `GREENFIELD_REIMPLEMENTATION_PLAN.md` — plano original (referência)
+
+## Dívida Técnica
+
+- **django-fsm → viewflow.fsm**: `django-fsm` 3.0+ está deprecated, integrado ao `viewflow.fsm`. Migrar quando houver necessidade de novos recursos ou quando o pacote parar de funcionar com Django futuro. Não urgente.

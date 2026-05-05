@@ -1,6 +1,6 @@
 # Slice 7: Quality Gate Completo (ruff + mypy + pytest)
 
-> **Status**: TODO
+> **Status**: DONE
 > **Depende de**: Slices 1-6 (todos os apps criados)
 > **Change**: `openspec/changes/bootstrap-django-ats-core/`
 

@@ -116,11 +116,13 @@ static/          # css/, js/
 
 ## State do Sistema
 
-- **Fase atual**: Bootstrap (change `bootstrap-django-ats-core`)
-- **Change ativo**: `openspec/changes/bootstrap-django-ats-core/`
-- **Slices**: 7 slices planejados (001-007), nenhum implementado ainda
+- **Fase atual**: Fase 0 CONCLUÍDA — próxima: Fase 1 (Intake NIR)
+- **Change concluído**: `openspec/changes/bootstrap-django-ats-core/` (7 slices implementados)
+- **Apps criados**: `apps/accounts/`, `apps/cases/`, `apps/llm/`
+- **Testes**: 91 passando, quality gate verde
 - **Documentacao de dominio**: `docs/DOMAIN_ANALYSIS.md`
 - **ADR ativa**: `docs/adr/ADR-0001-arquitetura-django-web-ssr-ats-triagem-eda.md`
+- **Dívida técnica**: `django-fsm` deprecated → `viewflow.fsm` (não urgente)
 
 ## Quality Bar
 
