@@ -1,6 +1,6 @@
 # Slice 1: Tema Hospitalar — Paleta + Fontes
 
-> **Status**: TODO
+> **Status**: DONE
 > **Depende de**: Fase 0 completa
 > **Change**: `openspec/changes/intake-nir/`
 
