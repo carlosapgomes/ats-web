@@ -71,6 +71,10 @@ STATIC_ROOT = BASE_DIR / "staticfiles"
 MEDIA_URL = "media/"
 MEDIA_ROOT = BASE_DIR / "media"
 
+# Upload limits
+DATA_UPLOAD_MAX_MEMORY_SIZE = 20 * 1024 * 1024  # 20 MB
+FILE_UPLOAD_MAX_MEMORY_SIZE = 20 * 1024 * 1024  # 20 MB
+
 # Intranet Guard
 # Range CIDR da intranet (ex: "10.0.0.0/8" ou "192.168.0.0/16")
 # Se vazio, papéis nir/scheduler são bloqueados de qualquer IP.
