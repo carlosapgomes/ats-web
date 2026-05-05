@@ -74,6 +74,7 @@ config/          # settings (base/dev/prod), urls, wsgi, asgi
 apps/accounts/   # User, Role, auth views, intranet guard middleware
 apps/cases/      # Case (FSM 17 estados), CaseEvent (auditoria)
 apps/llm/        # PromptTemplate (versionado, 1 ativo por nome)
+apps/pipeline/   # Pipeline LLM: client, services, policy engine, orchestrator, tasks
 apps/intake/     # NIR: upload PDF, meus casos, detalhe + timeline
 templates/       # base.html (tema hospitalar), login, switch-role, intake/
 static/          # css/app.css (paleta hospitalar), js/upload.js
@@ -117,12 +118,13 @@ static/          # css/app.css (paleta hospitalar), js/upload.js
 
 ## State do Sistema
 
-- **Fase atual**: Fase 1 CONCLUÍDA — próxima: Fase 2 (Pipeline LLM)
+- **Fase atual**: Fase 2 CONCLUÍDA — próxima: Fase 3 (Fila Médica / Doctor)
 - **Changes concluídos**:
-  - `openspec/changes/bootstrap-django-ats-core/` (7 slices, Fase 0)
-  - `openspec/changes/intake-nir/` (6 slices, Fase 1)
-- **Apps criados**: `apps/accounts/`, `apps/cases/`, `apps/llm/`, `apps/intake/`
-- **Testes**: 144 passando, quality gate verde
+  - `openspec/archive/bootstrap-django-ats-core/` (7 slices, Fase 0)
+  - `openspec/archive/intake-nir/` (6 slices, Fase 1)
+  - `openspec/archive/pipeline-llm/` (7 slices, Fase 2)
+- **Apps criados**: `apps/accounts/`, `apps/cases/`, `apps/llm/`, `apps/intake/`, `apps/pipeline/`
+- **Testes**: 291 passando, quality gate verde
 - **Templates**: base.html com tema hospitalar, login, switch-role, intake (home, my_cases, case_detail)
 - **Documentacao de dominio**: `docs/DOMAIN_ANALYSIS.md`
 - **ADR ativa**: `docs/adr/ADR-0001-arquitetura-django-web-ssr-ats-triagem-eda.md`

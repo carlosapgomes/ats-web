@@ -37,19 +37,19 @@ Upload de PDF pelo NIR, criação do caso, fila de "meus casos", visualização 
 
 ---
 
-## Fase 2 — Pipeline LLM
+## Fase 2 — Pipeline LLM ✅ (CONCLUÍDA)
 
 Processamento automático do caso via LLM + decision engine determinístico.
 
-**Change**: `openspec/changes/pipeline-llm/`
+**Change**: `openspec/archive/pipeline-llm/`
 
-- [ ] **Slice 1**: App pipeline + LLM client abstraído (OpenAI SDK)
-- [ ] **Slice 2**: Policy engine — EDA Preop Policy (thresholds, minimum exams, conditional gates)
-- [ ] **Slice 3**: Policy engine — Reconciliation + Support Synthesis
-- [ ] **Slice 4**: Scope Detection (EDA / non-EDA / unknown)
-- [ ] **Slice 5**: LLM1 Service + LLM2 Service (JSON parser + prompt rendering)
-- [ ] **Slice 6**: Pipeline orchestrator + django-q2 task + integração intake
-- [ ] **Slice 7**: Quality gate completo
+- [x] **Slice 1**: App pipeline + LLM client abstraído (OpenAI SDK)
+- [x] **Slice 2**: Policy engine — EDA Preop Policy (thresholds, minimum exams, conditional gates)
+- [x] **Slice 3**: Policy engine — Reconciliation + Support Synthesis
+- [x] **Slice 4**: Scope Detection (EDA / non-EDA / unknown)
+- [x] **Slice 5**: LLM1 Service + LLM2 Service (JSON parser + prompt rendering)
+- [x] **Slice 6**: Pipeline orchestrator + django-q2 task + integração intake
+- [x] **Slice 7**: Quality gate completo
 
 ---
 
@@ -170,8 +170,8 @@ Transformar em PWA instalável e refinamentos de UX.
 ```
 Fase 0 (bootstrap) ✅ CONCLUÍDA
   ├── Fase 1 (intake NIR) ✅ CONCLUÍDA
-    │     └── Fase 2 (pipeline LLM) ← próxima, precisa de intake + PromptTemplate
-  │           └── Fase 3 (fila médica) ← precisa de LLM artifacts
+  │     └── Fase 2 (pipeline LLM) ✅ CONCLUÍDA
+  │           └── Fase 3 (fila médica) ← próxima, precisa de LLM artifacts
   │                 ├── Fase 4 (fila agendador) ← precisa de decisão médica
   │                 └── Fase 5 (resultado NIR) ← precisa de decisão + agendamento
   ├── Fase 6 (dashboard) ← precisa de Case + CaseEvent
