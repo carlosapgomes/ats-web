@@ -1,6 +1,6 @@
 # Slice 3: Policy Engine — Reconciliation + Support Synthesis
 
-> **Status**: TODO
+> **Status**: ✅ DONE
 > **Depende de**: Slice 2 (eda_preop_policy)
 > **Change**: `openspec/changes/pipeline-llm/`
 
