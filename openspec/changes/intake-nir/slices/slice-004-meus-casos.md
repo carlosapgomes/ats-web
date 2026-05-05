@@ -1,6 +1,6 @@
 # Slice 4: Meus Casos — Lista com Filtros
 
-> **Status**: TODO
+> **Status**: DONE ✅
 > **Depende de**: Slice 3 (upload funcionando)
 > **Change**: `openspec/changes/intake-nir/`
 

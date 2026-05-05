@@ -12,6 +12,47 @@ from apps.cases.models import Case
 from .forms import CaseUploadForm
 from .pdf_utils import extract_pdf_text
 
+STATUS_LABELS: dict[str, str] = {
+    "NEW": "Novo",
+    "R1_ACK_PROCESSING": "Processando",
+    "EXTRACTING": "Extraindo dados",
+    "LLM_STRUCT": "Análise IA (estrutura)",
+    "LLM_SUGGEST": "Análise IA (sugestão)",
+    "R2_POST_WIDGET": "Preparando avaliação",
+    "WAIT_DOCTOR": "Aguardando médico",
+    "DOCTOR_ACCEPTED": "Aceito pelo médico",
+    "DOCTOR_DENIED": "Recusado pelo médico",
+    "R3_POST_REQUEST": "Preparando agendamento",
+    "WAIT_APPT": "Aguardando agendamento",
+    "APPT_CONFIRMED": "Agendamento confirmado",
+    "APPT_DENIED": "Agendamento negado",
+    "FAILED": "Falha no processamento",
+    "R1_FINAL_REPLY_POSTED": "Resultado enviado",
+    "WAIT_R1_CLEANUP_THUMBS": "Aguardando confirmação",
+    "CLEANUP_RUNNING": "Em limpeza",
+    "CLEANED": "Concluído",
+}
+
+STATUS_CSS_CLASS: dict[str, str] = {
+    "NEW": "status-pending",
+    "R1_ACK_PROCESSING": "status-progress",
+    "EXTRACTING": "status-progress",
+    "LLM_STRUCT": "status-progress",
+    "LLM_SUGGEST": "status-progress",
+    "R2_POST_WIDGET": "status-progress",
+    "WAIT_DOCTOR": "status-progress",
+    "DOCTOR_ACCEPTED": "status-accepted",
+    "DOCTOR_DENIED": "status-denied",
+    "R3_POST_REQUEST": "status-progress",
+    "WAIT_APPT": "status-progress",
+    "APPT_CONFIRMED": "status-done",
+    "APPT_DENIED": "status-denied",
+    "FAILED": "status-denied",
+    "WAIT_R1_CLEANUP_THUMBS": "status-pending",
+    "CLEANUP_RUNNING": "status-pending",
+    "CLEANED": "status-done",
+}
+
 
 @login_required
 @role_required("nir")
@@ -61,6 +102,54 @@ def intake_home(request: HttpRequest) -> HttpResponse:
         {
             "form": form,
             "recent_cases": recent_cases,
+        },
+    )
+
+
+@login_required
+@role_required("nir")
+def my_cases(request: HttpRequest) -> HttpResponse:
+    """Lista de 'Meus Casos' do NIR — cards com filtros."""
+    user = request.user
+    assert user.is_authenticated
+
+    qs = (
+        Case.objects.filter(
+            created_by=user,
+        )
+        .exclude(status="CLEANED")
+        .order_by("-created_at")
+    )
+
+    # Filtro por status
+    status_filter = request.GET.get("status", "")
+    if status_filter:
+        qs = qs.filter(status=status_filter)
+
+    # Busca por número de registro
+    search = request.GET.get("q", "")
+    if search:
+        qs = qs.filter(agency_record_number__icontains=search)
+
+    # Prepara dados enriquecidos: label + css class por caso
+    case_data = [
+        {
+            "case": c,
+            "status_label": STATUS_LABELS.get(c.status, c.get_status_display()),
+            "status_css": STATUS_CSS_CLASS.get(c.status, "status-pending"),
+        }
+        for c in qs
+    ]
+
+    return render(
+        request,
+        "intake/my_cases.html",
+        {
+            "case_data": case_data,
+            "status_filter": status_filter,
+            "search": search,
+            "status_labels": STATUS_LABELS,
+            "status_css": STATUS_CSS_CLASS,
         },
     )
 
