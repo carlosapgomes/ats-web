@@ -38,3 +38,6 @@ INTRANET_IP_RANGE = "127.0.0.0/8"
 # Desabilita CSRF em testes
 CSRF_COOKIE_SECURE = False
 SESSION_COOKIE_SECURE = False
+
+# LLM: Use StaticLlmClient in tests by default
+LLM_CLIENT_FACTORY = None  # type: ignore[assignment]

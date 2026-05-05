@@ -16,6 +16,7 @@ INSTALLED_APPS = [
     "apps.cases",
     "apps.intake",
     "apps.llm",
+    "apps.pipeline",
 ]
 
 MIDDLEWARE = [
@@ -83,6 +84,12 @@ INTRANET_IP_RANGE = os.environ.get("INTRANET_IP_RANGE", "")
 # Header do proxy/tunnel com IP real do cliente
 # Cloudflare Tunnel padrão usa CF-Connecting-IP
 TRUSTED_PROXY_HEADER = os.environ.get("TRUSTED_PROXY_HEADER", "HTTP_CF_CONNECTING_IP")
+
+# LLM Configuration
+LLM_CLIENT_FACTORY = "apps.pipeline.llm.create_openai_client"
+OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY", "")
+OPENAI_MODEL = os.environ.get("OPENAI_MODEL", "gpt-4o")
+OPENAI_BASE_URL = os.environ.get("OPENAI_BASE_URL", "https://api.openai.com/v1")
 
 # Password validation
 AUTH_PASSWORD_VALIDATORS = [
