@@ -131,6 +131,8 @@ class Case(models.Model):
     def extraction_complete(self, success: bool, user=None):
         if not success:
             self._record_event("CASE_EXTRACTION_FAILED", user=user)
+        else:
+            self._record_event("CASE_EXTRACTION_OK", user=user)
         return CaseStatus.FAILED if not success else CaseStatus.LLM_STRUCT
 
     @transition(
