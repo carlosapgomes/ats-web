@@ -44,5 +44,24 @@ explicit_package_bases = true
 module = "apps.accounts.tests.*"
 disable_error_code = ["no-untyped-def"]
 
+[[tool.mypy.overrides]]
+module = "apps.cases.tests.*"
+disable_error_code = ["no-untyped-def"]
+
+[[tool.mypy.overrides]]
+module = "apps.cases.models"
+disable_error_code = ["no-untyped-def", "untyped-decorator", "no-any-return"]
+
+[[tool.mypy.overrides]]
+module = [
+    "django_fsm",
+    "django_fsm.*",
+]
+ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+module = "apps.cases.migrations.*"
+disable_error_code = ["import-untyped"]
+
 [tool.django-stubs]
 django_settings_module = "config.settings.test"
