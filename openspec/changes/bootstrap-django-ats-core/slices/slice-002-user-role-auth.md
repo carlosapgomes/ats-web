@@ -1,6 +1,6 @@
 # Slice 2: Modelos User + Role + Autenticação
 
-> **Status**: TODO
+> **Status**: DONE
 > **Depende de**: Slice 1
 > **Change**: `openspec/changes/bootstrap-django-ats-core/`
 

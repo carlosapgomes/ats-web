@@ -11,8 +11,6 @@ Usage:
     uv run python manage.py check --settings=config.settings.test
 """
 
-import os
-
 import dj_database_url
 
 from .base import *  # noqa: F401,F403
