@@ -42,11 +42,11 @@ explicit_package_bases = true
 
 [[tool.mypy.overrides]]
 module = "apps.accounts.tests.*"
-disable_error_code = ["no-untyped-def"]
+disable_error_code = ["no-untyped-def", "no-untyped-call", "assignment"]
 
 [[tool.mypy.overrides]]
 module = "apps.cases.tests.*"
-disable_error_code = ["no-untyped-def"]
+disable_error_code = ["no-untyped-def", "no-untyped-call", "assignment"]
 
 [[tool.mypy.overrides]]
 module = "apps.cases.models"

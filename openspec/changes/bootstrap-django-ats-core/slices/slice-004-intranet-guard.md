@@ -1,6 +1,6 @@
 # Slice 4: Middleware Intranet Guard
 
-> **Status**: TODO
+> **Status**: DONE
 > **Depende de**: Slice 2 (accounts app com User/Role)
 > **Change**: `openspec/changes/bootstrap-django-ats-core/`
 

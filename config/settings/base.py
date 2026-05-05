@@ -1,5 +1,6 @@
 """Base Django settings for ATS Web."""
 
+import os
 from pathlib import Path
 
 BASE_DIR = Path(__file__).resolve().parent.parent.parent
@@ -23,6 +24,7 @@ MIDDLEWARE = [
     "django.middleware.csrf.CsrfViewMiddleware",
     "django.contrib.auth.middleware.AuthenticationMiddleware",
     "apps.accounts.middleware.ActiveRoleMiddleware",
+    "apps.accounts.middleware.IntranetGuardMiddleware",
     "django.contrib.messages.middleware.MessageMiddleware",
     "django.middleware.clickjacking.XFrameOptionsMiddleware",
 ]
@@ -65,6 +67,15 @@ STATIC_ROOT = BASE_DIR / "staticfiles"
 
 MEDIA_URL = "media/"
 MEDIA_ROOT = BASE_DIR / "media"
+
+# Intranet Guard
+# Range CIDR da intranet (ex: "10.0.0.0/8" ou "192.168.0.0/16")
+# Se vazio, papéis nir/scheduler são bloqueados de qualquer IP.
+INTRANET_IP_RANGE = os.environ.get("INTRANET_IP_RANGE", "")
+
+# Header do proxy/tunnel com IP real do cliente
+# Cloudflare Tunnel padrão usa CF-Connecting-IP
+TRUSTED_PROXY_HEADER = os.environ.get("TRUSTED_PROXY_HEADER", "HTTP_CF_CONNECTING_IP")
 
 # Password validation
 AUTH_PASSWORD_VALIDATORS = [
