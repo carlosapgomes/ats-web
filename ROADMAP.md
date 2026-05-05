@@ -26,13 +26,14 @@ CaseEvent, PromptTemplate, intranet guard, template base Bootstrap.
 
 Upload de PDF pelo NIR, criação do caso, fila de "meus casos", visualização básica.
 
-- Tela de upload com drag & drop
-- Storage do PDF em `MEDIA_ROOT`
-- Criação do caso (status NEW → R1_ACK_PROCESSING → EXTRACTING)
-- Extração de texto do PDF (PyMuPDF ou pdfplumber)
-- Extração do número de registro (agency_record_number)
-- Tela "Meus Casos" do NIR (lista com filtros por status/data)
-- Tela de detalhe do caso (dados + PDF inline)
+**Change**: `openspec/changes/intake-nir/`
+
+- [ ] **Slice 1**: Tema hospitalar — paleta + fontes + header
+- [ ] **Slice 2**: App intake + decorator `role_required`
+- [ ] **Slice 3**: Upload de PDF + criação do caso + extração de texto
+- [ ] **Slice 4**: Meus Casos — lista com filtros e cards
+- [ ] **Slice 5**: Detalhe do caso — dados + PDF inline + timeline
+- [ ] **Slice 6**: Quality gate completo
 
 ---
 

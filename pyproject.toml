@@ -4,12 +4,12 @@ version = "0.1.0"
 requires-python = ">=3.13"
 dependencies = [
     "django>=5.2,<6",
-    "django-fsm",
     "django-q2",
     "psycopg[binary]",
     "whitenoise",
     "python-dotenv",
     "dj-database-url",
+    "django-fsm==3.0.1",
 ]
 
 [dependency-groups]
