@@ -7,3 +7,11 @@ tmp/
 .tmp/
 # openspec changes are tracked; only archive is excluded
 openspec/changes/archive/
+
+# Python / Django
+.venv/
+__pycache__/
+*.pyc
+*.sqlite3
+media/
+staticfiles/

@@ -1,0 +1,40 @@
+[project]
+name = "ats-web"
+version = "0.1.0"
+requires-python = ">=3.13"
+dependencies = [
+    "django>=5.2,<6",
+    "django-fsm",
+    "django-q2",
+    "psycopg[binary]",
+    "whitenoise",
+    "python-dotenv",
+]
+
+[dependency-groups]
+dev = [
+    "pytest",
+    "pytest-django",
+    "ruff",
+    "mypy",
+    "django-stubs",
+]
+
+[tool.ruff]
+target-version = "py313"
+line-length = 120
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "N", "W", "UP"]
+
+[tool.pytest.ini_options]
+DJANGO_SETTINGS_MODULE = "config.settings.dev"
+pythonpath = ["."]
+
+[tool.mypy]
+plugins = ["mypy_django_plugin.main"]
+python_version = "3.13"
+strict = true
+
+[tool.django-stubs]
+django_settings_module = "config.settings.dev"
