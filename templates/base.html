@@ -3,64 +3,68 @@
 <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <meta name="theme-color" content="#0d6efd">
+    <meta name="theme-color" content="#0b4263">
     <title>{% block title %}ATS{% endblock %}</title>
+    <!-- Google Fonts: hospitalar -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Merriweather+Sans:wght@600;700&family=Source+Sans+3:wght@400;500;600&display=swap" rel="stylesheet">
+    <!-- Bootstrap 5.3 -->
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
+    <!-- ATS Hospital Theme -->
     <link href="{% static 'css/app.css' %}" rel="stylesheet">
     <!-- PWA manifest -->
     <link rel="manifest" href="/manifest.json">
 </head>
-<body>
-    <!-- Navbar fixa -->
-    <nav class="navbar navbar-expand-lg navbar-dark bg-dark">
-        <div class="container">
-            <a class="navbar-brand" href="/">ATS</a>
-            {% if user.is_authenticated %}
-            <div class="d-flex align-items-center">
-                <!-- Badge do papel ativo -->
-                <span class="badge bg-primary me-3">{{ active_role_display }}</span>
-                <!-- Avatar dropdown -->
-                <div class="dropdown">
-                    <button class="btn btn-outline-light dropdown-toggle" type="button"
-                            data-bs-toggle="dropdown" aria-expanded="false">
-                        {{ user.get_full_name|default:user.username }}
-                    </button>
-                    <ul class="dropdown-menu dropdown-menu-end">
-                        {% if user.roles.count > 1 %}
-                        <li><a class="dropdown-item" href="/switch-role/">Trocar papel</a></li>
-                        <li><hr class="dropdown-divider"></li>
-                        {% endif %}
-                        <li>
-                            <form method="post" action="/logout/">
-                                {% csrf_token %}
-                                <button class="dropdown-item" type="submit">Sair</button>
-                            </form>
-                        </li>
-                    </ul>
-                </div>
-            </div>
-            {% endif %}
-        </div>
-    </nav>
+<body class="hospital-shell">
 
-    <!-- Messages -->
-    <div class="container mt-3">
-        {% if messages %}
+<!-- Header hospitalar com gradiente -->
+<header class="app-header text-white py-3 mb-4">
+  <div class="container">
+    <div class="d-flex flex-column flex-lg-row justify-content-between gap-3 align-items-lg-start">
+      <div>
+        <h1 class="app-header__title">ATS</h1>
+        <p class="app-header__subtitle">{% block subtitle %}Sistema de Triagem Hospitalar{% endblock %}</p>
+      </div>
+      {% if user.is_authenticated %}
+      <div class="text-lg-end">
+        <p class="app-session-meta mb-2">
+          {{ user.get_full_name|default:user.username }} · <strong>{{ active_role_display }}</strong>
+        </p>
+        <div class="d-flex gap-1 justify-content-lg-end">
+          {% if user.roles.count > 1 %}
+          <a href="/switch-role/" class="btn btn-sm btn-light">Trocar papel</a>
+          {% endif %}
+          <form method="post" action="/logout/" class="d-inline">
+            {% csrf_token %}
+            <button type="submit" class="btn btn-sm btn-light">Sair</button>
+          </form>
+        </div>
+      </div>
+      {% endif %}
+    </div>
+    {% block nav %}{% endblock %}
+  </div>
+</header>
+
+<!-- Messages -->
+<main class="app-shell container pb-5">
+    {% if messages %}
+    <div class="mb-3">
         {% for message in messages %}
         <div class="alert alert-{{ message.tags }} alert-dismissible fade show">
             {{ message }}
             <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Fechar"></button>
         </div>
         {% endfor %}
-        {% endif %}
     </div>
+    {% endif %}
 
     <!-- Content -->
-    <main class="container mt-4">
-        {% block content %}{% endblock %}
-    </main>
+    {% block content %}{% endblock %}
+</main>
 
-    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
-    <script src="{% static 'js/app.js' %}"></script>
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
+<script src="{% static 'js/app.js' %}"></script>
 </body>
 </html>

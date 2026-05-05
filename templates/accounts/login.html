@@ -1,13 +1,13 @@
 {% extends "base.html" %}
 
-{% block title %}ATS Web — Login{% endblock %}
+{% block title %}ATS — Login{% endblock %}
 
 {% block content %}
 <div class="row justify-content-center mt-5">
     <div class="col-md-4">
         <div class="card shadow">
             <div class="card-body p-4">
-                <h3 class="text-center mb-4">ATS Web</h3>
+                <h3 class="text-center mb-4">ATS — Triagem Hospitalar</h3>
 
                 <form method="post">
                     {% csrf_token %}
@@ -19,7 +19,7 @@
                         <label for="{{ form.password.id_for_label }}" class="form-label">Senha</label>
                         {{ form.password }}
                     </div>
-                    <button type="submit" class="btn btn-primary w-100">Entrar</button>
+                    <button type="submit" class="btn btn-hospital w-100">Entrar</button>
                 </form>
             </div>
         </div>

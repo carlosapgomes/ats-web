@@ -1,6 +1,6 @@
 {% extends "base.html" %}
 
-{% block title %}ATS Web — Selecionar Papel{% endblock %}
+{% block title %}ATS — Selecionar Papel{% endblock %}
 
 {% block content %}
 <div class="row justify-content-center mt-5">
@@ -15,7 +15,7 @@
                         <form method="post">
                             {% csrf_token %}
                             <input type="hidden" name="role" value="{{ role.name }}">
-                            <button type="submit" class="btn btn-outline-primary w-100 py-3 role-card">
+                            <button type="submit" class="btn btn-hospital-outline w-100 py-3 role-card">
                                 {{ role.label }}
                             </button>
                         </form>
