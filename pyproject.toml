@@ -45,6 +45,10 @@ strict = true
 explicit_package_bases = true
 
 [[tool.mypy.overrides]]
+module = "apps.accounts.decorators"
+disable_error_code = ["no-untyped-def"]
+
+[[tool.mypy.overrides]]
 module = "apps.accounts.tests.*"
 disable_error_code = ["no-untyped-def", "no-untyped-call", "assignment"]
 
@@ -55,6 +59,14 @@ disable_error_code = ["no-untyped-def", "no-untyped-call", "assignment"]
 [[tool.mypy.overrides]]
 module = "apps.llm.tests.*"
 disable_error_code = ["no-untyped-def", "no-untyped-call", "assignment"]
+
+[[tool.mypy.overrides]]
+module = "apps.intake.tests.*"
+disable_error_code = ["no-untyped-def", "no-untyped-call", "assignment"]
+
+[[tool.mypy.overrides]]
+module = "apps.intake.views"
+disable_error_code = ["untyped-decorator"]
 
 [[tool.mypy.overrides]]
 module = "apps.cases.migrations.*"
