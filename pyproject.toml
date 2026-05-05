@@ -9,6 +9,7 @@ dependencies = [
     "psycopg[binary]",
     "whitenoise",
     "python-dotenv",
+    "dj-database-url",
 ]
 
 [dependency-groups]
