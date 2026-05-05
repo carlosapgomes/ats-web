@@ -1,6 +1,6 @@
 # Slice 5: LLM1 Service + LLM2 Service
 
-> **Status**: TODO
+> **Status**: DONE
 > **Depende de**: Slice 1 (LLM client), Slice 2 (policy types)
 > **Change**: `openspec/changes/pipeline-llm/`
 
