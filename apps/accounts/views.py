@@ -34,7 +34,7 @@ def login_view(request):  # type: ignore[no-untyped-def]
                     # Multiple roles: let user pick
                     return redirect("switch_role")
             else:
-                messages.error(request, "Email ou senha inválidos.")
+                messages.error(request, "Usuário ou senha inválidos.")
     else:
         form = LoginForm()
 
