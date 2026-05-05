@@ -21,7 +21,12 @@
 - **mypy** (type checking estatico com django-stubs)
 
 ### Banco de Dados
-- **PostgreSQL** 17+ (extensao unaccent habilitada)
+- **PostgreSQL** 17+ (extensao unaccent habilitada) — versão atual nos containers: 17.9
+- **Docker Compose** com arquivos separados por ambiente (dev, test, prod) via Docker rootless
+- **docker-compose.yml**: definição base do serviço PostgreSQL (imagem, healthcheck, init.sql com unaccent)
+- **docker-compose.dev.yml** (name: ats-web-dev): porta 5432, volume persistente `pgdata_dev`
+- **docker-compose.test.yml** (name: ats-web-test): porta 5433, tmpfs para dados efêmeros
+- **docker-compose.prod.yml** (name: ats-web-prod): rede interna, sem porta exposta, volume `pgdata_prod`
 
 ### Constraints do Stack
 - Frontend **sem** framework JS (React, Vue, etc.). Apenas Vanilla JS.
@@ -42,8 +47,14 @@
 ### Setup inicial
 
 ```bash
-uv sync                                                    # instala dependencias do pyproject.toml
-uv run python manage.py migrate --settings=config.settings.dev  # aplica migracoes
+# 1. Dependências Python
+uv sync
+
+# 2. Banco de dados (container PostgreSQL)
+docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d
+
+# 3. Migrations
+uv run python manage.py migrate --settings=config.settings.dev
 ```
 
 ### Operacao basica
@@ -51,6 +62,19 @@ uv run python manage.py migrate --settings=config.settings.dev  # aplica migraco
 ```bash
 git status --short
 git branch --show-current
+```
+
+### Ambiente de testes
+
+```bash
+# Subir banco de teste (porta 5433, dados efêmeros)
+docker compose -f docker-compose.yml -f docker-compose.test.yml up -d
+
+# Rodar testes
+uv run pytest
+
+# Derrubar e limpar dados de teste
+docker compose -f docker-compose.yml -f docker-compose.test.yml down -v
 ```
 
 ### Servidor de desenvolvimento
@@ -85,6 +109,15 @@ uv run ruff check . && uv run ruff format --check . && uv run mypy . && uv run p
 - **FSM**: todos os 17 estados preservados para rastreabilidade completa.
 
 ## 5. Politica de Testes
+
+### Infraestrutura de Testes
+
+- **Banco de dados de teste isolado**: PostgreSQL em container dedicado (`ats-web-test`), porta 5433, dados efêmeros via tmpfs.
+- **Settings de teste**: `config/settings.test` — banco `ats_web_test`, hashers rápidos (MD5), DEBUG=False.
+- **pytest**: configurado com `--reuse-db` para acelerar execuções repetidas. O banco persiste entre rodadas e é descartado apenas com `down -v`.
+- **CI/CD futuro**: usar `docker compose -f docker-compose.yml -f docker-compose.test.yml` para isolar completamente o ambiente de testes.
+
+### Metodologia
 
 - TDD obrigatorio: RED (teste falha) -> GREEN (minimo para passar) -> REFACTOR (limpeza sem quebrar).
 - Nao iniciar implementacao sem primeiro teste falhando para o comportamento-alvo.
