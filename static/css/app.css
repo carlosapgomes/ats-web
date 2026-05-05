@@ -1,0 +1,22 @@
+/* ATS Web — Custom Styles */
+
+body {
+    background-color: #f5f5f5;
+}
+
+/* Navbar refinements */
+.navbar-brand {
+    font-weight: 600;
+    letter-spacing: 0.5px;
+}
+
+/* Role selection cards */
+.role-card {
+    cursor: pointer;
+    transition: transform 0.15s ease, box-shadow 0.15s ease;
+}
+
+.role-card:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+}

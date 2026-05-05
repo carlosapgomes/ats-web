@@ -1,10 +1,11 @@
-"""Views for authentication: login, logout, and role switching."""
+"""Views for authentication: login, logout, role switching, and home."""
 
 from django.contrib import messages
 from django.contrib.auth import authenticate, login, logout
 from django.contrib.auth.decorators import login_required
 from django.shortcuts import redirect, render
 
+from .context_processors import ROLE_DISPLAY_NAMES
 from .forms import LoginForm, RoleSelectForm
 
 
@@ -64,18 +65,43 @@ def switch_role_view(request):  # type: ignore[no-untyped-def]
     else:
         form = RoleSelectForm()
 
-    role_labels = {
-        "nir": "NIR",
-        "doctor": "Médico",
-        "scheduler": "Agendador",
-        "manager": "Supervisor",
-        "admin": "Administrador",
-    }
-
-    roles_display = [{"name": role, "label": role_labels.get(role, role)} for role in user_roles]
+    roles_display = [{"name": role, "label": ROLE_DISPLAY_NAMES.get(role, role)} for role in user_roles]
 
     return render(
         request,
         "accounts/switch_role.html",
         {"roles": roles_display, "form": form},
+    )
+
+
+ROLE_HOME_URLS = {
+    "nir": "/cases/my-cases/",
+    "doctor": "/doctor/queue/",
+    "scheduler": "/scheduler/queue/",
+    "manager": "/dashboard/",
+    "admin": "/dashboard/",
+}
+
+
+@login_required
+def home_view(request):  # type: ignore[no-untyped-def]
+    """Redireciona para a home do papel ativo.
+
+    Por enquanto, renderiza um placeholder já que as URLs
+    destino não existem. Quando os apps forem criados nos
+    próximos changes, a view será atualizada para redirect.
+    """
+    active_role = request.session.get("active_role")
+    if not active_role:
+        return redirect("/switch-role/")
+
+    active_role_display = ROLE_DISPLAY_NAMES.get(active_role, active_role)
+
+    return render(
+        request,
+        "home.html",
+        {
+            "active_role": active_role,
+            "active_role_display": active_role_display,
+        },
     )
