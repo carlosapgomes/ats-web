@@ -1,17 +1,17 @@
+# Base: definição comum do serviço PostgreSQL
+# Uso: docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d
+
 services:
   db:
     image: postgres:17
-    container_name: ats-web-db
     restart: unless-stopped
     environment:
-      POSTGRES_DB: ats_web_dev
       POSTGRES_USER: ats_web
       POSTGRES_PASSWORD: ats_web_dev
-    ports:
-      - "5432:5432"
     volumes:
-      - pgdata:/var/lib/postgresql/data
       - ./docker/postgres/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
-
-volumes:
-  pgdata:
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ats_web"]
+      interval: 2s
+      timeout: 3s
+      retries: 5

@@ -1,0 +1,14 @@
+# Testing: banco isolado em porta diferente, dados efêmeros
+# Uso: docker compose -f docker-compose.yml -f docker-compose.test.yml up -d
+#       docker compose -f docker-compose.yml -f docker-compose.test.yml down -v
+
+name: ats-web-test
+
+services:
+  db:
+    ports:
+      - "5433:5432"
+    environment:
+      POSTGRES_DB: ats_web_test
+    tmpfs:
+      - /var/lib/postgresql/data:noexec

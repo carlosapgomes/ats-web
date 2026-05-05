@@ -29,8 +29,9 @@ line-length = 120
 select = ["E", "F", "I", "N", "W", "UP"]
 
 [tool.pytest.ini_options]
-DJANGO_SETTINGS_MODULE = "config.settings.dev"
+DJANGO_SETTINGS_MODULE = "config.settings.test"
 pythonpath = ["."]
+addopts = ["--reuse-db", "-v"]
 
 [tool.mypy]
 plugins = ["mypy_django_plugin.main"]
@@ -38,4 +39,4 @@ python_version = "3.13"
 strict = true
 
 [tool.django-stubs]
-django_settings_module = "config.settings.dev"
+django_settings_module = "config.settings.test"

@@ -1,0 +1,15 @@
+# Production: apenas o essencial, sem portas expostas no host
+# Uso: docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d
+
+name: ats-web-prod
+
+services:
+  db:
+    environment:
+      POSTGRES_DB: ats_web
+    # sem ports — acessível apenas internamente pela rede compose
+    volumes:
+      - pgdata_prod:/var/lib/postgresql/data
+
+volumes:
+  pgdata_prod:
