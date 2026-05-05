@@ -42,7 +42,7 @@ dev = [
 requires-dist = [
     { name = "dj-database-url" },
     { name = "django", specifier = ">=5.2,<6" },
-    { name = "django-fsm" },
+    { name = "django-fsm", specifier = "==3.0.1" },
     { name = "django-q2" },
     { name = "psycopg", extras = ["binary"] },
     { name = "python-dotenv" },
