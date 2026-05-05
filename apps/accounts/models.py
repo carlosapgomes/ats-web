@@ -34,8 +34,3 @@ class User(AbstractUser):
     @property
     def is_account_active(self) -> bool:
         return self.account_status == "active" and self.is_active
-
-    def get_active_role(self) -> str | None:
-        """Retorna o papel ativo da sessão. Usado em views/middleware."""
-        # O papel ativo real fica na sessão, não no model.
-        return None

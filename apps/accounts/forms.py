@@ -4,12 +4,12 @@ from django import forms
 
 
 class LoginForm(forms.Form):
-    """Formulário de login com email e senha."""
+    """Formulário de login com username e senha."""
 
-    username = forms.EmailField(
-        label="Email",
-        max_length=254,
-        widget=forms.EmailInput(attrs={"class": "form-control", "placeholder": "seu@email.com", "autofocus": True}),
+    username = forms.CharField(
+        label="Usuário",
+        max_length=150,
+        widget=forms.TextInput(attrs={"class": "form-control", "placeholder": "nome de usuário", "autofocus": True}),
     )
     password = forms.CharField(
         label="Senha",

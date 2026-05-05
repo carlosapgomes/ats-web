@@ -2,6 +2,8 @@
 
 from django.shortcuts import redirect
 
+EXEMPT_PATHS = {"/login/", "/logout/", "/switch-role/"}
+
 
 class ActiveRoleMiddleware:
     """Garante papel ativo na sessão para usuários autenticados.
@@ -18,11 +20,9 @@ class ActiveRoleMiddleware:
         if (
             request.user.is_authenticated
             and "active_role" not in request.session
-            and not request.path.startswith("/login")
-            and not request.path.startswith("/switch-role")
-            and not request.path.startswith("/admin")
-            and not request.path.startswith("/static")
-            and not request.path.startswith("/logout")
+            and request.path not in EXEMPT_PATHS
+            and not request.path.startswith("/admin/")
+            and not request.path.startswith("/static/")
         ):
             roles = list(request.user.roles.values_list("name", flat=True))
             if len(roles) == 1:
