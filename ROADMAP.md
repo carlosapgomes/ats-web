@@ -41,15 +41,15 @@ Upload de PDF pelo NIR, criação do caso, fila de "meus casos", visualização 
 
 Processamento automático do caso via LLM + decision engine determinístico.
 
-- Integração com OpenAI (client abstraído, injetável)
-- **LLM1**: extração estruturada (patient, EDA, labs, ECG, ASA, policy_precheck)
-- **LLM2**: sugestão de decisão (accept/deny + support + rationale)
-- **EDA Preop Policy**: engine determinístico de regras (thresholds, minimum exams, conditional gates)
-- **EDA Policy Reconciliation**: hard rules sobre saída LLM2, registro de contradições
-- **Support Synthesis**: derivação ASA + risco cardiovascular → recomendação de suporte
-- **Scope Detection**: detectar se exame é EDA; se não → manual_review (pula médico)
-- Job assíncrono via django-q2 para pipeline completa
-- Persistência de artifacts no Case (structured_data, summary_text, suggested_action)
+**Change**: `openspec/changes/pipeline-llm/`
+
+- [ ] **Slice 1**: App pipeline + LLM client abstraído (OpenAI SDK)
+- [ ] **Slice 2**: Policy engine — EDA Preop Policy (thresholds, minimum exams, conditional gates)
+- [ ] **Slice 3**: Policy engine — Reconciliation + Support Synthesis
+- [ ] **Slice 4**: Scope Detection (EDA / non-EDA / unknown)
+- [ ] **Slice 5**: LLM1 Service + LLM2 Service (JSON parser + prompt rendering)
+- [ ] **Slice 6**: Pipeline orchestrator + django-q2 task + integração intake
+- [ ] **Slice 7**: Quality gate completo
 
 ---
 
