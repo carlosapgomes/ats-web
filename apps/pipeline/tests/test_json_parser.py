@@ -63,6 +63,35 @@ class TestDecodeTrailingCommas:
         assert result == {"patient": {"name": "João", "age": 35}, "findings": [1, 2]}
 
 
+class TestDecodeEmbeddedJson:
+    """JSON embutido no meio de texto deve ser encontrado via raw_decode scan."""
+
+    def test_decode_json_embedded_in_text(self) -> None:
+        data = 'Here is some text\n{"key": "value"}\nand more text'
+        result = decode_llm_json_object(data)
+        assert result == {"key": "value"}
+
+    def test_decode_json_embedded_with_prefix_and_suffix(self) -> None:
+        data = 'The response is: {"decision": "accept", "priority": 1}. End.'
+        result = decode_llm_json_object(data)
+        assert result == {"decision": "accept", "priority": 1}
+
+    def test_decode_json_embedded_multiple_objects_returns_first(self) -> None:
+        data = 'First: {"a": 1}. Second: {"b": 2}.'
+        result = decode_llm_json_object(data)
+        assert result == {"a": 1}
+
+    def test_decode_json_embedded_in_multiline_text(self) -> None:
+        data = (
+            "Thank you for your request.\n\n"
+            "Here is the structured output:\n"
+            '{"patient": {"name": "Maria", "age": 60}}\n\n'
+            "Let me know if you need anything else."
+        )
+        result = decode_llm_json_object(data)
+        assert result == {"patient": {"name": "Maria", "age": 60}}
+
+
 class TestDecodeErrors:
     """Respostas inválidas devem levantar LlmJsonParseError."""
 
@@ -81,3 +110,18 @@ class TestDecodeErrors:
     def test_decode_raises_on_markdown_not_json(self) -> None:
         with pytest.raises(LlmJsonParseError):
             decode_llm_json_object("```\njust some text\nno json here\n```")
+
+
+class TestLlmJsonParseErrorInheritance:
+    """LlmJsonParseError deve herdar ValueError (alinhado com legado)."""
+
+    def test_llm_json_parse_error_is_value_error(self) -> None:
+        assert issubclass(LlmJsonParseError, ValueError)
+
+    def test_llm_json_parse_error_caught_as_value_error(self) -> None:
+        try:
+            decode_llm_json_object("not json")
+        except ValueError:
+            pass
+        else:
+            pytest.fail("Expected ValueError to be raised")
