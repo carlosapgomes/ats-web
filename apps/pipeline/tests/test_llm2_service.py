@@ -146,6 +146,147 @@ class TestLlm2RaisesOnInvalidJson:
             )
 
 
+class TestLlm2IdentityValidation:
+    """LLM2 deve validar case_id e agency_record_number na resposta."""
+
+    def test_case_id_mismatch_raises_value_error(self) -> None:
+        llm_response = json.dumps({"case_id": "wrong-id", "decision": "accept"})
+        client = StaticLlmClient(response_text=llm_response)
+        service = Llm2Service(client)
+
+        with pytest.raises(ValueError, match="case_id mismatch"):
+            service.run(
+                case_id="expected-id",
+                agency_record_number="AR12345",
+                llm1_structured_data={},
+                system_prompt="...",
+                user_prompt_template="{case_id}|{agency_record_number}|{llm1_structured_data}",
+            )
+
+    def test_agency_record_number_mismatch_raises_value_error(self) -> None:
+        llm_response = json.dumps({"agency_record_number": "WRONG", "decision": "accept"})
+        client = StaticLlmClient(response_text=llm_response)
+        service = Llm2Service(client)
+
+        with pytest.raises(ValueError, match="agency_record_number mismatch"):
+            service.run(
+                case_id="case-001",
+                agency_record_number="AR99999",
+                llm1_structured_data={},
+                system_prompt="...",
+                user_prompt_template="{case_id}|{agency_record_number}|{llm1_structured_data}",
+            )
+
+    def test_matching_case_id_passes(self) -> None:
+        llm_response = json.dumps({"case_id": "case-001", "decision": "accept"})
+        client = StaticLlmClient(response_text=llm_response)
+        service = Llm2Service(client)
+
+        result = service.run(
+            case_id="case-001",
+            agency_record_number="AR12345",
+            llm1_structured_data={},
+            system_prompt="...",
+            user_prompt_template="{case_id}|{agency_record_number}|{llm1_structured_data}",
+        )
+
+        assert result.suggested_action["decision"] == "accept"
+
+    def test_missing_case_id_in_response_passes(self) -> None:
+        """Se response não tem case_id, a validação é skipada."""
+        llm_response = json.dumps({"decision": "accept"})
+        client = StaticLlmClient(response_text=llm_response)
+        service = Llm2Service(client)
+
+        result = service.run(
+            case_id="case-001",
+            agency_record_number="AR12345",
+            llm1_structured_data={},
+            system_prompt="...",
+            user_prompt_template="{case_id}|{agency_record_number}|{llm1_structured_data}",
+        )
+
+        assert result.suggested_action["decision"] == "accept"
+
+    def test_case_id_integer_matches_string(self) -> None:
+        """case_id como int no JSON deve ser comparado como string."""
+        llm_response = json.dumps({"case_id": 42, "decision": "accept"})
+        client = StaticLlmClient(response_text=llm_response)
+        service = Llm2Service(client)
+
+        result = service.run(
+            case_id="42",
+            agency_record_number="AR12345",
+            llm1_structured_data={},
+            system_prompt="...",
+            user_prompt_template="{case_id}|{agency_record_number}|{llm1_structured_data}",
+        )
+
+        assert result.suggested_action["decision"] == "accept"
+
+
+class TestLlm2PriorCase:
+    """LLM2 deve incluir prior_case_json no prompt quando fornecido."""
+
+    def test_prior_case_included_in_prompt(self) -> None:
+        llm_response = json.dumps({"decision": "accept"})
+        client = RecordingLlmClient(responses=[llm_response])
+        service = Llm2Service(client)
+
+        prior_case: dict[str, object] = {
+            "previous_decision": "deny",
+            "previous_reasoning": "Exames insuficientes",
+        }
+
+        service.run(
+            case_id="case-020",
+            agency_record_number="AR55555",
+            llm1_structured_data={},
+            system_prompt="...",
+            user_prompt_template="Prior: {prior_case}\nCase: {case_id}",
+            prior_case_json=prior_case,
+        )
+
+        call = client.calls[0]
+        assert "previous_decision" in call["user_prompt"]
+        assert "deny" in call["user_prompt"]
+        assert 'Exames insuficientes"' in call["user_prompt"]
+
+    def test_prior_case_none_renders_null(self) -> None:
+        llm_response = json.dumps({"decision": "accept"})
+        client = RecordingLlmClient(responses=[llm_response])
+        service = Llm2Service(client)
+
+        service.run(
+            case_id="case-021",
+            agency_record_number="AR66666",
+            llm1_structured_data={},
+            system_prompt="...",
+            user_prompt_template="Prior: {prior_case}",
+            prior_case_json=None,
+        )
+
+        call = client.calls[0]
+        assert "null" in call["user_prompt"]
+
+    def test_prior_case_omitted_renders_null(self) -> None:
+        """Quando prior_case_json não é passado, default None → 'null'."""
+        llm_response = json.dumps({"decision": "accept"})
+        client = RecordingLlmClient(responses=[llm_response])
+        service = Llm2Service(client)
+
+        service.run(
+            case_id="case-022",
+            agency_record_number="AR77777",
+            llm1_structured_data={},
+            system_prompt="...",
+            user_prompt_template="Prior: {prior_case}",
+        )
+
+        call = client.calls[0]
+        assert "null" in call["user_prompt"]
+
+
 class TestLlm2Contradictions:
     """contradictions deve começar como lista vazia."""
 
