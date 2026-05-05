@@ -24,10 +24,14 @@ dev = [
 [tool.ruff]
 target-version = "py313"
 line-length = 120
-exclude = ["migrations"]
+exclude = ["migrations", ".pi"]
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "N", "W", "UP"]
+ignore = ["E501"]  # line length handled by formatter
+
+[tool.ruff.lint.isort]
+known-first-party = ["config", "apps"]
 
 [tool.pytest.ini_options]
 DJANGO_SETTINGS_MODULE = "config.settings.test"
@@ -53,19 +57,20 @@ module = "apps.llm.tests.*"
 disable_error_code = ["no-untyped-def", "no-untyped-call", "assignment"]
 
 [[tool.mypy.overrides]]
+module = "apps.cases.migrations.*"
+disable_error_code = ["import-untyped"]
+
+[[tool.mypy.overrides]]
 module = "apps.cases.models"
 disable_error_code = ["no-untyped-def", "untyped-decorator", "no-any-return"]
 
 [[tool.mypy.overrides]]
-module = [
-    "django_fsm",
-    "django_fsm.*",
-]
+module = ["django_fsm", "django_fsm.*"]
 ignore_missing_imports = true
 
 [[tool.mypy.overrides]]
-module = "apps.cases.migrations.*"
-disable_error_code = ["import-untyped"]
+module = ["apps.*.migrations.*"]
+ignore_errors = true
 
 [tool.django-stubs]
 django_settings_module = "config.settings.test"
