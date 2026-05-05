@@ -1,6 +1,6 @@
 # Slice 5: Template Base + Bootstrap 5.3
 
-> **Status**: TODO
+> **Status**: DONE
 > **Depende de**: Slice 2 (login/logout views)
 > **Change**: `openspec/changes/bootstrap-django-ats-core/`
 

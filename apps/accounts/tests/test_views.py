@@ -148,3 +148,61 @@ class TestSwitchRoleView:
 
         assert response.status_code == 302
         assert "login" in response.url
+
+
+@pytest.mark.django_db
+class TestHomeView:
+    """Tests for the home view (GET /)."""
+
+    def test_home_without_role_redirects_to_switch(self, client) -> None:
+        """GET / without active_role redirects to /switch-role/."""
+        user = User.objects.create_user(username="homeless@test.com", password="testpass123")
+        client.force_login(user)
+
+        response = client.get("/")
+
+        # Middleware ou view deve redirecionar para switch-role
+        assert response.status_code == 302
+        assert "/switch-role/" in response.url
+
+    def test_home_shows_role_name(self, client) -> None:
+        """GET / shows role display name in Portuguese for active role."""
+        from apps.accounts.models import Role
+
+        user = User.objects.create_user(username="adminhome@test.com", password="testpass123")
+        role = Role.objects.create(name="admin")
+        user.roles.add(role)
+        client.force_login(user)
+
+        session = client.session
+        session["active_role"] = "admin"
+        session.save()
+
+        response = client.get("/")
+        assert response.status_code == 200
+        content = response.content.decode()
+        assert "Administrador" in content
+
+    def test_home_redirects_by_role_shows_display(self, client) -> None:
+        """GET / with active_role='doctor' shows 'Médico'."""
+        from apps.accounts.models import Role
+
+        user = User.objects.create_user(username="dochome@test.com", password="testpass123")
+        role = Role.objects.create(name="doctor")
+        user.roles.add(role)
+        client.force_login(user)
+
+        session = client.session
+        session["active_role"] = "doctor"
+        session.save()
+
+        response = client.get("/")
+        assert response.status_code == 200
+        assert "Médico" in response.content.decode()
+
+    def test_home_requires_login(self, client) -> None:
+        """GET / without authentication redirects to login."""
+        response = client.get("/")
+
+        assert response.status_code == 302
+        assert "/login/" in response.url
