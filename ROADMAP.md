@@ -7,7 +7,7 @@
 
 ## Fase 0 — Bootstrap ✅ (CONCLUÍDA)
 
-**Change**: `openspec/changes/bootstrap-django-ats-core/`
+**Change**: `openspec/archive/bootstrap-django-ats-core/`
 
 Estrutura base do projeto Django: pyproject, config, User multi-role, Case FSM,
 CaseEvent, PromptTemplate, intranet guard, template base Bootstrap.
@@ -26,7 +26,7 @@ CaseEvent, PromptTemplate, intranet guard, template base Bootstrap.
 
 Upload de PDF pelo NIR, criação do caso, fila de "meus casos", visualização básica.
 
-**Change**: `openspec/changes/intake-nir/`
+**Change**: `openspec/archive/intake-nir/`
 
 - [x] **Slice 1**: Tema hospitalar — paleta + fontes + header
 - [x] **Slice 2**: App intake + decorator `role_required`
