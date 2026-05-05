@@ -49,6 +49,10 @@ module = "apps.cases.tests.*"
 disable_error_code = ["no-untyped-def", "no-untyped-call", "assignment"]
 
 [[tool.mypy.overrides]]
+module = "apps.llm.tests.*"
+disable_error_code = ["no-untyped-def", "no-untyped-call", "assignment"]
+
+[[tool.mypy.overrides]]
 module = "apps.cases.models"
 disable_error_code = ["no-untyped-def", "untyped-decorator", "no-any-return"]
 

@@ -1,6 +1,6 @@
 # Slice 6: PromptTemplate Model
 
-> **Status**: TODO
+> **Status**: DONE
 > **Depende de**: Slice 2 (accounts app com User)
 > **Change**: `openspec/changes/bootstrap-django-ats-core/`
 
