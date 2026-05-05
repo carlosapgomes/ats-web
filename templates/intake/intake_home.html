@@ -1,16 +1,106 @@
 {% extends "base.html" %}
+{% load static %}
 
-{% block title %}Intake — ATS{% endblock %}
+{% block title %}Recepção (NIR) — ATS{% endblock %}
 
 {% block subtitle %}Upload de encaminhamentos e acompanhamento de casos{% endblock %}
 
 {% block content %}
-<div class="row justify-content-center">
-  <div class="col-lg-8">
-    <div class="alert alert-info text-center py-5">
-      <h4 class="alert-heading">Em construção</h4>
-      <p class="mb-0">Upload de PDF em breve.</p>
+
+<!-- Upload Card -->
+<div class="card p-4 mb-4">
+  <h3 class="mb-3">Novo Encaminhamento</h3>
+  <p class="text-muted mb-3">Envie o PDF de encaminhamento do paciente. O sistema extrairá os dados automaticamente.</p>
+
+  <form method="post" enctype="multipart/form-data" id="upload-form" novalidate>
+    {% csrf_token %}
+
+    <!-- Upload zone com drag & drop -->
+    <div class="upload-zone mb-3" id="upload-zone">
+      <div class="upload-zone__icon">📎</div>
+      <div class="upload-zone__text fw-semibold">Arraste o PDF aqui ou clique para selecionar</div>
+      <div class="upload-zone__hint mt-1">Apenas arquivos PDF — até 20 MB</div>
     </div>
-  </div>
+
+    <!-- Campo hidden + exibição do arquivo selecionado -->
+    {{ form.pdf_file }}
+    <div class="d-none mb-3" id="upload-preview">
+      <div class="d-flex align-items-center gap-3 p-3 border rounded-3 bg-light">
+        <span style="font-size:2rem;">📄</span>
+        <div class="flex-grow-1">
+          <strong id="preview-name"></strong>
+          <div class="text-muted small" id="preview-size"></div>
+        </div>
+      </div>
+    </div>
+
+    {% if form.pdf_file.errors %}
+    <div class="text-danger small mb-2">{{ form.pdf_file.errors }}</div>
+    {% endif %}
+
+    <!-- Campo de número de registro -->
+    <div class="mb-3">
+      <label for="{{ form.agency_record_number.id_for_label }}" class="form-label">{{ form.agency_record_number.label }}</label>
+      {{ form.agency_record_number }}
+      {% if form.agency_record_number.errors %}
+      <div class="text-danger small mt-1">{{ form.agency_record_number.errors }}</div>
+      {% endif %}
+    </div>
+
+    <button type="submit" class="btn btn-hospital w-100 w-md-auto" id="btn-upload" disabled>
+      Enviar para Triagem
+    </button>
+  </form>
 </div>
+
+<!-- Casos Recentes -->
+<div class="card p-4">
+  <div class="d-flex justify-content-between align-items-center mb-3">
+    <h3 class="mb-0">Casos Recentes</h3>
+    {% if recent_cases %}
+    <span class="badge-hospital-primary status-badge">{{ recent_cases|length }} caso{{ recent_cases|length|pluralize:"s" }}</span>
+    {% endif %}
+  </div>
+
+  {% if recent_cases %}
+  <p class="text-muted small mb-3">Todos os encaminhamentos da sua conta. Atualizado automaticamente.</p>
+
+  <div class="row g-3">
+    {% for case in recent_cases %}
+    <div class="col-12">
+      <div class="case-card card p-3">
+        <div class="row align-items-center">
+          <div class="col-md-4">
+            <div class="case-meta fs-6 fw-semibold">Reg. {{ case.agency_record_number|default:"—" }}</div>
+            <div class="case-meta small text-muted">{{ case.case_id|truncatechars:12 }}</div>
+          </div>
+          <div class="col-md-3">
+            <div class="case-meta">📥 {{ case.created_at|date:"d/m/Y H:i" }}</div>
+            <div class="case-meta small text-muted">{{ case.get_status_display }}</div>
+          </div>
+          <div class="col-md-3">
+            <span class="status-badge
+              {% if case.status == 'CLEANED' %}status-done
+              {% elif case.status == 'FAILED' or case.status == 'DOCTOR_DENIED' or case.status == 'APPT_DENIED' %}status-denied
+              {% else %}status-progress{% endif %}">
+              {{ case.get_status_display }}
+            </span>
+          </div>
+          <div class="col-md-2 text-md-end mt-2 mt-md-0">
+            <a href="{% url 'intake:case_detail' case.case_id %}" class="btn btn-sm btn-hospital-outline">Ver detalhes</a>
+          </div>
+        </div>
+      </div>
+    </div>
+    {% endfor %}
+  </div>
+  {% else %}
+  <p class="text-muted mb-0">Nenhum caso registrado ainda. Envie seu primeiro encaminhamento acima.</p>
+  {% endif %}
+</div>
+
+{% endblock %}
+
+{% block extra_js %}
+<script src="{% static 'js/upload.js' %}"></script>
 {% endblock %}

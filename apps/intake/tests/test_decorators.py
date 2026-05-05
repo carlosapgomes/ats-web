@@ -100,7 +100,7 @@ class TestRoleRequiredDecorator:
 
         response = client.get(reverse("intake:home"))
         assert response.status_code == 200
-        assert "construção" in response.content.decode().lower()
+        assert "encaminhamento" in response.content.decode().lower()
 
     def test_intake_home_blocks_doctor(self, client) -> None:
         """doctor + login -> redirect."""
