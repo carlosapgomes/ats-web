@@ -1,6 +1,6 @@
 # Slice 1: App Pipeline + LLM Client Abstraído
 
-> **Status**: TODO
+> **Status**: DONE
 > **Depende de**: Fase 1 completa
 > **Change**: `openspec/changes/pipeline-llm/`
 
