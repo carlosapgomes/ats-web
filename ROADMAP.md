@@ -22,18 +22,18 @@ CaseEvent, PromptTemplate, intranet guard, template base Bootstrap.
 
 ---
 
-## Fase 1 — Intake NIR
+## Fase 1 — Intake NIR ✅ (CONCLUÍDA)
 
 Upload de PDF pelo NIR, criação do caso, fila de "meus casos", visualização básica.
 
 **Change**: `openspec/changes/intake-nir/`
 
-- [ ] **Slice 1**: Tema hospitalar — paleta + fontes + header
-- [ ] **Slice 2**: App intake + decorator `role_required`
-- [ ] **Slice 3**: Upload de PDF + criação do caso + extração de texto
-- [ ] **Slice 4**: Meus Casos — lista com filtros e cards
-- [ ] **Slice 5**: Detalhe do caso — dados + PDF inline + timeline
-- [ ] **Slice 6**: Quality gate completo
+- [x] **Slice 1**: Tema hospitalar — paleta + fontes + header
+- [x] **Slice 2**: App intake + decorator `role_required`
+- [x] **Slice 3**: Upload de PDF + criação do caso + extração de texto
+- [x] **Slice 4**: Meus Casos — lista com filtros e cards
+- [x] **Slice 5**: Detalhe do caso — dados + PDF inline + timeline
+- [x] **Slice 6**: Quality gate completo
 
 ---
 
@@ -169,8 +169,8 @@ Transformar em PWA instalável e refinamentos de UX.
 
 ```
 Fase 0 (bootstrap) ✅ CONCLUÍDA
-  ├── Fase 1 (intake NIR) ← próxima
-    │     └── Fase 2 (pipeline LLM) ← precisa de intake + PromptTemplate
+  ├── Fase 1 (intake NIR) ✅ CONCLUÍDA
+    │     └── Fase 2 (pipeline LLM) ← próxima, precisa de intake + PromptTemplate
   │           └── Fase 3 (fila médica) ← precisa de LLM artifacts
   │                 ├── Fase 4 (fila agendador) ← precisa de decisão médica
   │                 └── Fase 5 (resultado NIR) ← precisa de decisão + agendamento
