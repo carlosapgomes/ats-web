@@ -1,6 +1,6 @@
 # Slice 2: Policy Engine — EDA Preop Policy
 
-> **Status**: TODO
+> **Status**: DONE
 > **Depende de**: Slice 1 (app pipeline criado)
 > **Change**: `openspec/changes/pipeline-llm/`
 
