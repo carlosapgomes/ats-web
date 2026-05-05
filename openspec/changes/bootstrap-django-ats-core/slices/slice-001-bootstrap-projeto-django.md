@@ -1,6 +1,6 @@
 # Slice 1: Bootstrap do Projeto Django
 
-> **Status**: TODO
+> **Status**: DONE
 > **Change**: `openspec/changes/bootstrap-django-ats-core/`
 > **Design**: `openspec/changes/bootstrap-django-ats-core/design.md`
 
