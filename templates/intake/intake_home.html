@@ -5,6 +5,19 @@
 
 {% block subtitle %}Upload de encaminhamentos e acompanhamento de casos{% endblock %}
 
+{% block nav %}
+<nav class="app-nav mt-3" aria-label="Navegação">
+  <ul class="nav nav-pills gap-2">
+    <li class="nav-item">
+      <a class="nav-link active" href="{% url 'intake:home' %}">Novo Encaminhamento</a>
+    </li>
+    <li class="nav-item">
+      <a class="nav-link" href="{% url 'intake:my_cases' %}">Meus Casos</a>
+    </li>
+  </ul>
+</nav>
+{% endblock %}
+
 {% block content %}
 
 <!-- Upload Card -->
