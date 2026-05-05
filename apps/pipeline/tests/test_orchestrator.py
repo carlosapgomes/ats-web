@@ -333,11 +333,12 @@ class TestPipelineScopeGated:
         assert case.suggested_action is not None
         assert case.suggested_action.get("decision") == "manual_review_required"
 
-        # Scope gate event recorded
+        # Scope gate event recorded — honest SCOPE_GATE_BYPASS, no LLM2_OK
         events = CaseEvent.objects.filter(case=case).order_by("timestamp")
         event_types = [e.event_type for e in events]
         assert "EDA_SCOPE_GATED_MANUAL_REVIEW" in event_types
-        # NB: LLM2_OK appears due to FSM arc (llm2_complete), even without LLM2 call
+        assert "SCOPE_GATE_BYPASS" in event_types
+        assert "LLM2_OK" not in event_types
 
 
 @pytest.mark.django_db

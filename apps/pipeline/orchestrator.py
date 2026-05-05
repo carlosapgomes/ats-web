@@ -137,12 +137,9 @@ def _run_scope_and_llm2(
             payload=scope_result,
         )
         case.save()  # persist event BEFORE FSM transition overwrites _pending_event
-        # Transition through the required FSM arc: LLM_STRUCT → LLM_SUGGEST → R2_POST_WIDGET
-        case.llm1_complete(success=True, user=None)
-        case.save()
-        case.llm2_complete(success=True, user=None)
-        case.save()
-        case.ready_for_doctor()
+        # Direct transition LLM_STRUCT → WAIT_DOCTOR (no misleading LLM2_OK event)
+        reason_code = str(scope_result.get("reason_code", ""))
+        case.scope_gate_bypass(reason_code=reason_code)
         case.save()
         return
 

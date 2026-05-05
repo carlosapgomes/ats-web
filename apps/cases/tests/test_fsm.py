@@ -5,7 +5,7 @@ from __future__ import annotations
 import pytest
 from django_fsm import TransitionNotAllowed
 
-from apps.cases.models import Case, CaseStatus
+from apps.cases.models import Case, CaseEvent, CaseStatus
 
 
 class TestFSMNewToR1Ack:
@@ -64,6 +64,19 @@ class TestFSMLlmStruct:
         case.save()
         case = Case.objects.get(pk=case.pk)
         assert case.status == CaseStatus.FAILED
+
+    def test_scope_gate_bypass_transition(self, user, case_factory, advance_to) -> None:
+        """Scope-gated case: LLM_STRUCT → WAIT_DOCTOR directly."""
+        case = advance_to(case_factory(user), CaseStatus.LLM_STRUCT)
+        case.scope_gate_bypass(reason_code="non_eda_request")
+        case.save()
+        case = Case.objects.get(pk=case.pk)
+        assert case.status == CaseStatus.WAIT_DOCTOR
+
+        events = CaseEvent.objects.filter(case=case)
+        event_types = [e.event_type for e in events]
+        assert "SCOPE_GATE_BYPASS" in event_types
+        assert "LLM2_OK" not in event_types
 
 
 class TestFSMLlmSuggest:

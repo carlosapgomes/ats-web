@@ -138,6 +138,22 @@ class Case(models.Model):
     @transition(
         field=status,
         source=CaseStatus.LLM_STRUCT,
+        target=CaseStatus.WAIT_DOCTOR,
+    )
+    def scope_gate_bypass(self, *, reason_code: str = "", user=None):
+        """Bypass LLM2 for scope-gated cases (non-EDA / unknown exam type).
+
+        Records an honest audit event instead of a misleading LLM2_OK.
+        """
+        self._record_event(
+            "SCOPE_GATE_BYPASS",
+            user=user,
+            payload={"reason_code": reason_code},
+        )
+
+    @transition(
+        field=status,
+        source=CaseStatus.LLM_STRUCT,
         target=ReturnState(),
     )
     def llm1_complete(self, success: bool, user=None):
