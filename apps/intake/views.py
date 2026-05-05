@@ -162,6 +162,11 @@ def intake_home(request: HttpRequest) -> HttpResponse:
             case.extraction_complete(success=True, user=user)
             case.save()
 
+            # Disparar pipeline LLM assíncrona
+            from apps.pipeline.tasks import enqueue_pipeline
+
+            enqueue_pipeline(case.case_id)
+
             messages.success(request, "Encaminhamento enviado com sucesso.")
             return redirect("intake:case_detail", case_id=case.case_id)
     else:

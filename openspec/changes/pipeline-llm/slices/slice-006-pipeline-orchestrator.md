@@ -1,6 +1,6 @@
 # Slice 6: Pipeline Orchestrator + django-q2 Task
 
-> **Status**: TODO
+> **Status**: DONE
 > **Depende de**: Slices 1-5 todos implementados
 > **Change**: `openspec/changes/pipeline-llm/`
 
