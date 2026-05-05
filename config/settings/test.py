@@ -39,5 +39,12 @@ INTRANET_IP_RANGE = "127.0.0.0/8"
 CSRF_COOKIE_SECURE = False
 SESSION_COOKIE_SECURE = False
 
+# django-q2: use ORM backend without sync (tasks are queued but not
+# executed automatically in tests — prevents pipeline side effects)
+Q_CLUSTER = {
+    "sync": False,
+    "orm": "default",
+}
+
 # LLM: Use StaticLlmClient in tests by default
 LLM_CLIENT_FACTORY = None  # type: ignore[assignment]

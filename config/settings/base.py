@@ -17,6 +17,7 @@ INSTALLED_APPS = [
     "apps.intake",
     "apps.llm",
     "apps.pipeline",
+    "django_q",
 ]
 
 MIDDLEWARE = [
@@ -90,6 +91,19 @@ LLM_CLIENT_FACTORY = "apps.pipeline.llm.create_openai_client"
 OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY", "")
 OPENAI_MODEL = os.environ.get("OPENAI_MODEL", "gpt-4o")
 OPENAI_BASE_URL = os.environ.get("OPENAI_BASE_URL", "https://api.openai.com/v1")
+
+# django-q2 — async task queue
+Q_CLUSTER = {
+    "workers": 1,
+    "timeout": 600,
+    "retry": 180,
+    "save_limit": 250,
+    "queue_limit": 50,
+    "catch_up": False,
+    "poll": 1.0,
+    "label": "ATS Pipeline Worker",
+    "orm": "default",
+}
 
 # Password validation
 AUTH_PASSWORD_VALIDATORS = [

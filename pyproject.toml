@@ -63,6 +63,14 @@ module = "apps.llm.tests.*"
 disable_error_code = ["no-untyped-def", "no-untyped-call", "assignment"]
 
 [[tool.mypy.overrides]]
+module = "apps.pipeline.tests.*"
+disable_error_code = ["no-untyped-def", "no-untyped-call", "assignment"]
+
+[[tool.mypy.overrides]]
+module = "django_q.*"
+ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
 module = "apps.intake.tests.*"
 disable_error_code = ["no-untyped-def", "no-untyped-call", "assignment"]
 
