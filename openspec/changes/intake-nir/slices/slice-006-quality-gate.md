@@ -1,6 +1,6 @@
 # Slice 6: Quality Gate — Testes Completos + ruff + mypy
 
-> **Status**: TODO
+> **Status**: DONE
 > **Depende de**: Slices 1-5 todos implementados
 > **Change**: `openspec/changes/intake-nir/`
 
@@ -48,6 +48,10 @@ uv run pytest -v
 uv run ruff check . && uv run ruff format --check . && uv run mypy . && uv run pytest
 # Esperado: exit code 0
 ```
+
+### Limpeza de código morto
+
+- **Remover** `templates/intake/upload_success.html` — template órfão do Slice 3, substituído por `case_detail.html` no Slice 5. Nenhuma view o referencia mais.
 
 ### Ajustes comuns que podem ser necessários
 
