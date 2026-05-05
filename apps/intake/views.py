@@ -7,7 +7,7 @@ from django.shortcuts import get_object_or_404, redirect, render
 from django.utils import timezone
 
 from apps.accounts.decorators import role_required
-from apps.cases.models import Case
+from apps.cases.models import Case, CaseStatus
 
 from .forms import CaseUploadForm
 from .pdf_utils import extract_pdf_text
@@ -48,10 +48,84 @@ STATUS_CSS_CLASS: dict[str, str] = {
     "APPT_CONFIRMED": "status-done",
     "APPT_DENIED": "status-denied",
     "FAILED": "status-denied",
+    "R1_FINAL_REPLY_POSTED": "status-done",
     "WAIT_R1_CLEANUP_THUMBS": "status-pending",
     "CLEANUP_RUNNING": "status-pending",
     "CLEANED": "status-done",
 }
+
+# Mapeamento de status → índice do stepper (0-4)
+STEP_STATUS_INDEX: dict[str, int] = {
+    CaseStatus.NEW: 0,
+    CaseStatus.R1_ACK_PROCESSING: 0,
+    CaseStatus.EXTRACTING: 1,
+    CaseStatus.LLM_STRUCT: 1,
+    CaseStatus.LLM_SUGGEST: 1,
+    CaseStatus.R2_POST_WIDGET: 2,
+    CaseStatus.WAIT_DOCTOR: 2,
+    CaseStatus.DOCTOR_ACCEPTED: 2,
+    CaseStatus.DOCTOR_DENIED: 2,
+    CaseStatus.R3_POST_REQUEST: 3,
+    CaseStatus.WAIT_APPT: 3,
+    CaseStatus.APPT_CONFIRMED: 3,
+    CaseStatus.APPT_DENIED: 3,
+    CaseStatus.FAILED: 3,
+    CaseStatus.R1_FINAL_REPLY_POSTED: 4,
+    CaseStatus.WAIT_R1_CLEANUP_THUMBS: 4,
+    CaseStatus.CLEANUP_RUNNING: 4,
+    CaseStatus.CLEANED: 4,
+}
+
+# Labels em português para eventos de auditoria
+EVENT_LABELS: dict[str, str] = {
+    "CASE_CREATED": "Caso criado",
+    "CASE_START_PROCESSING": "Processamento iniciado",
+    "CASE_START_EXTRACTION": "Extração de dados iniciada",
+    "CASE_EXTRACTION_OK": "Extração de dados concluída",
+    "CASE_EXTRACTION_FAILED": "Falha na extração de dados",
+    "LLM1_OK": "Análise IA (estrutura) concluída",
+    "LLM2_OK": "Análise IA (sugestão) concluída",
+    "CASE_READY_FOR_DOCTOR": "Caso enviado para avaliação médica",
+    "DOCTOR_ACCEPT": "Aceito pelo médico",
+    "DOCTOR_DENY": "Recusado pelo médico",
+    "CASE_READY_FOR_SCHEDULER": "Caso enviado para agendamento",
+    "SCHEDULER_REQUEST_POSTED": "Solicitação de agendamento enviada",
+    "APPT_CONFIRMED": "Agendamento confirmado",
+    "APPT_DENIED": "Agendamento negado",
+    "FINAL_REPLY_POSTED": "Resultado final enviado",
+    "CLEANUP_TRIGGERED": "Limpeza iniciada",
+    "CLEANUP_COMPLETED": "Caso concluído",
+}
+
+# Cores do dot da timeline por event_type
+EVENT_DOT_CSS: dict[str, str] = {
+    "CASE_CREATED": "reception",
+    "CASE_START_PROCESSING": "system",
+    "CASE_START_EXTRACTION": "system",
+    "CASE_EXTRACTION_OK": "system",
+    "CASE_EXTRACTION_FAILED": "system",
+    "LLM1_OK": "system",
+    "LLM2_OK": "system",
+    "CASE_READY_FOR_DOCTOR": "system",
+    "DOCTOR_ACCEPT": "doctor",
+    "DOCTOR_DENY": "doctor",
+    "CASE_READY_FOR_SCHEDULER": "system",
+    "SCHEDULER_REQUEST_POSTED": "system",
+    "APPT_CONFIRMED": "scheduler",
+    "APPT_DENIED": "scheduler",
+    "FINAL_REPLY_POSTED": "system",
+    "CLEANUP_TRIGGERED": "system",
+    "CLEANUP_COMPLETED": "system",
+}
+
+# Etapas do stepper
+STEPS: list[dict[str, str]] = [
+    {"icon": "📄", "label": "Upload"},
+    {"icon": "🤖", "label": "Extração IA"},
+    {"icon": "🩺", "label": "Avaliação Médica"},
+    {"icon": "📅", "label": "Agendamento"},
+    {"icon": "✅", "label": "Resultado Final"},
+]
 
 
 @login_required
@@ -157,15 +231,59 @@ def my_cases(request: HttpRequest) -> HttpResponse:
 @login_required
 @role_required("nir")
 def case_detail(request: HttpRequest, case_id: str) -> HttpResponse:
-    """Detalhes de um caso para o NIR."""
-    case = get_object_or_404(Case.objects.select_related("created_by"), case_id=case_id)
+    """Detalhes de um caso para o NIR — timeline, stepper e PDF inline."""
+    case = get_object_or_404(
+        Case.objects.select_related("created_by"),
+        case_id=case_id,
+        created_by=request.user,
+    )
     events = case.events.all()
+
+    current_step_idx = STEP_STATUS_INDEX.get(case.status, 0)
+
+    # Enriquecer eventos com labels e cores
+    enriched_events = []
+    for e in events:
+        enriched_events.append(
+            {
+                "event": e,
+                "label": EVENT_LABELS.get(e.event_type, e.event_type),
+                "dot_css": EVENT_DOT_CSS.get(e.event_type, "system"),
+            }
+        )
+
+    can_confirm = case.status == CaseStatus.WAIT_R1_CLEANUP_THUMBS
 
     return render(
         request,
-        "intake/upload_success.html",
+        "intake/case_detail.html",
         {
             "case": case,
-            "events": events,
+            "events": enriched_events,
+            "steps": STEPS,
+            "current_step_idx": current_step_idx,
+            "status_label": STATUS_LABELS.get(case.status, case.get_status_display()),
+            "status_css": STATUS_CSS_CLASS.get(case.status, "status-pending"),
+            "can_confirm_receipt": can_confirm,
         },
     )
+
+
+@login_required
+@role_required("nir")
+def confirm_receipt(request: HttpRequest, case_id: str) -> HttpResponse:
+    """Confirma recebimento do resultado final e conclui o caso."""
+    case = get_object_or_404(
+        Case,
+        case_id=case_id,
+        created_by=request.user,
+    )
+
+    if request.method == "POST" and case.status == CaseStatus.WAIT_R1_CLEANUP_THUMBS:
+        case.cleanup_triggered(user=request.user)
+        case.save()
+        case.cleanup_completed(user=request.user)
+        case.save()
+        messages.success(request, "Recebimento confirmado. Caso concluído.")
+
+    return redirect("intake:case_detail", case_id=case.case_id)

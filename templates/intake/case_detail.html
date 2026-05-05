@@ -1,0 +1,142 @@
+{% extends "base.html" %}
+{% load static %}
+
+{% block title %}Caso {{ case.agency_record_number|default:case.case_id|truncatechars:8 }} — ATS{% endblock %}
+
+{% block subtitle %}Detalhes do encaminhamento e linha do tempo{% endblock %}
+
+{% block nav %}
+<nav class="app-nav mt-3" aria-label="Navegação">
+  <ul class="nav nav-pills gap-2">
+    <li class="nav-item">
+      <a class="nav-link" href="{% url 'intake:home' %}">Novo Encaminhamento</a>
+    </li>
+    <li class="nav-item">
+      <a class="nav-link" href="{% url 'intake:my_cases' %}">Meus Casos</a>
+    </li>
+  </ul>
+</nav>
+{% endblock %}
+
+{% block content %}
+
+<!-- Top Info -->
+<div class="card p-4 mb-4">
+  <div class="row align-items-center">
+    <div class="col-md-6">
+      <h4 class="mb-1">
+        {% if case.extracted_text %}
+          {{ case.extracted_text|truncatechars:60 }}
+        {% else %}
+          Caso {{ case.case_id|truncatechars:12 }}
+        {% endif %}
+      </h4>
+      <p class="text-muted mb-1">
+        Registro: <strong>{{ case.agency_record_number|default:"—" }}</strong>
+      </p>
+      <p class="text-muted mb-0">
+        Enviado por: <strong>{{ case.created_by.get_full_name|default:case.created_by.username }}</strong>
+        em {{ case.created_at|date:"d/m/Y H:i" }}
+      </p>
+    </div>
+    <div class="col-md-6 text-md-end mt-3 mt-md-0">
+      <span class="status-badge {{ status_css }} fs-6">{{ status_label }}</span>
+      {% if case.appointment_at %}
+      <div class="mt-2 text-muted small">Agendado para {{ case.appointment_at|date:"d/m/Y H:i" }}</div>
+      {% endif %}
+    </div>
+  </div>
+</div>
+
+<!-- Status Stepper -->
+<div class="card p-4 mb-4">
+  <h5 class="mb-3">Progresso do Caso</h5>
+  <div class="steps-bar">
+    {% for step in steps %}
+      {% if forloop.counter0 < current_step_idx %}
+      <div class="step-item done">
+      {% elif forloop.counter0 == current_step_idx %}
+      <div class="step-item current">
+      {% else %}
+      <div class="step-item">
+      {% endif %}
+        <span class="step-icon">{{ step.icon }}</span> {{ step.label }}
+      </div>
+    {% endfor %}
+  </div>
+</div>
+
+<!-- PDF Viewer -->
+{% if case.pdf_file %}
+<div class="card p-4 mb-4">
+  <h5 class="mb-3">
+    <button class="btn btn-link text-decoration-none p-0 text-dark" type="button" data-bs-toggle="collapse" data-bs-target="#pdf-collapse" aria-expanded="false" aria-controls="pdf-collapse">
+      📄 Visualizar PDF {% if case.pdf_file %}<small class="text-muted ms-2">(clique para expandir)</small>{% endif %}
+    </button>
+  </h5>
+  <div class="collapse" id="pdf-collapse">
+    <div class="ratio ratio-1x1" style="max-height: 80vh;">
+      <embed src="{{ case.pdf_file.url }}" type="application/pdf" style="width: 100%; height: 100%;">
+    </div>
+    <div class="mt-2 text-end">
+      <a href="{{ case.pdf_file.url }}" class="btn btn-sm btn-hospital-outline" target="_blank">Abrir em nova aba</a>
+    </div>
+  </div>
+</div>
+{% endif %}
+
+<!-- Texto Extraído -->
+{% if case.extracted_text %}
+<div class="card p-4 mb-4">
+  <h5 class="mb-3">Texto Extraído do PDF</h5>
+  <pre class="bg-light p-3 rounded-3" style="white-space: pre-wrap; font-size: 0.875rem;">{{ case.extracted_text }}</pre>
+</div>
+{% endif %}
+
+<!-- Timeline -->
+<div class="card p-4 mb-4">
+  <h5 class="mb-3">Linha do Tempo</h5>
+
+  {% if events %}
+    {% for item in events %}
+    <div class="timeline-event">
+      <div class="timeline-event__dot {{ item.dot_css }}"></div>
+      <div class="timeline-event__content">
+        <div class="timeline-event__title">{{ item.label }}</div>
+        <div class="timeline-event__time">
+          {{ item.event.timestamp|date:"d/m/Y H:i" }}
+          ·
+          {% if item.event.actor %}
+            {{ item.event.actor.get_full_name|default:item.event.actor.username }}
+          {% else %}
+            Sistema
+          {% endif %}
+        </div>
+      </div>
+    </div>
+    {% endfor %}
+  {% else %}
+  <p class="text-muted mb-0">Nenhum evento registrado.</p>
+  {% endif %}
+</div>
+
+<!-- Ações -->
+<div class="card p-4">
+  <h5 class="mb-3">Ações</h5>
+  {% if can_confirm_receipt %}
+  <p class="text-muted mb-3">Confirme o recebimento do resultado final para concluir o caso.</p>
+  <div class="d-flex gap-2">
+    <form method="post" action="{% url 'intake:confirm_receipt' case.case_id %}" class="d-inline">
+      {% csrf_token %}
+      <button type="submit" class="btn btn-hospital">✓ Confirmar Recebimento</button>
+    </form>
+    <a href="{% url 'intake:my_cases' %}" class="btn btn-outline-secondary">Voltar para lista</a>
+  </div>
+  {% else %}
+  <div class="d-flex gap-2">
+    <a href="{% url 'intake:my_cases' %}" class="btn btn-hospital-outline">← Voltar para lista</a>
+  </div>
+  {% endif %}
+</div>
+
+{% endblock %}

@@ -1,6 +1,6 @@
 # Slice 5: Detalhe do Caso — Dados + PDF Inline + Timeline
 
-> **Status**: TODO
+> **Status**: DONE
 > **Depende de**: Slice 4 (lista de casos)
 > **Change**: `openspec/changes/intake-nir/`
 
