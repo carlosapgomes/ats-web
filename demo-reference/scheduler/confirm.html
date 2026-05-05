@@ -1,0 +1,262 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Confirmar Agendamento — Caso #2026-0428-001</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Merriweather+Sans:wght@600;700&family=Source+Sans+3:wght@400;500;600&display=swap" rel="stylesheet">
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
+  <link href="../css/styles.css" rel="stylesheet">
+</head>
+<body class="hospital-shell">
+
+<header class="app-header text-white py-3 mb-4">
+  <div class="container">
+    <div class="d-flex flex-column flex-lg-row justify-content-between gap-3 align-items-lg-start">
+      <div>
+        <h1 class="app-header__title">Confirmar Agendamento</h1>
+        <p class="app-header__subtitle">Caso #2026-0428-001 · Maria Silva dos Santos</p>
+      </div>
+      <div class="text-lg-end">
+        <p class="app-session-meta mb-2">pedro.agendador@hospital.org · <strong>scheduler</strong></p>
+        <a href="queue.html" class="btn btn-sm btn-light">← Voltar para fila</a>
+      </div>
+    </div>
+  </div>
+</header>
+
+<main class="app-shell container pb-5">
+
+  <div class="row g-4 decision-two-col">
+    <!-- Left: Case Info -->
+    <div class="col-lg-5">
+      <div class="card p-4 mb-3">
+        <h5 class="mb-3">📋 Dados do Caso</h5>
+        <table class="table table-sm mb-0">
+          <tr><td class="text-muted" style="width:40%;">Paciente</td><td><strong>Maria Silva dos Santos</strong></td></tr>
+          <tr><td class="text-muted">Registro</td><td>2026-0428-001</td></tr>
+          <tr><td class="text-muted">Idade</td><td>75 anos</td></tr>
+          <tr><td class="text-muted">Sexo</td><td>Feminino</td></tr>
+          <tr><td class="text-muted">Diagnóstico</td><td>Catarata bilateral — cirurgia eletiva</td></tr>
+        </table>
+      </div>
+
+      <div class="card p-4">
+        <h5 class="mb-3">🩺 Decisão Médica</h5>
+        <div class="summary-box mb-2">
+          <div class="summary-label">Decisão</div>
+          <div class="summary-value">
+            <span class="status-badge status-accepted">ACEITAR</span>
+          </div>
+        </div>
+        <div class="summary-box mb-2">
+          <div class="summary-label">Suporte Necessário</div>
+          <div class="summary-value">Anestesista</div>
+        </div>
+        <div class="summary-box">
+          <div class="summary-label">Fluxo</div>
+          <div class="summary-value">Agendamento</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Right: Confirmation Form -->
+    <div class="col-lg-7">
+      <div class="card p-4">
+        <h5 class="mb-4">📅 Confirmação de Agendamento</h5>
+
+        <form id="schedule-form" novalidate>
+          <!-- Decision -->
+          <div class="mb-4">
+            <label class="form-label">Status do Agendamento <span class="text-danger">*</span></label>
+            <div class="decision-radio-group">
+              <div class="form-check">
+                <input class="form-check-input" type="radio" name="schedule-decision" id="sched-confirm" value="confirm" required>
+                <label class="form-check-label d-block" for="sched-confirm">
+                  <strong>✓ Confirmar Agendamento</strong>
+                  <div class="text-muted small">Informe a data e hora</div>
+                </label>
+              </div>
+              <div class="form-check">
+                <input class="form-check-input" type="radio" name="schedule-decision" id="sched-deny" value="deny">
+                <label class="form-check-label d-block" for="sched-deny">
+                  <strong>✗ Negar Agendamento</strong>
+                  <div class="text-muted small">Informe o motivo</div>
+                </label>
+              </div>
+            </div>
+            <div class="invalid-feedback" id="sched-decision-error">Selecione uma opção.</div>
+          </div>
+
+          <!-- Confirm Fields -->
+          <div class="decision-section" id="confirm-section">
+            <div class="row g-3 mb-3">
+              <div class="col-sm-6">
+                <label for="sched-date" class="form-label">Data <span class="text-danger">*</span></label>
+                <input type="date" class="form-control" id="sched-date" required min="2026-04-29">
+                <div class="invalid-feedback">Informe a data.</div>
+              </div>
+              <div class="col-sm-6">
+                <label for="sched-time" class="form-label">Horário <span class="text-danger">*</span></label>
+                <input type="time" class="form-control" id="sched-time" required>
+                <div class="invalid-feedback">Informe o horário.</div>
+              </div>
+            </div>
+            <div class="mb-3">
+              <label for="sched-notes" class="form-label">Observações</label>
+              <textarea class="form-control" id="sched-notes" rows="2" placeholder="Instruções adicionais para o paciente..."></textarea>
+            </div>
+          </div>
+
+          <!-- Deny Fields -->
+          <div class="decision-section" id="deny-section">
+            <div class="mb-3">
+              <label for="deny-reason" class="form-label">Motivo da Negativa <span class="text-danger">*</span></label>
+              <textarea class="form-control" id="deny-reason" rows="3" placeholder="Ex: indisponibilidade de vaga, conflito de agenda..."></textarea>
+              <div class="invalid-feedback">Informe o motivo da negativa.</div>
+            </div>
+          </div>
+
+          <!-- Case ID -->
+          <div class="mb-4">
+            <label class="form-label">ID do Caso</label>
+            <input type="text" class="form-control" value="2026-0428-001" readonly style="background:#f8f9fa;">
+            <div class="form-text">Preenchido automaticamente pelo sistema.</div>
+          </div>
+
+          <!-- Submit -->
+          <div class="d-flex gap-2">
+            <button type="submit" class="btn btn-hospital btn-lg flex-grow-1" id="btn-submit">
+              Enviar Confirmação
+            </button>
+            <a href="queue.html" class="btn btn-outline-secondary btn-lg">Cancelar</a>
+          </div>
+        </form>
+      </div>
+    </div>
+  </div>
+
+</main>
+
+<!-- Confirmation Modal -->
+<div class="modal fade" id="confirm-modal" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog modal-dialog-centered">
+    <div class="modal-content">
+      <div class="modal-header border-0">
+        <h5 class="modal-title">Confirmar Envio</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Fechar"></button>
+      </div>
+      <div class="modal-body" id="confirm-body">
+        <!-- Filled by JS -->
+      </div>
+      <div class="modal-footer border-0">
+        <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Revisar</button>
+        <button type="button" class="btn btn-hospital" id="btn-confirm-final">Confirmar</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
+<script>
+  (function () {
+    var confirmRadio = document.getElementById('sched-confirm');
+    var denyRadio = document.getElementById('sched-deny');
+    var confirmSection = document.getElementById('confirm-section');
+    var denySection = document.getElementById('deny-section');
+    var schedDate = document.getElementById('sched-date');
+    var schedTime = document.getElementById('sched-time');
+    var denyReason = document.getElementById('deny-reason');
+    var form = document.getElementById('schedule-form');
+    var confirmModal = new bootstrap.Modal(document.getElementById('confirm-modal'));
+    var confirmBody = document.getElementById('confirm-body');
+
+    function toggleSections() {
+      if (confirmRadio.checked) {
+        confirmSection.classList.add('active');
+        denySection.classList.remove('active');
+        schedDate.required = true;
+        schedTime.required = true;
+        denyReason.required = false;
+      } else if (denyRadio.checked) {
+        denySection.classList.add('active');
+        confirmSection.classList.remove('active');
+        schedDate.required = false;
+        schedTime.required = false;
+        denyReason.required = true;
+      } else {
+        confirmSection.classList.remove('active');
+        denySection.classList.remove('active');
+      }
+    }
+
+    confirmRadio.addEventListener('change', toggleSections);
+    denyRadio.addEventListener('change', toggleSections);
+
+    form.addEventListener('submit', function (e) {
+      e.preventDefault();
+
+      if (!confirmRadio.checked && !denyRadio.checked) {
+        document.getElementById('sched-decision-error').style.display = 'block';
+        return;
+      }
+      document.getElementById('sched-decision-error').style.display = 'none';
+
+      if (confirmRadio.checked) {
+        if (!schedDate.value || !schedTime.value) {
+          if (!schedDate.value) schedDate.classList.add('is-invalid');
+          if (!schedTime.value) schedTime.classList.add('is-invalid');
+          return;
+        }
+        var dateFormatted = new Date(schedDate.value + 'T' + schedTime.value).toLocaleString('pt-BR', {
+          day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit', hour12: false
+        });
+        confirmBody.innerHTML =
+          '<div class="text-center mb-3"><span style="font-size:3rem;">✓</span></div>' +
+          '<p class="text-center mb-1"><strong>Agendamento Confirmado</strong></p>' +
+          '<p class="text-center mb-1">Data: <strong>' + dateFormatted + '</strong></p>' +
+          '<p class="text-center text-muted small">Caso #2026-0428-001 · Maria Silva dos Santos</p>' +
+          '<div class="alert alert-info small mb-0 mt-3">O resultado será comunicado automaticamente à recepção.</div>';
+      } else {
+        var reason = denyReason.value.trim();
+        if (!reason) {
+          denyReason.classList.add('is-invalid');
+          return;
+        }
+        confirmBody.innerHTML =
+          '<div class="text-center mb-3"><span style="font-size:3rem;">✗</span></div>' +
+          '<p class="text-center mb-1"><strong>Agendamento Negado</strong></p>' +
+          '<p class="text-center text-muted small">Caso #2026-0428-001 · Maria Silva dos Santos</p>' +
+          '<div class="mt-3"><strong>Motivo:</strong> ' + escapeHtml(reason) + '</div>' +
+          '<div class="alert alert-warning small mb-0 mt-3">O caso retornará para reavaliação. A recepção será notificada.</div>';
+      }
+
+      confirmModal.show();
+    });
+
+    document.getElementById('btn-confirm-final').addEventListener('click', function () {
+      confirmModal.hide();
+      document.getElementById('btn-submit').textContent = '✓ Enviado';
+      document.getElementById('btn-submit').classList.remove('btn-hospital');
+      document.getElementById('btn-submit').classList.add('btn-success');
+      document.getElementById('btn-submit').disabled = true;
+      setTimeout(function () {
+        window.location.href = 'queue.html';
+      }, 1500);
+    });
+
+    schedDate.addEventListener('change', function () { schedDate.classList.remove('is-invalid'); });
+    schedTime.addEventListener('change', function () { schedTime.classList.remove('is-invalid'); });
+    denyReason.addEventListener('input', function () { denyReason.classList.remove('is-invalid'); });
+
+    function escapeHtml(str) {
+      var div = document.createElement('div');
+      div.appendChild(document.createTextNode(str));
+      return div.innerHTML;
+    }
+  })();
+</script>
+</body>
+</html>

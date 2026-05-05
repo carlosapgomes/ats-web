@@ -1,0 +1,293 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Decisão Médica — Caso #2026-0428-002</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Merriweather+Sans:wght@600;700&family=Source+Sans+3:wght@400;500;600&display=swap" rel="stylesheet">
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
+  <link href="../css/styles.css" rel="stylesheet">
+</head>
+<body class="hospital-shell">
+
+<header class="app-header text-white py-3 mb-4">
+  <div class="container">
+    <div class="d-flex flex-column flex-lg-row justify-content-between gap-3 align-items-lg-start">
+      <div>
+        <h1 class="app-header__title">Decisão Médica</h1>
+        <p class="app-header__subtitle">Caso #2026-0428-002 · João Pereira Gomes</p>
+      </div>
+      <div class="text-lg-end">
+        <p class="app-session-meta mb-2">carlos.medico@hospital.org · <strong>doctor</strong></p>
+        <a href="queue.html" class="btn btn-sm btn-light">← Voltar para fila</a>
+      </div>
+    </div>
+  </div>
+</header>
+
+<main class="app-shell container pb-5">
+
+  <div class="row g-4 decision-two-col">
+
+    <!-- Left: Case Summary -->
+    <div class="col-lg-5">
+      <div class="card p-4 mb-3">
+        <h5 class="mb-3">📋 Dados do Paciente</h5>
+        <table class="table table-sm mb-0">
+          <tr><td class="text-muted" style="width:40%;">Paciente</td><td><strong>João Pereira Gomes</strong></td></tr>
+          <tr><td class="text-muted">Registro</td><td>2026-0428-002</td></tr>
+          <tr><td class="text-muted">Idade</td><td>62 anos</td></tr>
+          <tr><td class="text-muted">Sexo</td><td>Masculino</td></tr>
+          <tr><td class="text-muted">Enviado em</td><td>28/04/2026 15:10</td></tr>
+          <tr><td class="text-muted">Aguardando</td><td><span class="waiting-time">25 min</span></td></tr>
+        </table>
+      </div>
+
+      <div class="card p-4 mb-3">
+        <h5 class="mb-3">🤖 Extração IA do PDF</h5>
+        <div class="summary-box mb-3">
+          <div class="summary-label">Diagnóstico Principal</div>
+          <div class="summary-value">Hérnia inguinal bilateral — cirurgia eletiva</div>
+        </div>
+        <div class="summary-box mb-3">
+          <div class="summary-label">Comorbidades</div>
+          <div class="summary-value">HAS controlada, DM2 em uso de metformina</div>
+        </div>
+        <div class="summary-box mb-3">
+          <div class="summary-label">Medicações</div>
+          <div class="summary-value">Losartana 50mg, Metformina 850mg</div>
+        </div>
+        <div class="summary-box mb-3">
+          <div class="summary-label">Exames</div>
+          <div class="summary-value">ECG normal, Hb 14.2, HbA1c 7.1%, Cr 1.0</div>
+        </div>
+        <div class="summary-box">
+          <div class="summary-label">Sugestão da IA</div>
+          <div class="summary-value">
+            <span class="badge bg-info me-1">Suporte: Nenhum</span>
+            <span class="badge bg-secondary">Fluxo: Agendamento</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="card p-4">
+        <h5 class="mb-3">📄 PDF Original</h5>
+        <div class="border rounded-3 p-3 text-center bg-light">
+          <span style="font-size:2rem;">📄</span>
+          <div>encaminhamento_joao_pereira.pdf</div>
+          <div class="text-muted small">1.2 MB</div>
+          <a href="#" class="btn btn-sm btn-outline-secondary mt-2" onclick="return false;">Visualizar PDF</a>
+        </div>
+      </div>
+    </div>
+
+    <!-- Right: Decision Form -->
+    <div class="col-lg-7">
+      <div class="card p-4">
+        <h5 class="mb-4">🩺 Formulário de Decisão</h5>
+
+        <form id="decision-form" novalidate>
+
+          <!-- Step 1: Decision -->
+          <div class="mb-4">
+            <label class="form-label">Decisão <span class="text-danger">*</span></label>
+            <div class="decision-radio-group">
+              <div class="form-check">
+                <input class="form-check-input" type="radio" name="decision" id="decision-accept" value="accept" required>
+                <label class="form-check-label d-block" for="decision-accept">
+                  <strong>✓ Aceitar</strong>
+                  <div class="text-muted small">Encaminhar para agendamento</div>
+                </label>
+              </div>
+              <div class="form-check">
+                <input class="form-check-input" type="radio" name="decision" id="decision-deny" value="deny">
+                <label class="form-check-label d-block" for="decision-deny">
+                  <strong>✗ Negar</strong>
+                  <div class="text-muted small">Triagem não indicada para este caso</div>
+                </label>
+              </div>
+            </div>
+            <div class="invalid-feedback" id="decision-error">Selecione uma decisão.</div>
+          </div>
+
+          <!-- Accept Fields (conditional) -->
+          <div class="decision-section" id="accept-section">
+            <div class="mb-3">
+              <label for="support-flag" class="form-label">Suporte Necessário <span class="text-danger">*</span></label>
+              <select class="form-select" id="support-flag" required>
+                <option value="" selected disabled>Selecione o tipo de suporte...</option>
+                <option value="none">Nenhum</option>
+                <option value="anesthesist">Anestesista</option>
+                <option value="anesthesist_icu">Anestesista + UTI</option>
+              </select>
+              <div class="invalid-feedback">Selecione o tipo de suporte.</div>
+            </div>
+
+            <div class="mb-3">
+              <label for="admission-flow" class="form-label">Fluxo de Admissão <span class="text-danger">*</span></label>
+              <select class="form-select" id="admission-flow" required>
+                <option value="" selected disabled>Selecione o fluxo...</option>
+                <option value="scheduled">Agendamento</option>
+                <option value="immediate">Vinda Imediata</option>
+              </select>
+              <div class="invalid-feedback">Selecione o fluxo de admissão.</div>
+            </div>
+          </div>
+
+          <!-- Deny Fields (conditional) -->
+          <div class="decision-section" id="deny-section">
+            <div class="mb-3">
+              <label for="deny-reason" class="form-label">Motivo da Negativa <span class="text-danger">*</span></label>
+              <textarea class="form-control" id="deny-reason" rows="3" placeholder="Descreva o motivo pelo qual a triagem não se aplica a este caso..."></textarea>
+              <div class="invalid-feedback">Informe o motivo da negativa.</div>
+            </div>
+          </div>
+
+          <!-- Case ID (auto-filled, hidden in production) -->
+          <div class="mb-4">
+            <label for="case-id" class="form-label">ID do Caso</label>
+            <input type="text" class="form-control" id="case-id" value="2026-0428-002" readonly style="background:#f8f9fa;">
+            <div class="form-text">Preenchido automaticamente pelo sistema.</div>
+          </div>
+
+          <!-- Submit -->
+          <div class="d-flex gap-2">
+            <button type="submit" class="btn btn-hospital btn-lg flex-grow-1" id="btn-submit">
+              Enviar Decisão
+            </button>
+            <a href="queue.html" class="btn btn-outline-secondary btn-lg">Cancelar</a>
+          </div>
+
+        </form>
+      </div>
+    </div>
+
+  </div>
+
+</main>
+
+<!-- Confirmation Modal -->
+<div class="modal fade" id="confirm-modal" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog modal-dialog-centered">
+    <div class="modal-content">
+      <div class="modal-header border-0">
+        <h5 class="modal-title">Confirmar Decisão</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Fechar"></button>
+      </div>
+      <div class="modal-body" id="confirm-body">
+        <!-- Filled by JS -->
+      </div>
+      <div class="modal-footer border-0">
+        <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Revisar</button>
+        <button type="button" class="btn btn-hospital" id="btn-confirm-final">Confirmar Decisão</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
+<script>
+  (function () {
+    var acceptRadio = document.getElementById('decision-accept');
+    var denyRadio = document.getElementById('decision-deny');
+    var acceptSection = document.getElementById('accept-section');
+    var denySection = document.getElementById('deny-section');
+    var supportFlag = document.getElementById('support-flag');
+    var admissionFlow = document.getElementById('admission-flow');
+    var denyReason = document.getElementById('deny-reason');
+    var form = document.getElementById('decision-form');
+    var confirmModal = new bootstrap.Modal(document.getElementById('confirm-modal'));
+    var confirmBody = document.getElementById('confirm-body');
+
+    function toggleSections() {
+      if (acceptRadio.checked) {
+        acceptSection.classList.add('active');
+        denySection.classList.remove('active');
+        supportFlag.required = true;
+        admissionFlow.required = true;
+        denyReason.required = false;
+      } else if (denyRadio.checked) {
+        denySection.classList.add('active');
+        acceptSection.classList.remove('active');
+        supportFlag.required = false;
+        admissionFlow.required = false;
+        denyReason.required = true;
+      } else {
+        acceptSection.classList.remove('active');
+        denySection.classList.remove('active');
+      }
+    }
+
+    acceptRadio.addEventListener('change', toggleSections);
+    denyRadio.addEventListener('change', toggleSections);
+
+    form.addEventListener('submit', function (e) {
+      e.preventDefault();
+
+      // Validate
+      if (!acceptRadio.checked && !denyRadio.checked) {
+        document.getElementById('decision-error').style.display = 'block';
+        return;
+      }
+      document.getElementById('decision-error').style.display = 'none';
+
+      var decision = acceptRadio.checked ? 'accept' : 'deny';
+      var supportText = supportFlag.options[supportFlag.selectedIndex].text;
+      var flowText = admissionFlow.options[admissionFlow.selectedIndex].text;
+      var reason = denyReason.value.trim();
+
+      if (decision === 'accept') {
+        if (!supportFlag.value || !admissionFlow.value) {
+          if (!supportFlag.value) supportFlag.classList.add('is-invalid');
+          if (!admissionFlow.value) admissionFlow.classList.add('is-invalid');
+          return;
+        }
+        confirmBody.innerHTML =
+          '<div class="text-center mb-3"><span style="font-size:3rem;">✓</span></div>' +
+          '<p class="text-center mb-1"><strong>ACEITAR</strong> — ' + supportText + ' · ' + flowText + '</p>' +
+          '<p class="text-center text-muted small">Caso #2026-0428-002 · João Pereira Gomes</p>' +
+          '<div class="alert alert-info small mb-0 mt-3">O caso será encaminhado automaticamente para agendamento.</div>';
+      } else {
+        if (!reason) {
+          denyReason.classList.add('is-invalid');
+          return;
+        }
+        confirmBody.innerHTML =
+          '<div class="text-center mb-3"><span style="font-size:3rem;">✗</span></div>' +
+          '<p class="text-center mb-1"><strong>NEGAR</strong></p>' +
+          '<p class="text-center text-muted small">Caso #2026-0428-002 · João Pereira Gomes</p>' +
+          '<div class="mt-3"><strong>Motivo:</strong> ' + escapeHtml(reason) + '</div>' +
+          '<div class="alert alert-warning small mb-0 mt-3">O resultado será comunicado à recepção.</div>';
+      }
+
+      confirmModal.show();
+    });
+
+    document.getElementById('btn-confirm-final').addEventListener('click', function () {
+      confirmModal.hide();
+      document.getElementById('btn-submit').textContent = '✓ Decisão Enviada';
+      document.getElementById('btn-submit').classList.remove('btn-hospital');
+      document.getElementById('btn-submit').classList.add('btn-success');
+      document.getElementById('btn-submit').disabled = true;
+      // Simulate return to queue
+      setTimeout(function () {
+        window.location.href = 'queue.html';
+      }, 1500);
+    });
+
+    // Clear invalid states on input
+    supportFlag.addEventListener('change', function () { supportFlag.classList.remove('is-invalid'); });
+    admissionFlow.addEventListener('change', function () { admissionFlow.classList.remove('is-invalid'); });
+    denyReason.addEventListener('input', function () { denyReason.classList.remove('is-invalid'); });
+
+    function escapeHtml(str) {
+      var div = document.createElement('div');
+      div.appendChild(document.createTextNode(str));
+      return div.innerHTML;
+    }
+  })();
+</script>
+</body>
+</html>

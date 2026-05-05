@@ -1,0 +1,9 @@
+
+# dev-loop bootstrap rules
+prompts/
+.env
+*.secret
+tmp/
+.tmp/
+# openspec changes are tracked; only archive is excluded
+openspec/changes/archive/

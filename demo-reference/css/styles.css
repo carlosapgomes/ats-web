@@ -1,0 +1,593 @@
+/* ============================================================
+   Sistema de Triagem Hospitalar — Demo Styles
+   Paleta herdada do design system existente (Bootstrap 5.3)
+   ============================================================ */
+
+:root {
+  --hospital-primary: #0b4263;
+  --hospital-secondary: #1b5f78;
+  --hospital-accent: #2f8f9d;
+  --hospital-accent-light: #d4eef3;
+  --hospital-bg: #f3f8fb;
+  --hospital-surface: #ffffff;
+  --hospital-border: #c7d8e2;
+  --hospital-text: #1f2f3a;
+  --hospital-muted: #4c6677;
+  --hospital-success: #1b7a4a;
+  --hospital-warning: #b05b0c;
+  --hospital-danger: #b53535;
+  --hospital-info: #2f8f9d;
+}
+
+/* ---------- Base ---------- */
+
+body.hospital-shell {
+  margin: 0;
+  min-height: 100vh;
+  color: var(--hospital-text);
+  font-family: "Source Sans 3", sans-serif;
+  background:
+    radial-gradient(circle at top right, rgba(47, 143, 157, 0.10), transparent 46%),
+    radial-gradient(circle at top left, rgba(11, 66, 99, 0.08), transparent 38%),
+    var(--hospital-bg);
+}
+
+body.hospital-shell h1,
+body.hospital-shell h2,
+body.hospital-shell h3,
+body.hospital-shell h4,
+body.hospital-shell h5,
+body.hospital-shell h6 {
+  font-family: "Merriweather Sans", sans-serif;
+  letter-spacing: 0.01em;
+}
+
+/* ---------- Header ---------- */
+
+.app-header {
+  border-bottom: 1px solid rgba(199, 216, 226, 0.7);
+  background: linear-gradient(125deg, var(--hospital-primary), var(--hospital-secondary));
+}
+
+.app-header__title {
+  margin: 0;
+  font-size: 1.2rem;
+  font-weight: 700;
+}
+
+.app-header__subtitle {
+  margin: 0.15rem 0 0;
+  font-size: 0.92rem;
+  color: rgba(255, 255, 255, 0.86);
+}
+
+.app-nav .nav-link {
+  border-radius: 999px;
+  color: rgba(255, 255, 255, 0.86);
+  font-weight: 600;
+  font-size: 0.9rem;
+}
+
+.app-nav .nav-link:hover,
+.app-nav .nav-link:focus {
+  color: #ffffff;
+  background-color: rgba(255, 255, 255, 0.12);
+}
+
+.app-nav .nav-link.active {
+  color: var(--hospital-primary);
+  background-color: #ffffff;
+}
+
+.app-session-meta {
+  font-size: 0.86rem;
+  color: rgba(255, 255, 255, 0.9);
+}
+
+/* ---------- Shell animation ---------- */
+
+.app-shell {
+  animation: shell-fade-in 220ms ease-out;
+}
+
+@keyframes shell-fade-in {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* ---------- Cards ---------- */
+
+.hospital-shell .card {
+  border: 1px solid var(--hospital-border);
+  border-radius: 0.9rem;
+  background-color: var(--hospital-surface);
+  box-shadow: 0 10px 22px rgba(10, 31, 46, 0.08);
+}
+
+.hospital-shell .card h2,
+.hospital-shell .card h3 {
+  color: var(--hospital-primary);
+}
+
+/* ---------- Buttons ---------- */
+
+.btn-hospital {
+  border-color: var(--hospital-primary);
+  background-color: var(--hospital-primary);
+  color: #fff;
+}
+
+.btn-hospital:hover,
+.btn-hospital:focus {
+  border-color: #07344e;
+  background-color: #07344e;
+  color: #fff;
+}
+
+.btn-hospital-outline {
+  border-color: var(--hospital-primary);
+  color: var(--hospital-primary);
+}
+
+.btn-hospital-outline:hover,
+.btn-hospital-outline:focus {
+  background-color: var(--hospital-primary);
+  color: #fff;
+}
+
+/* ---------- Badges & status ---------- */
+
+.badge-hospital-primary {
+  background-color: var(--hospital-primary);
+  color: #fff;
+}
+
+.badge-hospital-accent {
+  background-color: var(--hospital-accent);
+  color: #fff;
+}
+
+.status-badge {
+  font-size: 0.82rem;
+  padding: 0.3em 0.65em;
+  border-radius: 999px;
+  font-weight: 600;
+}
+
+.status-pending { background-color: #fff3cd; color: #856404; }
+.status-progress { background-color: #cce5ff; color: #004085; }
+.status-accepted { background-color: #d4edda; color: #155724; }
+.status-denied   { background-color: #f8d7da; color: #721c24; }
+.status-done     { background-color: #d4edda; color: #155724; }
+
+/* ---------- Forms ---------- */
+
+.hospital-shell .form-label {
+  margin-bottom: 0.3rem;
+  color: var(--hospital-muted);
+  font-weight: 600;
+}
+
+.hospital-shell .form-control:focus,
+.hospital-shell .form-select:focus {
+  border-color: var(--hospital-accent);
+  box-shadow: 0 0 0 0.2rem rgba(47, 143, 157, 0.25);
+}
+
+.hospital-shell .form-check-input:checked {
+  background-color: var(--hospital-primary);
+  border-color: var(--hospital-primary);
+}
+
+/* ---------- Steps / Stepper ---------- */
+
+.steps-bar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0;
+  margin-bottom: 1.5rem;
+}
+
+.step-item {
+  flex: 1;
+  min-width: 90px;
+  text-align: center;
+  position: relative;
+  padding: 0.5rem 0.25rem;
+  font-size: 0.78rem;
+  color: var(--hospital-muted);
+  border-bottom: 3px solid var(--hospital-border);
+}
+
+.step-item.done {
+  color: var(--hospital-success);
+  border-bottom-color: var(--hospital-success);
+}
+
+.step-item.current {
+  color: var(--hospital-primary);
+  border-bottom-color: var(--hospital-primary);
+  font-weight: 700;
+}
+
+.step-item .step-icon {
+  display: block;
+  font-size: 1.1rem;
+  margin-bottom: 0.15rem;
+}
+
+/* ---------- Notification badge ---------- */
+
+.notif-badge {
+  position: relative;
+}
+
+.notif-badge::after {
+  content: attr(data-count);
+  position: absolute;
+  top: -6px;
+  right: -10px;
+  background: #e74c3c;
+  color: #fff;
+  font-size: 0.7rem;
+  font-weight: 700;
+  min-width: 18px;
+  height: 18px;
+  line-height: 18px;
+  text-align: center;
+  border-radius: 999px;
+  padding: 0 4px;
+}
+
+.notif-badge:not([data-count])::after,
+.notif-badge[data-count="0"]::after {
+  display: none;
+}
+
+/* ---------- Upload zone ---------- */
+
+.upload-zone {
+  border: 2px dashed var(--hospital-border);
+  border-radius: 0.9rem;
+  padding: 2.5rem 2rem;
+  text-align: center;
+  background: rgba(47, 143, 157, 0.04);
+  transition: border-color 0.2s, background 0.2s;
+  cursor: pointer;
+}
+
+.upload-zone:hover,
+.upload-zone.drag-over {
+  border-color: var(--hospital-accent);
+  background: rgba(47, 143, 157, 0.10);
+}
+
+.upload-zone__icon {
+  font-size: 2.5rem;
+  color: var(--hospital-accent);
+  margin-bottom: 0.5rem;
+}
+
+.upload-zone__text {
+  color: var(--hospital-muted);
+  font-size: 1rem;
+}
+
+.upload-zone__hint {
+  color: var(--hospital-muted);
+  font-size: 0.82rem;
+}
+
+/* ---------- Landing page ---------- */
+
+.landing-hero {
+  text-align: center;
+  padding: 3rem 1rem 2rem;
+}
+
+.landing-hero__title {
+  font-size: 2rem;
+  color: var(--hospital-primary);
+}
+
+.landing-hero__subtitle {
+  font-size: 1.1rem;
+  color: var(--hospital-muted);
+  max-width: 580px;
+  margin: 0.5rem auto 0;
+}
+
+.role-card {
+  transition: transform 0.2s, box-shadow 0.2s;
+  text-decoration: none;
+  color: inherit;
+  display: block;
+}
+
+.role-card:hover {
+  transform: translateY(-3px);
+  box-shadow: 0 14px 28px rgba(10, 31, 46, 0.12);
+  color: inherit;
+}
+
+.role-card__icon {
+  font-size: 2.2rem;
+  margin-bottom: 0.5rem;
+}
+
+.role-card__title {
+  font-size: 1.15rem;
+  color: var(--hospital-primary);
+}
+
+.role-card__desc {
+  font-size: 0.88rem;
+  color: var(--hospital-muted);
+}
+
+/* ---------- Case card ---------- */
+
+.case-card {
+  transition: box-shadow 0.2s;
+}
+
+.case-card:hover {
+  box-shadow: 0 12px 24px rgba(10, 31, 46, 0.12);
+}
+
+.case-card .patient-name {
+  font-size: 1.1rem;
+  color: var(--hospital-primary);
+}
+
+.case-card .case-meta {
+  font-size: 0.82rem;
+  color: var(--hospital-muted);
+}
+
+.waiting-time {
+  font-size: 0.8rem;
+  color: var(--hospital-warning);
+  font-weight: 600;
+}
+
+.waiting-time.urgent {
+  color: var(--hospital-danger);
+}
+
+/* ---------- Timeline (case detail) ---------- */
+
+.timeline-event {
+  display: flex;
+  gap: 1rem;
+  padding: 0.6rem 0;
+  border-bottom: 1px solid rgba(199, 216, 226, 0.5);
+}
+
+.timeline-event:last-child {
+  border-bottom: none;
+}
+
+.timeline-event__dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  margin-top: 0.4rem;
+  flex-shrink: 0;
+}
+
+.timeline-event__dot.system { background-color: var(--hospital-accent); }
+.timeline-event__dot.doctor { background-color: var(--hospital-primary); }
+.timeline-event__dot.scheduler { background-color: var(--hospital-success); }
+.timeline-event__dot.reception { background-color: var(--hospital-warning); }
+
+.timeline-event__content {
+  flex: 1;
+}
+
+.timeline-event__title {
+  font-weight: 600;
+  font-size: 0.9rem;
+  color: var(--hospital-text);
+}
+
+.timeline-event__time {
+  font-size: 0.78rem;
+  color: var(--hospital-muted);
+}
+
+/* ---------- Pulse animation ---------- */
+
+@keyframes pulse-dot {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.4; }
+}
+
+.pulse-dot {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background-color: var(--hospital-danger);
+  animation: pulse-dot 1.5s ease-in-out infinite;
+  margin-right: 0.35rem;
+  vertical-align: middle;
+}
+
+/* ---------- Decision form ---------- */
+
+.decision-section {
+  display: none;
+}
+
+.decision-section.active {
+  display: block;
+}
+
+.decision-radio-group .form-check {
+  padding: 0.75rem 1rem;
+  border: 1px solid var(--hospital-border);
+  border-radius: 0.6rem;
+  margin-bottom: 0.5rem;
+  transition: border-color 0.2s, background 0.2s;
+}
+
+.decision-radio-group .form-check:hover {
+  border-color: var(--hospital-accent);
+  background: rgba(47, 143, 157, 0.04);
+}
+
+.decision-radio-group .form-check-input:checked + .form-check-label {
+  font-weight: 700;
+  color: var(--hospital-primary);
+}
+
+/* ---------- Summary box ---------- */
+
+.summary-box {
+  background: rgba(47, 143, 157, 0.06);
+  border-left: 4px solid var(--hospital-accent);
+  border-radius: 0 0.5rem 0.5rem 0;
+  padding: 1rem;
+}
+
+.summary-box .summary-label {
+  font-size: 0.78rem;
+  font-weight: 600;
+  color: var(--hospital-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.summary-box .summary-value {
+  font-size: 0.95rem;
+  color: var(--hospital-text);
+}
+
+/* ---------- Toast / Alert demo ---------- */
+
+.demo-toast {
+  position: fixed;
+  bottom: 1.5rem;
+  right: 1.5rem;
+  z-index: 1055;
+  min-width: 300px;
+  display: none;
+}
+
+.demo-toast.show {
+  display: block;
+  animation: shell-fade-in 220ms ease-out;
+}
+
+/* ---------- Responsive tweaks ---------- */
+
+@media (max-width: 767.98px) {
+  /* Header */
+  .app-header { padding-top: 0.75rem !important; padding-bottom: 0.75rem !important; }
+  .app-header__title { font-size: 1rem; }
+  .app-header__subtitle { font-size: 0.8rem; }
+
+  /* Cards */
+  .hospital-shell .card { padding: 0.75rem !important; border-radius: 0.6rem; }
+
+  /* Case cards: full-width action buttons */
+  .case-card .row > [class*="col-lg-"]:last-child {
+    flex-direction: row !important;
+    justify-content: space-between !important;
+    align-items: center !important;
+  }
+  .case-card .btn {
+    margin-top: 0 !important;
+    white-space: nowrap;
+  }
+
+  /* Case card meta */
+  .case-card .case-meta { font-size: 0.78rem; }
+  .case-card .patient-name { font-size: 1rem; }
+
+  /* NIR case card action button full-width */
+  .case-card [class*="col-md-"] a.btn { display: block; width: 100%; text-align: center; }
+  .case-card [class*="col-md-"]:last-child { margin-top: 0.5rem !important; }
+
+  /* Upload zone */
+  .upload-zone { padding: 1.5rem 1rem; }
+  .upload-zone__icon { font-size: 2rem; }
+
+  /* Tables: ensure scroll */
+  .table-responsive { -webkit-overflow-scrolling: touch; }
+  table.table-sm { font-size: 0.82rem; }
+
+  /* Forms: full width */
+  .decision-radio-group .form-check { padding: 0.5rem 0.75rem; }
+
+  /* Landing */
+  .landing-hero { padding: 1.5rem 0.5rem 1rem; }
+  .landing-hero__title { font-size: 1.35rem; }
+  .landing-hero__subtitle { font-size: 0.9rem; }
+  .role-card { padding: 0.75rem !important; }
+  .role-card__icon { font-size: 1.6rem; }
+  .role-card__title { font-size: 1rem; }
+  .role-card__desc { font-size: 0.8rem; }
+
+  /* Steps bar (vertical) */
+  .steps-bar {
+    flex-direction: column;
+    gap: 0.25rem;
+  }
+  .step-item {
+    border-bottom: none;
+    border-left: 3px solid var(--hospital-border);
+    text-align: left;
+    padding: 0.3rem 0.6rem;
+  }
+  .step-item.done { border-left-color: var(--hospital-success); }
+  .step-item.current { border-left-color: var(--hospital-primary); }
+
+  /* Summary boxes */
+  .summary-box { padding: 0.6rem; }
+  .summary-box .summary-value { font-size: 0.85rem; }
+
+  /* Badges */
+  .status-badge { font-size: 0.75rem; }
+
+  /* Modal */
+  .modal-dialog { margin: 0.5rem; }
+
+  /* Action button rows: stack vertically */
+  .d-flex.gap-2:has(> .btn) {
+    flex-direction: column;
+  }
+
+  /* Buttons */
+  .btn-lg { padding: 0.4rem 1rem; font-size: 1rem; }
+
+  /* Admin filters */
+  .admin-filters {
+    flex-direction: column;
+    align-items: stretch !important;
+    gap: 0.5rem;
+  }
+  .admin-filters select,
+  .admin-filters input {
+    width: 100% !important;
+  }
+
+  /* Hide less important table columns on mobile */
+  .hide-mobile { display: none; }
+
+  /* Login */
+  .login-container { margin: 1rem auto; }
+
+  /* Decision form two-column to single */
+  .decision-two-col .col-lg-5,
+  .decision-two-col .col-lg-7 {
+    padding-bottom: 0.5rem;
+  }
+}

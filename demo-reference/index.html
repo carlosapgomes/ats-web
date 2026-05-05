@@ -1,0 +1,117 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Sistema de Triagem Hospitalar</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Merriweather+Sans:wght@600;700&family=Source+Sans+3:wght@400;500;600&display=swap" rel="stylesheet">
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
+  <link href="css/styles.css" rel="stylesheet">
+</head>
+<body class="hospital-shell">
+
+<header class="app-header text-white py-3 mb-4">
+  <div class="container">
+    <div class="d-flex flex-column flex-lg-row justify-content-between gap-3 align-items-lg-start">
+      <div>
+        <h1 class="app-header__title">Sistema de Triagem Hospitalar</h1>
+        <p class="app-header__subtitle">Triagem automatizada com resposta médica semi-estruturada e agendamento integrado</p>
+      </div>
+      <div class="text-lg-end">
+        <a href="login.html" class="btn btn-light btn-sm">Entrar</a>
+      </div>
+    </div>
+  </div>
+</header>
+
+<main class="app-shell container pb-5">
+
+  <!-- Hero -->
+  <div class="landing-hero mb-4">
+    <h2 class="landing-hero__title">Fluxo completo em um só lugar</h2>
+    <p class="landing-hero__subtitle">
+      Cada profissional acessa exatamente o que precisa: upload de PDFs, avaliação médica com formulário estruturado,
+      confirmação de agendamento e monitoramento. Sem chat, sem fricção.
+    </p>
+  </div>
+
+  <!-- Role Cards -->
+  <div class="row g-4 mb-5">
+    <!-- NIR -->
+    <div class="col-12 col-md-6 col-lg-3">
+      <a href="nir/dashboard.html" class="role-card card p-4 text-center">
+        <div class="role-card__icon">📄</div>
+        <h3 class="role-card__title mb-2">Recepção (NIR)</h3>
+        <p class="role-card__desc mb-0">
+          Upload de PDFs de encaminhamento, acompanhamento dos casos em tempo real e notificações de resultado.
+        </p>
+      </a>
+    </div>
+
+    <!-- Médico -->
+    <div class="col-12 col-md-6 col-lg-3">
+      <a href="doctor/queue.html" class="role-card card p-4 text-center">
+        <div class="role-card__icon">🩺</div>
+        <h3 class="role-card__title mb-2">Médico</h3>
+        <p class="role-card__desc mb-0">
+          Fila de avaliação com resumo clínico extraído por IA. Decisão em formulário semi-estruturado — rápido e preciso.
+        </p>
+      </a>
+    </div>
+
+    <!-- Agendador -->
+    <div class="col-12 col-md-6 col-lg-3">
+      <a href="scheduler/queue.html" class="role-card card p-4 text-center">
+        <div class="role-card__icon">📅</div>
+        <h3 class="role-card__title mb-2">Agendador</h3>
+        <p class="role-card__desc mb-0">
+          Solicitações de agendamento com dados do caso. Confirmação ou negativa com data e hora em um clique.
+        </p>
+      </a>
+    </div>
+
+    <!-- Admin -->
+    <div class="col-12 col-md-6 col-lg-3">
+      <a href="admin/dashboard.html" class="role-card card p-4 text-center">
+        <div class="role-card__icon">📊</div>
+        <h3 class="role-card__title mb-2">Administrador</h3>
+        <p class="role-card__desc mb-0">
+          Dashboard de monitoramento, métricas, gestão de usuários e templates de prompt.
+        </p>
+      </a>
+    </div>
+  </div>
+
+  <!-- Fluxo visual -->
+  <div class="card p-4">
+    <h3 class="mb-4">Como funciona o fluxo</h3>
+    <div class="steps-bar">
+      <div class="step-item done">
+        <span class="step-icon">📄</span> 1. NIR faz upload do PDF
+      </div>
+      <div class="step-item done">
+        <span class="step-icon">🤖</span> 2. IA extrai e estrutura os dados
+      </div>
+      <div class="step-item current">
+        <span class="step-icon">🩺</span> 3. Médico avalia e decide
+      </div>
+      <div class="step-item">
+        <span class="step-icon">📅</span> 4. Agendador confirma data
+      </div>
+      <div class="step-item">
+        <span class="step-icon">✅</span> 5. NIR recebe resultado final
+      </div>
+    </div>
+    <p class="text-muted small mb-0">
+      O sistema guia cada caso automaticamente entre as etapas. Cada profissional só vê o que é relevante para sua função.
+      Notificações push alertam sobre novos casos no celular.
+    </p>
+  </div>
+
+</main>
+
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
+</body>
+</html>

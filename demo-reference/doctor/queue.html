@@ -1,0 +1,207 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Fila de Avaliação — Médico</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Merriweather+Sans:wght@600;700&family=Source+Sans+3:wght@400;500;600&display=swap" rel="stylesheet">
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
+  <link href="../css/styles.css" rel="stylesheet">
+</head>
+<body class="hospital-shell">
+
+<header class="app-header text-white py-3 mb-4">
+  <div class="container">
+    <div class="d-flex flex-column flex-lg-row justify-content-between gap-3 align-items-lg-start">
+      <div>
+        <h1 class="app-header__title">Avaliação Médica</h1>
+        <p class="app-header__subtitle">Casos aguardando decisão</p>
+      </div>
+      <div class="text-lg-end">
+        <p class="app-session-meta mb-2">
+          carlos.medico@hospital.org · <strong>doctor</strong>
+        </p>
+        <a href="../index.html" class="btn btn-sm btn-light">Sair</a>
+      </div>
+    </div>
+    <nav class="app-nav mt-3" aria-label="Navegacao">
+      <ul class="nav nav-pills gap-2">
+        <li class="nav-item"><span class="nav-link active notif-badge" data-count="3" style="position:relative;">Pendentes</span></li>
+        <li class="nav-item"><span class="nav-link">Decididos Hoje</span></li>
+        <li class="nav-item"><span class="nav-link">Histórico</span></li>
+      </ul>
+    </nav>
+  </div>
+</header>
+
+<main class="app-shell container pb-5">
+
+  <!-- Alert / Priority Banner -->
+  <div class="alert alert-warning d-flex align-items-center gap-2 mb-4" role="alert">
+    <span class="pulse-dot"></span>
+    <strong>3 casos aguardando avaliação.</strong> Tempo médio de espera: 18 min.
+  </div>
+
+  <!-- Case Cards -->
+  <div class="row g-3">
+
+    <!-- Case 1 -->
+    <div class="col-12">
+      <div class="case-card card p-3">
+        <div class="row">
+          <div class="col-lg-8">
+            <div class="d-flex align-items-start gap-3">
+              <div>
+                <div class="patient-name">João Pereira Gomes</div>
+                <div class="case-meta mb-2">Reg. 2026-0428-002 · 62 anos · Masculino</div>
+                <div class="summary-box mb-2">
+                  <div class="row">
+                    <div class="col-sm-6 mb-2">
+                      <div class="summary-label">Diagnóstico de encaminhamento</div>
+                      <div class="summary-value">Hérnia inguinal bilateral — cirurgia eletiva</div>
+                    </div>
+                    <div class="col-sm-3 mb-2">
+                      <div class="summary-label">Suporte sugerido (IA)</div>
+                      <div class="summary-value">Nenhum</div>
+                    </div>
+                    <div class="col-sm-3 mb-2">
+                      <div class="summary-label">Fluxo sugerido (IA)</div>
+                      <div class="summary-value">Agendamento</div>
+                    </div>
+                  </div>
+                  <div class="summary-label">Observações</div>
+                  <div class="summary-value small">Paciente com comorbidades controladas (HAS, DM2). Exames pré-operatórios em anexo.</div>
+                </div>
+              </div>
+            </div>
+          </div>
+          <div class="col-lg-4 text-lg-end mt-3 mt-lg-0 d-flex flex-lg-column justify-content-between align-items-lg-end">
+            <div class="waiting-time">
+              ⏱ Aguardando há 25 min
+            </div>
+            <a href="decision.html?case=002" class="btn btn-hospital mt-2">Avaliar Caso</a>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Case 2 -->
+    <div class="col-12">
+      <div class="case-card card p-3">
+        <div class="row">
+          <div class="col-lg-8">
+            <div class="d-flex align-items-start gap-3">
+              <div>
+                <div class="patient-name">Antônio Ferreira Lima</div>
+                <div class="case-meta mb-2">Reg. 2026-0428-003 · 58 anos · Masculino</div>
+                <div class="summary-box mb-2">
+                  <div class="row">
+                    <div class="col-sm-6 mb-2">
+                      <div class="summary-label">Diagnóstico de encaminhamento</div>
+                      <div class="summary-value">Colecistectomia videolaparoscópica</div>
+                    </div>
+                    <div class="col-sm-3 mb-2">
+                      <div class="summary-label">Suporte sugerido (IA)</div>
+                      <div class="summary-value">Anestesista</div>
+                    </div>
+                    <div class="col-sm-3 mb-2">
+                      <div class="summary-label">Fluxo sugerido (IA)</div>
+                      <div class="summary-value">Agendamento</div>
+                    </div>
+                  </div>
+                  <div class="summary-label">Observações</div>
+                  <div class="summary-value small">Paciente com IMC elevado (34). Risco anestésico ASA II.</div>
+                </div>
+              </div>
+            </div>
+          </div>
+          <div class="col-lg-4 text-lg-end mt-3 mt-lg-0 d-flex flex-lg-column justify-content-between align-items-lg-end">
+            <div class="waiting-time">
+              ⏱ Aguardando há 18 min
+            </div>
+            <a href="decision.html?case=003" class="btn btn-hospital mt-2">Avaliar Caso</a>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Case 3: Urgent -->
+    <div class="col-12">
+      <div class="case-card card p-3" style="border-left: 4px solid var(--hospital-danger);">
+        <div class="row">
+          <div class="col-lg-8">
+            <div class="d-flex align-items-start gap-3">
+              <div>
+                <div class="patient-name">Rosa Albuquerque Costa</div>
+                <div class="case-meta mb-2">Reg. 2026-0428-004 · 81 anos · Feminino</div>
+                <div class="summary-box mb-2" style="border-left-color: var(--hospital-danger);">
+                  <div class="row">
+                    <div class="col-sm-6 mb-2">
+                      <div class="summary-label">Diagnóstico de encaminhamento</div>
+                      <div class="summary-value">Fratura de fêmur D — urgência ortopédica</div>
+                    </div>
+                    <div class="col-sm-3 mb-2">
+                      <div class="summary-label">Suporte sugerido (IA)</div>
+                      <div class="summary-value">Anestesista UTI</div>
+                    </div>
+                    <div class="col-sm-3 mb-2">
+                      <div class="summary-label">Fluxo sugerido (IA)</div>
+                      <div class="summary-value">Vinda Imediata</div>
+                    </div>
+                  </div>
+                  <div class="summary-label">Observações</div>
+                  <div class="summary-value small">Idosa, múltiplas comorbidades. Necessita avaliação urgente.</div>
+                </div>
+              </div>
+            </div>
+          </div>
+          <div class="col-lg-4 text-lg-end mt-3 mt-lg-0 d-flex flex-lg-column justify-content-between align-items-lg-end">
+            <div class="waiting-time urgent">
+              ⏱ Aguardando há 12 min — PRIORITÁRIO
+            </div>
+            <a href="decision.html?case=004" class="btn btn-danger mt-2">Avaliar Urgente</a>
+          </div>
+        </div>
+      </div>
+    </div>
+
+  </div>
+
+  <!-- Recently Decided -->
+  <div class="card p-4 mt-4">
+    <h5 class="mb-3">Decididos Hoje</h5>
+    <div class="row g-2">
+      <div class="col-md-6">
+        <div class="border rounded-3 p-3 d-flex justify-content-between align-items-center">
+          <div>
+            <strong>Maria Silva dos Santos</strong>
+            <div class="text-muted small">Reg. 2026-0428-001 · 75 anos</div>
+          </div>
+          <div class="text-end">
+            <span class="status-badge status-accepted">ACEITAR</span>
+            <div class="text-muted small mt-1">14:52 · Agendamento · Anestesista</div>
+          </div>
+        </div>
+      </div>
+      <div class="col-md-6">
+        <div class="border rounded-3 p-3 d-flex justify-content-between align-items-center">
+          <div>
+            <strong>Pedro Henrique Oliveira</strong>
+            <div class="text-muted small">Reg. 2026-0428-005 · 47 anos</div>
+          </div>
+          <div class="text-end">
+            <span class="status-badge status-denied">NEGAR</span>
+            <div class="text-muted small mt-1">15:30 · Contorno clínico não indicado</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+</main>
+
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
+</body>
+</html>
