@@ -1,6 +1,6 @@
 # Slice 2: App Intake + Decorator role_required
 
-> **Status**: TODO
+> **Status**: DONE
 > **Depende de**: Slice 1 (tema hospitalar)
 > **Change**: `openspec/changes/intake-nir/`
 

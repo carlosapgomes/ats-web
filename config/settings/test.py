@@ -32,6 +32,9 @@ PASSWORD_HASHERS = [
     "django.contrib.auth.hashers.MD5PasswordHasher",
 ]
 
+# Permite acesso de localhost para roles restritos (nir, scheduler) nos testes
+INTRANET_IP_RANGE = "127.0.0.0/8"
+
 # Desabilita CSRF em testes
 CSRF_COOKIE_SECURE = False
 SESSION_COOKIE_SECURE = False
