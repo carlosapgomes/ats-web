@@ -69,19 +69,11 @@ Corrigir UI para ser visual e funcionalmente equivalente aos mocks de referênci
 
 Decisão médica sobre casos processados.
 
-- Tela de fila médica (casos em WAIT_DOCTOR)
-- Tela de detalhe para decisão:
-  - PDF inline
-  - Dados estruturados (patient, labs, ECG, ASA)
-  - Sugestão LLM + resultado do policy engine
-  - Prior case lookup (negações recentes do mesmo registro)
-- Formulário de decisão:
-  - decision: accept / deny
-  - support_flag (se accept): none / anesthesist / anesthesist_icu
-  - admission_flow (se accept): scheduled / immediate
-  - reason (se deny): texto livre
-- Transição FSM: WAIT_DOCTOR → DOCTOR_ACCEPTED / DOCTOR_DENIED
-- Evento auditável da decisão
+**Change**: `openspec/changes/doctor-queue/`
+
+- [ ] **Slice 1**: App doctor + queue view + templates alinhados com mocks
+- [ ] **Slice 2**: Decision view + form condicional + FSM transitions
+- [ ] **Slice 3**: Quality gate completo
 
 ---
 
