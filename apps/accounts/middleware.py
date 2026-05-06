@@ -26,17 +26,30 @@ def _get_client_ip(request):  # type: ignore[no-untyped-def]
 
 
 def _is_intranet_ip(client_ip):  # type: ignore[no-untyped-def]
-    """Verifica se o IP está dentro do range da intranet."""
+    """Verifica se o IP está dentro de qualquer range da intranet.
+
+    INTRANET_IP_RANGE suporta múltiplos ranges separados por vírgula:
+        "127.0.0.0/8,192.168.15.0/24"
+    """
     ip_range = getattr(settings, "INTRANET_IP_RANGE", None)
     if not ip_range:
         # Se não configurado, bloquear papéis restritos por segurança
         return False
     try:
-        network = ipaddress.ip_network(ip_range, strict=False)
         addr = ipaddress.ip_address(client_ip)
-        return addr in network
     except (ValueError, TypeError):
         return False
+    for cidr in ip_range.split(","):
+        cidr = cidr.strip()
+        if not cidr:
+            continue
+        try:
+            network = ipaddress.ip_network(cidr, strict=False)
+            if addr in network:
+                return True
+        except (ValueError, TypeError):
+            continue
+    return False
 
 
 class IntranetGuardMiddleware:

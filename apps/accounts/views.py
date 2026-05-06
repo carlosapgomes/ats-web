@@ -85,23 +85,20 @@ ROLE_HOME_URLS = {
 
 @login_required
 def home_view(request):  # type: ignore[no-untyped-def]
-    """Redireciona para a home do papel ativo.
-
-    Por enquanto, renderiza um placeholder já que as URLs
-    destino não existem. Quando os apps forem criados nos
-    próximos changes, a view será atualizada para redirect.
-    """
+    """Redireciona para a home do papel ativo."""
     active_role = request.session.get("active_role")
     if not active_role:
         return redirect("/switch-role/")
 
-    active_role_display = ROLE_DISPLAY_NAMES.get(active_role, active_role)
+    if active_role == "nir":
+        return redirect("intake:home")
+    if active_role == "doctor":
+        return redirect("intake:home")  # TODO: doctor queue
+    if active_role == "scheduler":
+        return redirect("intake:home")  # TODO: scheduler queue
+    if active_role == "manager":
+        return redirect("intake:home")  # TODO: dashboard
+    if active_role == "admin":
+        return redirect("intake:home")  # TODO: admin panel
 
-    return render(
-        request,
-        "home.html",
-        {
-            "active_role": active_role,
-            "active_role_display": active_role_display,
-        },
-    )
+    return redirect("/switch-role/")
