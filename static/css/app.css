@@ -427,7 +427,15 @@ body.hospital-shell h6 {
   vertical-align: middle;
 }
 
-/* ---------- Decision form (temporary placeholder) ---------- */
+/* ---------- Decision form ---------- */
+
+.decision-section {
+  display: none;
+}
+
+.decision-section.active {
+  display: block;
+}
 
 .decision-radio-group .form-check {
   padding: 0.75rem 1rem;
@@ -445,6 +453,44 @@ body.hospital-shell h6 {
 .decision-radio-group .form-check-input:checked + .form-check-label {
   font-weight: 700;
   color: var(--hospital-primary);
+}
+
+/* ---------- Summary box ---------- */
+
+.summary-box {
+  background: rgba(47, 143, 157, 0.06);
+  border-left: 4px solid var(--hospital-accent);
+  border-radius: 0 0.5rem 0.5rem 0;
+  padding: 1rem;
+}
+
+.summary-box .summary-label {
+  font-size: 0.78rem;
+  font-weight: 600;
+  color: var(--hospital-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.summary-box .summary-value {
+  font-size: 0.95rem;
+  color: var(--hospital-text);
+}
+
+/* ---------- Toast / Alert demo ---------- */
+
+.demo-toast {
+  position: fixed;
+  bottom: 1.5rem;
+  right: 1.5rem;
+  z-index: 1055;
+  min-width: 300px;
+  display: none;
+}
+
+.demo-toast.show {
+  display: block;
+  animation: shell-fade-in 220ms ease-out;
 }
 
 /* ---------- Responsive tweaks ---------- */
