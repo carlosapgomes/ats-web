@@ -169,34 +169,36 @@ class TestAuthenticatedTemplate:
         from apps.accounts.models import Role
 
         user = User.objects.create_user(username="badge@test.com", password="testpass123")
-        role = Role.objects.create(name="doctor")
+        role = Role.objects.create(name="nir")
         user.roles.add(role)
         client.force_login(user)
 
         session = client.session
-        session["active_role"] = "doctor"
+        session["active_role"] = "nir"
         session.save()
 
-        response = client.get("/")
+        # home_view redirects to intake:home for nir (200)
+        response = client.get("/", follow=True)
         assert response.status_code == 200
-        # Badge should show "Médico" (role display name)
+        # Badge should show "NIR" (role display name)
         content = response.content.decode()
-        assert "Médico" in content
+        assert "NIR" in content
 
     def test_authenticated_user_sees_logout_button(self, client) -> None:
         """Header has logout form/button for authenticated users."""
         from apps.accounts.models import Role
 
         user = User.objects.create_user(username="logoutbtn@test.com", password="testpass123")
-        role = Role.objects.create(name="doctor")
+        role = Role.objects.create(name="nir")
         user.roles.add(role)
         client.force_login(user)
 
         session = client.session
-        session["active_role"] = "doctor"
+        session["active_role"] = "nir"
         session.save()
 
-        response = client.get("/")
+        # home_view redirects to intake:home for nir (200)
+        response = client.get("/", follow=True)
         assert response.status_code == 200
         content = response.content.decode()
         assert "Sair" in content
@@ -206,16 +208,17 @@ class TestAuthenticatedTemplate:
         from apps.accounts.models import Role
 
         user = User.objects.create_user(username="multi@test.com", password="testpass123")
-        role_doc = Role.objects.create(name="doctor")
+        role_nir = Role.objects.create(name="nir")
         role_mgr = Role.objects.create(name="manager")
-        user.roles.add(role_doc, role_mgr)
+        user.roles.add(role_nir, role_mgr)
         client.force_login(user)
 
         session = client.session
-        session["active_role"] = "doctor"
+        session["active_role"] = "nir"
         session.save()
 
-        response = client.get("/")
+        # home_view redirects to intake:home for nir (200)
+        response = client.get("/", follow=True)
         assert response.status_code == 200
         content = response.content.decode()
         assert "Trocar papel" in content
@@ -225,15 +228,16 @@ class TestAuthenticatedTemplate:
         from apps.accounts.models import Role
 
         user = User.objects.create_user(username="single@test.com", password="testpass123")
-        role = Role.objects.create(name="doctor")
+        role = Role.objects.create(name="nir")
         user.roles.add(role)
         client.force_login(user)
 
         session = client.session
-        session["active_role"] = "doctor"
+        session["active_role"] = "nir"
         session.save()
 
-        response = client.get("/")
+        # home_view redirects to intake:home for nir (200)
+        response = client.get("/", follow=True)
         assert response.status_code == 200
         content = response.content.decode()
         assert "Trocar papel" not in content

@@ -37,8 +37,8 @@ class TestActiveRoleMiddleware:
 
         response = client.get("/")
 
-        # Should NOT redirect; active_role is auto-set
-        assert response.status_code != 302
+        # Middleware auto-sets active_role; home_view then redirects
+        assert response.status_code == 302
         assert client.session["active_role"] == "doctor"
 
     def test_middleware_skips_login_paths(self, client) -> None:
@@ -64,5 +64,5 @@ class TestActiveRoleMiddleware:
 
         response = client.get("/")
 
-        # Should not redirect
-        assert response.status_code != 302
+        # home_view now always redirects when active_role is set
+        assert response.status_code == 302

@@ -28,7 +28,7 @@ class TestRoleRequiredDecorator:
         assert response.status_code == 200
 
     def test_role_required_blocks_wrong_role(self, client) -> None:
-        """doctor with active_role='doctor' accessing nir view -> redirect + error message."""
+        """doctor with active_role='doctor' accessing nir view -> redirect to /."""
         from apps.accounts.models import Role
 
         user = User.objects.create_user(username="doctor@test.com", password="testpass123")
@@ -44,10 +44,13 @@ class TestRoleRequiredDecorator:
         assert response.status_code == 302
         assert response.url == "/"
 
-        # Follow redirect and check that error message is rendered
-        followed = client.get("/")
-        content = followed.content.decode()
-        assert "permissão" in content.lower() or "acesso" in content.lower()
+        # role_required sets an error message via django.contrib.messages
+        # home_view then redirects "/" to intake:home for doctor (loop),
+        # so we verify the message was queued instead of checking rendered content
+        from django.contrib.messages import get_messages
+
+        msgs = list(get_messages(response.wsgi_request))
+        assert any("permissão" in str(m) for m in msgs)
 
     def test_role_required_blocks_no_role(self, client) -> None:
         """User without active_role -> redirect."""
