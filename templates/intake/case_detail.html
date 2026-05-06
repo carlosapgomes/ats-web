@@ -128,7 +128,7 @@
   <div class="d-flex gap-2">
     <form method="post" action="{% url 'intake:confirm_receipt' case.case_id %}" class="d-inline">
       {% csrf_token %}
-      <button type="submit" class="btn btn-hospital">✓ Confirmar Recebimento</button>
+      <button type="submit" class="btn btn-hospital" id="btn-confirm">✓ Confirmar Recebimento</button>
     </form>
     <a href="{% url 'intake:my_cases' %}" class="btn btn-outline-secondary">Voltar para lista</a>
   </div>
@@ -139,4 +139,17 @@
   {% endif %}
 </div>
 
+{% endblock %}
+
+{% block extra_js %}
+<script>
+  const confirmBtn = document.getElementById('btn-confirm');
+  if (confirmBtn) {
+    confirmBtn.addEventListener('click', function () {
+      this.textContent = '✓ Confirmando...';
+      this.classList.remove('btn-hospital');
+      this.classList.add('btn-success');
+    });
+  }
+</script>
 {% endblock %}
