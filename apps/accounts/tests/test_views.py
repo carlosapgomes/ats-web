@@ -176,7 +176,7 @@ class TestHomeView:
         assert response.status_code == 302
         assert "/switch-role/" in response.url
 
-    def test_home_redirects_to_intake_for_doctor(self, client) -> None:
+    def test_home_redirects_to_doctor_queue(self, client) -> None:
         from apps.accounts.models import Role
 
         user = User.objects.create_user(username="docredir@test.com", password="testpass123")
@@ -188,7 +188,7 @@ class TestHomeView:
 
         response = client.get("/")
         assert response.status_code == 302
-        assert response.url == reverse("intake:home")
+        assert response.url == reverse("doctor:queue")
 
     def test_home_without_role_redirects_to_switch(self, client) -> None:
         """GET / without active_role redirects to /switch-role/."""

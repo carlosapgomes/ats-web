@@ -76,7 +76,7 @@ def switch_role_view(request):  # type: ignore[no-untyped-def]
 
 ROLE_HOME_URLS = {
     "nir": "/cases/my-cases/",
-    "doctor": "/doctor/queue/",
+    "doctor": "/doctor/",
     "scheduler": "/scheduler/queue/",
     "manager": "/dashboard/",
     "admin": "/dashboard/",
@@ -93,7 +93,7 @@ def home_view(request):  # type: ignore[no-untyped-def]
     if active_role == "nir":
         return redirect("intake:home")
     if active_role == "doctor":
-        return redirect("intake:home")  # TODO: doctor queue
+        return redirect("doctor:queue")
     if active_role == "scheduler":
         return redirect("intake:home")  # TODO: scheduler queue
     if active_role == "manager":

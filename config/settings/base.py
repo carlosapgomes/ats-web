@@ -21,6 +21,7 @@ INSTALLED_APPS = [
     "apps.intake",
     "apps.llm",
     "apps.pipeline",
+    "apps.doctor",
     "django_q",
 ]
 
