@@ -166,39 +166,41 @@ class TestHomeView:
         assert "/switch-role/" in response.url
 
     def test_home_shows_role_name(self, client) -> None:
-        """GET / shows role display name in Portuguese for active role."""
+        """GET / redirects nir to intake:home, which renders with role display."""
         from apps.accounts.models import Role
 
-        user = User.objects.create_user(username="adminhome@test.com", password="testpass123")
-        role = Role.objects.create(name="admin")
+        user = User.objects.create_user(username="nirhome@test.com", password="testpass123")
+        role = Role.objects.create(name="nir")
         user.roles.add(role)
         client.force_login(user)
 
         session = client.session
-        session["active_role"] = "admin"
+        session["active_role"] = "nir"
         session.save()
 
-        response = client.get("/")
+        # home_view redirects nir to intake:home
+        response = client.get("/", follow=True)
         assert response.status_code == 200
         content = response.content.decode()
-        assert "Administrador" in content
+        assert "NIR" in content
 
     def test_home_redirects_by_role_shows_display(self, client) -> None:
-        """GET / with active_role='doctor' shows 'Médico'."""
+        """GET / with active_role='nir' redirects to intake:home showing role 'NIR'."""
         from apps.accounts.models import Role
 
-        user = User.objects.create_user(username="dochome@test.com", password="testpass123")
-        role = Role.objects.create(name="doctor")
+        user = User.objects.create_user(username="nirhome2@test.com", password="testpass123")
+        role = Role.objects.create(name="nir")
         user.roles.add(role)
         client.force_login(user)
 
         session = client.session
-        session["active_role"] = "doctor"
+        session["active_role"] = "nir"
         session.save()
 
-        response = client.get("/")
+        # home_view redirects nir to intake:home
+        response = client.get("/", follow=True)
         assert response.status_code == 200
-        assert "Médico" in response.content.decode()
+        assert "NIR" in response.content.decode()
 
     def test_home_requires_login(self, client) -> None:
         """GET / without authentication redirects to login."""
