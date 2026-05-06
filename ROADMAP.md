@@ -53,6 +53,18 @@ Processamento automático do caso via LLM + decision engine determinístico.
 
 ---
 
+## Fase 2b — Alinhamento Visual com Mocks
+
+Corrigir UI para ser visual e funcionalmente equivalente aos mocks de referência.
+
+**Change**: `openspec/changes/ui-alinhamento-mocks/`
+
+- [ ] **Slice 1**: Infra de estáticos + CSS completo + .env loading
+- [ ] **Slice 2**: Templates alinhados com mocks + middleware multi-range + home redirect
+- [ ] **Slice 3**: Quality gate
+
+---
+
 ## Fase 3 — Fila Médica (Doctor)
 
 Decisão médica sobre casos processados.
@@ -171,7 +183,8 @@ Transformar em PWA instalável e refinamentos de UX.
 Fase 0 (bootstrap) ✅ CONCLUÍDA
   ├── Fase 1 (intake NIR) ✅ CONCLUÍDA
   │     └── Fase 2 (pipeline LLM) ✅ CONCLUÍDA
-  │           └── Fase 3 (fila médica) ← próxima, precisa de LLM artifacts
+  │           └── Fase 2b (alinhamento visual) ← próxima, correção de UI com mocks
+  │                 └── Fase 3 (fila médica) ← precisa de LLM artifacts + UI alinhada
   │                 ├── Fase 4 (fila agendador) ← precisa de decisão médica
   │                 └── Fase 5 (resultado NIR) ← precisa de decisão + agendamento
   ├── Fase 6 (dashboard) ← precisa de Case + CaseEvent
