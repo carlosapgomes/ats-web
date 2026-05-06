@@ -118,13 +118,14 @@ static/          # css/app.css (paleta hospitalar), js/upload.js
 
 ## State do Sistema
 
-- **Fase atual**: Fase 2 CONCLUÍDA — próxima: Fase 3 (Fila Médica / Doctor)
+- **Fase atual**: Fase 2b CONCLUÍDA — próxima: Fase 3 (Fila Médica / Doctor)
 - **Changes concluídos**:
   - `openspec/archive/bootstrap-django-ats-core/` (7 slices, Fase 0)
   - `openspec/archive/intake-nir/` (6 slices, Fase 1)
   - `openspec/archive/pipeline-llm/` (7 slices, Fase 2)
+  - `openspec/archive/ui-alinhamento-mocks/` (3 slices, Fase 2b)
 - **Apps criados**: `apps/accounts/`, `apps/cases/`, `apps/llm/`, `apps/intake/`, `apps/pipeline/`
-- **Testes**: 291 passando, quality gate verde
+- **Testes**: 301 passando, quality gate verde
 - **Templates**: base.html com tema hospitalar, login, switch-role, intake (home, my_cases, case_detail)
 - **Documentacao de dominio**: `docs/DOMAIN_ANALYSIS.md`
 - **ADR ativa**: `docs/adr/ADR-0001-arquitetura-django-web-ssr-ats-triagem-eda.md`
