@@ -33,10 +33,10 @@
       <div class="upload-zone__icon">📎</div>
       <div class="upload-zone__text fw-semibold">Arraste o PDF aqui ou clique para selecionar</div>
       <div class="upload-zone__hint mt-1">Apenas arquivos PDF — até 20 MB</div>
+      {{ form.pdf_file }}
     </div>
 
-    <!-- Campo hidden + exibição do arquivo selecionado -->
-    {{ form.pdf_file }}
+    <!-- Exibição do arquivo selecionado -->
     <div class="d-none mb-3" id="upload-preview">
       <div class="d-flex align-items-center gap-3 p-3 border rounded-3 bg-light">
         <span style="font-size:2rem;">📄</span>
@@ -84,6 +84,7 @@
       <div class="case-card card p-3">
         <div class="row align-items-center">
           <div class="col-md-4">
+            {% if case.extracted_text %}<div class="patient-name">{{ case.extracted_text|truncatechars:40 }}</div>{% endif %}
             <div class="case-meta fs-6 fw-semibold">Reg. {{ case.agency_record_number|default:"—" }}</div>
             <div class="case-meta small text-muted">{{ case.case_id|truncatechars:12 }}</div>
           </div>

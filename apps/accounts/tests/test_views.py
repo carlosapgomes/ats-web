@@ -154,6 +154,42 @@ class TestSwitchRoleView:
 class TestHomeView:
     """Tests for the home view (GET /)."""
 
+    def test_home_redirects_to_intake_for_nir(self, client) -> None:
+        from apps.accounts.models import Role
+
+        user = User.objects.create_user(username="nirredir@test.com", password="testpass123")
+        user.roles.add(Role.objects.create(name="nir"))
+        client.force_login(user)
+        session = client.session
+        session["active_role"] = "nir"
+        session.save()
+
+        response = client.get("/")
+        assert response.status_code == 302
+        assert response.url == reverse("intake:home")
+
+    def test_home_redirects_to_switch_role_when_no_role(self, client) -> None:
+        user = User.objects.create_user(username="norolehome@test.com", password="testpass123")
+        client.force_login(user)
+
+        response = client.get("/")
+        assert response.status_code == 302
+        assert "/switch-role/" in response.url
+
+    def test_home_redirects_to_intake_for_doctor(self, client) -> None:
+        from apps.accounts.models import Role
+
+        user = User.objects.create_user(username="docredir@test.com", password="testpass123")
+        user.roles.add(Role.objects.create(name="doctor"))
+        client.force_login(user)
+        session = client.session
+        session["active_role"] = "doctor"
+        session.save()
+
+        response = client.get("/")
+        assert response.status_code == 302
+        assert response.url == reverse("intake:home")
+
     def test_home_without_role_redirects_to_switch(self, client) -> None:
         """GET / without active_role redirects to /switch-role/."""
         user = User.objects.create_user(username="homeless@test.com", password="testpass123")
