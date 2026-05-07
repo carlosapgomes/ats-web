@@ -169,7 +169,7 @@ class TestAuthenticatedTemplate:
         from apps.accounts.models import Role
 
         user = User.objects.create_user(username="badge@test.com", password="testpass123")
-        role = Role.objects.create(name="nir")
+        role, _ = Role.objects.get_or_create(name="nir")
         user.roles.add(role)
         client.force_login(user)
 
@@ -189,7 +189,7 @@ class TestAuthenticatedTemplate:
         from apps.accounts.models import Role
 
         user = User.objects.create_user(username="logoutbtn@test.com", password="testpass123")
-        role = Role.objects.create(name="nir")
+        role, _ = Role.objects.get_or_create(name="nir")
         user.roles.add(role)
         client.force_login(user)
 
@@ -208,8 +208,8 @@ class TestAuthenticatedTemplate:
         from apps.accounts.models import Role
 
         user = User.objects.create_user(username="multi@test.com", password="testpass123")
-        role_nir = Role.objects.create(name="nir")
-        role_mgr = Role.objects.create(name="manager")
+        role_nir, _ = Role.objects.get_or_create(name="nir")
+        role_mgr, _ = Role.objects.get_or_create(name="manager")
         user.roles.add(role_nir, role_mgr)
         client.force_login(user)
 
@@ -228,7 +228,7 @@ class TestAuthenticatedTemplate:
         from apps.accounts.models import Role
 
         user = User.objects.create_user(username="single@test.com", password="testpass123")
-        role = Role.objects.create(name="nir")
+        role, _ = Role.objects.get_or_create(name="nir")
         user.roles.add(role)
         client.force_login(user)
 
@@ -261,8 +261,8 @@ class TestLoginAndRolePages:
         from apps.accounts.models import Role
 
         user = User.objects.create_user(username="switcher@test.com", password="testpass123")
-        role_doc = Role.objects.create(name="doctor")
-        role_mgr = Role.objects.create(name="manager")
+        role_doc, _ = Role.objects.get_or_create(name="doctor")
+        role_mgr, _ = Role.objects.get_or_create(name="manager")
         user.roles.add(role_doc, role_mgr)
         client.force_login(user)
 

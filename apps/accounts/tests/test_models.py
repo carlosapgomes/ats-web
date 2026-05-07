@@ -15,7 +15,7 @@ class TestUserModel:
         from apps.accounts.models import Role
 
         user = User.objects.create_user(username="nir@example.com", password="testpass123")
-        role = Role.objects.create(name="nir")
+        role, _ = Role.objects.get_or_create(name="nir")
 
         user.roles.add(role)
 
@@ -52,8 +52,8 @@ class TestUserModel:
         from apps.accounts.models import Role
 
         user = User.objects.create_user(username="multi@role.com", password="testpass123")
-        role_nir = Role.objects.create(name="nir")
-        role_doctor = Role.objects.create(name="doctor")
+        role_nir, _ = Role.objects.get_or_create(name="nir")
+        role_doctor, _ = Role.objects.get_or_create(name="doctor")
 
         user.roles.add(role_nir, role_doctor)
 
@@ -69,7 +69,7 @@ class TestRoleModel:
         """Role can be created with a name."""
         from apps.accounts.models import Role
 
-        role = Role.objects.create(name="doctor")
+        role, _ = Role.objects.get_or_create(name="doctor")
         assert role.name == "doctor"
         assert str(role) == "doctor"
 
@@ -77,7 +77,7 @@ class TestRoleModel:
         """Role names must be unique."""
         from apps.accounts.models import Role
 
-        Role.objects.create(name="admin")
+        Role.objects.create(name="test_unique_role")
 
         with pytest.raises(Exception):
-            Role.objects.create(name="admin")
+            Role.objects.create(name="test_unique_role")

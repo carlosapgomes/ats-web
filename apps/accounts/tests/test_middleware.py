@@ -52,8 +52,8 @@ class TestActiveRoleMiddleware:
         from apps.accounts.models import Role
 
         user = User.objects.create_user(username="multi@test.com", password="testpass123")
-        role_nir = Role.objects.create(name="nir")
-        role_doctor = Role.objects.create(name="doctor")
+        role_nir, _ = Role.objects.get_or_create(name="nir")
+        role_doctor, _ = Role.objects.get_or_create(name="doctor")
         user.roles.add(role_nir, role_doctor)
         client.force_login(user)
 
@@ -67,7 +67,7 @@ class TestActiveRoleMiddleware:
         from apps.accounts.models import Role
 
         user = User.objects.create_user(username="single@test.com", password="testpass123")
-        role = Role.objects.create(name="doctor")
+        role, _ = Role.objects.get_or_create(name="doctor")
         user.roles.add(role)
         client.force_login(user)
 
@@ -89,7 +89,7 @@ class TestActiveRoleMiddleware:
         from apps.accounts.models import Role
 
         user = User.objects.create_user(username="active@test.com", password="testpass123")
-        role = Role.objects.create(name="doctor")
+        role, _ = Role.objects.get_or_create(name="doctor")
         user.roles.add(role)
         client.force_login(user)
 

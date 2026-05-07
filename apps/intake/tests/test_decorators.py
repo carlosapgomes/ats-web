@@ -16,7 +16,7 @@ class TestRoleRequiredDecorator:
         from apps.accounts.models import Role
 
         user = User.objects.create_user(username="nir@test.com", password="testpass123")
-        role = Role.objects.create(name="nir")
+        role, _ = Role.objects.get_or_create(name="nir")
         user.roles.add(role)
         client.force_login(user)
 
@@ -32,7 +32,7 @@ class TestRoleRequiredDecorator:
         from apps.accounts.models import Role
 
         user = User.objects.create_user(username="doctor@test.com", password="testpass123")
-        role = Role.objects.create(name="doctor")
+        role, _ = Role.objects.get_or_create(name="doctor")
         user.roles.add(role)
         client.force_login(user)
 
@@ -70,8 +70,8 @@ class TestRoleRequiredDecorator:
         # For now, we verify the decorator's behavior via the intake home
         # which only allows "nir". This test validates the mechanism exists.
         user = User.objects.create_user(username="multi@test.com", password="testpass123")
-        role_nir = Role.objects.create(name="nir")
-        role_doctor = Role.objects.create(name="doctor")
+        role_nir, _ = Role.objects.get_or_create(name="nir")
+        role_doctor, _ = Role.objects.get_or_create(name="doctor")
         user.roles.add(role_nir, role_doctor)
         client.force_login(user)
 
@@ -93,7 +93,7 @@ class TestRoleRequiredDecorator:
         from apps.accounts.models import Role
 
         user = User.objects.create_user(username="nirfull@test.com", password="testpass123")
-        role = Role.objects.create(name="nir")
+        role, _ = Role.objects.get_or_create(name="nir")
         user.roles.add(role)
         client.force_login(user)
 
@@ -110,7 +110,7 @@ class TestRoleRequiredDecorator:
         from apps.accounts.models import Role
 
         user = User.objects.create_user(username="doc@test.com", password="testpass123")
-        role = Role.objects.create(name="doctor")
+        role, _ = Role.objects.get_or_create(name="doctor")
         user.roles.add(role)
         client.force_login(user)
 
