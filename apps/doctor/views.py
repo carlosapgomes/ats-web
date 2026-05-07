@@ -240,6 +240,10 @@ def doctor_submit(request: HttpRequest, case_id: str) -> HttpResponse:
         case.save()
         case.scheduler_request_posted(user=request.user)
         case.save()
+    # If denied, post final reply → WAIT_R1_CLEANUP_THUMBS
+    else:
+        case.final_reply_posted(user=request.user)
+        case.save()
 
     return redirect("doctor:queue")
 

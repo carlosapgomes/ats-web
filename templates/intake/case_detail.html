@@ -25,7 +25,9 @@
   <div class="row align-items-center">
     <div class="col-md-6">
       <h4 class="mb-1">
-        {% if case.extracted_text %}
+        {% if patient_name %}
+          {{ patient_name }}
+        {% elif case.extracted_text %}
           {{ case.extracted_text|truncatechars:60 }}
         {% else %}
           Caso {{ case.case_id|truncatechars:12 }}
@@ -90,6 +92,57 @@
 <div class="card p-4 mb-4">
   <h5 class="mb-3">Texto Extraído do PDF</h5>
   <pre class="bg-light p-3 rounded-3" style="white-space: pre-wrap; font-size: 0.875rem;">{{ case.extracted_text }}</pre>
+</div>
+{% endif %}
+
+<!-- Resultado Final -->
+{% if result_info %}
+<div class="card p-4 mb-4">
+  <h5 class="mb-3">📋 Resultado Final</h5>
+  {% if result_info.type == "accepted_scheduled" %}
+    <div class="d-flex align-items-center gap-3 mb-3">
+      <span class="badge bg-success fs-6 px-3 py-2">✓ Agendamento Confirmado</span>
+    </div>
+    <div class="row g-3">
+      <div class="col-md-6">
+        <p class="mb-1 text-muted small">Data/Hora</p>
+        <p class="mb-0 fw-medium">{{ result_info.appointment_at|date:"d/m/Y H:i" }}</p>
+      </div>
+      <div class="col-md-6">
+        <p class="mb-1 text-muted small">Suporte</p>
+        <p class="mb-0 fw-medium">{{ result_info.support }}</p>
+      </div>
+      <div class="col-md-6">
+        <p class="mb-1 text-muted small">Fluxo</p>
+        <p class="mb-0 fw-medium">{{ result_info.flow }}</p>
+      </div>
+      {% if result_info.instructions %}
+      <div class="col-12">
+        <p class="mb-1 text-muted small">Instruções</p>
+        <p class="mb-0 fw-medium">{{ result_info.instructions }}</p>
+      </div>
+      {% endif %}
+    </div>
+  {% elif result_info.type == "appt_denied" %}
+    <div class="d-flex align-items-center gap-3 mb-3">
+      <span class="badge bg-danger fs-6 px-3 py-2">✗ Agendamento Negado</span>
+    </div>
+    {% if result_info.reason %}
+    <p class="mb-0"><strong>Motivo:</strong> {{ result_info.reason }}</p>
+    {% endif %}
+  {% elif result_info.type == "doctor_denied" %}
+    <div class="d-flex align-items-center gap-3 mb-3">
+      <span class="badge bg-warning text-dark fs-6 px-3 py-2">✗ Recusado pelo Médico</span>
+    </div>
+    {% if result_info.reason %}
+    <p class="mb-0"><strong>Motivo:</strong> {{ result_info.reason }}</p>
+    {% endif %}
+  {% elif result_info.type == "failed" %}
+    <div class="d-flex align-items-center gap-3 mb-3">
+      <span class="badge bg-danger fs-6 px-3 py-2">✗ Falha no Processamento</span>
+    </div>
+    <p class="mb-0 text-muted">Ocorreu uma falha durante o processamento deste caso.</p>
+  {% endif %}
 </div>
 {% endif %}
 

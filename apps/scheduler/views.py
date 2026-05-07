@@ -224,6 +224,9 @@ def scheduler_submit(request: HttpRequest, case_id: str) -> HttpResponse:
         # FSM transition: WAIT_APPT → APPT_DENIED
         case.scheduler_decide(appointment_status="denied", user=request.user)
 
+    # Post final reply → WAIT_R1_CLEANUP_THUMBS (both confirm and deny)
+    case.save()  # persiste decisão do scheduler e seu evento
+    case.final_reply_posted(user=request.user)
     case.save()
 
     return redirect("scheduler:queue")

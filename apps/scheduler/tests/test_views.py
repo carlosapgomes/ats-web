@@ -353,7 +353,7 @@ class TestSchedulerSubmitView:
     # ── Confirm submit ────────────────────────────────────────────────
 
     def test_submit_confirm_updates_case(self, client) -> None:
-        """POST confirm transiciona para APPT_CONFIRMED e persiste campos."""
+        """POST confirm transiciona para APPT_CONFIRMED → WAIT_R1_CLEANUP_THUMBS e persiste campos."""
         self._login_as(client, "scheduler")
         case = self._create_waited_case()
         scheduler_user = User.objects.get(username="scheduler@submit.test")
@@ -372,7 +372,7 @@ class TestSchedulerSubmitView:
         assert response.url == "/scheduler/"
 
         updated_case = Case.objects.get(pk=case.case_id)
-        assert updated_case.status == CaseStatus.APPT_CONFIRMED
+        assert updated_case.status == CaseStatus.WAIT_R1_CLEANUP_THUMBS
         assert updated_case.appointment_status == "confirmed"
         assert updated_case.appointment_at is not None
         local_at = timezone.localtime(updated_case.appointment_at)
@@ -383,8 +383,8 @@ class TestSchedulerSubmitView:
         assert updated_case.scheduler == scheduler_user
         assert updated_case.appointment_decided_at is not None
 
-    def test_submit_confirm_creates_case_event(self, client) -> None:
-        """POST confirm registra CaseEvent APPT_CONFIRMED."""
+    def test_submit_confirm_creates_case_events(self, client) -> None:
+        """POST confirm registra CaseEvent APPT_CONFIRMED + FINAL_REPLY_POSTED."""
         self._login_as(client, "scheduler")
         case = self._create_waited_case()
 
@@ -399,13 +399,13 @@ class TestSchedulerSubmitView:
             },
         )
 
-        event = CaseEvent.objects.filter(case=case, event_type="APPT_CONFIRMED").first()
-        assert event is not None
+        assert CaseEvent.objects.filter(case=case, event_type="APPT_CONFIRMED").exists()
+        assert CaseEvent.objects.filter(case=case, event_type="FINAL_REPLY_POSTED").exists()
 
     # ── Deny submit ───────────────────────────────────────────────────
 
     def test_submit_deny_updates_case(self, client) -> None:
-        """POST deny transiciona para APPT_DENIED e persiste motivo."""
+        """POST deny transiciona para APPT_DENIED → WAIT_R1_CLEANUP_THUMBS e persiste motivo."""
         self._login_as(client, "scheduler")
         case = self._create_waited_case()
         scheduler_user = User.objects.get(username="scheduler@submit.test")
@@ -424,14 +424,14 @@ class TestSchedulerSubmitView:
         assert response.url == "/scheduler/"
 
         updated_case = Case.objects.get(pk=case.case_id)
-        assert updated_case.status == CaseStatus.APPT_DENIED
+        assert updated_case.status == CaseStatus.WAIT_R1_CLEANUP_THUMBS
         assert updated_case.appointment_status == "denied"
         assert updated_case.appointment_reason == "Indisponibilidade de vaga."
         assert updated_case.scheduler == scheduler_user
         assert updated_case.appointment_decided_at is not None
 
-    def test_submit_deny_creates_case_event(self, client) -> None:
-        """POST deny registra CaseEvent APPT_DENIED."""
+    def test_submit_deny_creates_case_events(self, client) -> None:
+        """POST deny registra CaseEvent APPT_DENIED + FINAL_REPLY_POSTED."""
         self._login_as(client, "scheduler")
         case = self._create_waited_case()
 
@@ -446,8 +446,8 @@ class TestSchedulerSubmitView:
             },
         )
 
-        event = CaseEvent.objects.filter(case=case, event_type="APPT_DENIED").first()
-        assert event is not None
+        assert CaseEvent.objects.filter(case=case, event_type="APPT_DENIED").exists()
+        assert CaseEvent.objects.filter(case=case, event_type="FINAL_REPLY_POSTED").exists()
 
     # ── Guards ────────────────────────────────────────────────────────
 

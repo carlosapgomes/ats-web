@@ -5,10 +5,21 @@ from __future__ import annotations
 import pytest
 from django.contrib.auth import get_user_model
 from django.urls import reverse
+from django.utils import timezone
 
 from apps.cases.models import Case, CaseEvent, CaseStatus
 
 User = get_user_model()
+
+
+SAMPLE_PATIENT_NAME = "Maria da Silva"
+
+
+def _case_with_patient(case: Case, name: str = SAMPLE_PATIENT_NAME) -> Case:
+    """Set structured_data with patient name for a case."""
+    case.structured_data = {"patient": {"name": name}}
+    case.save()
+    return case
 
 
 # ── Helpers ──────────────────────────────────────────────────────────────
@@ -182,6 +193,204 @@ class TestCaseDetailAuthorization:
 
 
 # ── Tests: confirm_receipt ───────────────────────────────────────────────
+
+
+@pytest.mark.django_db
+class TestCaseDetailResultInfo:
+    """Verifica exibição da seção de resultado final na página de detalhe."""
+
+    def test_result_shows_accepted_scheduled(self, client) -> None:
+        """APPT_CONFIRMED → mostra badge Agendamento Confirmado + data + suporte + fluxo."""
+        client, user = _nir_client(client)
+        case = _case_with_patient(
+            Case.objects.create(
+                created_by=user,
+                agency_record_number="RES-ACCEPT",
+                status=CaseStatus.APPT_CONFIRMED,
+                appointment_at=timezone.now(),
+                doctor_support_flag="anesthesist",
+                doctor_admission_flow="scheduled",
+                appointment_instructions="Chegar 30min antes",
+            )
+        )
+        response = client.get(reverse("intake:case_detail", args=[case.case_id]))
+        assert response.status_code == 200
+        content = response.content.decode()
+        assert "Agendamento Confirmado" in content
+        assert "Anestesista" in content  # support
+        assert "Agendamento" in content  # flow
+        assert "Chegar 30min antes" in content
+
+    def test_result_shows_accepted_scheduled_no_instructions(self, client) -> None:
+        """APPT_CONFIRMED sem instruções → não quebra."""
+        client, user = _nir_client(client)
+        case = _case_with_patient(
+            Case.objects.create(
+                created_by=user,
+                agency_record_number="RES-ACCEPT2",
+                status=CaseStatus.APPT_CONFIRMED,
+                appointment_at=timezone.now(),
+                doctor_support_flag="anesthesist_icu",
+                doctor_admission_flow="immediate",
+            )
+        )
+        response = client.get(reverse("intake:case_detail", args=[case.case_id]))
+        assert response.status_code == 200
+        content = response.content.decode()
+        assert "Agendamento Confirmado" in content
+        assert "Anestesista + UTI" in content
+        assert "Vinda Imediata" in content
+
+    def test_result_shows_appt_denied(self, client) -> None:
+        """APPT_DENIED → mostra badge Agendamento Negado + motivo."""
+        client, user = _nir_client(client)
+        case = _case_with_patient(
+            Case.objects.create(
+                created_by=user,
+                agency_record_number="RES-DENY",
+                status=CaseStatus.APPT_DENIED,
+                appointment_reason="Vaga indisponível",
+            )
+        )
+        response = client.get(reverse("intake:case_detail", args=[case.case_id]))
+        assert response.status_code == 200
+        content = response.content.decode()
+        assert "Agendamento Negado" in content
+        assert "Vaga indisponível" in content
+
+    def test_result_shows_doctor_denied(self, client) -> None:
+        """DOCTOR_DENIED → mostra badge Recusado pelo Médico + motivo."""
+        client, user = _nir_client(client)
+        case = _case_with_patient(
+            Case.objects.create(
+                created_by=user,
+                agency_record_number="RES-DOCDENY",
+                status=CaseStatus.DOCTOR_DENIED,
+                doctor_reason="Paciente não se enquadra",
+            )
+        )
+        response = client.get(reverse("intake:case_detail", args=[case.case_id]))
+        assert response.status_code == 200
+        content = response.content.decode()
+        assert "Recusado pelo Médico" in content
+        assert "Paciente não se enquadra" in content
+
+    def test_result_shows_failed(self, client) -> None:
+        """FAILED → mostra badge Falha no Processamento."""
+        client, user = _nir_client(client)
+        case = _case_with_patient(
+            Case.objects.create(
+                created_by=user,
+                agency_record_number="RES-FAIL",
+                status=CaseStatus.FAILED,
+            )
+        )
+        response = client.get(reverse("intake:case_detail", args=[case.case_id]))
+        assert response.status_code == 200
+        content = response.content.decode()
+        assert "Falha no Processamento" in content
+
+    def test_result_shows_terminal_with_result(self, client) -> None:
+        """WAIT_R1_CLEANUP_THUMBS → mostra badge Agendamento Confirmado."""
+        client, user = _nir_client(client)
+        case = _case_with_patient(
+            Case.objects.create(
+                created_by=user,
+                agency_record_number="RES-TERM",
+                status=CaseStatus.WAIT_R1_CLEANUP_THUMBS,
+                appointment_at=timezone.now(),
+                doctor_support_flag="none",
+                doctor_admission_flow="scheduled",
+            )
+        )
+        response = client.get(reverse("intake:case_detail", args=[case.case_id]))
+        assert response.status_code == 200
+        content = response.content.decode()
+        assert "Agendamento Confirmado" in content
+
+    def test_result_shows_cleaned(self, client) -> None:
+        """CLEANED → mostra badge Agendamento Confirmado."""
+        client, user = _nir_client(client)
+        case = _case_with_patient(
+            Case.objects.create(
+                created_by=user,
+                agency_record_number="RES-CLEAN",
+                status=CaseStatus.CLEANED,
+                appointment_at=timezone.now(),
+                doctor_support_flag="none",
+                doctor_admission_flow="scheduled",
+            )
+        )
+        response = client.get(reverse("intake:case_detail", args=[case.case_id]))
+        assert response.status_code == 200
+        content = response.content.decode()
+        assert "Agendamento Confirmado" in content
+
+    def test_result_hidden_for_in_progress(self, client) -> None:
+        """WAIT_DOCTOR → badges de resultado não aparecem (stepper tem "Resultado Final" como label)."""
+        client, user = _nir_client(client)
+        case = _case_with_patient(
+            Case.objects.create(
+                created_by=user,
+                agency_record_number="RES-HIDE",
+                status=CaseStatus.WAIT_DOCTOR,
+            )
+        )
+        response = client.get(reverse("intake:case_detail", args=[case.case_id]))
+        assert response.status_code == 200
+        content = response.content.decode()
+        # Stepper tem step "Resultado Final", então verificamos badges específicos do card
+        assert "Agendamento Confirmado" not in content
+        assert "Agendamento Negado" not in content
+        assert "Recusado pelo Médico" not in content
+        assert "Falha no Processamento" not in content
+
+
+@pytest.mark.django_db
+class TestCaseDetailPatientName:
+    """Verifica exibição do nome do paciente na página de detalhe."""
+
+    def test_patient_name_in_top_info(self, client) -> None:
+        """Nome do paciente aparece no topo quando disponível."""
+        client, user = _nir_client(client)
+        case = _case_with_patient(
+            Case.objects.create(
+                created_by=user,
+                agency_record_number="NAME-001",
+                status=CaseStatus.NEW,
+            )
+        )
+        response = client.get(reverse("intake:case_detail", args=[case.case_id]))
+        assert response.status_code == 200
+        content = response.content.decode()
+        assert SAMPLE_PATIENT_NAME in content
+
+    def test_patient_name_fallback_text(self, client) -> None:
+        """Sem nome do paciente → fallback para texto extraído."""
+        client, user = _nir_client(client)
+        case = Case.objects.create(
+            created_by=user,
+            agency_record_number="NAME-002",
+            status=CaseStatus.NEW,
+            extracted_text="Relatório médico do paciente João",
+        )
+        response = client.get(reverse("intake:case_detail", args=[case.case_id]))
+        assert response.status_code == 200
+        content = response.content.decode()
+        assert "Relatório médico do paciente João" in content
+
+    def test_patient_name_fallback_case_id(self, client) -> None:
+        """Sem nome nem texto extraído → fallback para 'Caso <id truncado>'."""
+        client, user = _nir_client(client)
+        case = Case.objects.create(
+            created_by=user,
+            agency_record_number="NAME-003",
+            status=CaseStatus.NEW,
+        )
+        response = client.get(reverse("intake:case_detail", args=[case.case_id]))
+        assert response.status_code == 200
+        content = response.content.decode()
+        assert "Caso" in content
 
 
 @pytest.mark.django_db

@@ -98,6 +98,17 @@ EVENT_LABELS: dict[str, str] = {
 }
 
 # Cores do dot da timeline por event_type
+SUPPORT_FLAG_MAP: dict[str, str] = {
+    "none": "Nenhum",
+    "anesthesist": "Anestesista",
+    "anesthesist_icu": "Anestesista + UTI",
+}
+
+ADMISSION_FLOW_MAP: dict[str, str] = {
+    "scheduled": "Agendamento",
+    "immediate": "Vinda Imediata",
+}
+
 EVENT_DOT_CSS: dict[str, str] = {
     "CASE_CREATED": "reception",
     "CASE_START_PROCESSING": "system",
@@ -259,6 +270,34 @@ def case_detail(request: HttpRequest, case_id: str) -> HttpResponse:
 
     can_confirm = case.status == CaseStatus.WAIT_R1_CLEANUP_THUMBS
 
+    # Resultado final
+    result_info = None
+    terminal_with_result = case.status in (
+        CaseStatus.WAIT_R1_CLEANUP_THUMBS,
+        CaseStatus.CLEANED,
+    )
+    if case.status == CaseStatus.APPT_CONFIRMED or terminal_with_result:
+        result_info = {
+            "type": "accepted_scheduled",
+            "appointment_at": case.appointment_at,
+            "support": SUPPORT_FLAG_MAP.get(case.doctor_support_flag, case.doctor_support_flag),
+            "flow": ADMISSION_FLOW_MAP.get(case.doctor_admission_flow, case.doctor_admission_flow),
+            "instructions": case.appointment_instructions or "",
+        }
+    elif case.status == CaseStatus.APPT_DENIED:
+        result_info = {"type": "appt_denied", "reason": case.appointment_reason}
+    elif case.status == CaseStatus.DOCTOR_DENIED:
+        result_info = {"type": "doctor_denied", "reason": case.doctor_reason}
+    elif case.status == CaseStatus.FAILED:
+        result_info = {"type": "failed"}
+
+    # Nome do paciente
+    patient_name = ""
+    if case.structured_data and isinstance(case.structured_data, dict):
+        patient = case.structured_data.get("patient", {})
+        if isinstance(patient, dict):
+            patient_name = patient.get("name", "")
+
     return render(
         request,
         "intake/case_detail.html",
@@ -270,6 +309,8 @@ def case_detail(request: HttpRequest, case_id: str) -> HttpResponse:
             "status_label": STATUS_LABELS.get(case.status, case.get_status_display()),
             "status_css": STATUS_CSS_CLASS.get(case.status, "status-pending"),
             "can_confirm_receipt": can_confirm,
+            "result_info": result_info,
+            "patient_name": patient_name,
         },
     )
 

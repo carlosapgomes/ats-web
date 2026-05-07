@@ -724,7 +724,7 @@ class TestDoctorSubmitView:
         assert events.exists()
 
     def test_submit_deny_persists_fields_and_transitions(self, client) -> None:
-        """POST deny → fields persisted, FSM: WAIT_DOCTOR → DOCTOR_DENIED."""
+        """POST deny → fields persisted, FSM: WAIT_DOCTOR → DOCTOR_DENIED → WAIT_R1_CLEANUP_THUMBS."""
         case = self._create_case_in_status(CaseStatus.WAIT_DOCTOR)
         case.structured_data = {"patient": {"name": "Test Deny", "age": 50, "gender": "Feminino"}}
         case.save()
@@ -745,7 +745,26 @@ class TestDoctorSubmitView:
         assert case.doctor_reason == "Contorno clínico não indicado"
         assert case.doctor == doctor
         assert case.doctor_decided_at is not None
-        assert case.status == CaseStatus.DOCTOR_DENIED
+        assert case.status == CaseStatus.WAIT_R1_CLEANUP_THUMBS
+
+    def test_submit_deny_creates_final_reply_event(self, client) -> None:
+        """POST deny cria evento FINAL_REPLY_POSTED (auto-transição)."""
+        case = self._create_case_in_status(CaseStatus.WAIT_DOCTOR)
+        case.structured_data = {"patient": {"name": "Final Reply", "age": 45, "gender": "Masculino"}}
+        case.save()
+
+        self._login_as(client, "doctor")
+
+        client.post(
+            f"/doctor/{case.case_id}/submit/",
+            data={
+                "decision": "deny",
+                "reason": "Sem indicação cirúrgica",
+            },
+        )
+
+        events = CaseEvent.objects.filter(case=case, event_type="FINAL_REPLY_POSTED")
+        assert events.exists()
 
     def test_submit_creates_case_event_accept(self, client) -> None:
         """POST accept creates a DOCTOR_ACCEPT CaseEvent."""
@@ -768,7 +787,7 @@ class TestDoctorSubmitView:
         assert events.filter(event_type="DOCTOR_ACCEPT").exists()
 
     def test_submit_creates_case_event_deny(self, client) -> None:
-        """POST deny creates a DOCTOR_DENY CaseEvent."""
+        """POST deny creates a DOCTOR_DENY and FINAL_REPLY_POSTED CaseEvent."""
         case = self._create_case_in_status(CaseStatus.WAIT_DOCTOR)
         case.structured_data = {"patient": {"name": "Event Deny", "age": 50, "gender": "Feminino"}}
         case.save()
@@ -785,6 +804,7 @@ class TestDoctorSubmitView:
 
         events = CaseEvent.objects.filter(case=case, event_type__startswith="DOCTOR_")
         assert events.filter(event_type="DOCTOR_DENY").exists()
+        assert CaseEvent.objects.filter(case=case, event_type="FINAL_REPLY_POSTED").exists()
 
     def test_submit_non_wait_doctor_returns_404(self, client) -> None:
         """POST to non-WAIT_DOCTOR case returns 404."""
