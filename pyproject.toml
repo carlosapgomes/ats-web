@@ -91,6 +91,14 @@ module = "apps.cases.migrations.*"
 disable_error_code = ["import-untyped"]
 
 [[tool.mypy.overrides]]
+module = "apps.dashboard.tests.*"
+disable_error_code = ["no-untyped-def", "no-untyped-call", "assignment"]
+
+[[tool.mypy.overrides]]
+module = "apps.dashboard.views"
+disable_error_code = ["untyped-decorator"]
+
+[[tool.mypy.overrides]]
 module = "apps.cases.models"
 disable_error_code = ["no-untyped-def", "untyped-decorator", "no-any-return"]
 

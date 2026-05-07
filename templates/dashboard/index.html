@@ -1,0 +1,212 @@
+{% extends "base.html" %}
+{% load static %}
+{% load dashboard_extras %}
+
+{% block title %}Dashboard — ATS{% endblock %}
+{% block subtitle %}Visão geral de todos os casos e métricas operacionais{% endblock %}
+
+{% block nav %}
+<nav class="app-nav mt-3" aria-label="Navegação">
+  <ul class="nav nav-pills gap-2">
+    <li class="nav-item">
+      <span class="nav-link active">Dashboard</span>
+    </li>
+    <li class="nav-item">
+      <a href="#" class="nav-link" onclick="return false;">Prompts</a>
+    </li>
+    <li class="nav-item">
+      <a href="#" class="nav-link" onclick="return false;">Usuários</a>
+    </li>
+    <li class="nav-item">
+      <a href="#" class="nav-link" onclick="return false;">Auditoria</a>
+    </li>
+  </ul>
+</nav>
+{% endblock %}
+
+{% block content %}
+
+<!-- Summary Cards -->
+<div class="row g-3 mb-4">
+  <div class="col-6 col-md-3">
+    <div class="card p-3 text-center">
+      <div style="font-size:2rem; font-weight:700; color:var(--hospital-primary);">
+        {{ summary.total_today }}
+      </div>
+      <div class="text-muted small">Total Hoje</div>
+    </div>
+  </div>
+  <div class="col-6 col-md-3">
+    <div class="card p-3 text-center">
+      <div style="font-size:2rem; font-weight:700; color:var(--hospital-success);">
+        {{ summary.accepted }}
+      </div>
+      <div class="text-muted small">Aceitos</div>
+    </div>
+  </div>
+  <div class="col-6 col-md-3">
+    <div class="card p-3 text-center">
+      <div style="font-size:2rem; font-weight:700; color:var(--hospital-danger);">
+        {{ summary.denied }}
+      </div>
+      <div class="text-muted small">Negados</div>
+    </div>
+  </div>
+  <div class="col-6 col-md-3">
+    <div class="card p-3 text-center">
+      <div style="font-size:2rem; font-weight:700; color:var(--hospital-warning);">
+        {{ summary.in_progress }}
+      </div>
+      <div class="text-muted small">Em Andamento</div>
+    </div>
+  </div>
+</div>
+
+<!-- Sub-metrics -->
+<div class="row g-3 mb-4">
+  <div class="col-md-4">
+    <div class="card p-3">
+      <h6 class="text-muted small mb-2">AGUARDANDO POR ETAPA</h6>
+      <div class="d-flex justify-content-between mb-1">
+        <span>Fila Médica</span> <strong>{{ stage_waiting.waiting_doctor }}</strong>
+      </div>
+      <div class="d-flex justify-content-between mb-1">
+        <span>Fila Agendamento</span> <strong>{{ stage_waiting.waiting_appt }}</strong>
+      </div>
+      <div class="d-flex justify-content-between">
+        <span>Confirmação Recepção</span> <strong>{{ stage_waiting.waiting_confirm }}</strong>
+      </div>
+    </div>
+  </div>
+  <div class="col-md-4">
+    <div class="card p-3">
+      <h6 class="text-muted small mb-2">FLUXO DE ADMISSÃO</h6>
+      <div class="d-flex justify-content-between mb-1">
+        <span>Agendamento</span> <strong>{{ admission_flow.scheduled }}</strong>
+      </div>
+      <div class="d-flex justify-content-between">
+        <span>Vinda Imediata</span> <strong>{{ admission_flow.immediate }}</strong>
+      </div>
+    </div>
+  </div>
+  <div class="col-md-4">
+    <div class="card p-3">
+      <h6 class="text-muted small mb-2">TEMPO MÉDIO</h6>
+      <div class="d-flex justify-content-between mb-1">
+        <span>Upload → Decisão Médica</span> <strong>{{ avg_times.upload_to_decision }}</strong>
+      </div>
+      <div class="d-flex justify-content-between mb-1">
+        <span>Decisão → Agendamento</span> <strong>{{ avg_times.decision_to_schedule }}</strong>
+      </div>
+      <div class="d-flex justify-content-between">
+        <span>Ciclo Total</span> <strong>{{ avg_times.total_cycle }}</strong>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Case Table -->
+<div class="card p-4">
+  <div class="d-flex justify-content-between align-items-center mb-3 flex-wrap gap-2">
+    <h5 class="mb-0">Todos os Casos</h5>
+    <div class="admin-filters d-flex gap-2 align-items-center flex-wrap">
+      <form method="get" class="d-flex gap-2 align-items-center flex-wrap">
+        <select name="status" class="form-select form-select-sm" style="width:auto;">
+          <option value="">Todos os status</option>
+          {% for code, _label in status_choices %}
+          <option value="{{ code }}" {% if status_filter == code %}selected{% endif %}>
+            {{ STATUS_LABELS|lookup:code }}
+          </option>
+          {% endfor %}
+        </select>
+        <input type="date" name="date_from" class="form-control form-control-sm" style="width:auto;"
+               value="{{ date_from }}" placeholder="Data início">
+        <input type="date" name="date_to" class="form-control form-control-sm" style="width:auto;"
+               value="{{ date_to }}" placeholder="Data fim">
+        <button type="submit" class="btn btn-sm btn-hospital-outline">Filtrar</button>
+        {% if status_filter or date_from or date_to %}
+        <a href="{% url 'dashboard:index' %}" class="btn btn-sm btn-outline-secondary">Limpar</a>
+        {% endif %}
+      </form>
+    </div>
+  </div>
+
+  <div class="table-responsive">
+    <table class="table table-sm align-middle">
+      <thead class="table-light">
+        <tr>
+          <th>Paciente</th>
+          <th>Registro</th>
+          <th class="hide-mobile">Idade</th>
+          <th>Status</th>
+          <th class="hide-mobile">Etapa</th>
+          <th class="hide-mobile">Enviado</th>
+          <th>Ações</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% if cases %}
+        {% for item in cases %}
+        <tr>
+          <td><strong>{{ item.patient_name|default:"—" }}</strong></td>
+          <td>{{ item.case.agency_record_number|default:item.case.case_id|truncatechars:12 }}</td>
+          <td class="hide-mobile">
+            {% if item.case.structured_data.patient.age %}
+              {{ item.case.structured_data.patient.age }}
+            {% else %}
+              —
+            {% endif %}
+          </td>
+          <td><span class="status-badge {{ item.status_css }}">{{ item.status_label }}</span></td>
+          <td class="hide-mobile">{{ item.step_label }}</td>
+          <td class="hide-mobile">{{ item.case.created_at|date:"d/m/Y H:i" }}</td>
+          <td>
+            <a href="{% url 'dashboard:case_detail' item.case.case_id %}"
+               class="btn btn-sm btn-outline-secondary">Ver</a>
+          </td>
+        </tr>
+        {% endfor %}
+        {% else %}
+        <tr>
+          <td colspan="7" class="text-center text-muted py-3">Nenhum caso encontrado.</td>
+        </tr>
+        {% endif %}
+      </tbody>
+    </table>
+  </div>
+
+  <!-- Pagination -->
+  {% if page_obj.paginator.num_pages > 1 %}
+  <nav class="mt-3" aria-label="Paginação">
+    <ul class="pagination pagination-sm justify-content-center mb-0">
+      {% if page_obj.has_previous %}
+      <li class="page-item">
+        <a class="page-link" href="?page={{ page_obj.previous_page_number }}{% if status_filter %}&status={{ status_filter }}{% endif %}{% if date_from %}&date_from={{ date_from }}{% endif %}{% if date_to %}&date_to={{ date_to }}{% endif %}">Anterior</a>
+      </li>
+      {% else %}
+      <li class="page-item disabled"><span class="page-link">Anterior</span></li>
+      {% endif %}
+
+      {% for i in page_obj.paginator.page_range %}
+        {% if page_obj.number == i %}
+        <li class="page-item active"><span class="page-link">{{ i }}</span></li>
+        {% else %}
+        <li class="page-item">
+          <a class="page-link" href="?page={{ i }}{% if status_filter %}&status={{ status_filter }}{% endif %}{% if date_from %}&date_from={{ date_from }}{% endif %}{% if date_to %}&date_to={{ date_to }}{% endif %}">{{ i }}</a>
+        </li>
+        {% endif %}
+      {% endfor %}
+
+      {% if page_obj.has_next %}
+      <li class="page-item">
+        <a class="page-link" href="?page={{ page_obj.next_page_number }}{% if status_filter %}&status={{ status_filter }}{% endif %}{% if date_from %}&date_from={{ date_from }}{% endif %}{% if date_to %}&date_to={{ date_to }}{% endif %}">Próxima</a>
+      </li>
+      {% else %}
+      <li class="page-item disabled"><span class="page-link">Próxima</span></li>
+      {% endif %}
+    </ul>
+  </nav>
+  {% endif %}
+</div>
+
+{% endblock %}
