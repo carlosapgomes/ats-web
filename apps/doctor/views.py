@@ -16,6 +16,25 @@ DOCTOR_DECISION_STATUSES = [
     CaseStatus.DOCTOR_DENIED,
 ]
 
+# ── Helper mappers ───────────────────────────────────────────────────────
+
+SUPPORT_RECOMMENDATION_MAP: dict[str, str] = {
+    "none": "Nenhum",
+    "anesthesist": "Anestesista",
+    "anesthesist_icu": "Anestesista + UTI",
+}
+
+SUGGESTION_FLOW_MAP: dict[str, str] = {
+    "accept": "Aceitar",
+    "deny": "Negar",
+    "manual_review_required": "Revisão Manual",
+}
+
+DOCTOR_DECISION_MAP: dict[str, str] = {
+    "accept": "ACEITAR",
+    "deny": "NEGAR",
+}
+
 
 def _get_patient_name(case: Case) -> str:
     if case.structured_data and isinstance(case.structured_data, dict):
@@ -43,21 +62,45 @@ def _get_patient_gender(case: Case) -> str:
 
 
 def _get_diagnosis(case: Case) -> str:
+    """Extract diagnosis display text.
+
+    Prefers summary_text (populated by pipeline LLM1) over structured_data.
+    """
+    if case.summary_text:
+        return case.summary_text
     if case.structured_data and isinstance(case.structured_data, dict):
-        return str(case.structured_data.get("diagnosis", ""))
+        eda = case.structured_data.get("eda", {})
+        if isinstance(eda, dict):
+            indication = eda.get("indication_category", "")
+            if indication:
+                return str(indication)
     return ""
 
 
 def _get_suggested_support(case: Case) -> str:
+    """Read support_recommendation from suggested_action and map to Portuguese."""
     if case.suggested_action and isinstance(case.suggested_action, dict):
-        return str(case.suggested_action.get("support", "Nenhum"))
+        raw = case.suggested_action.get("support_recommendation", "none")
+        return SUPPORT_RECOMMENDATION_MAP.get(str(raw), str(raw))
     return "Nenhum"
 
 
 def _get_suggested_flow(case: Case) -> str:
+    """Read suggestion from suggested_action and map to display text."""
     if case.suggested_action and isinstance(case.suggested_action, dict):
-        return str(case.suggested_action.get("admission_flow", "—"))
+        raw = case.suggested_action.get("suggestion", "")
+        return SUGGESTION_FLOW_MAP.get(str(raw), "—")
     return "—"
+
+
+def _get_doctor_decision_display(case: Case) -> str:
+    """Map doctor_decision to display label."""
+    if case.doctor_decision:
+        return DOCTOR_DECISION_MAP.get(case.doctor_decision, case.doctor_decision.upper())
+    return ""
+
+
+# ── Card builder ─────────────────────────────────────────────────────────
 
 
 def _build_case_card(case: Case, wait_minutes: int) -> dict[str, Any]:
@@ -73,9 +116,13 @@ def _build_case_card(case: Case, wait_minutes: int) -> dict[str, Any]:
         "suggested_flow": _get_suggested_flow(case),
         "summary_text": case.summary_text or "",
         "doctor_decision": case.doctor_decision or "",
+        "doctor_decision_display": _get_doctor_decision_display(case),
         "wait_minutes": wait_minutes,
         "is_urgent": wait_minutes <= 15,
     }
+
+
+# ── View ──────────────────────────────────────────────────────────────────
 
 
 @login_required
