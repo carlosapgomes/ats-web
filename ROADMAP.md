@@ -99,8 +99,10 @@ Resultado volta ao NIR, confirmação e cleanup.
 
 **Change**: `openspec/changes/nir-result-closure/`
 
-- [ ] **Slice 1**: Resultado final + auto-transição + nome do paciente no case_detail
-- [ ] **Slice 2**: Quality gate completo
+- [x] **Slice 1**: Resultado final + auto-transição + nome do paciente no case_detail ✅
+- [x] **Slice 2**: Quality gate completo ✅
+
+**368 testes, arquivado em `openspec/archive/nir-result-closure/`**
 
 ---
 
