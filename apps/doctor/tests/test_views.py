@@ -370,6 +370,17 @@ def _advance_case_to(case: Case, target: str) -> Case:
             "doctor_decide(decision='accept')",
             "ready_for_scheduler",
         ],
+        CaseStatus.WAIT_APPT: [
+            "start_processing",
+            "start_extraction",
+            "extraction_complete(success=True)",
+            "llm1_complete(success=True)",
+            "llm2_complete(success=True)",
+            "ready_for_doctor",
+            "doctor_decide(decision='accept')",
+            "ready_for_scheduler",
+            "scheduler_request_posted",
+        ],
     }
     steps = path.get(target, [])
     for step in steps:
@@ -667,7 +678,7 @@ class TestDoctorSubmitView:
         return case
 
     def test_submit_accept_persists_fields_and_transitions(self, client) -> None:
-        """POST accept → fields persisted, FSM: WAIT_DOCTOR → DOCTOR_ACCEPTED → R3_POST_REQUEST."""
+        """POST accept → fields persisted, FSM: WAIT_DOCTOR → DOCTOR_ACCEPTED → R3_POST_REQUEST → WAIT_APPT."""
         case = self._create_case_in_status(CaseStatus.WAIT_DOCTOR)
         case.structured_data = {"patient": {"name": "Test Accept", "age": 40, "gender": "Masculino"}}
         case.save()
@@ -690,7 +701,27 @@ class TestDoctorSubmitView:
         assert case.doctor_admission_flow == "scheduled"
         assert case.doctor == doctor
         assert case.doctor_decided_at is not None
-        assert case.status == CaseStatus.R3_POST_REQUEST
+        assert case.status == CaseStatus.WAIT_APPT
+
+    def test_submit_accept_creates_scheduler_event(self, client) -> None:
+        """POST accept creates SCHEDULER_REQUEST_POSTED event (auto-transition)."""
+        case = self._create_case_in_status(CaseStatus.WAIT_DOCTOR)
+        case.structured_data = {"patient": {"name": "Sched Event", "age": 35, "gender": "Feminino"}}
+        case.save()
+
+        self._login_as(client, "doctor")
+
+        client.post(
+            f"/doctor/{case.case_id}/submit/",
+            data={
+                "decision": "accept",
+                "support_flag": "none",
+                "admission_flow": "scheduled",
+            },
+        )
+
+        events = CaseEvent.objects.filter(case=case, event_type="SCHEDULER_REQUEST_POSTED")
+        assert events.exists()
 
     def test_submit_deny_persists_fields_and_transitions(self, client) -> None:
         """POST deny → fields persisted, FSM: WAIT_DOCTOR → DOCTOR_DENIED."""

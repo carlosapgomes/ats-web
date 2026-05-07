@@ -95,7 +95,7 @@ def home_view(request):  # type: ignore[no-untyped-def]
     if active_role == "doctor":
         return redirect("doctor:queue")
     if active_role == "scheduler":
-        return redirect("intake:home")  # TODO: scheduler queue
+        return redirect("scheduler:queue")
     if active_role == "manager":
         return redirect("intake:home")  # TODO: dashboard
     if active_role == "admin":

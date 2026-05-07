@@ -238,6 +238,8 @@ def doctor_submit(request: HttpRequest, case_id: str) -> HttpResponse:
     if decision == "accept":
         case.ready_for_scheduler(user=request.user)
         case.save()
+        case.scheduler_request_posted(user=request.user)
+        case.save()
 
     return redirect("doctor:queue")
 

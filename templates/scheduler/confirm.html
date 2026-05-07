@@ -1,0 +1,165 @@
+{% extends "base.html" %}
+{% load static %}
+
+{% block title %}Confirmar Agendamento · ATS{% endblock %}
+
+{% block subtitle %}Caso {{ case.agency_record_number|default:case.case_id|truncatechars:16 }} · {{ patient_name }}{% endblock %}
+
+{% block content %}
+
+<div class="row g-4 decision-two-col">
+
+  <!-- Left: Case Summary -->
+  <div class="col-lg-5">
+    <div class="card p-4 mb-3">
+      <h5 class="mb-3">📋 Dados do Caso</h5>
+      <table class="table table-sm mb-0">
+        <tr><td class="text-muted" style="width:40%;">Paciente</td><td><strong>{{ patient_name }}</strong></td></tr>
+        <tr><td class="text-muted">Registro</td><td>{{ case.agency_record_number|default:case.case_id|truncatechars:20 }}</td></tr>
+        <tr><td class="text-muted">Idade</td><td>{% if patient_age %}{{ patient_age }} anos{% else %}—{% endif %}</td></tr>
+        <tr><td class="text-muted">Sexo</td><td>{{ patient_gender|default:"—" }}</td></tr>
+        <tr><td class="text-muted">Diagnóstico</td><td>{{ diagnosis|default:"—" }}</td></tr>
+        <tr><td class="text-muted">Enviado em</td><td>{{ case.created_at|date:"d/m/Y H:i" }}</td></tr>
+        <tr><td class="text-muted">Aguardando</td><td><span class="waiting-time">⏱ {{ case.created_at|timesince }}</span></td></tr>
+      </table>
+    </div>
+
+    <div class="card p-4">
+      <h5 class="mb-3">🩺 Decisão Médica</h5>
+      <div class="summary-box mb-3">
+        <div class="summary-label">Decisão</div>
+        <div class="summary-value">
+          <span class="status-badge status-accepted">{{ doctor_decision_display|default:"—" }}</span>
+        </div>
+      </div>
+      <div class="summary-box mb-3">
+        <div class="summary-label">Suporte Necessário</div>
+        <div class="summary-value">{{ support_flag_display|default:"—" }}</div>
+      </div>
+      <div class="summary-box">
+        <div class="summary-label">Fluxo</div>
+        <div class="summary-value">{{ admission_flow_display|default:"—" }}</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Right: Confirmation Form -->
+  <div class="col-lg-7">
+    <div class="card p-4">
+      <h5 class="mb-4">📅 Confirmação de Agendamento</h5>
+
+      <form id="schedule-form" method="post" action="{% url 'scheduler:submit' case.case_id %}" novalidate>
+        {% csrf_token %}
+
+        <!-- Decision -->
+        <div class="mb-4">
+          <label class="form-label">Status do Agendamento <span class="text-danger">*</span></label>
+          <div class="decision-radio-group">
+            <div class="form-check">
+              <input class="form-check-input" type="radio" name="decision" id="sched-confirm" value="confirm" required{% if form.decision.value == "confirm" %} checked{% endif %}>
+              <label class="form-check-label d-block" for="sched-confirm">
+                <strong>✓ Confirmar Agendamento</strong>
+                <div class="text-muted small">Informe a data e hora</div>
+              </label>
+            </div>
+            <div class="form-check">
+              <input class="form-check-input" type="radio" name="decision" id="sched-deny" value="deny"{% if form.decision.value == "deny" %} checked{% endif %}>
+              <label class="form-check-label d-block" for="sched-deny">
+                <strong>✗ Negar Agendamento</strong>
+                <div class="text-muted small">Informe o motivo</div>
+              </label>
+            </div>
+          </div>
+          {% if form.decision.errors %}
+          <div class="invalid-feedback d-block">{{ form.decision.errors.0 }}</div>
+          {% else %}
+          <div class="invalid-feedback" id="sched-decision-error">Selecione uma opção.</div>
+          {% endif %}
+        </div>
+
+        <!-- Confirm Fields (conditional) -->
+        <div class="decision-section{% if form.decision.value == 'confirm' %} active{% endif %}" id="confirm-section">
+          <div class="row g-3 mb-3">
+            <div class="col-sm-6">
+              <label for="sched-date" class="form-label">Data <span class="text-danger">*</span></label>
+              <input type="date" class="form-control{% if form.appointment_date.errors %} is-invalid{% endif %}" id="sched-date" name="appointment_date"{% if form.appointment_date.value %} value="{{ form.appointment_date.value|date:'Y-m-d' }}"{% endif %}>
+              {% if form.appointment_date.errors %}
+              <div class="invalid-feedback d-block">{{ form.appointment_date.errors.0 }}</div>
+              {% else %}
+              <div class="invalid-feedback">Informe a data.</div>
+              {% endif %}
+            </div>
+            <div class="col-sm-6">
+              <label for="sched-time" class="form-label">Horário <span class="text-danger">*</span></label>
+              <input type="time" class="form-control{% if form.appointment_time.errors %} is-invalid{% endif %}" id="sched-time" name="appointment_time"{% if form.appointment_time.value %} value="{{ form.appointment_time.value|time:'H:i' }}"{% endif %}>
+              {% if form.appointment_time.errors %}
+              <div class="invalid-feedback d-block">{{ form.appointment_time.errors.0 }}</div>
+              {% else %}
+              <div class="invalid-feedback">Informe o horário.</div>
+              {% endif %}
+            </div>
+          </div>
+          <div class="mb-3">
+            <label for="sched-notes" class="form-label">Observações</label>
+            <textarea class="form-control" id="sched-notes" name="notes" rows="2" placeholder="Instruções adicionais para o paciente...">{{ form.notes.value|default:"" }}</textarea>
+          </div>
+        </div>
+
+        <!-- Deny Fields (conditional) -->
+        <div class="decision-section{% if form.decision.value == 'deny' %} active{% endif %}" id="deny-section">
+          <div class="mb-3">
+            <label for="deny-reason" class="form-label">Motivo da Negativa <span class="text-danger">*</span></label>
+            <textarea class="form-control{% if form.reason.errors %} is-invalid{% endif %}" id="deny-reason" name="reason" rows="3" placeholder="Ex: indisponibilidade de vaga, conflito de agenda...">{{ form.reason.value|default:"" }}</textarea>
+            {% if form.reason.errors %}
+            <div class="invalid-feedback d-block">{{ form.reason.errors.0 }}</div>
+            {% else %}
+            <div class="invalid-feedback">Informe o motivo da negativa.</div>
+            {% endif %}
+          </div>
+        </div>
+
+        <!-- Case ID (auto-filled) -->
+        <div class="mb-4">
+          <label for="case-id-display" class="form-label">ID do Caso</label>
+          <input type="text" class="form-control" id="case-id-display" value="{{ case.agency_record_number|default:case.case_id }}" readonly style="background:#f8f9fa;">
+          <div class="form-text">Preenchido automaticamente pelo sistema.</div>
+        </div>
+
+        <!-- Submit -->
+        <div class="d-flex gap-2">
+          <button type="submit" class="btn btn-hospital btn-lg flex-grow-1" id="btn-submit">
+            Enviar Confirmação
+          </button>
+          <a href="{% url 'scheduler:queue' %}" class="btn btn-outline-secondary btn-lg">Cancelar</a>
+        </div>
+
+      </form>
+    </div>
+  </div>
+
+</div>
+
+<!-- Confirmation Modal -->
+<div class="modal fade" id="confirm-modal" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog modal-dialog-centered">
+    <div class="modal-content">
+      <div class="modal-header border-0">
+        <h5 class="modal-title">Confirmar Envio</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Fechar"></button>
+      </div>
+      <div class="modal-body" id="confirm-body">
+        <!-- Filled by JS -->
+      </div>
+      <div class="modal-footer border-0">
+        <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Revisar</button>
+        <button type="button" class="btn btn-hospital" id="btn-confirm-final">Confirmar</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+{% endblock %}
+
+{% block extra_js %}
+<script src="{% static 'js/scheduler_confirm.js' %}"></script>
+{% endblock %}

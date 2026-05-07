@@ -79,6 +79,10 @@ module = "apps.doctor.tests.*"
 disable_error_code = ["no-untyped-def", "no-untyped-call", "assignment"]
 
 [[tool.mypy.overrides]]
+module = "apps.scheduler.tests.*"
+disable_error_code = ["no-untyped-def", "no-untyped-call", "assignment"]
+
+[[tool.mypy.overrides]]
 module = "apps.intake.views"
 disable_error_code = ["untyped-decorator"]
 
