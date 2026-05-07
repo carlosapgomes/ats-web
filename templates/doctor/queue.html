@@ -74,7 +74,11 @@
           <div class="waiting-time{% if c.is_urgent %} urgent{% endif %}">
             ⏱ Aguardando há {{ c.wait_minutes }} min{% if c.is_urgent %} — PRIORITÁRIO{% endif %}
           </div>
-          <span class="btn btn-hospital mt-2">Avaliar Caso</span>
+          {% if c.is_urgent %}
+          <a href="{% url 'doctor:decision' c.case_id %}" class="btn btn-danger mt-2">Avaliar Urgente</a>
+          {% else %}
+          <a href="{% url 'doctor:decision' c.case_id %}" class="btn btn-hospital mt-2">Avaliar Caso</a>
+          {% endif %}
         </div>
       </div>
     </div>
