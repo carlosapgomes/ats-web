@@ -71,9 +71,11 @@ Decisão médica sobre casos processados.
 
 **Change**: `openspec/changes/doctor-queue/`
 
-- [ ] **Slice 1**: App doctor + queue view + templates alinhados com mocks
-- [ ] **Slice 2**: Decision view + form condicional + FSM transitions
-- [ ] **Slice 3**: Quality gate completo
+- [x] **Slice 1**: App doctor + queue view + templates alinhados com mocks ✅
+- [x] **Slice 2**: Decision view + form condicional + FSM transitions ✅
+- [x] **Slice 3**: Quality gate completo ✅
+
+**331 testes, 3 slices + 2 follow-ups, arquivado em `openspec/archive/doctor-queue/`**
 
 ---
 
