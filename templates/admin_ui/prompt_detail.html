@@ -1,0 +1,87 @@
+{% extends "base.html" %}
+{% load static %}
+
+{% block title %}{{ prompt.name }} v{{ prompt.version }} — ATS{% endblock %}
+{% block subtitle %}Detalhes da versão {{ prompt.version }} de {{ prompt.name }}{% endblock %}
+
+{% block nav %}
+<nav class="app-nav mt-3" aria-label="Navegação">
+  <ul class="nav nav-pills gap-2">
+    <li class="nav-item">
+      <a href="{% url 'dashboard:index' %}" class="nav-link">Dashboard</a>
+    </li>
+    <li class="nav-item">
+      <a href="{% url 'admin_ui:prompt_list' %}" class="nav-link">Prompts</a>
+    </li>
+    <li class="nav-item">
+      <a href="{% url 'admin_ui:user_list' %}" class="nav-link">Usuários</a>
+    </li>
+    <li class="nav-item">
+      <a href="#" class="nav-link" onclick="return false;">Auditoria</a>
+    </li>
+  </ul>
+</nav>
+{% endblock %}
+
+{% block content %}
+
+<div class="mb-4">
+  <a href="{% url 'admin_ui:prompt_list' %}" class="btn btn-sm btn-outline-secondary">&larr; Voltar para lista</a>
+</div>
+
+<div class="row g-3 mb-4">
+  <div class="col-md-8">
+    <div class="card p-4">
+      <h5 class="mb-3">Conteúdo</h5>
+      <pre class="border rounded p-3 bg-light font-monospace" style="white-space: pre-wrap; word-break: break-word; max-height: 600px; overflow-y: auto;">{{ prompt.content }}</pre>
+    </div>
+  </div>
+  <div class="col-md-4">
+    <div class="card p-4">
+      <h5 class="mb-3">Metadados</h5>
+      <dl class="mb-0">
+        <dt class="small text-muted">Nome</dt>
+        <dd class="mb-2">{{ prompt.name }}</dd>
+
+        <dt class="small text-muted">Versão</dt>
+        <dd class="mb-2">v{{ prompt.version }}</dd>
+
+        <dt class="small text-muted">Status</dt>
+        <dd class="mb-2">
+          {% if prompt.is_active %}
+          <span class="badge bg-success">Ativo</span>
+          {% else %}
+          <span class="badge bg-secondary">Inativo</span>
+          {% endif %}
+        </dd>
+
+        <dt class="small text-muted">Criado em</dt>
+        <dd class="mb-2">{{ prompt.created_at|date:"d/m/Y H:i" }}</dd>
+
+        <dt class="small text-muted">Atualizado em</dt>
+        <dd class="mb-2">{{ prompt.updated_at|date:"d/m/Y H:i" }}</dd>
+
+        <dt class="small text-muted">Atualizado por</dt>
+        <dd class="mb-3">{% if prompt.updated_by %}{{ prompt.updated_by.get_full_name|default:prompt.updated_by.username }}{% else %}—{% endif %}</dd>
+      </dl>
+
+      {% if is_admin %}
+      <div class="d-flex flex-column gap-2">
+        {% if not prompt.is_active %}
+        <form method="post" action="{% url 'admin_ui:prompt_activate' prompt.pk %}">
+          {% csrf_token %}
+          <button type="submit" class="btn btn-success w-100">Ativar</button>
+        </form>
+        {% else %}
+        <form method="post" action="{% url 'admin_ui:prompt_deactivate' prompt.pk %}">
+          {% csrf_token %}
+          <button type="submit" class="btn btn-outline-danger w-100">Desativar</button>
+        </form>
+        {% endif %}
+      </div>
+      {% endif %}
+    </div>
+  </div>
+</div>
+
+{% endblock %}

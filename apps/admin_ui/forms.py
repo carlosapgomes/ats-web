@@ -44,6 +44,35 @@ class UserCreateForm(forms.ModelForm):  # type: ignore[type-arg]
         return user
 
 
+PROMPT_NAME_CHOICES = [
+    ("llm1_system", "LLM1 - System Prompt"),
+    ("llm1_user", "LLM1 - User Prompt"),
+    ("llm2_system", "LLM2 - System Prompt"),
+    ("llm2_user", "LLM2 - User Prompt"),
+]
+
+
+class PromptCreateForm(forms.Form):  # type: ignore[type-arg]
+    """Formulário para criar nova versão de prompt."""
+
+    name = forms.ChoiceField(
+        label="Nome do Prompt",
+        choices=PROMPT_NAME_CHOICES,
+        widget=forms.Select(attrs={"class": "form-select"}),
+    )
+    content = forms.CharField(
+        label="Conteúdo",
+        widget=forms.Textarea(
+            attrs={
+                "class": "form-control font-monospace",
+                "rows": 20,
+                "placeholder": "Digite o conteúdo do prompt...",
+            }
+        ),
+        required=True,
+    )
+
+
 class UserUpdateForm(forms.ModelForm):  # type: ignore[type-arg]
     """Formulário para editar usuário (email e papéis apenas).
 

@@ -1,0 +1,96 @@
+{% extends "base.html" %}
+{% load static %}
+
+{% block title %}Prompts — ATS{% endblock %}
+{% block subtitle %}Gestão de templates de prompt para LLM{% endblock %}
+
+{% block nav %}
+<nav class="app-nav mt-3" aria-label="Navegação">
+  <ul class="nav nav-pills gap-2">
+    <li class="nav-item">
+      <a href="{% url 'dashboard:index' %}" class="nav-link">Dashboard</a>
+    </li>
+    <li class="nav-item">
+      <span class="nav-link active">Prompts</span>
+    </li>
+    <li class="nav-item">
+      <a href="{% url 'admin_ui:user_list' %}" class="nav-link">Usuários</a>
+    </li>
+    <li class="nav-item">
+      <a href="#" class="nav-link" onclick="return false;">Auditoria</a>
+    </li>
+  </ul>
+</nav>
+{% endblock %}
+
+{% block content %}
+
+<div class="card p-4">
+  <div class="d-flex justify-content-between align-items-center mb-3 flex-wrap gap-2">
+    <h5 class="mb-0">Prompts</h5>
+    {% if is_admin %}
+    <a href="{% url 'admin_ui:prompt_create' %}" class="btn btn-sm btn-hospital">Nova Versão</a>
+    {% endif %}
+  </div>
+
+  {% if grouped %}
+    {% for name, versions in grouped.items %}
+    <div class="card mb-3 border">
+      <div class="card-header d-flex justify-content-between align-items-center flex-wrap gap-2">
+        <div>
+          <strong class="fs-6">{{ name }}</strong>
+          {% for v in versions %}
+            {% if v.is_active %}
+            <span class="badge bg-success ms-2">Ativa v{{ v.version }}</span>
+            {% endif %}
+          {% endfor %}
+        </div>
+        <span class="text-muted small">{{ versions|length }} versão{{ versions|length|pluralize:"," }}</span>
+      </div>
+      <div class="card-body p-0">
+        <div class="table-responsive">
+          <table class="table table-sm mb-0 align-middle">
+            <thead class="table-light">
+              <tr>
+                <th>Versão</th>
+                <th>Status</th>
+                <th>Criado em</th>
+                <th>Atualizado por</th>
+                <th>Ações</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for v in versions %}
+              <tr class="{% if v.is_active %}table-success{% endif %}">
+                <td><strong>v{{ v.version }}</strong></td>
+                <td>
+                  {% if v.is_active %}
+                  <span class="badge bg-success">Ativo</span>
+                  {% else %}
+                  <span class="badge bg-secondary">Inativo</span>
+                  {% endif %}
+                </td>
+                <td class="small">{{ v.created_at|date:"d/m/Y H:i" }}</td>
+                <td class="small">{% if v.updated_by %}{{ v.updated_by.get_full_name|default:v.updated_by.username }}{% else %}—{% endif %}</td>
+                <td>
+                  <a href="{% url 'admin_ui:prompt_detail' v.pk %}" class="btn btn-sm btn-outline-secondary">Ver</a>
+                </td>
+              </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+    {% endfor %}
+  {% else %}
+    <div class="text-center text-muted py-5">
+      <p>Nenhum prompt cadastrado.</p>
+      {% if is_admin %}
+      <a href="{% url 'admin_ui:prompt_create' %}" class="btn btn-sm btn-hospital">Criar primeiro prompt</a>
+      {% endif %}
+    </div>
+  {% endif %}
+</div>
+
+{% endblock %}
