@@ -60,11 +60,10 @@ class TestDoctorQueueView:
                 "age": 62,
                 "gender": "Masculino",
             },
-            "diagnosis": "Fratura de fêmur D — urgência ortopédica",
         }
         case.suggested_action = {
-            "support": "Anestesista UTI",
-            "admission_flow": "Vinda Imediata",
+            "support_recommendation": "anesthesist_icu",
+            "suggestion": "accept",
         }
         case.save()
 
@@ -87,7 +86,10 @@ class TestDoctorQueueView:
             status=CaseStatus.DOCTOR_ACCEPTED,
             doctor=doctor_user,
             doctor_decision="accept",
-            suggested_action={"support": "Nenhum", "admission_flow": "Agendamento"},
+            suggested_action={
+                "support_recommendation": "none",
+                "suggestion": "accept",
+            },
             structured_data={
                 "patient": {
                     "name": "Maria Silva dos Santos",
@@ -136,7 +138,6 @@ class TestDoctorQueueView:
         assert response.status_code == 200
         content = response.content.decode()
         assert "Pendente Silva" in content
-        # NEW case should not be in queue context
         assert "pending" in content.lower() or "Pendentes" in content
 
     def test_queue_shows_waiting_time(self, client) -> None:
@@ -158,7 +159,6 @@ class TestDoctorQueueView:
         response = client.get("/doctor/")
         assert response.status_code == 200
         content = response.content.decode()
-        # Should show the waiting time somewhere
         assert "45" in content or "min" in content.lower()
 
     def test_queue_shows_average_wait_time(self, client) -> None:
@@ -185,7 +185,6 @@ class TestDoctorQueueView:
         self._login_as(client, "doctor")
         response = client.get("/doctor/")
         assert response.status_code == 200
-        # Should mention something about wait time
         content = response.content.decode()
         assert "Tempo médio" in content or "Espera" in content or "aguardando" in content.lower()
 
@@ -204,12 +203,11 @@ class TestDoctorQueueView:
                     "age": 58,
                     "gender": "Masculino",
                 },
-                "diagnosis": "Colecistectomia videolaparoscópica",
             },
             summary_text="Paciente com IMC elevado (34). Risco anestésico ASA II.",
             suggested_action={
-                "support": "Anestesista",
-                "admission_flow": "Agendamento",
+                "support_recommendation": "anesthesist",
+                "suggestion": "accept",
             },
         )
         case.save()
@@ -221,3 +219,73 @@ class TestDoctorQueueView:
         assert "Antônio Ferreira Lima" in content
         assert "58" in content
         assert "2026-0428-005" in content
+
+    # ── Support recommendation mapping ────────────────────────────────
+
+    def test_support_recommendation_maps_to_portuguese(self, client) -> None:
+        """support_recommendation values are mapped to Portuguese labels."""
+        nir_user = User.objects.create_user(username="nir3@test.com", password="testpass123")
+        nir_user.roles.add(self._create_role("nir"))
+
+        for rec_key, expected_label in [
+            ("none", "Nenhum"),
+            ("anesthesist", "Anestesista"),
+            ("anesthesist_icu", "Anestesista + UTI"),
+        ]:
+            case = Case.objects.create(created_by=nir_user, status=CaseStatus.WAIT_DOCTOR)
+            case.structured_data = {"patient": {"name": f"Teste {rec_key}", "age": 40, "gender": "Masculino"}}
+            case.suggested_action = {"support_recommendation": rec_key, "suggestion": "accept"}
+            case.save()
+
+        self._login_as(client, "doctor")
+        response = client.get("/doctor/")
+        assert response.status_code == 200
+        content = response.content.decode()
+        assert "Anestesista + UTI" in content
+        assert "Anestesista" in content
+
+    # ── Diagnosis sources ─────────────────────────────────────────────
+
+    def test_diagnosis_uses_summary_text_priority(self, client) -> None:
+        """_get_diagnosis prefers summary_text over structured_data."""
+        nir_user = User.objects.create_user(username="nir4@test.com", password="testpass123")
+        nir_user.roles.add(self._create_role("nir"))
+
+        case = Case.objects.create(
+            created_by=nir_user,
+            status=CaseStatus.WAIT_DOCTOR,
+            summary_text="Hérnia inguinal bilateral — cirurgia eletiva",
+            structured_data={
+                "patient": {"name": "João Hérnia", "age": 62, "gender": "Masculino"},
+                "eda": {"indication_category": "standard"},
+            },
+        )
+        case.save()
+
+        self._login_as(client, "doctor")
+        response = client.get("/doctor/")
+        assert response.status_code == 200
+        content = response.content.decode()
+        # summary_text should appear as diagnosis, not the eda indication
+        assert "Hérnia inguinal bilateral" in content
+
+    # ── Suggestion flow mapping ───────────────────────────────────────
+
+    def test_suggestion_flow_displays_mapped_value(self, client) -> None:
+        """suggestion values are mapped to display text in card."""
+        nir_user = User.objects.create_user(username="nir5@test.com", password="testpass123")
+        nir_user.roles.add(self._create_role("nir"))
+
+        case = Case.objects.create(created_by=nir_user, status=CaseStatus.WAIT_DOCTOR)
+        case.structured_data = {"patient": {"name": "Teste Flow", "age": 45, "gender": "Feminino"}}
+        case.suggested_action = {
+            "support_recommendation": "none",
+            "suggestion": "manual_review_required",
+        }
+        case.save()
+
+        self._login_as(client, "doctor")
+        response = client.get("/doctor/")
+        assert response.status_code == 200
+        content = response.content.decode()
+        assert "Revisão Manual" in content
