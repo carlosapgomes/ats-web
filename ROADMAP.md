@@ -85,9 +85,11 @@ Agendamento ou notificação de vinda imediata.
 
 **Change**: `openspec/changes/scheduler-queue/`
 
-- [ ] **Slice 1**: App scheduler + queue view + templates + auto-transition (R3→WAIT_APPT)
-- [ ] **Slice 2**: Confirm view + form condicional + FSM transitions
-- [ ] **Slice 3**: Quality gate completo
+- [x] **Slice 1**: App scheduler + queue view + templates + auto-transition ✅
+- [x] **Slice 2**: Confirm view + form condicional + FSM transitions ✅
+- [x] **Slice 3**: Quality gate completo ✅
+
+**356 testes, arquivado em `openspec/archive/scheduler-queue/`**
 
 ---
 
