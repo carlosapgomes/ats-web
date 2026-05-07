@@ -16,7 +16,7 @@ def user_password() -> str:
 def user_with_single_role(db: None, user_password: str):  # type: ignore[no-untyped-def]
     from apps.accounts.models import Role
 
-    role = Role.objects.create(name="admin")
+    role, _ = Role.objects.get_or_create(name="admin")
     user = User.objects.create_user(
         username="testuser",
         password=user_password,
@@ -29,12 +29,13 @@ def user_with_single_role(db: None, user_password: str):  # type: ignore[no-unty
 def user_with_multiple_roles(db: None, user_password: str):  # type: ignore[no-untyped-def]
     from apps.accounts.models import Role
 
-    roles = Role.objects.bulk_create([Role(name="doctor"), Role(name="manager")])
+    doctor_role, _ = Role.objects.get_or_create(name="doctor")
+    manager_role, _ = Role.objects.get_or_create(name="manager")
     user = User.objects.create_user(
         username="multiuser",
         password=user_password,
     )
-    user.roles.add(*roles)
+    user.roles.add(doctor_role, manager_role)
     return user
 
 

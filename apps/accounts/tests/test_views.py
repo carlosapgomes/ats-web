@@ -23,7 +23,7 @@ class TestLoginView:
         from apps.accounts.models import Role
 
         user = User.objects.create_user(username="nir@test.com", password="testpass123")
-        role = Role.objects.create(name="nir")
+        role, _ = Role.objects.get_or_create(name="nir")
         user.roles.add(role)
 
         response = client.post(reverse("login"), {"username": "nir@test.com", "password": "testpass123"})
@@ -46,8 +46,8 @@ class TestLoginView:
         from apps.accounts.models import Role
 
         user = User.objects.create_user(username="multi@test.com", password="testpass123")
-        role_nir = Role.objects.create(name="nir")
-        role_doctor = Role.objects.create(name="doctor")
+        role_nir, _ = Role.objects.get_or_create(name="nir")
+        role_doctor, _ = Role.objects.get_or_create(name="doctor")
         user.roles.add(role_nir, role_doctor)
 
         response = client.post(reverse("login"), {"username": "multi@test.com", "password": "testpass123"})
@@ -60,7 +60,7 @@ class TestLoginView:
         from apps.accounts.models import Role
 
         user = User.objects.create_user(username="single@test.com", password="testpass123")
-        role = Role.objects.create(name="doctor")
+        role, _ = Role.objects.get_or_create(name="doctor")
         user.roles.add(role)
 
         response = client.post(reverse("login"), {"username": "single@test.com", "password": "testpass123"})
@@ -103,7 +103,7 @@ class TestSwitchRoleView:
         from apps.accounts.models import Role
 
         user = User.objects.create_user(username="switch@test.com", password="testpass123")
-        role = Role.objects.create(name="doctor")
+        role, _ = Role.objects.get_or_create(name="doctor")
         user.roles.add(role)
         client.force_login(user)
 
@@ -116,8 +116,8 @@ class TestSwitchRoleView:
         from apps.accounts.models import Role
 
         user = User.objects.create_user(username="valid@test.com", password="testpass123")
-        role_nir = Role.objects.create(name="nir")
-        role_doctor = Role.objects.create(name="doctor")
+        role_nir, _ = Role.objects.get_or_create(name="nir")
+        role_doctor, _ = Role.objects.get_or_create(name="doctor")
         user.roles.add(role_nir, role_doctor)
         client.force_login(user)
 
@@ -132,7 +132,7 @@ class TestSwitchRoleView:
         from apps.accounts.models import Role
 
         user = User.objects.create_user(username="invalid@test.com", password="testpass123")
-        role = Role.objects.create(name="doctor")
+        role, _ = Role.objects.get_or_create(name="doctor")
         user.roles.add(role)
         client.force_login(user)
 
@@ -158,7 +158,8 @@ class TestHomeView:
         from apps.accounts.models import Role
 
         user = User.objects.create_user(username="nirredir@test.com", password="testpass123")
-        user.roles.add(Role.objects.create(name="nir"))
+        role, _ = Role.objects.get_or_create(name="nir")
+        user.roles.add(role)
         client.force_login(user)
         session = client.session
         session["active_role"] = "nir"
@@ -180,7 +181,8 @@ class TestHomeView:
         from apps.accounts.models import Role
 
         user = User.objects.create_user(username="schedredir@test.com", password="testpass123")
-        user.roles.add(Role.objects.create(name="scheduler"))
+        role, _ = Role.objects.get_or_create(name="scheduler")
+        user.roles.add(role)
         client.force_login(user)
         session = client.session
         session["active_role"] = "scheduler"
@@ -194,7 +196,8 @@ class TestHomeView:
         from apps.accounts.models import Role
 
         user = User.objects.create_user(username="docredir@test.com", password="testpass123")
-        user.roles.add(Role.objects.create(name="doctor"))
+        role, _ = Role.objects.get_or_create(name="doctor")
+        user.roles.add(role)
         client.force_login(user)
         session = client.session
         session["active_role"] = "doctor"
@@ -220,7 +223,7 @@ class TestHomeView:
         from apps.accounts.models import Role
 
         user = User.objects.create_user(username="nirhome@test.com", password="testpass123")
-        role = Role.objects.create(name="nir")
+        role, _ = Role.objects.get_or_create(name="nir")
         user.roles.add(role)
         client.force_login(user)
 
@@ -239,7 +242,7 @@ class TestHomeView:
         from apps.accounts.models import Role
 
         user = User.objects.create_user(username="nirhome2@test.com", password="testpass123")
-        role = Role.objects.create(name="nir")
+        role, _ = Role.objects.get_or_create(name="nir")
         user.roles.add(role)
         client.force_login(user)
 

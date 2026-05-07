@@ -30,7 +30,7 @@ def _nir_client(client):
     from apps.accounts.models import Role
 
     user = User.objects.create_user(username="nir@test.com", password="testpass123")
-    role = Role.objects.create(name="nir")
+    role, _ = Role.objects.get_or_create(name="nir")
     user.roles.add(role)
     client.force_login(user)
     session = client.session
@@ -44,7 +44,7 @@ def _doctor_client(client):
     from apps.accounts.models import Role
 
     user = User.objects.create_user(username="doc@test.com", password="testpass123")
-    role = Role.objects.create(name="doctor")
+    role, _ = Role.objects.get_or_create(name="doctor")
     user.roles.add(role)
     client.force_login(user)
     session = client.session
