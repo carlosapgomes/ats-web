@@ -137,11 +137,11 @@ Gestão de usuários e prompts pelo admin via UI.
 
 Geração automática de resumos operacionais.
 
-- Cron job django-q2 com janelas configuráveis (cutoffs)
-- Agregação de métricas por janela
-- Persistência do resumo (SupervisorSummaryDispatch)
-- Exibição no dashboard do supervisor
-- Idempotência: não gerar duplicatas para mesma janela
+**Change**: `openspec/changes/periodic-summary/`
+
+- [ ] **Slice 1**: Modelo SupervisorSummary + agregação + resolve_window + task
+- [ ] **Slice 2**: Card no dashboard + página de histórico
+- [ ] **Slice 3**: Quality gate completo
 
 ---
 
