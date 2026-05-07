@@ -1,0 +1,185 @@
+{% extends "base.html" %}
+{% load static %}
+
+{% block title %}Decisão Médica · ATS{% endblock %}
+
+{% block subtitle %}Caso {{ case.agency_record_number|default:case.case_id|truncatechars:16 }} · {{ patient_name }}{% endblock %}
+
+{% block content %}
+
+<div class="row g-4 decision-two-col">
+
+  <!-- Left: Case Summary -->
+  <div class="col-lg-5">
+    <div class="card p-4 mb-3">
+      <h5 class="mb-3">📋 Dados do Paciente</h5>
+      <table class="table table-sm mb-0">
+        <tr><td class="text-muted" style="width:40%;">Paciente</td><td><strong>{{ patient_name }}</strong></td></tr>
+        <tr><td class="text-muted">Registro</td><td>{{ case.agency_record_number|default:case.case_id|truncatechars:20 }}</td></tr>
+        <tr><td class="text-muted">Idade</td><td>{% if patient_age %}{{ patient_age }} anos{% else %}—{% endif %}</td></tr>
+        <tr><td class="text-muted">Sexo</td><td>{{ patient_gender|default:"—" }}</td></tr>
+        <tr><td class="text-muted">Enviado em</td><td>{{ case.created_at|date:"d/m/Y H:i" }}</td></tr>
+        <tr><td class="text-muted">Aguardando</td><td><span class="waiting-time">⏱ {{ case.created_at|timesince }}</span></td></tr>
+      </table>
+    </div>
+
+    <div class="card p-4 mb-3">
+      <h5 class="mb-3">🤖 Extração IA do PDF</h5>
+      <div class="summary-box mb-3">
+        <div class="summary-label">Diagnóstico Principal</div>
+        <div class="summary-value">{{ diagnosis|default:"—" }}</div>
+      </div>
+      {% if summary_text %}
+      <div class="summary-box mb-3">
+        <div class="summary-label">Observações</div>
+        <div class="summary-value">{{ summary_text }}</div>
+      </div>
+      {% endif %}
+      <div class="summary-box">
+        <div class="summary-label">Sugestão da IA</div>
+        <div class="summary-value">
+          <span class="badge bg-info me-1">Suporte: {{ suggested_support }}</span>
+          <span class="badge bg-secondary">Fluxo: {{ suggested_flow }}</span>
+        </div>
+      </div>
+    </div>
+
+    <div class="card p-4">
+      <h5 class="mb-3">📄 PDF Original</h5>
+      <div class="border rounded-3 p-3 text-center bg-light">
+        <span style="font-size:2rem;">📄</span>
+        <div>{{ pdf_filename|default:"encaminhamento.pdf" }}</div>
+        <div class="text-muted small">
+          {% if case.pdf_file %}{{ case.pdf_file.size|filesizeformat }}{% else %}—{% endif %}
+        </div>
+        {% if case.pdf_file %}
+        <a href="{{ case.pdf_file.url }}" class="btn btn-sm btn-outline-secondary mt-2" target="_blank">Visualizar PDF</a>
+        {% endif %}
+      </div>
+    </div>
+  </div>
+
+  <!-- Right: Decision Form -->
+  <div class="col-lg-7">
+    <div class="card p-4">
+      <h5 class="mb-4">🩺 Formulário de Decisão</h5>
+
+      <form id="decision-form" method="post" action="{% url 'doctor:submit' case.case_id %}" novalidate>
+        {% csrf_token %}
+
+        <!-- Step 1: Decision -->
+        <div class="mb-4">
+          <label class="form-label">Decisão <span class="text-danger">*</span></label>
+          <div class="decision-radio-group">
+            <div class="form-check">
+              <input class="form-check-input" type="radio" name="decision" id="decision-accept" value="accept" required{% if form.decision.value == "accept" %} checked{% endif %}>
+              <label class="form-check-label d-block" for="decision-accept">
+                <strong>✓ Aceitar</strong>
+                <div class="text-muted small">Encaminhar para agendamento</div>
+              </label>
+            </div>
+            <div class="form-check">
+              <input class="form-check-input" type="radio" name="decision" id="decision-deny" value="deny"{% if form.decision.value == "deny" %} checked{% endif %}>
+              <label class="form-check-label d-block" for="decision-deny">
+                <strong>✗ Negar</strong>
+                <div class="text-muted small">Triagem não indicada para este caso</div>
+              </label>
+            </div>
+          </div>
+          {% if form.decision.errors %}
+          <div class="invalid-feedback d-block">{{ form.decision.errors.0 }}</div>
+          {% else %}
+          <div class="invalid-feedback" id="decision-error">Selecione uma decisão.</div>
+          {% endif %}
+        </div>
+
+        <!-- Accept Fields (conditional) -->
+        <div class="decision-section{% if form.decision.value == 'accept' %} active{% endif %}" id="accept-section">
+          <div class="mb-3">
+            <label for="support-flag" class="form-label">Suporte Necessário <span class="text-danger">*</span></label>
+            <select class="form-select{% if form.support_flag.errors %} is-invalid{% endif %}" id="support-flag" name="support_flag">
+              <option value="" selected disabled>Selecione o tipo de suporte...</option>
+              <option value="none"{% if form.support_flag.value == "none" %} selected{% endif %}>Nenhum</option>
+              <option value="anesthesist"{% if form.support_flag.value == "anesthesist" %} selected{% endif %}>Anestesista</option>
+              <option value="anesthesist_icu"{% if form.support_flag.value == "anesthesist_icu" %} selected{% endif %}>Anestesista + UTI</option>
+            </select>
+            {% if form.support_flag.errors %}
+            <div class="invalid-feedback d-block">{{ form.support_flag.errors.0 }}</div>
+            {% else %}
+            <div class="invalid-feedback">Selecione o tipo de suporte.</div>
+            {% endif %}
+          </div>
+
+          <div class="mb-3">
+            <label for="admission-flow" class="form-label">Fluxo de Admissão <span class="text-danger">*</span></label>
+            <select class="form-select{% if form.admission_flow.errors %} is-invalid{% endif %}" id="admission-flow" name="admission_flow">
+              <option value="" selected disabled>Selecione o fluxo...</option>
+              <option value="scheduled"{% if form.admission_flow.value == "scheduled" %} selected{% endif %}>Agendamento</option>
+              <option value="immediate"{% if form.admission_flow.value == "immediate" %} selected{% endif %}>Vinda Imediata</option>
+            </select>
+            {% if form.admission_flow.errors %}
+            <div class="invalid-feedback d-block">{{ form.admission_flow.errors.0 }}</div>
+            {% else %}
+            <div class="invalid-feedback">Selecione o fluxo de admissão.</div>
+            {% endif %}
+          </div>
+        </div>
+
+        <!-- Deny Fields (conditional) -->
+        <div class="decision-section{% if form.decision.value == 'deny' %} active{% endif %}" id="deny-section">
+          <div class="mb-3">
+            <label for="deny-reason" class="form-label">Motivo da Negativa <span class="text-danger">*</span></label>
+            <textarea class="form-control{% if form.reason.errors %} is-invalid{% endif %}" id="deny-reason" name="reason" rows="3" placeholder="Descreva o motivo pelo qual a triagem não se aplica a este caso...">{{ form.reason.value|default:"" }}</textarea>
+            {% if form.reason.errors %}
+            <div class="invalid-feedback d-block">{{ form.reason.errors.0 }}</div>
+            {% else %}
+            <div class="invalid-feedback">Informe o motivo da negativa.</div>
+            {% endif %}
+          </div>
+        </div>
+
+        <!-- Case ID (auto-filled, hidden in production) -->
+        <div class="mb-4">
+          <label for="case-id-display" class="form-label">ID do Caso</label>
+          <input type="text" class="form-control" id="case-id-display" value="{{ case.case_id }}" readonly style="background:#f8f9fa;">
+          <div class="form-text">Preenchido automaticamente pelo sistema.</div>
+        </div>
+
+        <!-- Submit -->
+        <div class="d-flex gap-2">
+          <button type="submit" class="btn btn-hospital btn-lg flex-grow-1" id="btn-submit">
+            Enviar Decisão
+          </button>
+          <a href="{% url 'doctor:queue' %}" class="btn btn-outline-secondary btn-lg">Cancelar</a>
+        </div>
+
+      </form>
+    </div>
+  </div>
+
+</div>
+
+<!-- Confirmation Modal -->
+<div class="modal fade" id="confirm-modal" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog modal-dialog-centered">
+    <div class="modal-content">
+      <div class="modal-header border-0">
+        <h5 class="modal-title">Confirmar Decisão</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Fechar"></button>
+      </div>
+      <div class="modal-body" id="confirm-body">
+        <!-- Filled by JS -->
+      </div>
+      <div class="modal-footer border-0">
+        <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Revisar</button>
+        <button type="button" class="btn btn-hospital" id="btn-confirm-final">Confirmar Decisão</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+{% endblock %}
+
+{% block extra_js %}
+<script src="{% static 'js/decision.js' %}"></script>
+{% endblock %}

@@ -5,11 +5,13 @@ from typing import Any
 
 from django.contrib.auth.decorators import login_required
 from django.db.models import QuerySet
-from django.http import HttpRequest, HttpResponse
-from django.shortcuts import render
+from django.http import Http404, HttpRequest, HttpResponse
+from django.shortcuts import get_object_or_404, redirect, render
 from django.utils import timezone
 
 from apps.cases.models import Case, CaseStatus
+
+from .forms import DoctorDecisionForm
 
 DOCTOR_DECISION_STATUSES = [
     CaseStatus.DOCTOR_ACCEPTED,
@@ -166,3 +168,83 @@ def doctor_queue(request: HttpRequest) -> HttpResponse:
     }
 
     return render(request, "doctor/queue.html", context)
+
+
+# ── Decision helpers ─────────────────────────────────────────────────────
+
+
+def _build_decision_context(case: Case, form: DoctorDecisionForm) -> dict[str, Any]:
+    """Build context dict for the decision template."""
+    return {
+        "case": case,
+        "form": form,
+        "patient_name": _get_patient_name(case),
+        "patient_age": _get_patient_age(case),
+        "patient_gender": _get_patient_gender(case),
+        "diagnosis": _get_diagnosis(case),
+        "suggested_support": _get_suggested_support(case),
+        "suggested_flow": _get_suggested_flow(case),
+        "summary_text": case.summary_text or "",
+        "pdf_filename": _get_pdf_filename(case),
+    }
+
+
+# ── Decision view ────────────────────────────────────────────────────────────
+
+
+@login_required
+def doctor_decision(request: HttpRequest, case_id: str) -> HttpResponse:
+    """GET: Renderiza formulário de decisão para um caso em WAIT_DOCTOR."""
+    case = get_object_or_404(Case, pk=case_id)
+
+    if case.status != CaseStatus.WAIT_DOCTOR:
+        raise Http404("Caso não está aguardando decisão médica.")
+
+    form = DoctorDecisionForm()
+    return render(request, "doctor/decision.html", _build_decision_context(case, form))
+
+
+@login_required
+def doctor_submit(request: HttpRequest, case_id: str) -> HttpResponse:
+    """POST: Valida formulário, persiste decisão e executa transições FSM."""
+    if request.method != "POST":
+        raise Http404
+
+    case = get_object_or_404(Case, pk=case_id)
+
+    if case.status != CaseStatus.WAIT_DOCTOR:
+        raise Http404("Caso não está aguardando decisão médica.")
+
+    form = DoctorDecisionForm(request.POST)
+
+    if not form.is_valid():
+        return render(request, "doctor/decision.html", _build_decision_context(case, form))
+
+    decision = form.cleaned_data["decision"]
+
+    # Persist decision fields
+    case.doctor_decision = decision
+    case.doctor_support_flag = form.cleaned_data.get("support_flag", "") or "none"
+    case.doctor_admission_flow = form.cleaned_data.get("admission_flow", "")
+    case.doctor_reason = form.cleaned_data.get("reason", "")
+    case.doctor = request.user  # type: ignore[assignment]  # guaranteed by @login_required
+    case.doctor_decided_at = timezone.now()
+
+    # FSM transition: WAIT_DOCTOR → DOCTOR_ACCEPTED or DOCTOR_DENIED
+    case.doctor_decide(decision=decision, user=request.user)
+    case.save()
+
+    # If accepted, advance to WAIT_APPT
+    if decision == "accept":
+        case.ready_for_scheduler(user=request.user)
+        case.save()
+
+    return redirect("doctor:queue")
+
+
+def _get_pdf_filename(case: Case) -> str:
+    """Extrai nome do arquivo PDF do caso."""
+    if case.pdf_file and case.pdf_file.name:
+        pdf_name: str = case.pdf_file.name
+        return pdf_name.rsplit("/", 1)[-1] if "/" in pdf_name else pdf_name
+    return ""
