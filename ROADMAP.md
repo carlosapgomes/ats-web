@@ -110,13 +110,10 @@ Resultado volta ao NIR, confirmação e cleanup.
 
 Visão gerencial e operacional para managers/admins.
 
-- Dashboard com métricas do período:
-  - Pacientes recebidos, processados, avaliados
-  - Aceitos (agendamento), vinda imediata, recusados
-  - Em andamento (por etapa)
-- Lista de todos os casos com filtros (status, etapa, resultado, data)
-- Paginação
-- Detalhe do caso com timeline completa (todos os CaseEvents)
+**Change**: `openspec/changes/dashboard-supervisor/`
+
+- [ ] **Slice 1**: App dashboard + métricas + tabela de casos + case detail admin
+- [ ] **Slice 2**: Quality gate completo
 
 ---
 
