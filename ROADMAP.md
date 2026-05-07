@@ -83,13 +83,11 @@ Decisão médica sobre casos processados.
 
 Agendamento ou notificação de vinda imediata.
 
-- Tela de fila do agendador (casos em WAIT_APPT)
-- Seção separada para notificações de vinda imediata (somente leitura)
-- Tela de agendamento:
-  - Formulário: confirmed/denied, data/hora, local, instruções, motivo
-  - Comportamento bifurcado: formulário (scheduled) vs informativo (immediate)
-- Transição FSM: WAIT_APPT → APPT_CONFIRMED / APPT_DENIED
-- Evento auditável
+**Change**: `openspec/changes/scheduler-queue/`
+
+- [ ] **Slice 1**: App scheduler + queue view + templates + auto-transition (R3→WAIT_APPT)
+- [ ] **Slice 2**: Confirm view + form condicional + FSM transitions
+- [ ] **Slice 3**: Quality gate completo
 
 ---
 
