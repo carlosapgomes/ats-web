@@ -123,11 +123,11 @@ Visão gerencial e operacional para managers/admins.
 
 Gestão de usuários e prompts pelo admin via UI.
 
-- CRUD de usuários (criar, bloquear, reativar, remover)
-- Atribuição de papéis (multi-role)
-- Proteções: não auto-bloquear, não deixar sem admin ativo
-- CRUD de prompts (criar versão, ativar, desativar)
-- Trilha de auditoria de ações administrativas
+**Change**: `openspec/changes/admin-management/`
+
+- [ ] **Slice 1**: App admin_ui + CRUD de usuários com proteções
+- [ ] **Slice 2**: CRUD de prompts com versionamento
+- [ ] **Slice 3**: Quality gate completo
 
 ---
 
