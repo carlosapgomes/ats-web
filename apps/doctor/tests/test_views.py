@@ -290,6 +290,23 @@ class TestDoctorQueueView:
         content = response.content.decode()
         assert "Revisão Manual" in content
 
+    # ── Navigation links ──────────────────────────────────────────────
+
+    def test_queue_has_evaluate_case_link(self, client) -> None:
+        """Each pending case card has a link to the decision page."""
+        nir_user = User.objects.create_user(username="nir_link@test.com", password="testpass123")
+        nir_user.roles.add(self._create_role("nir"))
+
+        case = Case.objects.create(created_by=nir_user, status=CaseStatus.WAIT_DOCTOR)
+        case.structured_data = {"patient": {"name": "Link Test", "age": 40, "gender": "Masculino"}}
+        case.save()
+
+        self._login_as(client, "doctor")
+        response = client.get("/doctor/")
+        assert response.status_code == 200
+        content = response.content.decode()
+        assert f"/doctor/{case.case_id}/" in content
+
 
 # ── Helpers for decision view tests ────────────────────────────────────
 
