@@ -112,8 +112,10 @@ Visão gerencial e operacional para managers/admins.
 
 **Change**: `openspec/changes/dashboard-supervisor/`
 
-- [ ] **Slice 1**: App dashboard + métricas + tabela de casos + case detail admin
-- [ ] **Slice 2**: Quality gate completo
+- [x] **Slice 1**: App dashboard + métricas + tabela de casos + case detail admin ✅
+- [x] **Slice 2**: Quality gate completo ✅
+
+**398 testes, arquivado em `openspec/archive/dashboard-supervisor/`**
 
 ---
 

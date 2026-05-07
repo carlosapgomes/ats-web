@@ -6,11 +6,11 @@ Validação final completa.
 
 ## Checklist
 
-- [ ] `uv run ruff check .` — 0 errors
-- [ ] `uv run ruff format --check .` — 0 errors
-- [ ] `uv run mypy .` — 0 type errors
-- [ ] `uv run pytest` — todos passando
-- [ ] Teste manual no browser:
+- [x] `uv run ruff check .` — 0 errors
+- [x] `uv run ruff format --check .` — 0 errors
+- [x] `uv run mypy .` — 0 type errors
+- [x] `uv run pytest` — todos passando
+- [ ] Teste manual no browser (pendente — ambiente headless):
   - Login como admin → redireciona para `/dashboard/`
   - Summary cards com contagens
   - Filtros por status e data funcionam
