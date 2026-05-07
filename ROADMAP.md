@@ -97,15 +97,10 @@ Agendamento ou notificação de vinda imediata.
 
 Resultado volta ao NIR, confirmação e cleanup.
 
-- Tela de resultado final por tipo:
-  - Aceito (agendado): data/hora, local, instruções, médico, suporte
-  - Aceito (imediato): médico, suporte
-  - Negado: motivo
-  - Falha: causa
-  - Fora de escopo: explicação
-- Botão "Confirmar Recebimento" (substitui 👍 do Matrix)
-- Transição FSM: → WAIT_R1_CLEANUP_THUMBS → CLEANUP_RUNNING → CLEANED
-- Cleanup: marcar como CLEANED (caso some das filas)
+**Change**: `openspec/changes/nir-result-closure/`
+
+- [ ] **Slice 1**: Resultado final + auto-transição + nome do paciente no case_detail
+- [ ] **Slice 2**: Quality gate completo
 
 ---
 
