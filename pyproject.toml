@@ -99,6 +99,18 @@ module = "apps.dashboard.views"
 disable_error_code = ["untyped-decorator"]
 
 [[tool.mypy.overrides]]
+module = "apps.admin_ui.tests.*"
+disable_error_code = ["no-untyped-def", "no-untyped-call", "assignment", "valid-type", "attr-defined"]
+
+[[tool.mypy.overrides]]
+module = "apps.admin_ui.views"
+disable_error_code = ["untyped-decorator"]
+
+[[tool.mypy.overrides]]
+module = "apps.admin_ui.forms"
+disable_error_code = ["type-arg", "valid-type", "no-any-return", "unused-ignore"]
+
+[[tool.mypy.overrides]]
 module = "apps.cases.models"
 disable_error_code = ["no-untyped-def", "untyped-decorator", "no-any-return"]
 

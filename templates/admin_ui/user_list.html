@@ -1,0 +1,125 @@
+{% extends "base.html" %}
+{% load static %}
+
+{% block title %}Usuários — ATS{% endblock %}
+{% block subtitle %}Gestão de usuários do sistema{% endblock %}
+
+{% block nav %}
+<nav class="app-nav mt-3" aria-label="Navegação">
+  <ul class="nav nav-pills gap-2">
+    <li class="nav-item">
+      <a href="{% url 'dashboard:index' %}" class="nav-link">Dashboard</a>
+    </li>
+    <li class="nav-item">
+      <a href="#" class="nav-link" onclick="return false;">Prompts</a>
+    </li>
+    <li class="nav-item">
+      <span class="nav-link active">Usuários</span>
+    </li>
+    <li class="nav-item">
+      <a href="#" class="nav-link" onclick="return false;">Auditoria</a>
+    </li>
+  </ul>
+</nav>
+{% endblock %}
+
+{% block content %}
+
+<div class="card p-4">
+  <div class="d-flex justify-content-between align-items-center mb-3 flex-wrap gap-2">
+    <h5 class="mb-0">Usuários</h5>
+    <div class="d-flex gap-2 align-items-center flex-wrap">
+      <form method="get" class="d-flex gap-2 align-items-center flex-wrap">
+        <input type="text" name="q" class="form-control form-control-sm" style="width:180px;"
+               placeholder="Buscar username ou email..." value="{{ q }}">
+        <select name="status" class="form-select form-select-sm" style="width:auto;">
+          <option value="">Todos os status</option>
+          {% for code, label in status_choices %}
+          <option value="{{ code }}" {% if status_filter == code %}selected{% endif %}>{{ label }}</option>
+          {% endfor %}
+        </select>
+        <select name="role" class="form-select form-select-sm" style="width:auto;">
+          <option value="">Todos os papéis</option>
+          {% for role in all_roles %}
+          <option value="{{ role.name }}" {% if role_filter == role.name %}selected{% endif %}>{{ role.name }}</option>
+          {% endfor %}
+        </select>
+        <button type="submit" class="btn btn-sm btn-hospital-outline">Filtrar</button>
+        {% if status_filter or role_filter or q %}
+        <a href="{% url 'admin_ui:user_list' %}" class="btn btn-sm btn-outline-secondary">Limpar</a>
+        {% endif %}
+      </form>
+      {% if is_admin %}
+      <a href="{% url 'admin_ui:user_create' %}" class="btn btn-sm btn-hospital">Criar Usuário</a>
+      {% endif %}
+    </div>
+  </div>
+
+  <div class="table-responsive">
+    <table class="table table-sm align-middle">
+      <thead class="table-light">
+        <tr>
+          <th>Username</th>
+          <th>Email</th>
+          <th>Papéis</th>
+          <th>Status</th>
+          {% if is_admin %}
+          <th>Ações</th>
+          {% endif %}
+        </tr>
+      </thead>
+      <tbody>
+        {% if users %}
+        {% for u in users %}
+        <tr>
+          <td><strong>{{ u.username }}</strong></td>
+          <td>{{ u.email|default:"—" }}</td>
+          <td>
+            {% for role in u.roles.all %}
+            <span class="badge bg-secondary me-1">{{ role.name }}</span>
+            {% empty %}
+            <span class="text-muted small">Sem papéis</span>
+            {% endfor %}
+          </td>
+          <td>
+            {% if u.account_status == "active" %}
+            <span class="badge bg-success">Ativo</span>
+            {% elif u.account_status == "blocked" %}
+            <span class="badge bg-danger">Bloqueado</span>
+            {% elif u.account_status == "removed" %}
+            <span class="badge bg-secondary">Removido</span>
+            {% endif %}
+          </td>
+          {% if is_admin %}
+          <td>
+            <div class="d-flex gap-1">
+              <a href="{% url 'admin_ui:user_update' u.pk %}" class="btn btn-sm btn-outline-secondary">Editar</a>
+              {% if u.account_status == "active" %}
+              <form method="post" action="{% url 'admin_ui:user_block' u.pk %}" class="d-inline">
+                {% csrf_token %}
+                <button type="submit" class="btn btn-sm btn-outline-danger">Bloquear</button>
+              </form>
+              {% elif u.account_status == "blocked" %}
+              <form method="post" action="{% url 'admin_ui:user_unblock' u.pk %}" class="d-inline">
+                {% csrf_token %}
+                <button type="submit" class="btn btn-sm btn-outline-success">Desbloquear</button>
+              </form>
+              {% endif %}
+            </div>
+          </td>
+          {% endif %}
+        </tr>
+        {% endfor %}
+        {% else %}
+        <tr>
+          <td colspan="{% if is_admin %}5{% else %}4{% endif %}" class="text-center text-muted py-3">
+            Nenhum usuário encontrado.
+          </td>
+        </tr>
+        {% endif %}
+      </tbody>
+    </table>
+  </div>
+</div>
+
+{% endblock %}
