@@ -125,9 +125,11 @@ Gestão de usuários e prompts pelo admin via UI.
 
 **Change**: `openspec/changes/admin-management/`
 
-- [ ] **Slice 1**: App admin_ui + CRUD de usuários com proteções
-- [ ] **Slice 2**: CRUD de prompts com versionamento
-- [ ] **Slice 3**: Quality gate completo
+- [x] **Slice 1**: App admin_ui + CRUD de usuários com proteções ✅
+- [x] **Slice 2**: CRUD de prompts com versionamento ✅
+- [x] **Slice 3**: Quality gate completo ✅
+
+**479 testes, arquivado em `openspec/archive/admin-management/`**
 
 ---
 
