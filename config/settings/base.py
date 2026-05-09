@@ -114,6 +114,14 @@ Q_CLUSTER = {
     "orm": "default",
 }
 
+# Periodic Summary Configuration
+# Comma-separated hours (in SUMMARY_TIMEZONE) when summaries are generated.
+# Default: 1, 7, 13, 19 (01:00, 07:00, 13:00, 19:00)
+SUMMARY_CUTOFF_HOURS = os.environ.get("SUMMARY_CUTOFF_HOURS", "7,13,19,1")
+
+# Timezone for summary window resolution (defaults to project TIME_ZONE)
+SUMMARY_TIMEZONE = os.environ.get("SUMMARY_TIMEZONE", TIME_ZONE)
+
 # Password validation
 AUTH_PASSWORD_VALIDATORS = [
     {"NAME": "django.contrib.auth.password_validation.UserAttributeSimilarityValidator"},
