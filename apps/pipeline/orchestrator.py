@@ -154,7 +154,34 @@ def _run_scope_and_llm2(
         payload=preop_decision,
     )
 
-    # ── 4. LLM2 suggestion ──────────────────────────────────────
+    # ── 4. Prior case lookup ────────────────────────────────────
+    from apps.pipeline.prior_case import lookup_prior_case_context
+
+    prior_context = lookup_prior_case_context(
+        case_id=case.case_id,
+        agency_record_number=case.agency_record_number,
+    )
+
+    # Serializa prior_case para dict (ou None) para passar ao LLM2
+    prior_case_json: dict[str, object] | None = None
+    if prior_context.prior_case is not None:
+        prior_case_json = {
+            "prior_case_id": prior_context.prior_case.prior_case_id,
+            "decided_at": prior_context.prior_case.decided_at,
+            "decision": prior_context.prior_case.decision,
+            "reason": prior_context.prior_case.reason,
+            "prior_denial_count_7d": prior_context.prior_denial_count_7d,
+        }
+        case._record_event(
+            "PRIOR_CASE_LOOKUP",
+            payload={
+                "prior_case_id": prior_context.prior_case.prior_case_id,
+                "decision": prior_context.prior_case.decision,
+                "prior_denial_count_7d": prior_context.prior_denial_count_7d,
+            },
+        )
+
+    # ── 5. LLM2 suggestion ──────────────────────────────────────
     sp2 = llm2_system_prompt or _get_prompt_content("llm2_system_prompt")
     ut2 = llm2_user_template or _get_prompt_content("llm2_user_prompt")
 
@@ -165,16 +192,17 @@ def _run_scope_and_llm2(
         llm1_structured_data=structured_data,
         system_prompt=sp2,
         user_prompt_template=ut2,
+        prior_case_json=prior_case_json,
     )
 
-    # ── 5. Reconciliation (LLM2 ⊗ preop policy) ─────────────────
+    # ── 6. Reconciliation (LLM2 ⊗ preop policy) ─────────────────
     reconciled = _apply_reconciliation(
         structured_data=structured_data,
         llm2_suggested_action=result2.suggested_action,
         preop_decision=preop_decision,
     )
 
-    # ── 6. Support synthesis ────────────────────────────────────
+    # ── 7. Support synthesis ────────────────────────────────────
     support_ctx = synthesize_eda_support_context(structured_data=structured_data)
     reconciled["support_recommendation"] = support_ctx.support_recommendation
     reconciled["asa"] = {
@@ -182,13 +210,13 @@ def _run_scope_and_llm2(
         "display_text": support_ctx.asa_display,
     }
 
-    # ── 7. Attach preop gate ────────────────────────────────────
+    # ── 8. Attach preop gate ────────────────────────────────────
     reconciled["preop_gate"] = preop_decision
 
     case.suggested_action = reconciled
     case.save()
 
-    # ── 8. Transition LLM_SUGGEST → R2_POST_WIDGET ─────────────
+    # ── 9. Transition LLM_SUGGEST → R2_POST_WIDGET ─────────────
     case.llm2_complete(success=True, user=None)
     case.save()
     case.ready_for_doctor()
