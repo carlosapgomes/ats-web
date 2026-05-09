@@ -105,6 +105,39 @@
   </div>
 </div>
 
+<!-- Summary Card (último resumo) -->
+{% if latest_summary %}
+<div class="row g-3 mb-4">
+  <div class="col-12">
+    <div class="card p-3">
+      <div class="d-flex justify-content-between align-items-center">
+        <div>
+          <h6 class="text-muted small mb-1">ÚLTIMO RESUMO</h6>
+          <span class="text-muted small">
+            {{ latest_summary.window_start|date:"d/m/Y H:i" }} — {{ latest_summary.window_end|date:"d/m/Y H:i" }}
+          </span>
+        </div>
+        <a href="{% url 'dashboard:summaries' %}" class="btn btn-sm btn-hospital-outline">Ver todos os resumos</a>
+      </div>
+      <div class="row g-2 mt-2 text-center">
+        <div class="col">
+          <div style="font-size:1.25rem; font-weight:700;">{{ latest_summary.patients_received }}</div>
+          <div class="text-muted small">Recebidos</div>
+        </div>
+        <div class="col">
+          <div style="font-size:1.25rem; font-weight:700;">{{ latest_summary.accepted_scheduled }}</div>
+          <div class="text-muted small">Aceitos</div>
+        </div>
+        <div class="col">
+          <div style="font-size:1.25rem; font-weight:700;">{{ latest_summary.refused }}</div>
+          <div class="text-muted small">Recusados</div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+{% endif %}
+
 <!-- Case Table -->
 <div class="card p-4">
   <div class="d-flex justify-content-between align-items-center mb-3 flex-wrap gap-2">

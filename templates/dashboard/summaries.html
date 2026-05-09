@@ -1,0 +1,112 @@
+{% extends "base.html" %}
+{% load static %}
+
+{% block title %}Resumos — ATS{% endblock %}
+{% block subtitle %}Histórico de resumos periódicos de supervisão{% endblock %}
+
+{% block nav %}
+<nav class="app-nav mt-3" aria-label="Navegação">
+  <ul class="nav nav-pills gap-2">
+    <li class="nav-item">
+      <a href="{% url 'dashboard:index' %}" class="nav-link">Dashboard</a>
+    </li>
+    <li class="nav-item">
+      <a href="{% url 'admin_ui:prompt_list' %}" class="nav-link">Prompts</a>
+    </li>
+    <li class="nav-item">
+      <a href="{% url 'admin_ui:user_list' %}" class="nav-link">Usuários</a>
+    </li>
+    <li class="nav-item">
+      <span class="nav-link active">Auditoria</span>
+    </li>
+  </ul>
+</nav>
+{% endblock %}
+
+{% block content %}
+
+<div class="card p-4">
+  <h5 class="mb-3">Resumos Periódicos</h5>
+
+  <div class="table-responsive">
+    <table class="table table-sm align-middle">
+      <thead class="table-light">
+        <tr>
+          <th>Período</th>
+          <th>Recebidos</th>
+          <th>Processados</th>
+          <th>Avaliados</th>
+          <th>Aceitos</th>
+          <th>Imediata</th>
+          <th>Recusados</th>
+          <th>Em Andamento</th>
+          <th>Status</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% if summaries %}
+        {% for s in summaries %}
+        <tr>
+          <td>
+            {{ s.window_start|date:"d/m/Y H:i" }} — {{ s.window_end|date:"d/m/Y H:i" }}
+          </td>
+          <td>{{ s.patients_received }}</td>
+          <td>{{ s.reports_processed }}</td>
+          <td>{{ s.cases_evaluated }}</td>
+          <td>{{ s.accepted_scheduled }}</td>
+          <td>{{ s.immediate_admission }}</td>
+          <td>{{ s.refused }}</td>
+          <td>{{ s.in_progress }}</td>
+          <td>
+            {% if s.status == "sent" %}
+            <span class="badge bg-success">Enviado</span>
+            {% else %}
+            <span class="badge bg-warning text-dark">Pendente</span>
+            {% endif %}
+          </td>
+        </tr>
+        {% endfor %}
+        {% else %}
+        <tr>
+          <td colspan="9" class="text-center text-muted py-3">Nenhum resumo encontrado.</td>
+        </tr>
+        {% endif %}
+      </tbody>
+    </table>
+  </div>
+
+  <!-- Pagination -->
+  {% if page_obj.paginator.num_pages > 1 %}
+  <nav class="mt-3" aria-label="Paginação">
+    <ul class="pagination pagination-sm justify-content-center mb-0">
+      {% if page_obj.has_previous %}
+      <li class="page-item">
+        <a class="page-link" href="?page={{ page_obj.previous_page_number }}">Anterior</a>
+      </li>
+      {% else %}
+      <li class="page-item disabled"><span class="page-link">Anterior</span></li>
+      {% endif %}
+
+      {% for i in page_obj.paginator.page_range %}
+        {% if page_obj.number == i %}
+        <li class="page-item active"><span class="page-link">{{ i }}</span></li>
+        {% else %}
+        <li class="page-item">
+          <a class="page-link" href="?page={{ i }}">{{ i }}</a>
+        </li>
+        {% endif %}
+      {% endfor %}
+
+      {% if page_obj.has_next %}
+      <li class="page-item">
+        <a class="page-link" href="?page={{ page_obj.next_page_number }}">Próxima</a>
+      </li>
+      {% else %}
+      <li class="page-item disabled"><span class="page-link">Próxima</span></li>
+      {% endif %}
+    </ul>
+  </nav>
+  {% endif %}
+</div>
+
+{% endblock %}

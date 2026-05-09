@@ -10,7 +10,7 @@ from django.shortcuts import get_object_or_404, render
 from django.utils import timezone
 
 from apps.accounts.decorators import role_required
-from apps.cases.models import Case, CaseStatus
+from apps.cases.models import Case, CaseStatus, SupervisorSummary
 
 # Reaproveita mapeamentos definidos no intake para consistência visual
 from apps.intake.views import (
@@ -180,6 +180,9 @@ def dashboard_index(request: HttpRequest) -> HttpResponse:
 
     enriched_cases = [_enrich_case(c) for c in page_obj]
 
+    # Último resumo para o card no dashboard
+    latest_summary = SupervisorSummary.objects.order_by("-window_end").first()
+
     return render(
         request,
         "dashboard/index.html",
@@ -195,6 +198,7 @@ def dashboard_index(request: HttpRequest) -> HttpResponse:
             "date_to": date_to,
             "status_choices": CaseStatus.choices,
             "STATUS_LABELS": STATUS_LABELS,
+            "latest_summary": latest_summary,
         },
     )
 
@@ -260,5 +264,24 @@ def dashboard_case_detail(request: HttpRequest, case_id: str) -> HttpResponse:
             "can_confirm_receipt": False,
             "result_info": result_info,
             "patient_name": patient_name,
+        },
+    )
+
+
+@login_required
+@role_required("manager", "admin")
+def dashboard_summaries(request: HttpRequest) -> HttpResponse:
+    """Página com histórico paginado de resumos de supervisão."""
+    summaries_qs = SupervisorSummary.objects.order_by("-window_end")
+    paginator = Paginator(summaries_qs, 25)
+    page_number = request.GET.get("page", 1)
+    page_obj = paginator.get_page(page_number)
+
+    return render(
+        request,
+        "dashboard/summaries.html",
+        {
+            "page_obj": page_obj,
+            "summaries": page_obj,
         },
     )
