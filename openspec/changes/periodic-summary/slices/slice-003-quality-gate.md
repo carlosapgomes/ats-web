@@ -6,10 +6,10 @@ Validação final completa.
 
 ## Checklist
 
-- [ ] `uv run ruff check .` — 0 errors
-- [ ] `uv run ruff format --check .` — 0 errors
-- [ ] `uv run mypy .` — 0 type errors
-- [ ] `uv run pytest` — todos passando
+- [x] `uv run ruff check .` — 0 errors
+- [x] `uv run ruff format --check .` — 0 errors
+- [x] `uv run mypy .` — 0 type errors
+- [x] `uv run pytest` — 506 passed, 0 failed
 - [ ] Teste manual no browser:
   - Login como admin → dashboard
   - Card de último resumo visível (ou mensagem "nenhum resumo")
