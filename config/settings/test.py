@@ -24,6 +24,8 @@ DATABASES = {
         default="postgres://ats_web:ats_web_dev@localhost:5433/ats_web_test",
         conn_max_age=0,
         conn_health_checks=False,
+        # Force test database URL regardless of DATABASE_URL env var
+        env="TEST_DATABASE_URL",
     )
 }
 
