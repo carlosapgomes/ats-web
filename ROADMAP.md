@@ -139,9 +139,11 @@ Geração automática de resumos operacionais.
 
 **Change**: `openspec/changes/periodic-summary/`
 
-- [ ] **Slice 1**: Modelo SupervisorSummary + agregação + resolve_window + task
-- [ ] **Slice 2**: Card no dashboard + página de histórico
-- [ ] **Slice 3**: Quality gate completo
+- [x] **Slice 1**: Modelo SupervisorSummary + agregação + resolve_window + task ✅
+- [x] **Slice 2**: Card no dashboard + página de histórico ✅
+- [x] **Slice 3**: Quality gate completo ✅
+
+**506 testes, arquivado em `openspec/archive/periodic-summary/`**
 
 ---
 
