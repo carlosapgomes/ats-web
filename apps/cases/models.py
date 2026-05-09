@@ -295,3 +295,30 @@ class CaseEvent(models.Model):
 
     def __str__(self) -> str:
         return f"CaseEvent {self.event_type} @ {self.timestamp}"
+
+
+class SupervisorSummary(models.Model):
+    """Resumo periódico para supervisão de casos."""
+
+    window_start = models.DateTimeField()
+    window_end = models.DateTimeField()
+    patients_received = models.PositiveIntegerField(default=0)
+    reports_processed = models.PositiveIntegerField(default=0)
+    cases_evaluated = models.PositiveIntegerField(default=0)
+    accepted_scheduled = models.PositiveIntegerField(default=0)
+    immediate_admission = models.PositiveIntegerField(default=0)
+    refused = models.PositiveIntegerField(default=0)
+    in_progress = models.PositiveIntegerField(default=0)
+    status = models.CharField(
+        max_length=10,
+        choices=[("pending", "Pending"), ("sent", "Sent")],
+        default="sent",
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        unique_together = [("window_start", "window_end")]
+        ordering = ["-window_end"]
+
+    def __str__(self) -> str:
+        return f"SupervisorSummary {self.window_start} – {self.window_end} [{self.status}]"
