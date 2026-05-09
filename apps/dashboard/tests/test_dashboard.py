@@ -7,7 +7,7 @@ from django.contrib.auth import get_user_model
 from django.urls import reverse
 from django.utils import timezone
 
-from apps.cases.models import Case, CaseStatus
+from apps.cases.models import Case, CaseStatus, SupervisorSummary
 
 User = get_user_model()
 
@@ -535,3 +535,130 @@ class TestHomeRedirect:
         # NIR deve ir para intake, não dashboard
         last_url = response.redirect_chain[-1][0] if response.redirect_chain else ""
         assert "/dashboard/" not in last_url
+
+
+# ── Dashboard: Summaries (Slice 002) ────────────────────────────────────
+
+
+@pytest.mark.django_db
+class TestDashboardSummaryCard:
+    """Verifica o card de último resumo no dashboard."""
+
+    def _create_summary(self, **overrides) -> SupervisorSummary:
+        defaults = {
+            "window_start": timezone.now() - timedelta(hours=6),
+            "window_end": timezone.now() - timedelta(hours=3),
+            "patients_received": 10,
+            "reports_processed": 8,
+            "cases_evaluated": 7,
+            "accepted_scheduled": 4,
+            "immediate_admission": 2,
+            "refused": 1,
+            "in_progress": 3,
+            "status": "sent",
+        }
+        defaults.update(overrides)
+        return SupervisorSummary.objects.create(**defaults)
+
+    def test_card_appears_when_summary_exists(self, client) -> None:
+        """Card com último resumo aparece no dashboard se existir."""
+        _login_as(client, "manager")
+        self._create_summary()
+        response = client.get(reverse("dashboard:index"))
+        assert response.status_code == 200
+        content = response.content.decode()
+        assert "ÚLTIMO RESUMO" in content
+        assert "Ver todos" in content
+
+    def test_card_shows_correct_data(self, client) -> None:
+        """Card exibe as métricas principais do último resumo."""
+        _login_as(client, "manager")
+        self._create_summary(
+            patients_received=15,
+            accepted_scheduled=6,
+            refused=2,
+        )
+        response = client.get(reverse("dashboard:index"))
+        assert response.status_code == 200
+        content = response.content.decode()
+        assert "15" in content  # received
+        assert "6" in content  # accepted
+        assert "2" in content  # refused
+
+    def test_card_hides_when_no_summary(self, client) -> None:
+        """Card não aparece quando não há resumos."""
+        _login_as(client, "manager")
+        response = client.get(reverse("dashboard:index"))
+        assert response.status_code == 200
+        content = response.content.decode()
+        assert "ÚLTIMO RESUMO" not in content
+
+
+@pytest.mark.django_db
+class TestDashboardSummariesView:
+    """Verifica a view /dashboard/summaries/."""
+
+    def _create_summaries(self, count: int = 5) -> None:
+        base = timezone.now()
+        for i in range(count):
+            SupervisorSummary.objects.create(
+                window_start=base - timedelta(hours=(i + 1) * 6),
+                window_end=base - timedelta(hours=(i + 1) * 6 - 3),
+                patients_received=10 + i,
+                reports_processed=8 + i,
+                cases_evaluated=7 + i,
+                accepted_scheduled=4 + i,
+                immediate_admission=2,
+                refused=1,
+                in_progress=3,
+                status="sent" if i % 2 == 0 else "pending",
+            )
+
+    def test_accessible_for_manager(self, client) -> None:
+        """GET /dashboard/summaries/ retorna 200 para manager."""
+        _login_as(client, "manager")
+        response = client.get(reverse("dashboard:summaries"))
+        assert response.status_code == 200
+
+    def test_accessible_for_admin(self, client) -> None:
+        """GET /dashboard/summaries/ retorna 200 para admin."""
+        _login_as(client, "admin")
+        response = client.get(reverse("dashboard:summaries"))
+        assert response.status_code == 200
+
+    def test_blocked_for_nir(self, client) -> None:
+        """GET /dashboard/summaries/ bloqueado para NIR."""
+        _login_as(client, "nir")
+        response = client.get(reverse("dashboard:summaries"))
+        assert response.status_code == 302
+
+    def test_blocked_for_doctor(self, client) -> None:
+        """GET /dashboard/summaries/ bloqueado para doctor."""
+        _login_as(client, "doctor")
+        response = client.get(reverse("dashboard:summaries"))
+        assert response.status_code == 302
+
+    def test_lists_summaries_with_pagination(self, client) -> None:
+        """/dashboard/summaries/ lista resumos com paginação (25 por página)."""
+        _login_as(client, "manager")
+        self._create_summaries(30)
+        response = client.get(reverse("dashboard:summaries"))
+        assert response.status_code == 200
+        content = response.content.decode()
+        # Pagination should be present (30 > 25)
+        assert "pagination" in content or "page-link" in content
+
+    def test_shows_status_badge(self, client) -> None:
+        """Tabela exibe badge de status (Enviado/Pendente)."""
+        _login_as(client, "manager")
+        self._create_summaries(2)
+        response = client.get(reverse("dashboard:summaries"))
+        assert response.status_code == 200
+        content = response.content.decode()
+        assert "Enviado" in content or "Pendente" in content
+
+    def test_requires_login(self, client) -> None:
+        """GET /dashboard/summaries/ sem autenticação → redirect."""
+        response = client.get(reverse("dashboard:summaries"))
+        assert response.status_code == 302
+        assert "/login/" in response.url
