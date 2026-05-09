@@ -151,10 +151,11 @@ Geração automática de resumos operacionais.
 
 Consulta de casos anteriores do mesmo paciente.
 
-- Busca por agency_record_number
-- Detectar negações recentes (7 dias)
-- Exibir contexto de caso anterior na tela de decisão médica
-- Registrar lookup como evento auditável
+**Change**: `openspec/changes/prior-case-lookup/`
+
+- [ ] **Slice 1**: Lookup function + integração pipeline + audit event
+- [ ] **Slice 2**: UI cards (decisão médica + case detail)
+- [ ] **Slice 3**: Quality gate completo
 
 ---
 
