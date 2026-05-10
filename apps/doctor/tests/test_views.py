@@ -506,6 +506,111 @@ class TestDoctorDecisionView:
         assert "PDF" in content or "pdf" in content.lower() or "Encaminhamento" in content
 
 
+# ── Prior case card tests ───────────────────────────────────────────────
+
+
+@pytest.mark.django_db
+class TestDoctorDecisionPriorCaseCard:
+    """Tests for prior case context card in doctor decision view."""
+
+    def _create_role(self, name: str):
+        from apps.accounts.models import Role
+
+        role, _ = Role.objects.get_or_create(name=name)
+        return role
+
+    def _login_as(self, client, role_name: str):
+        user = User.objects.create_user(username=f"{role_name}@prior.test", password="testpass123")
+        user.roles.add(self._create_role(role_name))
+        client.force_login(user)
+        session = client.session
+        session["active_role"] = role_name
+        session.save()
+        return user
+
+    def _make_prior_denied_case(self, user, arn: str, reason: str, days_ago: int = 1) -> Case:
+        """Create a prior DOCTOR_DENIED case with the same agency_record_number."""
+        from datetime import timedelta
+
+        case = Case.objects.create(
+            created_by=user,
+            agency_record_number=arn,
+            status=CaseStatus.DOCTOR_DENIED,
+            doctor_decision="deny",
+            doctor_reason=reason,
+            doctor_decided_at=timezone.now() - timedelta(days=days_ago),
+        )
+        Case.objects.filter(case_id=case.case_id).update(created_at=timezone.now() - timedelta(days=days_ago))
+        return case
+
+    def test_prior_case_card_shows_when_recent_denial(self, client) -> None:
+        """Card 'Caso Anterior' aparece quando há negação recente."""
+        nir_user = User.objects.create_user(username="nir_prior1@test.com", password="testpass123")
+        nir_user.roles.add(self._create_role("nir"))
+
+        current = Case.objects.create(
+            created_by=nir_user,
+            status=CaseStatus.WAIT_DOCTOR,
+            agency_record_number="ARN-001",
+            structured_data={"patient": {"name": "João Prior", "age": 50, "gender": "Masculino"}},
+        )
+        current.save()
+
+        # Create prior case with same ARN
+        self._make_prior_denied_case(nir_user, "ARN-001", "Contorno clínico elevado")
+
+        self._login_as(client, "doctor")
+        response = client.get(f"/doctor/{current.case_id}/")
+        assert response.status_code == 200
+        content = response.content.decode()
+        assert "Caso Anterior" in content
+        assert "Triagem Negada" in content
+        assert "Contorno clínico elevado" in content
+
+    def test_prior_case_card_hidden_when_no_prior(self, client) -> None:
+        """Card não aparece quando não há caso anterior."""
+        nir_user = User.objects.create_user(username="nir_prior2@test.com", password="testpass123")
+        nir_user.roles.add(self._create_role("nir"))
+
+        current = Case.objects.create(
+            created_by=nir_user,
+            status=CaseStatus.WAIT_DOCTOR,
+            agency_record_number="ARN-002",
+            structured_data={"patient": {"name": "Maria SemPrior", "age": 40, "gender": "Feminino"}},
+        )
+        current.save()
+
+        self._login_as(client, "doctor")
+        response = client.get(f"/doctor/{current.case_id}/")
+        assert response.status_code == 200
+        content = response.content.decode()
+        assert "Caso Anterior" not in content
+
+    def test_prior_case_card_shows_multiple_denials_badge(self, client) -> None:
+        """Card mostra badge de contagem quando múltiplas negações."""
+        nir_user = User.objects.create_user(username="nir_prior3@test.com", password="testpass123")
+        nir_user.roles.add(self._create_role("nir"))
+
+        current = Case.objects.create(
+            created_by=nir_user,
+            status=CaseStatus.WAIT_DOCTOR,
+            agency_record_number="ARN-003",
+            structured_data={"patient": {"name": "Multi Prior", "age": 60, "gender": "Masculino"}},
+        )
+        current.save()
+
+        # Create 2 prior denied cases
+        self._make_prior_denied_case(nir_user, "ARN-003", "Primeira negação", days_ago=2)
+        self._make_prior_denied_case(nir_user, "ARN-003", "Segunda negação", days_ago=1)
+
+        self._login_as(client, "doctor")
+        response = client.get(f"/doctor/{current.case_id}/")
+        assert response.status_code == 200
+        content = response.content.decode()
+        assert "Caso Anterior" in content
+        assert "2 negações" in content or "negações em 7 dias" in content
+
+
 # ── Form validation tests ────────────────────────────────────────────────
 
 

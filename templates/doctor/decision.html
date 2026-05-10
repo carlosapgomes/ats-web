@@ -61,6 +61,35 @@
 
   <!-- Right: Decision Form -->
   <div class="col-lg-7">
+
+    {% if prior_context and prior_context.prior_case %}
+    <!-- Prior Case Card -->
+    <div class="card p-4 mb-3 border-warning">
+      <div class="card-header bg-warning text-dark fw-semibold py-2 px-3 mb-3" style="margin: -1rem -1rem 0 -1rem; border-radius: 0.375rem 0.375rem 0 0;">
+        ⚠️ Caso Anterior — Negação Recente
+        {% if prior_context.prior_denial_count_7d > 1 %}
+        <span class="badge bg-danger ms-2">{{ prior_context.prior_denial_count_7d }} negações em 7 dias</span>
+        {% endif %}
+      </div>
+      <div class="card-body pt-3">
+        <table class="table table-sm mb-0">
+          <tr>
+            <td class="text-muted" style="width:35%;">Decisão</td>
+            <td><strong>{{ prior_decision_display }}</strong></td>
+          </tr>
+          <tr>
+            <td class="text-muted">Data</td>
+            <td>{{ prior_context.prior_case.decided_at|slice:":10"|default:"—" }}</td>
+          </tr>
+          <tr>
+            <td class="text-muted">Motivo</td>
+            <td>{{ prior_context.prior_case.reason }}</td>
+          </tr>
+        </table>
+      </div>
+    </div>
+    {% endif %}
+
     <div class="card p-4">
       <h5 class="mb-4">🩺 Formulário de Decisão</h5>
 

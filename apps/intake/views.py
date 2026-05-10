@@ -270,6 +270,18 @@ def case_detail(request: HttpRequest, case_id: str) -> HttpResponse:
 
     can_confirm = case.status == CaseStatus.WAIT_R1_CLEANUP_THUMBS
 
+    # Prior case lookup — extrair informações do evento PRIOR_CASE_LOOKUP
+    prior_case_lookup = None
+    for e in events:
+        if e.event_type == "PRIOR_CASE_LOOKUP":
+            payload = e.payload or {}
+            prior_case_lookup = {
+                "prior_case_id": payload.get("prior_case_id", ""),
+                "decision": payload.get("decision", ""),
+                "prior_denial_count_7d": payload.get("prior_denial_count_7d", 0),
+            }
+            break
+
     # Resultado final
     result_info = None
     terminal_with_result = case.status in (
@@ -311,6 +323,7 @@ def case_detail(request: HttpRequest, case_id: str) -> HttpResponse:
             "can_confirm_receipt": can_confirm,
             "result_info": result_info,
             "patient_name": patient_name,
+            "prior_case_lookup": prior_case_lookup,
         },
     )
 
