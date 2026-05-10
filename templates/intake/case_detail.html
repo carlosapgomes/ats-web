@@ -146,6 +146,33 @@
 </div>
 {% endif %}
 
+<!-- Prior Case Lookup Card -->
+{% if prior_case_lookup %}
+<div class="card p-4 mb-4 border-warning">
+  <h5 class="mb-3">⚠️ Caso Anterior — Negação Recente</h5>
+  <div class="row g-3">
+    <div class="col-md-6">
+      <p class="mb-1 text-muted small">Decisão</p>
+      <p class="mb-0 fw-medium">
+        {% if prior_case_lookup.decision == "doctor_denied" %}
+          Triagem Negada
+        {% elif prior_case_lookup.decision == "appointment_denied" %}
+          Agendamento Negado
+        {% else %}
+          {{ prior_case_lookup.decision }}
+        {% endif %}
+      </p>
+    </div>
+    {% if prior_case_lookup.prior_denial_count_7d > 1 %}
+    <div class="col-md-6">
+      <p class="mb-1 text-muted small">Negações em 7 dias</p>
+      <p class="mb-0"><span class="badge bg-danger fs-6">{{ prior_case_lookup.prior_denial_count_7d }}</span></p>
+    </div>
+    {% endif %}
+  </div>
+</div>
+{% endif %}
+
 <!-- Timeline -->
 <div class="card p-4 mb-4">
   <h5 class="mb-3">Linha do Tempo</h5>

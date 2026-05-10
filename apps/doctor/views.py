@@ -37,6 +37,12 @@ DOCTOR_DECISION_MAP: dict[str, str] = {
     "deny": "NEGAR",
 }
 
+# Prior case decision mapping for display on UI cards
+PRIOR_DECISION_DISPLAY: dict[str, str] = {
+    "doctor_denied": "Triagem Negada",
+    "appointment_denied": "Agendamento Negado",
+}
+
 
 def _get_patient_name(case: Case) -> str:
     if case.structured_data and isinstance(case.structured_data, dict):
@@ -175,6 +181,19 @@ def doctor_queue(request: HttpRequest) -> HttpResponse:
 
 def _build_decision_context(case: Case, form: DoctorDecisionForm) -> dict[str, Any]:
     """Build context dict for the decision template."""
+    from apps.pipeline.prior_case import lookup_prior_case_context
+
+    prior_context = None
+    prior_decision_display = ""
+    if case.agency_record_number:
+        pc = lookup_prior_case_context(
+            case_id=case.case_id,
+            agency_record_number=case.agency_record_number,
+        )
+        if pc.prior_case is not None:
+            prior_context = pc
+            prior_decision_display = PRIOR_DECISION_DISPLAY.get(pc.prior_case.decision, pc.prior_case.decision)
+
     return {
         "case": case,
         "form": form,
@@ -186,6 +205,8 @@ def _build_decision_context(case: Case, form: DoctorDecisionForm) -> dict[str, A
         "suggested_flow": _get_suggested_flow(case),
         "summary_text": case.summary_text or "",
         "pdf_filename": _get_pdf_filename(case),
+        "prior_context": prior_context,
+        "prior_decision_display": prior_decision_display,
     }
 
 

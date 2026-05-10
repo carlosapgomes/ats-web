@@ -530,3 +530,56 @@ class TestCaseDetailStepper:
         assert "done" in content
         # Deve ter step marcado como current
         assert "current" in content
+
+
+# ── Prior case lookup card tests ────────────────────────────────────────
+
+
+@pytest.mark.django_db
+class TestCaseDetailPriorCaseLookup:
+    """Tests for PRIOR_CASE_LOOKUP card in case detail view."""
+
+    def test_prior_case_card_appears_with_prior_case_lookup_event(self, client) -> None:
+        """Card 'Caso Anterior' aparece quando há evento PRIOR_CASE_LOOKUP."""
+        client, user = _nir_client(client)
+        case = Case.objects.create(
+            created_by=user,
+            agency_record_number="PRIOR-EVT",
+            status=CaseStatus.NEW,
+        )
+        CaseEvent.objects.create(
+            case=case,
+            event_type="PRIOR_CASE_LOOKUP",
+            actor=user,
+            actor_type="system",
+            payload={
+                "prior_case_id": "abc-123",
+                "decision": "doctor_denied",
+                "prior_denial_count_7d": 1,
+            },
+        )
+        response = client.get(reverse("intake:case_detail", args=[case.case_id]))
+        assert response.status_code == 200
+        content = response.content.decode()
+        assert "Caso Anterior" in content
+        assert "Triagem Negada" in content
+
+    def test_prior_case_card_hidden_without_event(self, client) -> None:
+        """Card não aparece quando não há evento PRIOR_CASE_LOOKUP."""
+        client, user = _nir_client(client)
+        case = Case.objects.create(
+            created_by=user,
+            agency_record_number="NO-PRIOR",
+            status=CaseStatus.NEW,
+        )
+        # Create a different event, not PRIOR_CASE_LOOKUP
+        CaseEvent.objects.create(
+            case=case,
+            event_type="CASE_CREATED",
+            actor=user,
+            actor_type="system",
+        )
+        response = client.get(reverse("intake:case_detail", args=[case.case_id]))
+        assert response.status_code == 200
+        content = response.content.decode()
+        assert "Caso Anterior" not in content

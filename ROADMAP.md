@@ -153,9 +153,11 @@ Consulta de casos anteriores do mesmo paciente.
 
 **Change**: `openspec/changes/prior-case-lookup/`
 
-- [ ] **Slice 1**: Lookup function + integração pipeline + audit event
-- [ ] **Slice 2**: UI cards (decisão médica + case detail)
-- [ ] **Slice 3**: Quality gate completo
+- [x] **Slice 1**: Lookup function + integração pipeline + audit event ✅
+- [x] **Slice 2**: UI cards (decisão médica + case detail) ✅
+- [x] **Slice 3**: Quality gate completo ✅
+
+**532 testes, arquivado em `openspec/archive/prior-case-lookup/`**
 
 ---
 
