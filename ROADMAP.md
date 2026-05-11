@@ -165,12 +165,11 @@ Consulta de casos anteriores do mesmo paciente.
 
 Transformar em PWA instalável e refinamentos de UX.
 
-- manifest.json (nome, ícone, tema)
-- Service worker mínimo (cache de estáticos)
-- Meta tags viewport, theme-color, apple-mobile-web-app
-- Prompt de instalação
-- Badges de contagem nas filas (novo caso, decisão pendente)
-- Responsividade mobile
+**Change**: `openspec/changes/pwa-polish/`
+
+- [ ] **Slice 1**: PWA core — manifest, ícone, service worker, meta tags
+- [ ] **Slice 2**: Badges de contagem + responsividade mobile
+- [ ] **Slice 3**: Quality gate completo
 
 ---
 
