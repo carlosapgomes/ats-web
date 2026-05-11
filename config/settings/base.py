@@ -55,6 +55,7 @@ TEMPLATES = [
                 "django.contrib.auth.context_processors.auth",
                 "django.contrib.messages.context_processors.messages",
                 "apps.accounts.context_processors.role_context",
+                "apps.accounts.context_processors.queue_counts",
             ],
         },
     },

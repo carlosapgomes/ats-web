@@ -145,6 +145,20 @@ body.hospital-shell h6 {
   color: #fff;
 }
 
+/* ---------- Touch-friendly buttons ---------- */
+
+.btn {
+  min-height: 44px;
+}
+
+.btn-sm {
+  min-height: 36px;
+}
+
+.btn-lg {
+  min-height: 48px;
+}
+
 /* ---------- Badges & status ---------- */
 
 .badge-hospital-primary {
@@ -589,12 +603,71 @@ body.hospital-shell h6 {
   /* Hide less important table columns on mobile */
   .hide-mobile { display: none; }
 
+  /* Responsive badge */
+  .badge.bg-danger.ms-1 {
+    font-size: 0.65rem;
+    min-width: 16px;
+    height: 16px;
+    line-height: 16px;
+    padding: 0 3px;
+  }
+
   /* Login */
   .login-container { margin: 1rem auto; }
+
+  /* Ensure nav links are touch-friendly */
+  .app-nav .nav-link {
+    min-height: 44px;
+    display: inline-flex;
+    align-items: center;
+  }
 
   /* Decision form two-column to single */
   .decision-two-col .col-lg-5,
   .decision-two-col .col-lg-7 {
     padding-bottom: 0.5rem;
+  }
+}
+
+/* ---------- Extra small screens (320px–576px) ---------- */
+
+@media (max-width: 575.98px) {
+  .app-header__title { font-size: 0.95rem; }
+
+  .app-header__subtitle { font-size: 0.75rem; }
+
+  .app-session-meta {
+    font-size: 0.78rem;
+  }
+
+  .container {
+    padding-left: 0.75rem;
+    padding-right: 0.75rem;
+  }
+
+  /* Full-width action buttons on very small screens */
+  .d-flex.gap-1.justify-content-lg-end {
+    flex-wrap: wrap;
+  }
+
+  .d-flex.gap-1.justify-content-lg-end .btn {
+    flex: 1 1 auto;
+    min-width: 0;
+  }
+
+  /* Reduce card padding */
+  .hospital-shell .card {
+    padding: 0.5rem !important;
+  }
+
+  /* Ensure tables don't break layout */
+  .table {
+    font-size: 0.75rem;
+  }
+
+  /* Stepper compact */
+  .step-item {
+    font-size: 0.72rem;
+    min-width: 60px;
   }
 }
