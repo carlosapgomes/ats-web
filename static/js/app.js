@@ -1,4 +1,8 @@
 /* ATS Web — Vanilla JavaScript */
 
-// Placeholder for future PWA service worker registration
-// and other client-side enhancements.
+// Service Worker registration
+if ('serviceWorker' in navigator) {
+  window.addEventListener('load', () => {
+    navigator.serviceWorker.register('/static/js/sw.js').catch(() => {});
+  });
+}

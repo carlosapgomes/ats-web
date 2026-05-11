@@ -1,0 +1,14 @@
+{
+  "name": "ATS — Sistema de Triagem Hospitalar",
+  "short_name": "ATS",
+  "description": "Sistema de Triagem de Endoscopia Digestiva Alta",
+  "start_url": "/",
+  "display": "standalone",
+  "theme_color": "#0b4263",
+  "background_color": "#ffffff",
+  "icons": [
+    { "src": "/static/icons/icon.svg", "sizes": "any", "type": "image/svg+xml" },
+    { "src": "/static/icons/icon-192.png", "sizes": "192x192", "type": "image/png" },
+    { "src": "/static/icons/icon-512.png", "sizes": "512x512", "type": "image/png" }
+  ]
+}
