@@ -167,9 +167,11 @@ Transformar em PWA instalável e refinamentos de UX.
 
 **Change**: `openspec/changes/pwa-polish/`
 
-- [ ] **Slice 1**: PWA core — manifest, ícone, service worker, meta tags
-- [ ] **Slice 2**: Badges de contagem + responsividade mobile
-- [ ] **Slice 3**: Quality gate completo
+- [x] **Slice 1**: PWA core — manifest, ícone, service worker, meta tags ✅
+- [x] **Slice 2**: Badges de contagem + responsividade mobile ✅
+- [x] **Slice 3**: Quality gate completo ✅
+
+**541 testes, arquivado em `openspec/archive/pwa-polish/`**
 
 ---
 
