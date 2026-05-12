@@ -12,6 +12,7 @@ dependencies = [
     "django-fsm==3.0.1",
     "pymupdf>=1.27.2.3",
     "openai>=2.34.0",
+    "gunicorn>=23.0.0",
 ]
 
 [dependency-groups]

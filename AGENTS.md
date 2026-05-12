@@ -47,21 +47,40 @@
 ### Setup inicial
 
 ```bash
-# 1. Dependências Python
-uv sync
-
-# 2. Banco de dados (container PostgreSQL)
+# 1. Subir todos os serviços (db + web + worker)
 docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d
 
-# 3. Migrations
-uv run python manage.py migrate --settings=config.settings.dev
+# 2. Rodar migrations (primeira vez)
+docker compose -f docker-compose.yml -f docker-compose.dev.yml exec web \
+  uv run python manage.py migrate --settings=config.settings.dev
+
+# 3. Criar superuser (primeira vez)
+docker compose -f docker-compose.yml -f docker-compose.dev.yml exec web \
+  uv run python manage.py createsuperuser --settings=config.settings.dev
 ```
 
 ### Operacao basica
 
 ```bash
-git status --short
-git branch --show-current
+# Subir
+DDEV="docker compose -f docker-compose.yml -f docker-compose.dev.yml"
+$DDEV up -d
+
+# Logs
+$DDEV logs -f web
+$DDEV logs -f worker
+
+# Parar
+$DDEV down
+
+# Migrations
+$DDEV exec web uv run python manage.py migrate --settings=config.settings.dev
+
+# Django management commands
+$DDEV exec web uv run python manage.py <command> --settings=config.settings.dev
+
+# Status dos serviços
+$DDEV ps
 ```
 
 ### Ambiente de testes
@@ -80,7 +99,11 @@ docker compose -f docker-compose.yml -f docker-compose.test.yml down -v
 ### Servidor de desenvolvimento
 
 ```bash
-uv run python manage.py runserver --settings=config.settings.dev
+# Tudo roda em Docker:
+docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d
+# Web: http://localhost:8080
+# Worker: django-q2 processa pipeline automaticamente
+# Código editado no host reflete instantaneamente (volume mount)
 ```
 
 ### Quality gate completo

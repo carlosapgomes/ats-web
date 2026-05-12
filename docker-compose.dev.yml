@@ -1,5 +1,5 @@
-# Development: banco com porta exposta e volume persistente
-# Uso: docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d
+# Development: all services with live-reload via volume mount
+# Usage: docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d
 
 name: ats-web-dev
 
@@ -12,5 +12,52 @@ services:
     volumes:
       - pgdata_dev:/var/lib/postgresql/data
 
+  web:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    command: uv run python manage.py runserver 0.0.0.0:8000 --settings=config.settings.dev
+    ports:
+      - "8080:8000"
+    volumes:
+      - .:/app                # live-reload: mount source code
+      - app_venv:/app/.venv   # prevent host venv from leaking into container
+    environment:
+      DJANGO_SETTINGS_MODULE: config.settings.dev
+      DATABASE_URL: postgres://ats_web:ats_web_dev@db:5432/ats_web_dev
+      DJANGO_SECRET_KEY: dev-secret-key-not-for-production
+      DJANGO_DEBUG: "true"
+    depends_on:
+      db:
+        condition: service_healthy
+    networks:
+      - ats-net
+    stdin_open: true
+    tty: true
+
+  worker:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    command: uv run python manage.py qcluster --settings=config.settings.dev
+    volumes:
+      - .:/app
+      - app_venv:/app/.venv
+    environment:
+      DJANGO_SETTINGS_MODULE: config.settings.dev
+      DATABASE_URL: postgres://ats_web:ats_web_dev@db:5432/ats_web_dev
+      DJANGO_SECRET_KEY: dev-secret-key-not-for-production
+      DJANGO_DEBUG: "true"
+    depends_on:
+      db:
+        condition: service_healthy
+    networks:
+      - ats-net
+
+networks:
+  ats-net:
+    external: false
+
 volumes:
   pgdata_dev:
+  app_venv:
