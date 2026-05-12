@@ -54,9 +54,13 @@ docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d
 docker compose -f docker-compose.yml -f docker-compose.dev.yml exec web \
   uv run python manage.py migrate --settings=config.settings.dev
 
-# 3. Criar superuser (primeira vez)
+# 3. Criar usuário admin com todos os papéis (idempotente)
 docker compose -f docker-compose.yml -f docker-compose.dev.yml exec web \
-  uv run python manage.py createsuperuser --settings=config.settings.dev
+  uv run python manage.py seed_admin --settings=config.settings.dev
+
+# 4. Criar prompts LLM iniciais (idempotente)
+docker compose -f docker-compose.yml -f docker-compose.dev.yml exec web \
+  uv run python manage.py seed_prompts --settings=config.settings.dev
 ```
 
 ### Operacao basica
