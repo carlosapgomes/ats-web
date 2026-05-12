@@ -18,22 +18,29 @@ Python 3.13+ · Django 5.2+ · PostgreSQL 17+ · Bootstrap 5.3 · Vanilla JS · 
 
 > Tudo roda em Docker. Não é necessário instalar Python ou uv no host.
 
-### Primeira vez
+### Primeira vez (bootstrap completo)
 
 ```bash
 # 1. Subir todos os serviços (db + web + worker)
 docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d
 
-# 2. Rodar migrations
+# 2. Rodar migrations (cria tabelas + seed dos 5 papéis)
 docker compose -f docker-compose.yml -f docker-compose.dev.yml exec web \
   uv run python manage.py migrate --settings=config.settings.dev
 
-# 3. Criar superuser
+# 3. Criar usuário admin com todos os papéis (idempotente)
 docker compose -f docker-compose.yml -f docker-compose.dev.yml exec web \
-  uv run python manage.py createsuperuser --settings=config.settings.dev
+  uv run python manage.py seed_admin --settings=config.settings.dev
 
-# 4. Acessar http://localhost:8080
+# 4. Criar prompts LLM iniciais (idempotente)
+docker compose -f docker-compose.yml -f docker-compose.dev.yml exec web \
+  uv run python manage.py seed_prompts --settings=config.settings.dev
+
+# 5. Acessar http://localhost:8080 (login: admin / admin)
 ```
+
+> Os comandos `seed_admin` e `seed_prompts` são idempotentes — podem ser executados
+> múltiplas vezes sem efeitos colaterais.
 
 ### Comandos do dia-a-dia
 
