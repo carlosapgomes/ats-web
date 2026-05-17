@@ -204,7 +204,6 @@ def _build_decision_context(case: Case, form: DoctorDecisionForm) -> dict[str, A
         "suggested_support": _get_suggested_support(case),
         "suggested_flow": _get_suggested_flow(case),
         "summary_text": case.summary_text or "",
-        "pdf_filename": _get_pdf_filename(case),
         "prior_context": prior_context,
         "prior_decision_display": prior_decision_display,
     }
@@ -267,11 +266,3 @@ def doctor_submit(request: HttpRequest, case_id: str) -> HttpResponse:
         case.save()
 
     return redirect("doctor:queue")
-
-
-def _get_pdf_filename(case: Case) -> str:
-    """Extrai nome do arquivo PDF do caso."""
-    if case.pdf_file and case.pdf_file.name:
-        pdf_name: str = case.pdf_file.name
-        return pdf_name.rsplit("/", 1)[-1] if "/" in pdf_name else pdf_name
-    return ""
