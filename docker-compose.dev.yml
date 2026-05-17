@@ -27,6 +27,7 @@ services:
       DATABASE_URL: postgres://ats_web:ats_web_dev@db:5432/ats_web_dev
       DJANGO_SECRET_KEY: dev-secret-key-not-for-production
       DJANGO_DEBUG: "true"
+      INTRANET_IP_RANGE: ${INTRANET_IP_RANGE:-127.0.0.0/8,192.168.0.0/16,10.0.0.0/8,172.16.0.0/12}
     depends_on:
       db:
         condition: service_healthy
@@ -48,6 +49,7 @@ services:
       DATABASE_URL: postgres://ats_web:ats_web_dev@db:5432/ats_web_dev
       DJANGO_SECRET_KEY: dev-secret-key-not-for-production
       DJANGO_DEBUG: "true"
+      INTRANET_IP_RANGE: ${INTRANET_IP_RANGE:-127.0.0.0/8,192.168.0.0/16,10.0.0.0/8,172.16.0.0/12}
     depends_on:
       db:
         condition: service_healthy
