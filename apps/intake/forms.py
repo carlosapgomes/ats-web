@@ -18,13 +18,3 @@ class CaseUploadForm(forms.Form):
             }
         ),
     )
-    agency_record_number = forms.CharField(
-        label="Número do Registro",
-        max_length=20,
-        widget=forms.TextInput(
-            attrs={
-                "class": "form-control",
-                "placeholder": "Ex: 2026-0428-001",
-            }
-        ),
-    )

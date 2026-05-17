@@ -10,7 +10,7 @@ from apps.accounts.decorators import role_required
 from apps.cases.models import Case, CaseStatus
 
 from .forms import CaseUploadForm
-from .pdf_utils import extract_pdf_text
+from .pdf_utils import extract_pdf_text, strip_watermark_and_extract_record
 
 STATUS_LABELS: dict[str, str] = {
     "NEW": "Novo",
@@ -151,7 +151,6 @@ def intake_home(request: HttpRequest) -> HttpResponse:
         if form.is_valid():
             case = Case.objects.create(
                 created_by=user,
-                agency_record_number=form.cleaned_data["agency_record_number"],
             )
             # Salvar PDF
             case.pdf_file = form.cleaned_data["pdf_file"]
@@ -163,9 +162,11 @@ def intake_home(request: HttpRequest) -> HttpResponse:
             case.start_extraction(user=user)
             case.save()
 
-            # Extrair texto do PDF
+            # Extrair texto do PDF (com remoção de marca d'água)
             extracted = extract_pdf_text(case.pdf_file.path)
-            case.extracted_text = extracted
+            cleaned_text, record_number = strip_watermark_and_extract_record(extracted)
+            case.extracted_text = cleaned_text
+            case.agency_record_number = record_number
             case.agency_record_extracted_at = timezone.now()
             case.save()
 

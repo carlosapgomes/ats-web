@@ -51,15 +51,6 @@
     <div class="text-danger small mb-2">{{ form.pdf_file.errors }}</div>
     {% endif %}
 
-    <!-- Campo de número de registro -->
-    <div class="mb-3">
-      <label for="{{ form.agency_record_number.id_for_label }}" class="form-label">{{ form.agency_record_number.label }}</label>
-      {{ form.agency_record_number }}
-      {% if form.agency_record_number.errors %}
-      <div class="text-danger small mt-1">{{ form.agency_record_number.errors }}</div>
-      {% endif %}
-    </div>
-
     <button type="submit" class="btn btn-hospital w-100 w-md-auto" id="btn-upload" disabled>
       Enviar para Triagem
     </button>

@@ -90,20 +90,22 @@ class TestUploadPost:
     """POST /cases/ — criação de caso via upload."""
 
     def test_upload_creates_case(self, client) -> None:
-        """POST com PDF e registro cria Case no banco."""
+        """POST com PDF cria Case no banco e extrai texto."""
         client, _ = _nir_client(client)
-        pdf_bytes = _create_test_pdf_bytes()
+        pdf_text = "Paciente: João da Silva\nCódigo: 12345"
+        pdf_bytes = _create_test_pdf_bytes(text=pdf_text)
         pdf_file = SimpleUploadedFile("test.pdf", pdf_bytes, content_type="application/pdf")
         response = client.post(
             reverse("intake:home"),
-            {"pdf_file": pdf_file, "agency_record_number": "2026-0505-001"},
+            {"pdf_file": pdf_file},
             follow=True,
         )
         assert response.status_code == 200
         assert Case.objects.count() == 1
         case = Case.objects.first()
         assert case is not None
-        assert case.agency_record_number == "2026-0505-001"
+        # agency_record_number is extracted from PDF text
+        assert case.agency_record_number == "12345"
 
     def test_upload_sets_created_by(self, client) -> None:
         """case.created_by deve ser o usuário logado."""
@@ -112,7 +114,7 @@ class TestUploadPost:
         pdf_file = SimpleUploadedFile("test.pdf", pdf_bytes, content_type="application/pdf")
         client.post(
             reverse("intake:home"),
-            {"pdf_file": pdf_file, "agency_record_number": "2026-0505-001"},
+            {"pdf_file": pdf_file},
             follow=True,
         )
         case = Case.objects.first()
@@ -126,7 +128,7 @@ class TestUploadPost:
         pdf_file = SimpleUploadedFile("test.pdf", pdf_bytes, content_type="application/pdf")
         client.post(
             reverse("intake:home"),
-            {"pdf_file": pdf_file, "agency_record_number": "2026-0505-001"},
+            {"pdf_file": pdf_file},
             follow=True,
         )
         case = Case.objects.first()
@@ -141,7 +143,7 @@ class TestUploadPost:
         pdf_file = SimpleUploadedFile("test.pdf", pdf_bytes, content_type="application/pdf")
         client.post(
             reverse("intake:home"),
-            {"pdf_file": pdf_file, "agency_record_number": "2026-0505-001"},
+            {"pdf_file": pdf_file},
             follow=True,
         )
         case = Case.objects.first()
@@ -149,14 +151,14 @@ class TestUploadPost:
         assert case.status == CaseStatus.LLM_STRUCT
 
     def test_upload_extracts_text(self, client) -> None:
-        """case.extracted_text deve conter o texto do PDF."""
+        """case.extracted_text deve conter o texto do PDF (sem marca d'água)."""
         client, _ = _nir_client(client)
-        pdf_text = "Paciente: João da Silva\nRegistro: 2026-0505-001"
+        pdf_text = "Paciente: João da Silva\nCódigo: 12345"
         pdf_bytes = _create_test_pdf_bytes(text=pdf_text)
         pdf_file = SimpleUploadedFile("test.pdf", pdf_bytes, content_type="application/pdf")
         client.post(
             reverse("intake:home"),
-            {"pdf_file": pdf_file, "agency_record_number": "2026-0505-001"},
+            {"pdf_file": pdf_file},
             follow=True,
         )
         case = Case.objects.first()
@@ -164,19 +166,20 @@ class TestUploadPost:
         assert "João da Silva" in case.extracted_text
         assert case.agency_record_extracted_at is not None
 
-    def test_upload_sets_agency_record_number(self, client) -> None:
-        """agency_record_number deve vir do formulário, não do PDF."""
+    def test_upload_extracts_record_number_from_text(self, client) -> None:
+        """agency_record_number deve ser extraído do texto do PDF."""
         client, _ = _nir_client(client)
-        pdf_bytes = _create_test_pdf_bytes()
+        pdf_text = "RELATÓRIO DE OCORRÊNCIAS\nCódigo: 98765"
+        pdf_bytes = _create_test_pdf_bytes(text=pdf_text)
         pdf_file = SimpleUploadedFile("test.pdf", pdf_bytes, content_type="application/pdf")
         client.post(
             reverse("intake:home"),
-            {"pdf_file": pdf_file, "agency_record_number": "MY-CUSTOM-123"},
+            {"pdf_file": pdf_file},
             follow=True,
         )
         case = Case.objects.first()
         assert case is not None
-        assert case.agency_record_number == "MY-CUSTOM-123"
+        assert case.agency_record_number == "98765"
 
     def test_upload_rejects_non_pdf(self, client) -> None:
         """POST com arquivo .txt deve falhar validação."""
@@ -184,7 +187,7 @@ class TestUploadPost:
         txt_file = SimpleUploadedFile("test.txt", b"not a pdf", content_type="text/plain")
         response = client.post(
             reverse("intake:home"),
-            {"pdf_file": txt_file, "agency_record_number": "2026-0505-001"},
+            {"pdf_file": txt_file},
         )
         assert response.status_code == 200  # form re-rendered with errors
         assert Case.objects.count() == 0
@@ -196,7 +199,7 @@ class TestUploadPost:
         pdf_file = SimpleUploadedFile("test.pdf", pdf_bytes, content_type="application/pdf")
         response = client.post(
             reverse("intake:home"),
-            {"pdf_file": pdf_file, "agency_record_number": "2026-0505-001"},
+            {"pdf_file": pdf_file},
         )
         # Redirected away because role_required blocks
         assert response.status_code == 302
@@ -208,7 +211,7 @@ class TestUploadPost:
         pdf_file = SimpleUploadedFile("test.pdf", pdf_bytes, content_type="application/pdf")
         response = client.post(
             reverse("intake:home"),
-            {"pdf_file": pdf_file, "agency_record_number": "2026-0505-001"},
+            {"pdf_file": pdf_file},
         )
         assert response.status_code == 302
         assert "/login/" in response.url.lower()
@@ -226,7 +229,7 @@ class TestUploadAuditEvents:
         pdf_file = SimpleUploadedFile("test.pdf", pdf_bytes, content_type="application/pdf")
         client.post(
             reverse("intake:home"),
-            {"pdf_file": pdf_file, "agency_record_number": "2026-0505-001"},
+            {"pdf_file": pdf_file},
             follow=True,
         )
         case = Case.objects.first()
@@ -242,7 +245,7 @@ class TestUploadAuditEvents:
         pdf_file = SimpleUploadedFile("test.pdf", pdf_bytes, content_type="application/pdf")
         client.post(
             reverse("intake:home"),
-            {"pdf_file": pdf_file, "agency_record_number": "2026-0505-001"},
+            {"pdf_file": pdf_file},
             follow=True,
         )
         case = Case.objects.first()

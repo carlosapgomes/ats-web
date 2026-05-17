@@ -45,16 +45,16 @@
     </div>
 
     <div class="card p-4">
-      <h5 class="mb-3">📄 PDF Original</h5>
-      <div class="border rounded-3 p-3 text-center bg-light">
-        <span style="font-size:2rem;">📄</span>
-        <div>{{ pdf_filename|default:"encaminhamento.pdf" }}</div>
-        <div class="text-muted small">
-          {% if case.pdf_file %}{{ case.pdf_file.size|filesizeformat }}{% else %}—{% endif %}
+      <h5 class="mb-3">
+        <a data-bs-toggle="collapse" href="#extractedText" role="button" aria-expanded="false" aria-controls="extractedText" class="text-decoration-none d-flex align-items-center gap-2">
+          📄 Texto Extraído do PDF
+          <span class="badge bg-secondary">clique para expandir</span>
+        </a>
+      </h5>
+      <div class="collapse" id="extractedText">
+        <div class="card card-body bg-light">
+          <pre class="mb-0" style="white-space: pre-wrap; font-size: 0.9rem; max-height: 400px; overflow-y: auto;">{{ case.extracted_text|default:"Texto não disponível" }}</pre>
         </div>
-        {% if case.pdf_file %}
-        <a href="{{ case.pdf_file.url }}" class="btn btn-sm btn-outline-secondary mt-2" target="_blank">Visualizar PDF</a>
-        {% endif %}
       </div>
     </div>
   </div>
