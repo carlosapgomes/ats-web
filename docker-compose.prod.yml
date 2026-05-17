@@ -24,6 +24,9 @@ services:
       DJANGO_SECRET_KEY: ${DJANGO_SECRET_KEY:?Set DJANGO_SECRET_KEY}
       ALLOWED_HOSTS: ${ALLOWED_HOSTS:-localhost}
       INTRANET_IP_RANGE: ${INTRANET_IP_RANGE:-10.0.0.0/8}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:?Set OPENAI_API_KEY}
+      OPENAI_MODEL: ${OPENAI_MODEL:-gpt-4o}
+      OPENAI_BASE_URL: ${OPENAI_BASE_URL:-https://api.openai.com/v1}
     depends_on:
       db:
         condition: service_healthy
@@ -41,6 +44,9 @@ services:
       DATABASE_URL: postgres://ats_web:${POSTGRES_PASSWORD}@db:5432/ats_web
       DJANGO_SECRET_KEY: ${DJANGO_SECRET_KEY:?Set DJANGO_SECRET_KEY}
       INTRANET_IP_RANGE: ${INTRANET_IP_RANGE:-10.0.0.0/8}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:?Set OPENAI_API_KEY}
+      OPENAI_MODEL: ${OPENAI_MODEL:-gpt-4o}
+      OPENAI_BASE_URL: ${OPENAI_BASE_URL:-https://api.openai.com/v1}
     depends_on:
       db:
         condition: service_healthy
