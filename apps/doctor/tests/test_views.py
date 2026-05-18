@@ -530,6 +530,47 @@ class TestDoctorDecisionView:
         content = response.content.decode()
         assert "PDF" in content or "pdf" in content.lower() or "Encaminhamento" in content
 
+    def test_decision_shows_all_seven_report_blocks(self, client) -> None:
+        """Decision page renders all 7 report block titles."""
+        case = self._create_case_in_status(CaseStatus.WAIT_DOCTOR)
+        case.summary_text = "Paciente com HDA. Hb 8.5."
+        case.structured_data = {
+            "patient": {"name": "João Blocos", "age": 45, "gender": "Masculino"},
+            "eda": {
+                "labs": {
+                    "hb_g_dl": 8.5,
+                    "platelets_per_mm3": 120000,
+                    "inr": 1.1,
+                },
+                "ecg": {
+                    "report_present": True,
+                    "abnormal_flag": False,
+                },
+            },
+        }
+        case.suggested_action = {
+            "suggestion": "accept",
+            "support_recommendation": "anesthesist",
+            "asa": {"display_text": "ASA II"},
+        }
+        case.save()
+        self._login_as(client, "doctor")
+        response = client.get(f"/doctor/{case.case_id}/")
+        assert response.status_code == 200
+        content = response.content.decode()
+
+        # All 7 block titles must appear
+        assert "Resumo Clínico" in content
+        assert "Achados Críticos" in content
+        assert "Pendências Críticas" in content
+        assert "Decisão Sugerida" in content
+        assert "Suporte Recomendado" in content
+        assert "ASA Estimado" in content
+        assert "Motivo Objetivo" in content
+
+        # Context must appear
+        assert "procedimento solicitado" in content.lower()
+
 
 # ── Prior case card tests ───────────────────────────────────────────────
 

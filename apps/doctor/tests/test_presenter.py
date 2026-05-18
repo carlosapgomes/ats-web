@@ -1,0 +1,525 @@
+"""Tests for the DoctorReportPresenter — 7-block medical report."""
+
+from __future__ import annotations
+
+from typing import Any
+
+import pytest
+
+from apps.doctor.presenters import DoctorReportPresenter
+
+# ── Fixture helpers ─────────────────────────────────────────────────────
+
+
+def _make_complete_payload() -> dict[str, Any]:
+    """Full structured payload covering all supported fields."""
+    return {
+        "origin_context": {
+            "city": "Salvador",
+            "state_uf": "BA",
+            "hospital": "Hospital Geral",
+            "unit": "Centro Cirúrgico",
+        },
+        "transfusion": {
+            "had_transfusion": "yes",
+            "total_units": 3,
+            "hemocomponent": "concentrado de hemácias",
+        },
+        "tracked_exams": [
+            {
+                "exam_label": "Hb",
+                "result_value": "8.5 g/dL",
+                "is_most_recent": True,
+                "exam_datetime_iso": "2025-12-01T10:00:00",
+            },
+            {
+                "exam_label": "Plaquetas",
+                "result_value": "120000/mm³",
+                "is_most_recent": False,
+            },
+        ],
+        "eda": {
+            "requested_procedure": {"subtype": "gastrostomy"},
+            "labs": {
+                "hb_g_dl": 8.5,
+                "platelets_per_mm3": 120000,
+                "inr": 1.1,
+            },
+            "ecg": {
+                "report_present": True,
+                "abnormal_flag": False,
+            },
+            "indication_category": "bleeding",
+            "is_pediatric": False,
+        },
+        "policy_precheck": {
+            "labs_required": True,
+            "labs_pass": "yes",
+            "ecg_required": False,
+            "ecg_present": True,
+            "labs_failed_items": [],
+            "excluded_from_eda_flow": False,
+        },
+        "patient": {
+            "age": 45,
+            "name": "João Pereira",
+        },
+    }
+
+
+def _make_minimal_payload() -> dict[str, Any]:
+    """Minimal payload — mostly empty/absent data."""
+    return {
+        "patient": {"age": 30},
+    }
+
+
+def _make_suggested_action_accept() -> dict[str, Any]:
+    return {
+        "suggestion": "accept",
+        "support_recommendation": "none",
+        "asa": {"display_text": "ASA II"},
+    }
+
+
+def _make_suggested_action_deny() -> dict[str, Any]:
+    return {
+        "suggestion": "deny",
+        "support_recommendation": "none",
+        "asa": {"display_text": "ASA I"},
+        "reason_code": "hb_below_threshold",
+        "reason_text": "Hb abaixo do limiar: 8.5 g/dL.",
+    }
+
+
+def _make_recent_denial_context() -> dict[str, Any]:
+    return {
+        "decision": "deny_triage",
+        "reason": "Contorno clínico elevado",
+        "decided_at": "2025-12-01T14:00:00+00:00",
+        "prior_denial_count_7d": 2,
+    }
+
+
+@pytest.mark.django_db
+class TestDoctorReportPresenter:
+    """Tests for the DoctorReportPresenter — 7-block report generation."""
+
+    # ── Block coverage ────────────────────────────────────────────────
+
+    def test_full_payload_generates_all_seven_blocks(self):
+        """Presenter with complete payload generates all 7 report blocks."""
+        payload = _make_complete_payload()
+        suggested = _make_suggested_action_accept()
+        presenter = DoctorReportPresenter(
+            structured_data=payload,
+            summary_text="Paciente com HDA. Hb 8.5.",
+            suggested_action=suggested,
+        )
+        report = presenter.build_report()
+
+        block_names = set(report["blocks"].keys())
+        expected = {
+            "resumo_clinico",
+            "achados_criticos",
+            "pendencias_criticas",
+            "decisao_sugerida",
+            "suporte_recomendado",
+            "asa_estimado",
+            "motivo_objetivo",
+        }
+        assert block_names == expected
+
+    def test_minimal_payload_still_generates_all_blocks(self):
+        """Presenter with minimal payload still generates all 7 blocks (with fallbacks)."""
+        presenter = DoctorReportPresenter(
+            structured_data=_make_minimal_payload(),
+            summary_text="",
+            suggested_action={},
+        )
+        report = presenter.build_report()
+        assert len(report["blocks"]) == 7
+        for block_name, block_lines in report["blocks"].items():
+            assert isinstance(block_lines, list), f"Block {block_name} should be a list"
+            assert len(block_lines) >= 1, f"Block {block_name} should have at least one line"
+
+    # ── Canonical procedure ──────────────────────────────────────────
+
+    def test_procedure_standard_resolves_to_eda(self):
+        """standard subtype resolves to 'EDA'."""
+        presenter = DoctorReportPresenter(
+            structured_data={"eda": {"requested_procedure": {"subtype": "standard"}}},
+            summary_text="",
+            suggested_action={},
+        )
+        assert "EDA" in presenter._resolve_canonical_procedure_name()
+
+    def test_procedure_gastrostomy(self):
+        """gastrostomy subtype resolves to 'EDA para gastrostomia'."""
+        presenter = DoctorReportPresenter(
+            structured_data={"eda": {"requested_procedure": {"subtype": "gastrostomy"}}},
+            summary_text="",
+            suggested_action={},
+        )
+        assert "EDA para gastrostomia" in presenter._resolve_canonical_procedure_name()
+
+    def test_procedure_esophageal_dilation(self):
+        """esophageal_dilation subtype resolves to 'EDA para dilatação esofágica'."""
+        presenter = DoctorReportPresenter(
+            structured_data={"eda": {"requested_procedure": {"subtype": "esophageal_dilation"}}},
+            summary_text="",
+            suggested_action={},
+        )
+        assert "EDA para dilatação esofágica" in presenter._resolve_canonical_procedure_name()
+
+    def test_procedure_foreign_body(self):
+        """foreign_body subtype resolves to 'EDA para retirada de corpo estranho'."""
+        presenter = DoctorReportPresenter(
+            structured_data={"eda": {"requested_procedure": {"subtype": "foreign_body"}}},
+            summary_text="",
+            suggested_action={},
+        )
+        assert "EDA para retirada de corpo estranho" in presenter._resolve_canonical_procedure_name()
+
+    def test_procedure_falls_back_to_rulebook(self):
+        """When eda.requested_procedure.subtype is absent, falls back to rulebook."""
+        presenter = DoctorReportPresenter(
+            structured_data={
+                "preop_screening": {"rulebook_signals": {"eda_subtype": "gastrostomy"}},
+            },
+            summary_text="",
+            suggested_action={},
+        )
+        assert "EDA para gastrostomia" in presenter._resolve_canonical_procedure_name()
+
+    # ── Context lines ─────────────────────────────────────────────────
+
+    def test_origin_appears_when_present(self):
+        """Origin line includes city, state, hospital, unit when present."""
+        presenter = DoctorReportPresenter(
+            structured_data={
+                "origin_context": {
+                    "city": "Salvador",
+                    "state_uf": "BA",
+                    "hospital": "Hospital Geral",
+                    "unit": "UTI",
+                }
+            },
+            summary_text="",
+            suggested_action={},
+        )
+        report = presenter.build_report()
+        origin = report["context"]["origin"]
+        assert "Salvador" in origin
+        assert "BA" in origin
+        assert "Hospital Geral" in origin
+        assert "UTI" in origin
+
+    def test_origin_fallback_when_missing(self):
+        """Origin fallback when no evidence."""
+        presenter = DoctorReportPresenter(
+            structured_data={},
+            summary_text="",
+            suggested_action={},
+        )
+        report = presenter.build_report()
+        assert "sem evidência" in report["context"]["origin"]
+
+    def test_transfusion_appears_when_present(self):
+        """Transfusion lines show 'sim', units, and hemocomponent."""
+        presenter = DoctorReportPresenter(
+            structured_data={
+                "transfusion": {
+                    "had_transfusion": "yes",
+                    "total_units": 5,
+                    "hemocomponent": "plasma",
+                }
+            },
+            summary_text="",
+            suggested_action={},
+        )
+        report = presenter.build_report()
+        transf_lines = report["context"]["transfusion_lines"]
+        assert any("sim" in line for line in transf_lines)
+        assert any("5" in line for line in transf_lines)
+        assert any("plasma" in line for line in transf_lines)
+
+    def test_transfusion_shows_no_by_default(self):
+        """Transfusion defaults to 'não' when absent."""
+        presenter = DoctorReportPresenter(
+            structured_data={},
+            summary_text="",
+            suggested_action={},
+        )
+        report = presenter.build_report()
+        assert any("não" in line for line in report["context"]["transfusion_lines"])
+
+    def test_tracked_exams_appear_when_present(self):
+        """Tracked exams with recency markers appear."""
+        presenter = DoctorReportPresenter(
+            structured_data={
+                "tracked_exams": [
+                    {
+                        "exam_label": "Hb",
+                        "result_value": "10.0 g/dL",
+                        "is_most_recent": True,
+                        "exam_datetime_iso": "2025-12-01T10:00:00",
+                    },
+                    {
+                        "exam_label": "Creatinina",
+                        "result_value": "1.2 mg/dL",
+                        "is_most_recent": False,
+                    },
+                ]
+            },
+            summary_text="",
+            suggested_action={},
+        )
+        report = presenter.build_report()
+        tracked = report["context"]["tracked_exam_lines"]
+        assert any("Hb: 10.0 g/dL" in line for line in tracked)
+        assert any("Creatinina" in line for line in tracked)
+        assert any("mais recente" in line for line in tracked)
+
+    def test_pediatric_marker_when_true(self):
+        """Pediatric marker appears when patient is pediatric."""
+        presenter = DoctorReportPresenter(
+            structured_data={"patient": {"age": 10}},
+            summary_text="",
+            suggested_action={},
+        )
+        report = presenter.build_report()
+        assert "paciente pediátrico" in report["context"]["pediatric"]
+
+    def test_pediatric_marker_from_eda_flag(self):
+        """Pediatric marker from eda.is_pediatric flag."""
+        presenter = DoctorReportPresenter(
+            structured_data={
+                "patient": {"age": 30},
+                "eda": {"is_pediatric": True},
+            },
+            summary_text="",
+            suggested_action={},
+        )
+        report = presenter.build_report()
+        assert "paciente pediátrico" in report["context"]["pediatric"]
+
+    def test_pediatric_marker_hidden_when_not_pediatric(self):
+        """Pediatric marker absent when not pediatric."""
+        presenter = DoctorReportPresenter(
+            structured_data={"patient": {"age": 45}},
+            summary_text="",
+            suggested_action={},
+        )
+        report = presenter.build_report()
+        assert "pediátrico" not in report["context"]["pediatric"]
+
+    # ── Critical findings ─────────────────────────────────────────────
+
+    def test_critical_findings_show_lab_values(self):
+        """Critical findings show Hb, platelets, INR, ECG status."""
+        presenter = DoctorReportPresenter(
+            structured_data={
+                "eda": {
+                    "labs": {
+                        "hb_g_dl": 10.5,
+                        "platelets_per_mm3": 200000,
+                        "inr": 1.0,
+                    },
+                    "ecg": {
+                        "report_present": True,
+                        "abnormal_flag": False,
+                    },
+                }
+            },
+            summary_text="",
+            suggested_action={},
+        )
+        report = presenter.build_report()
+        findings = "\n".join(report["blocks"]["achados_criticos"])
+        assert "Hb" in findings
+        assert "10.5" in findings
+        assert "Plaquetas" in findings
+        assert "200000" in findings
+        assert "INR" in findings
+        assert "1.0" in findings
+        assert "ECG" in findings
+
+    # ── Critical pending ──────────────────────────────────────────────
+
+    def test_critical_pending_shows_lab_and_ecg_status(self):
+        """Critical pending shows lab pass/fail and ECG presence."""
+        presenter = DoctorReportPresenter(
+            structured_data={
+                "policy_precheck": {
+                    "labs_required": True,
+                    "labs_pass": "yes",
+                    "ecg_required": False,
+                    "ecg_present": True,
+                    "labs_failed_items": [],
+                },
+                "eda": {
+                    "labs": {
+                        "hb_g_dl": 10.0,
+                        "platelets_per_mm3": 200000,
+                        "inr": 1.0,
+                    },
+                },
+            },
+            summary_text="",
+            suggested_action={},
+        )
+        report = presenter.build_report()
+        pending = "\n".join(report["blocks"]["pendencias_criticas"])
+        assert "Laboratório" in pending
+        assert "ECG" in pending
+
+    # ── Decision suggested ───────────────────────────────────────────
+
+    def test_decision_accept_shows_aceitar(self):
+        """Accept suggestion maps to 'aceitar'."""
+        presenter = DoctorReportPresenter(
+            structured_data=_make_minimal_payload(),
+            summary_text="",
+            suggested_action={"suggestion": "accept"},
+        )
+        report = presenter.build_report()
+        decision = "\n".join(report["blocks"]["decisao_sugerida"])
+        assert "aceitar" in decision
+
+    def test_decision_deny_shows_negar(self):
+        """Deny suggestion maps to 'negar'."""
+        presenter = DoctorReportPresenter(
+            structured_data=_make_minimal_payload(),
+            summary_text="",
+            suggested_action={"suggestion": "deny"},
+        )
+        report = presenter.build_report()
+        decision = "\n".join(report["blocks"]["decisao_sugerida"])
+        assert "negar" in decision
+
+    # ── Support recommended ──────────────────────────────────────────
+
+    def test_support_anesthesist(self):
+        """Support recommendation maps to Portuguese."""
+        presenter = DoctorReportPresenter(
+            structured_data=_make_minimal_payload(),
+            summary_text="",
+            suggested_action={"support_recommendation": "anesthesist"},
+        )
+        report = presenter.build_report()
+        support = "\n".join(report["blocks"]["suporte_recomendado"])
+        assert "anestesista" in support
+
+    # ── ASA estimated ────────────────────────────────────────────────
+
+    def test_asa_shows_display_text(self):
+        """ASA block shows display_text from suggested_action."""
+        presenter = DoctorReportPresenter(
+            structured_data=_make_minimal_payload(),
+            summary_text="",
+            suggested_action={"asa": {"display_text": "ASA III"}},
+        )
+        report = presenter.build_report()
+        asa = "\n".join(report["blocks"]["asa_estimado"])
+        assert "ASA III" in asa
+
+    def test_asa_fallback_to_bucket(self):
+        """ASA falls back to bucket mapping when no display_text."""
+        presenter = DoctorReportPresenter(
+            structured_data=_make_minimal_payload(),
+            summary_text="",
+            suggested_action={"asa": {"bucket": "insufficient_data"}},
+        )
+        report = presenter.build_report()
+        asa = "\n".join(report["blocks"]["asa_estimado"])
+        assert "não foi possível estimar" in asa
+
+    # ── Objective reason ─────────────────────────────────────────────
+
+    def test_objective_reason_accept(self):
+        """Accept objective reason shows 'Aceito com suporte'."""
+        presenter = DoctorReportPresenter(
+            structured_data=_make_minimal_payload(),
+            summary_text="",
+            suggested_action={
+                "suggestion": "accept",
+                "support_recommendation": "anesthesist",
+            },
+        )
+        report = presenter.build_report()
+        reason = "\n".join(report["blocks"]["motivo_objetivo"])
+        assert "Aceito" in reason
+
+    def test_objective_reason_deny(self):
+        """Deny objective reason shows 'Negado por'."""
+        presenter = DoctorReportPresenter(
+            structured_data={
+                "policy_precheck": {
+                    "labs_required": True,
+                    "labs_pass": "no",
+                    "labs_failed_items": ["Hb"],
+                    "ecg_required": False,
+                    "excluded_from_eda_flow": False,
+                },
+                "eda": {
+                    "labs": {},
+                },
+            },
+            summary_text="",
+            suggested_action={
+                "suggestion": "deny",
+                "reason_code": "hb_below_threshold",
+                "reason_text": "Hb abaixo do limiar: 8.5 g/dL.",
+            },
+        )
+        report = presenter.build_report()
+        reason = "\n".join(report["blocks"]["motivo_objetivo"])
+        assert "Negado por" in reason
+
+    # ── Recent denial ───────────────────────────────────────────────
+
+    def test_recent_denial_appears_when_provided(self):
+        """Recent denial context appears when provided."""
+        presenter = DoctorReportPresenter(
+            structured_data=_make_minimal_payload(),
+            summary_text="",
+            suggested_action={},
+            recent_denial_context=_make_recent_denial_context(),
+        )
+        report = presenter.build_report()
+        assert report["recent_denial"] is not None
+        denial_lines = report["recent_denial"]["lines"]
+        assert any("negado na triagem" in line for line in denial_lines)
+        assert any("Contorno clínico elevado" in line for line in denial_lines)
+        assert any("2" in line and "últimos 7 dias" in line for line in denial_lines)
+
+    def test_recent_denial_none_when_not_provided(self):
+        """Recent denial is None when not provided."""
+        presenter = DoctorReportPresenter(
+            structured_data=_make_minimal_payload(),
+            summary_text="",
+            suggested_action={},
+        )
+        report = presenter.build_report()
+        assert report["recent_denial"] is None
+
+    # ── Text report for audit ────────────────────────────────────────
+
+    def test_text_report_includes_all_blocks(self):
+        """Text report (for audit) includes all 7 block titles."""
+        presenter = DoctorReportPresenter(
+            structured_data=_make_complete_payload(),
+            summary_text="Paciente com HDA. Hb 8.5.",
+            suggested_action=_make_suggested_action_accept(),
+            recent_denial_context=_make_recent_denial_context(),
+        )
+        text = presenter.build_text_report()
+        assert "Resumo técnico da triagem" in text
+        assert "## Resumo clínico" in text
+        assert "## Achados críticos" in text
+        assert "## Pendências críticas" in text
+        assert "## Decisão sugerida" in text
+        assert "## Suporte recomendado" in text
+        assert "## ASA estimado" in text
+        assert "## Motivo objetivo" in text
