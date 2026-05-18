@@ -13,7 +13,7 @@ Change criado para corrigir divergências críticas identificadas na investigaç
 - [x] Slice 005 — Presenter médico em 7 blocos (`slices/slice-005-doctor-report-presenter.md`) — commit `d6c5fff`, report `/tmp/ats-web-slice-005-doctor-report-presenter-report.md`
 - [x] Slice 006 — Role guard médico (`slices/slice-006-doctor-role-guard.md`) — commit `0835256`, report `/tmp/ats-web-slice-006-doctor-role-guard-report.md`
 - [x] Slice 007 — Quality gate e closeout (`slices/slice-007-quality-docs-closeout.md`) — commit `a426f8d`, report `/tmp/ats-web-slice-007-quality-docs-closeout-report.md`
-- [ ] Slice 008 — OpenAI strict schema e language retry (`slices/slice-008-openai-strict-schema-and-language-retry.md`) — reabertura por teste manual com LLM real
+- [x] Slice 008 — OpenAI strict schema e language retry (`slices/slice-008-openai-strict-schema-and-language-retry.md`) — commit `4423f18`, report `/tmp/ats-web-slice-008-openai-strict-schema-language-retry-report.md`
 
 ## Definition of Done do Change
 
@@ -27,5 +27,5 @@ Change criado para corrigir divergências críticas identificadas na investigaç
 - [x] Views médicas exigem papel ativo `doctor`.
 - [x] Quality gate completo executado.
 - [x] Relatórios dos slices gerados.
-- [ ] Runtime OpenAI usa `response_format=json_schema` strict com schemas específicos LLM1/LLM2.
-- [ ] Language retry legado portado para LLM1/LLM2.
+- [x] Runtime OpenAI usa `response_format=json_schema` strict com schemas específicos LLM1/LLM2.
+- [x] Language retry legado portado para LLM1/LLM2.
