@@ -76,7 +76,13 @@ def _get_patient_gender(case: Case) -> str:
     if case.structured_data and isinstance(case.structured_data, dict):
         patient = case.structured_data.get("patient", {})
         if isinstance(patient, dict):
-            return str(patient.get("gender", ""))
+            # LLM1 schema uses "sex" — prefer it, with "gender" fallback
+            sex = patient.get("sex")
+            if isinstance(sex, str) and sex.strip():
+                return sex.strip()
+            gender = patient.get("gender")
+            if isinstance(gender, str) and gender.strip():
+                return gender.strip()
     return ""
 
 
