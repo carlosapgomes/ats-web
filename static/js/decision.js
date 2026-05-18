@@ -57,8 +57,12 @@
     if (admissionFlow) admissionFlow.addEventListener('change', function () { admissionFlow.classList.remove('is-invalid'); });
     if (denyReason) denyReason.addEventListener('input', function () { denyReason.classList.remove('is-invalid'); });
 
+    var finalSubmitConfirmed = false;
+
     if (form && confirmModal) {
         form.addEventListener('submit', function (e) {
+            if (finalSubmitConfirmed) return;
+
             e.preventDefault();
 
             // Validate decision selected
@@ -115,9 +119,19 @@
                 btnSubmit.disabled = true;
             }
 
-            // Submit the form to the server
+            // Submit the form through the browser's normal submit path.
+            // Avoid HTMLFormElement.submit(): it bypasses the submit event path
+            // and was observed in dev to produce an unauthenticated POST on
+            // the medical decision form. requestSubmit() preserves the normal
+            // form submission semantics while the confirmation guard above
+            // prevents reopening the modal.
+            finalSubmitConfirmed = true;
             setTimeout(function () {
-                form.submit();
+                if (form.requestSubmit) {
+                    form.requestSubmit();
+                } else {
+                    form.submit();
+                }
             }, 500);
         });
     }

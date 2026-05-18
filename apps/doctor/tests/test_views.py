@@ -1,6 +1,7 @@
 """Tests for doctor queue view."""
 
 from datetime import timedelta
+from pathlib import Path
 
 import pytest
 from django.contrib.auth import get_user_model
@@ -1068,6 +1069,19 @@ class TestDoctorSubmitView:
         events = CaseEvent.objects.filter(case=case, event_type__startswith="DOCTOR_")
         assert events.filter(event_type="DOCTOR_DENY").exists()
         assert CaseEvent.objects.filter(case=case, event_type="FINAL_REPLY_POSTED").exists()
+
+    def test_decision_js_uses_normal_submit_path_after_modal_confirmation(self) -> None:
+        """Modal confirmation must not use bare form.submit() as the primary path.
+
+        The manual dev flow showed POST /doctor/<id>/submit/ reaching
+        @login_required as anonymous immediately after modal confirmation.
+        Keep the JS on requestSubmit(), with a confirmation guard, so the final
+        POST follows the browser's normal form submission path.
+        """
+        js = Path("static/js/decision.js").read_text()
+        assert "finalSubmitConfirmed" in js
+        assert "form.requestSubmit()" in js
+        assert "if (finalSubmitConfirmed) return;" in js
 
     def test_submit_non_wait_doctor_returns_404(self, client) -> None:
         """POST to non-WAIT_DOCTOR case returns 404."""
