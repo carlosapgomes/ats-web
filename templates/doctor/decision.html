@@ -24,24 +24,39 @@
     </div>
 
     <div class="card p-4 mb-3">
-      <h5 class="mb-3">🤖 Extração IA do PDF</h5>
-      <div class="summary-box mb-3">
-        <div class="summary-label">Diagnóstico Principal</div>
-        <div class="summary-value">{{ diagnosis|default:"—" }}</div>
-      </div>
+      <h5 class="mb-3">🤖 Relatório da IA</h5>
       {% if summary_text %}
       <div class="summary-box mb-3">
-        <div class="summary-label">Observações</div>
+        <div class="summary-label">Resumo</div>
         <div class="summary-value">{{ summary_text }}</div>
       </div>
       {% endif %}
-      <div class="summary-box">
+      {% if suggested_action.reasoning %}
+      <div class="summary-box mb-3">
+        <div class="summary-label">Justificativa da IA</div>
+        <div class="summary-value">{{ suggested_action.reasoning }}</div>
+      </div>
+      {% endif %}
+      <div class="summary-box mb-3">
         <div class="summary-label">Sugestão da IA</div>
         <div class="summary-value">
           <span class="badge bg-info me-1">Suporte: {{ suggested_support }}</span>
           <span class="badge bg-secondary">Fluxo: {{ suggested_flow }}</span>
         </div>
       </div>
+      {% if suggested_action %}
+      <div class="mt-2">
+        <a data-bs-toggle="collapse" href="#llmFullReport" class="text-decoration-none small">
+          Ver relatório completo da IA ▾
+        </a>
+        <div class="collapse mt-2" id="llmFullReport">
+          <pre class="bg-light p-3 rounded" style="white-space: pre-wrap; font-size: 0.8rem; max-height: 300px; overflow-y: auto;">{{ suggested_action|pprint }}</pre>
+        </div>
+      </div>
+      {% endif %}
+      {% if not summary_text and not suggested_action %}
+      <div class="text-muted">Relatório da IA não disponível.</div>
+      {% endif %}
     </div>
 
     <div class="card p-4">
