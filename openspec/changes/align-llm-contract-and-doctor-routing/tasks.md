@@ -12,17 +12,17 @@ Change criado para corrigir divergências críticas identificadas na investigaç
 - [x] Slice 004 — Scope gate direto para resultado NIR (`slices/slice-004-scope-gate-nir-final.md`) — commit `ab5d5dd`, report `/tmp/ats-web-slice-004-scope-gate-nir-final-report.md`
 - [x] Slice 005 — Presenter médico em 7 blocos (`slices/slice-005-doctor-report-presenter.md`) — commit `d6c5fff`, report `/tmp/ats-web-slice-005-doctor-report-presenter-report.md`
 - [x] Slice 006 — Role guard médico (`slices/slice-006-doctor-role-guard.md`) — commit `0835256`, report `/tmp/ats-web-slice-006-doctor-role-guard-report.md`
-- [ ] Slice 007 — Quality gate e closeout (`slices/slice-007-quality-docs-closeout.md`)
+- [x] Slice 007 — Quality gate e closeout (`slices/slice-007-quality-docs-closeout.md`) — commit `a426f8d`, report `/tmp/ats-web-slice-007-quality-docs-closeout-report.md`
 
 ## Definition of Done do Change
 
-- [ ] Pipeline usa nomes canônicos de prompts do legado.
-- [ ] Defaults e fallbacks de prompts são compatíveis com o legado.
-- [ ] LLM1 valida schema Pydantic legado.
-- [ ] LLM2 valida schema Pydantic legado.
-- [ ] `non_eda` e `unknown` não entram na fila médica.
-- [ ] NIR recebe resultado de revisão manual obrigatória para scope gate.
-- [ ] Tela médica exibe relatório equivalente aos 7 blocos do legado.
-- [ ] Views médicas exigem papel ativo `doctor`.
-- [ ] Quality gate completo executado.
-- [ ] Relatórios dos slices gerados.
+- [x] Pipeline usa nomes canônicos de prompts do legado.
+- [x] Defaults e fallbacks de prompts são compatíveis com o legado.
+- [x] LLM1 valida schema Pydantic legado.
+- [x] LLM2 valida schema Pydantic legado.
+- [x] `non_eda` e `unknown` não entram na fila médica.
+- [x] NIR recebe resultado de revisão manual obrigatória para scope gate.
+- [x] Tela médica exibe relatório equivalente aos 7 blocos do legado.
+- [x] Views médicas exigem papel ativo `doctor`.
+- [x] Quality gate completo executado.
+- [x] Relatórios dos slices gerados.
