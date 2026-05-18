@@ -130,9 +130,9 @@ static/          # css/app.css (paleta hospitalar), js/upload.js
   `CaseEvent` de auditoria.
 - **Scope gate**: casos `non_eda` ou `unknown` (exame fora do escopo EDA) vão direto para
   `WAIT_R1_CLEANUP_THUMBS` com resultado de revisão manual obrigatória — **não entram na fila médica**.
-- **Presenter médico**: `apps/doctor/presenters.py` gera relatório de 7 blocos equivalente ao legado:
-  dados do paciente, informações clínicas, exames complementares, avaliação de risco, contraindicações,
-  fatores adicionais, síntese de suporte.
+- **Presenter médico**: `apps/doctor/presenters.py` gera relatório técnico equivalente ao legado em 7 blocos:
+  Resumo clínico, Achados críticos, Pendências críticas, Decisão sugerida, Suporte recomendado,
+  ASA estimado e Motivo objetivo.
 - **Role guard**: todas as views médicas exigem `@role_required('doctor')` com papel ativo `doctor`.
   Manager com role `doctor` ativo também acessa.
 
