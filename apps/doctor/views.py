@@ -12,6 +12,17 @@ from django.utils import timezone
 from apps.cases.models import Case, CaseStatus
 
 from .forms import DoctorDecisionForm
+from .presenters import DoctorReportPresenter
+
+
+def _map_prior_decision_to_denial_type(decision: str) -> str:
+    """Map PriorCaseSummary.decision to denial type for the presenter."""
+    if decision == "doctor_denied":
+        return "deny_triage"
+    if decision == "appointment_denied":
+        return "deny_appointment"
+    return "deny_triage"
+
 
 DOCTOR_DECISION_STATUSES = [
     CaseStatus.DOCTOR_ACCEPTED,
@@ -185,6 +196,7 @@ def _build_decision_context(case: Case, form: DoctorDecisionForm) -> dict[str, A
 
     prior_context = None
     prior_decision_display = ""
+    recent_denial_ctx = None
     if case.agency_record_number:
         pc = lookup_prior_case_context(
             case_id=case.case_id,
@@ -193,6 +205,21 @@ def _build_decision_context(case: Case, form: DoctorDecisionForm) -> dict[str, A
         if pc.prior_case is not None:
             prior_context = pc
             prior_decision_display = PRIOR_DECISION_DISPLAY.get(pc.prior_case.decision, pc.prior_case.decision)
+            recent_denial_ctx = {
+                "decision": _map_prior_decision_to_denial_type(pc.prior_case.decision),
+                "reason": pc.prior_case.reason,
+                "decided_at": pc.prior_case.decided_at,
+                "prior_denial_count_7d": pc.prior_denial_count_7d,
+            }
+
+    # Build 7-block report via presenter
+    presenter = DoctorReportPresenter(
+        structured_data=case.structured_data or {},
+        summary_text=case.summary_text or "",
+        suggested_action=case.suggested_action or {},
+        recent_denial_context=recent_denial_ctx,
+    )
+    report = presenter.build_report()
 
     return {
         "case": case,
@@ -208,6 +235,7 @@ def _build_decision_context(case: Case, form: DoctorDecisionForm) -> dict[str, A
         "structured_data": case.structured_data or {},
         "prior_context": prior_context,
         "prior_decision_display": prior_decision_display,
+        "report": report,
     }
 
 

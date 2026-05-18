@@ -507,6 +507,38 @@ body.hospital-shell h6 {
   animation: shell-fade-in 220ms ease-out;
 }
 
+/* ---------- Report blocks (7-block medical report) ---------- */
+
+.report-meta {
+  line-height: 1.6;
+}
+
+.report-block {
+  padding: 0.6rem 0;
+  border-bottom: 1px solid rgba(199, 216, 226, 0.4);
+}
+
+.report-block:last-child {
+  border-bottom: none;
+}
+
+.report-block-title {
+  font-weight: 700;
+  font-size: 0.88rem;
+  color: var(--hospital-primary);
+  margin-bottom: 0.3rem;
+}
+
+.report-block-body {
+  font-size: 0.86rem;
+  color: var(--hospital-text);
+  line-height: 1.55;
+}
+
+.report-block-body p {
+  margin-bottom: 0.25rem;
+}
+
 /* ---------- Responsive tweaks ---------- */
 
 @media (max-width: 767.98px) {

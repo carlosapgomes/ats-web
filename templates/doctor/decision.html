@@ -23,31 +23,112 @@
       </table>
     </div>
 
+    <!-- 7-Block Technical Report -->
     <div class="card p-4 mb-3">
-      <h5 class="mb-3">🤖 Relatório da IA</h5>
-      {% if summary_text %}
-      <div class="summary-box mb-3">
-        <div class="summary-label">Resumo</div>
-        <div class="summary-value">{{ summary_text }}</div>
+      <h5 class="mb-3">🤖 Relatório Técnico da Triagem</h5>
+
+      <!-- Context -->
+      <div class="report-meta mb-3 small text-muted">
+        <div>{{ report.context.procedure }}</div>
+        <div>{{ report.context.origin }}</div>
+        {% for line in report.context.transfusion_lines %}
+        <div>{{ line }}</div>
+        {% endfor %}
+        {% for line in report.context.tracked_exam_lines %}
+        <div>{{ line }}</div>
+        {% endfor %}
+        {% if report.context.pediatric %}
+        <div>{{ report.context.pediatric }}</div>
+        {% endif %}
       </div>
-      {% endif %}
-      {% if suggested_action.reasoning %}
-      <div class="summary-box mb-3">
-        <div class="summary-label">Justificativa da IA</div>
-        <div class="summary-value">{{ suggested_action.reasoning }}</div>
-      </div>
-      {% endif %}
-      <div class="summary-box mb-3">
-        <div class="summary-label">Sugestão da IA</div>
-        <div class="summary-value">
-          <span class="badge bg-info me-1">Suporte: {{ suggested_support }}</span>
-          <span class="badge bg-secondary">Fluxo: {{ suggested_flow }}</span>
+
+      <!-- Block 1: Resumo Clínico -->
+      <div class="report-block mb-2">
+        <div class="report-block-title">📋 Resumo Clínico</div>
+        <div class="report-block-body">
+          {% for line in report.blocks.resumo_clinico %}
+          <p class="mb-1">{{ line }}</p>
+          {% endfor %}
         </div>
       </div>
+
+      <!-- Block 2: Achados Críticos -->
+      <div class="report-block mb-2">
+        <div class="report-block-title">🔍 Achados Críticos</div>
+        <div class="report-block-body">
+          {% for line in report.blocks.achados_criticos %}
+          <div class="mb-0">{{ line }}</div>
+          {% endfor %}
+        </div>
+      </div>
+
+      <!-- Block 3: Pendências Críticas -->
+      <div class="report-block mb-2">
+        <div class="report-block-title">⚠️ Pendências Críticas</div>
+        <div class="report-block-body">
+          {% for line in report.blocks.pendencias_criticas %}
+          <div class="mb-0">{{ line }}</div>
+          {% endfor %}
+        </div>
+      </div>
+
+      <!-- Block 4: Decisão Sugerida -->
+      <div class="report-block mb-2">
+        <div class="report-block-title">✅ Decisão Sugerida</div>
+        <div class="report-block-body">
+          {% for line in report.blocks.decisao_sugerida %}
+          <span class="badge bg-info me-1">{{ line|cut:"- " }}</span>
+          {% endfor %}
+        </div>
+      </div>
+
+      <!-- Block 5: Suporte Recomendado -->
+      <div class="report-block mb-2">
+        <div class="report-block-title">🏥 Suporte Recomendado</div>
+        <div class="report-block-body">
+          {% for line in report.blocks.suporte_recomendado %}
+          <span class="badge bg-secondary me-1">{{ line|cut:"- " }}</span>
+          {% endfor %}
+        </div>
+      </div>
+
+      <!-- Block 6: ASA Estimado -->
+      <div class="report-block mb-2">
+        <div class="report-block-title">💉 ASA Estimado</div>
+        <div class="report-block-body">
+          {% for line in report.blocks.asa_estimado %}
+          <div class="mb-0">{{ line }}</div>
+          {% endfor %}
+        </div>
+      </div>
+
+      <!-- Block 7: Motivo Objetivo -->
+      <div class="report-block mb-2">
+        <div class="report-block-title">📝 Motivo Objetivo</div>
+        <div class="report-block-body">
+          {% for line in report.blocks.motivo_objetivo %}
+          <p class="mb-1">{{ line }}</p>
+          {% endfor %}
+        </div>
+      </div>
+
+      <!-- Recent Denial Block -->
+      {% if report.recent_denial %}
+      <div class="report-block mb-2 border-warning border rounded p-2 bg-warning bg-opacity-10">
+        <div class="report-block-title">🕓 Histórico de Negativa Recente</div>
+        <div class="report-block-body">
+          {% for line in report.recent_denial.lines %}
+          <div class="mb-0 small">{{ line }}</div>
+          {% endfor %}
+        </div>
+      </div>
+      {% endif %}
+
+      <!-- Full JSON (collapsible, not main report) -->
       {% if suggested_action %}
       <div class="mt-2">
         <a data-bs-toggle="collapse" href="#llmFullReport" class="text-decoration-none small">
-          Ver relatório completo da IA ▾
+          Ver JSON completo da IA ▾
         </a>
         <div class="collapse mt-2" id="llmFullReport">
           <pre class="bg-light p-3 rounded" style="white-space: pre-wrap; font-size: 0.8rem; max-height: 300px; overflow-y: auto;">{{ suggested_action|pprint }}</pre>
