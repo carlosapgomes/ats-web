@@ -41,6 +41,41 @@ LLM1_DEFAULT_SYSTEM_PROMPT = (
     "de transfusao deve ser tratada como 'no'."
 )
 
+LLM1_REQUIRED_SCHEMA_INSTRUCTIONS = """
+CONTRATO JSON OBRIGATORIO — NAO INVENTE OUTRO SCHEMA.
+Retorne APENAS um objeto JSON com estas chaves de topo, e nenhuma outra:
+schema_version, language, agency_record_number, patient, eda, preop_screening,
+policy_precheck, summary, extraction_quality, origin_context, transfusion, tracked_exams.
+
+Valores fixos e enums obrigatorios:
+- schema_version: exatamente "1.1".
+- language: exatamente "pt-BR".
+- patient.sex: apenas "M", "F" ou "Outro"; nunca "masculino"/"feminino".
+- Todos os EvidenceFlag devem ser strings "yes", "no" ou "unknown"; nunca true/false.
+- transfusion.had_transfusion: apenas "yes" ou "no".
+- eda.requested_procedure.subtype e preop_screening.rulebook_signals.eda_subtype: standard, gastrostomy, esophageal_dilation, foreign_body ou unknown.
+- eda.asa.bucket: I-II, III ou mais ou insufficient_data.
+
+Campos obrigatorios por bloco:
+patient = {"name", "age", "sex", "document_id"}. Use null quando ausente.
+eda = {"indication_category", "exclusion_type", "is_pediatric", "foreign_body_suspected", "requested_procedure", "labs", "ecg", "asa", "cardiovascular_risk"}.
+eda.requested_procedure = {"name", "urgency", "subtype"}.
+eda.labs = {"hb_g_dl", "hct_percent", "platelets_per_mm3", "tp_seconds", "inr", "rni", "ttpa_seconds", "urea_mg_dl", "creatinine_mg_dl", "source_text_hint"}.
+eda.ecg = {"report_present", "abnormal_flag", "source_text_hint"}.
+preop_screening = {"exam_type", "has_cardiovascular_disease", "has_active_respiratory_symptoms", "has_prior_respiratory_disease", "has_ecg_report", "has_chest_xray_report", "has_echocardiogram_report", "hb_g_dl", "platelets_per_mm3", "inr", "evidence_spans", "rulebook_signals"}.
+policy_precheck = {"excluded_from_eda_flow", "exclusion_reason", "labs_required", "labs_pass", "labs_failed_items", "ecg_required", "ecg_present", "pediatric_flag", "notes"}.
+summary = {"one_liner", "bullet_points"}; bullet_points deve ter 3 a 8 itens.
+extraction_quality = {"confidence", "missing_fields", "notes"}; confidence: alta, media ou baixa.
+origin_context = {"city", "hospital", "unit", "state_uf", "source_text_hint"}.
+transfusion = {"had_transfusion", "total_units", "hemocomponent", "source_text_hint"}.
+tracked_exams[] = {"exam_type", "exam_label", "result_value", "exam_datetime_iso", "is_most_recent", "source_text_hint"}.
+
+NUNCA use estes nomes/aliases: case_id no JSON de resposta, full_name, age_years,
+race_color, weight_kg, gender, request_indication, clinical_question,
+clinical_context, vitals, imaging_and_tests, asa_practical_estimate,
+triage_summary, result_excerpt, exam_name, key_findings, labs no topo.
+""".strip()
+
 LLM1_DEFAULT_USER_PROMPT = (
     "Tarefa: extrair dados estruturados e gerar resumo conciso de triagem "
     "a partir de um relatorio clinico para triagem EDA. Exigir evidencia "
@@ -54,7 +89,8 @@ LLM1_DEFAULT_USER_PROMPT = (
     "no texto. Identificar exames rastreados (tracked_exams) com recencia "
     "determinada por data/hora ou posicao textual, com desempate pela ultima "
     "ocorrencia. Registrar had_transfusion como binario (yes/no); ausencia de "
-    "evidencia de transfusao deve ser tratada como 'no'."
+    "evidencia de transfusao deve ser tratada como 'no'.\n\n"
+    f"{LLM1_REQUIRED_SCHEMA_INSTRUCTIONS}"
 )
 
 
@@ -175,6 +211,7 @@ def _render_user_prompt(
         f"case_id: {case_id}\n"
         f"agency_record_number: {agency_record_number}\n\n"
         "Retorne JSON schema_version 1.1 e preserve agency_record_number exatamente.\n"
+        f"{LLM1_REQUIRED_SCHEMA_INSTRUCTIONS}\n"
         "Todos os campos narrativos devem estar em portugues brasileiro (pt-BR).\n"
         "Nao use palavras em ingles nos campos narrativos.\n"
         "Estimar ASA pratico apenas em I-II, III ou mais ou insufficient_data.\n"

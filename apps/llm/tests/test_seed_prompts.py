@@ -58,3 +58,16 @@ class TestSeedPromptsCanonicalNames:
                 f"Prompt {pt.name} contains 'relatório de endoscopia'"
             )
             assert "achados endoscópicos" not in pt.content.lower(), f"Prompt {pt.name} contains 'achados endoscópicos'"
+
+    def test_llm1_user_seed_contains_strict_schema_contract(self) -> None:
+        """Seeded LLM1 user prompt must constrain the model to the Pydantic schema."""
+        call_command("seed_prompts")
+        pt = PromptTemplate.get_active("llm1_user")
+        assert pt is not None
+        assert "CONTRATO JSON OBRIGATORIO" in pt.content
+        assert "language: exatamente" in pt.content
+        assert "patient.sex" in pt.content
+        assert "EvidenceFlag devem ser strings" in pt.content
+        assert "NUNCA use estes nomes/aliases" in pt.content
+        assert "age_years" in pt.content
+        assert "triage_summary" in pt.content
