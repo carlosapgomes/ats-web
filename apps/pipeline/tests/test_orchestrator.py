@@ -118,8 +118,17 @@ def _eda_llm2_accept_response(case_id: str = "case-001") -> str:
     """LLM2 suggestion: accept."""
     return json.dumps(
         {
+            "schema_version": "1.1",
+            "language": "pt-BR",
             "case_id": case_id,
+            "agency_record_number": "12345",
             "suggestion": "accept",
+            "support_recommendation": "none",
+            "rationale": {
+                "short_reason": "Critérios atendidos.",
+                "details": ["Sem contraindicação relevante.", "Exames compatíveis."],
+                "missing_info_questions": [],
+            },
             "policy_alignment": {
                 "excluded_request": False,
                 "labs_ok": "yes",
@@ -127,6 +136,7 @@ def _eda_llm2_accept_response(case_id: str = "case-001") -> str:
                 "pediatric_flag": False,
                 "notes": None,
             },
+            "confidence": "alta",
         }
     )
 
@@ -135,7 +145,17 @@ def _eda_llm2_deny_response() -> str:
     """LLM2 suggestion: deny."""
     return json.dumps(
         {
+            "schema_version": "1.1",
+            "language": "pt-BR",
+            "case_id": "case-001",
+            "agency_record_number": "12345",
             "suggestion": "deny",
+            "support_recommendation": "none",
+            "rationale": {
+                "short_reason": "Exames incompletos.",
+                "details": ["Há pendências laboratoriais.", "Necessita revisão manual."],
+                "missing_info_questions": [],
+            },
             "policy_alignment": {
                 "excluded_request": False,
                 "labs_ok": "no",
@@ -143,6 +163,7 @@ def _eda_llm2_deny_response() -> str:
                 "pediatric_flag": False,
                 "notes": None,
             },
+            "confidence": "media",
         }
     )
 
