@@ -466,7 +466,7 @@ class TestPipelineLlm1Failure:
 
 @pytest.mark.django_db
 class TestPipelineScopeGated:
-    """Non-EDA → scope gate ativa → WAIT_DOCTOR sem LLM2."""
+    """Non-EDA → scope gate ativa → WAIT_R1_CLEANUP_THUMBS sem LLM2."""
 
     def test_pipeline_scope_gated(self, django_user_model) -> None:
         user = django_user_model.objects.create_user(username="nir7", password="pw")
@@ -483,7 +483,7 @@ class TestPipelineScopeGated:
         )
 
         case = _reload(case)
-        assert case.status == CaseStatus.WAIT_DOCTOR
+        assert case.status == CaseStatus.WAIT_R1_CLEANUP_THUMBS
 
         # LLM2 was never called (only 1 call = LLM1)
         assert len(client.calls) == 1
@@ -492,12 +492,72 @@ class TestPipelineScopeGated:
         assert case.suggested_action is not None
         assert case.suggested_action.get("decision") == "manual_review_required"
 
-        # Scope gate event recorded — honest SCOPE_GATE_BYPASS, no LLM2_OK
+        # Scope gate events recorded — EDA_SCOPE_GATED_MANUAL_REVIEW, SCOPE_GATE_BYPASS, FINAL_REPLY_POSTED
         events = CaseEvent.objects.filter(case=case).order_by("timestamp")
         event_types = [e.event_type for e in events]
         assert "EDA_SCOPE_GATED_MANUAL_REVIEW" in event_types
         assert "SCOPE_GATE_BYPASS" in event_types
+        assert "FINAL_REPLY_POSTED" in event_types
         assert "LLM2_OK" not in event_types
+
+    def test_pipeline_scope_gated_unknown_exam_type(self, django_user_model) -> None:
+        """unknown exam_type → WAIT_R1_CLEANUP_THUMBS sem LLM2."""
+        user = django_user_model.objects.create_user(username="nir_unk", password="pw")
+
+        # Use NON-EDA response but modify exam_type to 'unknown'
+        import json
+
+        unknown_data = json.loads(_non_eda_llm1_response())
+        unknown_data["preop_screening"]["exam_type"] = "unknown"
+
+        case = _make_case(user)
+        client = RecordingLlmClient(responses=[json.dumps(unknown_data)])
+
+        run_pipeline(
+            case.case_id,
+            llm_client=client,
+            llm1_system_prompt="sp1",
+            llm1_user_template="{case_id}|{agency_record_number}|{extracted_text}",
+        )
+
+        case = _reload(case)
+        assert case.status == CaseStatus.WAIT_R1_CLEANUP_THUMBS
+
+        # LLM2 was never called
+        assert len(client.calls) == 1
+
+        # suggested_action is the scope gate result
+        assert case.suggested_action is not None
+        assert case.suggested_action.get("decision") == "manual_review_required"
+        assert case.suggested_action.get("reason_code") == "unknown_exam_type"
+
+        # No LLM2_OK
+        event_types = [e.event_type for e in CaseEvent.objects.filter(case=case)]
+        assert "LLM2_OK" not in event_types
+        assert "EDA_SCOPE_GATED_MANUAL_REVIEW" in event_types
+        assert "FINAL_REPLY_POSTED" in event_types
+
+    def test_pipeline_scope_gated_does_not_appear_in_doctor_queue(self, django_user_model) -> None:
+        """Scope-gated case (WAIT_R1_CLEANUP_THUMBS) não aparece na fila WAIT_DOCTOR."""
+        user = django_user_model.objects.create_user(username="nir_filter", password="pw")
+        case = _make_case(user)
+
+        client = RecordingLlmClient(responses=[_non_eda_llm1_response()])
+        run_pipeline(
+            case.case_id,
+            llm_client=client,
+            llm1_system_prompt="sp1",
+            llm1_user_template="{case_id}|{agency_record_number}|{extracted_text}",
+        )
+
+        case = _reload(case)
+        # Not in WAIT_DOCTOR
+        assert case.status != CaseStatus.WAIT_DOCTOR
+        # Doctor queue would filter by WAIT_DOCTOR — this case won't appear
+        from apps.cases.models import Case
+
+        wait_doctor_count = Case.objects.filter(status=CaseStatus.WAIT_DOCTOR).count()
+        assert wait_doctor_count == 0
 
 
 @pytest.mark.django_db

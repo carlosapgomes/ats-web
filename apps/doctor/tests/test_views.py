@@ -292,6 +292,31 @@ class TestDoctorQueueView:
 
     # ── Navigation links ──────────────────────────────────────────────
 
+    def test_queue_excludes_scope_gated_cases(self, client) -> None:
+        """Scope-gated cases (WAIT_R1_CLEANUP_THUMBS) do not appear in doctor queue."""
+        nir_user = User.objects.create_user(username="nir_scopegate@test.com", password="testpass123")
+        nir_user.roles.add(self._create_role("nir"))
+
+        # Create a scope-gated case that ended in WAIT_R1_CLEANUP_THUMBS
+        gated = Case.objects.create(
+            created_by=nir_user,
+            status=CaseStatus.WAIT_R1_CLEANUP_THUMBS,
+            suggested_action={
+                "decision": "manual_review_required",
+                "reason_code": "non_eda_request",
+                "reason_text": "Fora de escopo.",
+            },
+        )
+        gated.structured_data = {"patient": {"name": "Gated Case", "age": 40, "gender": "Masculino"}}
+        gated.save()
+
+        self._login_as(client, "doctor")
+        response = client.get("/doctor/")
+        assert response.status_code == 200
+        content = response.content.decode()
+        # Scope-gated case should NOT appear
+        assert "Gated Case" not in content
+
     def test_queue_has_evaluate_case_link(self, client) -> None:
         """Each pending case card has a link to the decision page."""
         nir_user = User.objects.create_user(username="nir_link@test.com", password="testpass123")

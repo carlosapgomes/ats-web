@@ -66,12 +66,12 @@ class TestFSMLlmStruct:
         assert case.status == CaseStatus.FAILED
 
     def test_scope_gate_bypass_transition(self, user, case_factory, advance_to) -> None:
-        """Scope-gated case: LLM_STRUCT → WAIT_DOCTOR directly."""
+        """Scope-gated case: LLM_STRUCT → WAIT_R1_CLEANUP_THUMBS directly."""
         case = advance_to(case_factory(user), CaseStatus.LLM_STRUCT)
         case.scope_gate_bypass(reason_code="non_eda_request")
         case.save()
         case = Case.objects.get(pk=case.pk)
-        assert case.status == CaseStatus.WAIT_DOCTOR
+        assert case.status == CaseStatus.WAIT_R1_CLEANUP_THUMBS
 
         events = CaseEvent.objects.filter(case=case)
         event_types = [e.event_type for e in events]

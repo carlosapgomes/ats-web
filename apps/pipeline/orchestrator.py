@@ -141,9 +141,11 @@ def _run_scope_and_llm2(
             payload=scope_result,
         )
         case.save()  # persist event BEFORE FSM transition overwrites _pending_event
-        # Direct transition LLM_STRUCT → WAIT_DOCTOR (no misleading LLM2_OK event)
+        # Direct transition LLM_STRUCT → WAIT_R1_CLEANUP_THUMBS (no misleading LLM2_OK event)
         reason_code = str(scope_result.get("reason_code", ""))
         case.scope_gate_bypass(reason_code=reason_code)
+        case.save()
+        case._record_event("FINAL_REPLY_POSTED")
         case.save()
         return
 
