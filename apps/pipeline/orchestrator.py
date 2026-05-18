@@ -86,8 +86,8 @@ def _run_llm1_step(
 ) -> None:
     """Run LLM1: structured data extraction + persist artifacts + audit events."""
 
-    sp = system_prompt or _get_prompt_content("llm1_system_prompt")
-    ut = user_template or _get_prompt_content("llm1_user_prompt")
+    sp = system_prompt or _get_prompt_content("llm1_system")
+    ut = user_template or _get_prompt_content("llm1_user")
 
     service = Llm1Service(client)
     result = service.run(
@@ -182,8 +182,8 @@ def _run_scope_and_llm2(
         )
 
     # ── 5. LLM2 suggestion ──────────────────────────────────────
-    sp2 = llm2_system_prompt or _get_prompt_content("llm2_system_prompt")
-    ut2 = llm2_user_template or _get_prompt_content("llm2_user_prompt")
+    sp2 = llm2_system_prompt or _get_prompt_content("llm2_system")
+    ut2 = llm2_user_template or _get_prompt_content("llm2_user")
 
     service2 = Llm2Service(client)
     result2 = service2.run(
@@ -319,15 +319,50 @@ def _build_llm2_suggestion_input(suggested_action: dict[str, object]) -> Llm2Sug
 
 
 def _get_prompt_content(name: str) -> str:
-    """Resolve prompt content from DB or return a safe fallback."""
+    """Resolve prompt content from DB or return a legacy-compatible fallback."""
     template = PromptTemplate.get_active(name)
     if template is not None:
         return template.content
-    # Fallback: minimal prompt so the pipeline doesn't crash if templates
-    # were not yet seeded.  Production deployments MUST seed templates.
+    # Fallback: legacy default contents so the pipeline doesn't crash if
+    # templates were not yet seeded. Production MUST seed templates.
     logger.warning("PromptTemplate %r not found — using fallback", name)
-    # Use named placeholder to avoid format errors with keyword args.
-    return "{case_id}"
+    fallbacks = {
+        "llm1_system": (
+            "Voce e um assistente clinico para triagem de Endoscopia Digestiva Alta (EDA). "
+            "Retorne APENAS JSON valido que siga estritamente o schema_version 1.1. "
+            "Escreva todos os campos narrativos em portugues brasileiro (pt-BR). "
+            "Nao use palavras em ingles nos campos narrativos. "
+            "Nao inclua markdown, blocos de codigo ou chaves extras. "
+            "Nao invente fatos; use null/unknown quando faltar informacao. "
+            "Classifique o procedimento EDA suportado com subtype em standard, gastrostomy, "
+            "esophageal_dilation ou foreign_body. Estime ASA pratico apenas nos buckets "
+            "I-II, III ou mais, ou insufficient_data, sempre de forma conservadora e baseada "
+            "no texto. Nao inferir Mallampati ou risco OSA."
+        ),
+        "llm1_user": (
+            "Tarefa: extrair dados estruturados e gerar resumo conciso de triagem "
+            "a partir de um relatorio clinico para triagem EDA. "
+            "Exigir evidencia textual explicita para cada campo objetivo. "
+            "Quando nao houver evidencia textual, retornar unknown (ou null para numericos). "
+            "Preencher preop_screening.rulebook_signals para o novo rulebook, incluindo "
+            "exames minimos, exames condicionais, subtipo EDA suportado e contexto de "
+            "paciente pediatrico. Incluir preop_screening.evidence_spans com field_path "
+            "e excerpt sempre que houver evidencia."
+        ),
+        "llm2_system": (
+            "Voce e um assistente de apoio a decisao clinica para triagem de "
+            "Endoscopia Digestiva Alta (EDA). Retorne APENAS JSON valido que siga estritamente "
+            "o schema_version 1.1. Escreva todos os campos narrativos em portugues "
+            "brasileiro (pt-BR). Nao use palavras em ingles nos campos narrativos. "
+            "Use apenas valores de enum permitidos para suggestion e support_recommendation. "
+            "Nao inclua markdown, blocos de codigo ou chaves extras."
+        ),
+        "llm2_user": (
+            "Tarefa: sugerir accept/deny e recomendacao de suporte para triagem EDA "
+            "usando dados estruturados do LLM1 e contexto de caso anterior."
+        ),
+    }
+    return fallbacks.get(name, "{case_id}")
 
 
 # ── Data helpers ─────────────────────────────────────────────────────────────
