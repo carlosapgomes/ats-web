@@ -436,6 +436,31 @@ class TestLlm1PromptContainsLegacyInstructions:
         assert "CPRE" in user_prompt
         assert "non_eda" in user_prompt
 
+    def test_prompt_contains_explicit_schema_contract_and_forbidden_aliases(self) -> None:
+        payload = _valid_llm1_payload()
+        client = RecordingLlmClient(responses=[json.dumps(payload)])
+        service = Llm1Service(client)
+
+        service.run(
+            case_id="case-schema",
+            agency_record_number="12345",
+            extracted_text="Paciente masculino com solicitação de EDA.",
+            system_prompt="SP",
+            user_prompt_template="UT base",
+        )
+
+        user_prompt = client.calls[0]["user_prompt"]
+        assert "CONTRATO JSON OBRIGATORIO" in user_prompt
+        assert 'language: exatamente "pt-BR"' in user_prompt
+        assert 'patient.sex: apenas "M", "F" ou "Outro"' in user_prompt
+        assert 'EvidenceFlag devem ser strings "yes", "no" ou "unknown"' in user_prompt
+        assert "nunca true/false" in user_prompt
+        assert "tracked_exams[]" in user_prompt
+        assert "NUNCA use estes nomes/aliases" in user_prompt
+        assert "age_years" in user_prompt
+        assert "triage_summary" in user_prompt
+        assert "case_id no JSON de resposta" in user_prompt
+
     def test_prompt_includes_case_id_and_record(self) -> None:
         payload = _valid_llm1_payload(agency_record_number="99999")
         client = RecordingLlmClient(responses=[json.dumps(payload)])
@@ -492,6 +517,11 @@ class TestLlm1FallbackDefaults:
         assert "had_transfusion" in up
         assert "rulebook_signals" in up
         assert "evidence_spans" in up
+        assert "CONTRATO JSON OBRIGATORIO" in up
+        assert "patient.sex" in up
+        assert "full_name" in up
+        assert "age_years" in up
+        assert "triage_summary" in up
 
     def test_defaults_dont_diverge_from_v6_migration(self) -> None:
         """Seed e fallback não divergem nos blocos essenciais do legado v6."""
