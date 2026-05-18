@@ -1083,6 +1083,17 @@ class TestDoctorSubmitView:
         assert "form.requestSubmit()" in js
         assert "if (finalSubmitConfirmed) return;" in js
 
+    def test_service_worker_does_not_intercept_post_requests(self) -> None:
+        """Service worker must not wrap Django form POST requests.
+
+        Role switching and decision/receipt forms rely on normal browser
+        cookie/session/CSRF behavior. The service worker may cache GET assets,
+        but non-GET requests must go straight to Django.
+        """
+        sw = Path("static/js/sw.js").read_text()
+        assert 'event.request.method !== "GET"' in sw
+        assert "ats-cache-v2" in sw
+
     def test_submit_non_wait_doctor_returns_404(self, client) -> None:
         """POST to non-WAIT_DOCTOR case returns 404."""
         case = self._create_case_in_status(CaseStatus.DOCTOR_DENIED)
