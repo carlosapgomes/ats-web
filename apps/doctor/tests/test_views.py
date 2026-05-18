@@ -530,6 +530,34 @@ class TestDoctorDecisionView:
         content = response.content.decode()
         assert "PDF" in content or "pdf" in content.lower() or "Encaminhamento" in content
 
+    def test_decision_shows_patient_sex_from_schema(self, client) -> None:
+        """Patient sex from LLM1 schema (patient.sex) is displayed."""
+        case = self._create_case_in_status(CaseStatus.WAIT_DOCTOR)
+        case.agency_record_number = "2026-0506-SEX"
+        case.structured_data = {
+            "patient": {"name": "Maria Sex", "age": 35, "sex": "F"},
+        }
+        case.save()
+        self._login_as(client, "doctor")
+        response = client.get(f"/doctor/{case.case_id}/")
+        assert response.status_code == 200
+        content = response.content.decode()
+        assert "F" in content
+
+    def test_decision_shows_patient_gender_fallback(self, client) -> None:
+        """When sex is absent but gender is present, gender is used as fallback."""
+        case = self._create_case_in_status(CaseStatus.WAIT_DOCTOR)
+        case.agency_record_number = "2026-0506-GEN"
+        case.structured_data = {
+            "patient": {"name": "João Gender", "age": 40, "gender": "Masculino"},
+        }
+        case.save()
+        self._login_as(client, "doctor")
+        response = client.get(f"/doctor/{case.case_id}/")
+        assert response.status_code == 200
+        content = response.content.decode()
+        assert "Masculino" in content
+
     def test_decision_shows_all_seven_report_blocks(self, client) -> None:
         """Decision page renders all 7 report block titles."""
         case = self._create_case_in_status(CaseStatus.WAIT_DOCTOR)
