@@ -10,7 +10,7 @@ Change criado para corrigir divergências críticas identificadas na investigaç
 - [x] Slice 002 — Contrato Pydantic LLM1 (`slices/slice-002-llm1-pydantic-contract.md`) — commit `9a0f0e8`, report `/tmp/ats-web-slice-002-llm1-pydantic-report.md`
 - [x] Slice 003 — Contrato Pydantic LLM2 (`slices/slice-003-llm2-pydantic-contract.md`) — commit `37c0144`, report `/tmp/ats-web-slice-003-llm2-pydantic-report.md`
 - [x] Slice 004 — Scope gate direto para resultado NIR (`slices/slice-004-scope-gate-nir-final.md`) — commit `ab5d5dd`, report `/tmp/ats-web-slice-004-scope-gate-nir-final-report.md`
-- [ ] Slice 005 — Presenter médico em 7 blocos (`slices/slice-005-doctor-report-presenter.md`)
+- [x] Slice 005 — Presenter médico em 7 blocos (`slices/slice-005-doctor-report-presenter.md`) — commit `d6c5fff`, report `/tmp/ats-web-slice-005-doctor-report-presenter-report.md`
 - [ ] Slice 006 — Role guard médico (`slices/slice-006-doctor-role-guard.md`)
 - [ ] Slice 007 — Quality gate e closeout (`slices/slice-007-quality-docs-closeout.md`)
 
