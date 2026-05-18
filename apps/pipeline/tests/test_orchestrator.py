@@ -439,3 +439,77 @@ class TestEnqueuePipeline:
         args, _kwargs = calls[0]
         assert args[0] == "apps.pipeline.tasks.execute_pipeline"  # type: ignore[index]
         assert args[1] == str(case.case_id)  # type: ignore[index]
+
+
+@pytest.mark.django_db
+class TestPromptResolutionFromDB:
+    """Orchestrator resolves canonical prompt names from DB."""
+
+    def test_uses_llm1_system_from_db(self, django_user_model) -> None:
+        """When l1m1_system exists in DB, orchestrator uses it."""
+        from apps.llm.models import PromptTemplate
+
+        user = django_user_model.objects.create_user(username="npr1", password="pw")
+        case = _make_case(user)
+
+        # Seed canonical prompt with recognizable content
+        PromptTemplate.objects.create(
+            name="llm1_system",
+            version=1,
+            content="DB_SYSTEM_PROMPT_LLM1",
+            is_active=True,
+        )
+
+        # Capture what prompts are sent to LLM
+        client = RecordingLlmClient(responses=[_eda_llm1_response(), _eda_llm2_accept_response(str(case.case_id))])
+
+        # Run WITHOUT injecting llm1_system_prompt — must come from DB
+        run_pipeline(
+            case.case_id,
+            llm_client=client,
+            llm1_user_template="{case_id}|{agency_record_number}|{extracted_text}",
+            llm2_system_prompt="sp2",
+            llm2_user_template="{case_id}|{agency_record_number}|{llm1_structured_data}",
+        )
+
+        # Verify the LLM received the DB prompt
+        llm1_call = client.calls[0]
+        assert llm1_call["system_prompt"] == "DB_SYSTEM_PROMPT_LLM1"
+
+    def test_uses_llm2_system_from_db(self, django_user_model) -> None:
+        """When llm2_system exists in DB, orchestrator uses it."""
+        from apps.llm.models import PromptTemplate
+
+        user = django_user_model.objects.create_user(username="npr2", password="pw")
+        case = _make_case(user)
+
+        PromptTemplate.objects.create(
+            name="llm2_system",
+            version=1,
+            content="DB_SYSTEM_PROMPT_LLM2",
+            is_active=True,
+        )
+
+        client = RecordingLlmClient(responses=[_eda_llm1_response(), _eda_llm2_accept_response(str(case.case_id))])
+
+        run_pipeline(
+            case.case_id,
+            llm_client=client,
+            llm1_system_prompt="sp1",
+            llm1_user_template="{case_id}|{agency_record_number}|{extracted_text}",
+            llm2_user_template="{case_id}|{agency_record_number}|{llm1_structured_data}",
+        )
+
+        llm2_call = client.calls[1]
+        assert llm2_call["system_prompt"] == "DB_SYSTEM_PROMPT_LLM2"
+
+    def test_fallback_does_not_contain_endoscopy_report(self) -> None:
+        """When no prompt in DB, fallback must not mention 'relatório de endoscopia'."""
+        from apps.pipeline.orchestrator import _get_prompt_content
+
+        # Ensure no prompts in DB
+        for name in ["llm1_system", "llm1_user", "llm2_system", "llm2_user"]:
+            fallback = _get_prompt_content(name)
+            assert "relatório de endoscopia" not in fallback.lower(), (
+                f"Fallback for {name} contains 'relatório de endoscopia'"
+            )

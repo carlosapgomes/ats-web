@@ -11,46 +11,62 @@ from django.core.management.base import BaseCommand
 
 from apps.llm.models import PromptTemplate
 
-# Prompt names used by the pipeline orchestrator
+# Canonical prompt names matching the legacy system and admin UI.
 PROMPT_NAMES = [
-    "llm1_system_prompt",
-    "llm1_user_prompt",
-    "llm2_system_prompt",
-    "llm2_user_prompt",
+    "llm1_system",
+    "llm1_user",
+    "llm2_system",
+    "llm2_user",
 ]
 
+# Default contents ported from the legacy augmented-triage-system.
+# llm1: most recent versions (v6 from 0018_prompt_templates_llm1_ptbr_v6).
+# llm2: most recent versions (v3 from 0005_prompt_templates_ptbr_v3).
 DEFAULT_CONTENTS = {
-    "llm1_system_prompt": (
-        "Você é um assistente médico especializado em triagem de endoscopia digestiva alta (EDA). "
-        "Analise o relatório do paciente e extraia dados estruturados em JSON.\n\n"
-        "Campos obrigatórios:\n"
-        "- patient: name, age, sex\n"
-        "- exam_findings: lista de achados endoscópicos\n"
-        "- clinical_indication: indicação clínica do exame\n"
-        "- urgency: elective | urgent | emergency\n\n"
-        "Responda APENAS com JSON válido."
+    "llm1_system": (
+        "Voce e um assistente clinico para triagem de Endoscopia Digestiva Alta "
+        "(EDA). Retorne APENAS JSON valido que siga estritamente o schema_version "
+        "1.1. Escreva todos os campos narrativos em portugues brasileiro (pt-BR). "
+        "Nao use palavras em ingles nos campos narrativos. Nao inclua markdown, "
+        "blocos de codigo ou chaves extras. Nao invente fatos; use null/unknown "
+        "quando faltar informacao. Classifique o procedimento EDA suportado com "
+        "subtype em standard, gastrostomy, esophageal_dilation ou foreign_body. "
+        "Estime ASA pratico apenas nos buckets I-II, III ou mais, ou "
+        "insufficient_data, sempre de forma conservadora e baseada no texto. "
+        "Nao inferir Mallampati ou risco OSA. "
+        "Extraia origin_context (cidade/hospital/unidade/UF) quando disponivel. "
+        "Identifique tracked_exams com recencia por data/hora ou posicao textual. "
+        "Registre had_transfusion como binario (yes/no); ausencia de evidencia "
+        "de transfusao deve ser tratada como 'no'."
     ),
-    "llm1_user_prompt": (
-        "Analise o seguinte relatório de endoscopia e extraia os dados estruturados.\n\n"
-        "ID do caso: {case_id}\n\n"
-        "Relatório:\n{extracted_text}"
+    "llm1_user": (
+        "Tarefa: extrair dados estruturados e gerar resumo conciso de triagem "
+        "a partir de um relatorio clinico para triagem EDA. Exigir evidencia "
+        "textual explicita para cada campo objetivo. Quando nao houver evidencia "
+        "textual, retornar unknown (ou null para numericos). Preencher "
+        "preop_screening.rulebook_signals para o novo rulebook, incluindo exames "
+        "minimos, exames condicionais, subtipo EDA suportado e contexto de "
+        "paciente pediatrico. Incluir preop_screening.evidence_spans com "
+        "field_path e excerpt sempre que houver evidencia. "
+        "Extrair origin_context (cidade/hospital/unidade/UF) quando disponivel "
+        "no texto. Identificar exames rastreados (tracked_exams) com recencia "
+        "determinada por data/hora ou posicao textual, com desempate pela ultima "
+        "ocorrencia. Registrar had_transfusion como binario (yes/no); ausencia de "
+        "evidencia de transfusao deve ser tratada como 'no'."
     ),
-    "llm2_system_prompt": (
-        "Você é um assistente médico especializado em triagem de EDA. "
-        "Com base nos dados estruturados e na política de triagem, gere uma recomendação.\n\n"
-        "Campos obrigatórios na resposta:\n"
-        "- summary_text: resumo em linguagem clara para o médico\n"
-        "- suggested_action.support_recommendation: none | partial | full\n"
-        "- suggested_action.suggestion: scheduled | immediate\n"
-        "- confidence: 0.0 a 1.0\n"
-        "- reasoning: justificativa da recomendação\n\n"
-        "Responda APENAS com JSON válido."
+    "llm2_system": (
+        "Voce e um assistente de apoio a decisao clinica para triagem de "
+        "Endoscopia Digestiva Alta (EDA). Retorne APENAS JSON valido que siga "
+        "estritamente o schema_version 1.1. Escreva todos os campos narrativos em "
+        "portugues brasileiro (pt-BR). Nao use palavras em ingles nos campos "
+        "narrativos. Use apenas valores de enum permitidos para suggestion e "
+        "support_recommendation. Nao inclua markdown, blocos de codigo ou chaves "
+        "extras."
     ),
-    "llm2_user_prompt": (
-        "Dados estruturados do caso:\n{llm1_structured_data}\n\n"
-        "Caso anterior (se houver):\n{prior_case}\n\n"
-        "ID do caso: {case_id}\n\n"
-        "Gere a recomendação de triagem."
+    "llm2_user": (
+        "Tarefa: sugerir accept/deny e recomendacao de suporte para triagem EDA "
+        "usando dados estruturados do LLM1 e contexto de caso anterior. "
+        "Nao use palavras em ingles nos campos narrativos."
     ),
 }
 
@@ -79,8 +95,4 @@ class Command(BaseCommand):
             created_count += 1
             self.stdout.write(self.style.SUCCESS(f"  Created: {name} v1"))
 
-        self.stdout.write(
-            self.style.SUCCESS(
-                f"\nDone. {created_count} created, {skipped_count} skipped."
-            )
-        )
+        self.stdout.write(self.style.SUCCESS(f"\nDone. {created_count} created, {skipped_count} skipped."))
