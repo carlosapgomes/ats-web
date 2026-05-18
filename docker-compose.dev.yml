@@ -11,6 +11,11 @@ services:
       POSTGRES_DB: ats_web_dev
     volumes:
       - pgdata_dev:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ats_web -d ats_web_dev"]
+      interval: 2s
+      timeout: 3s
+      retries: 5
 
   web:
     build:
