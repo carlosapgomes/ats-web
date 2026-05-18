@@ -9,6 +9,7 @@ from django.http import Http404, HttpRequest, HttpResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.utils import timezone
 
+from apps.accounts.decorators import role_required
 from apps.cases.models import Case, CaseStatus
 
 from .forms import DoctorDecisionForm
@@ -151,6 +152,7 @@ def _build_case_card(case: Case, wait_minutes: int) -> dict[str, Any]:
 
 
 @login_required
+@role_required("doctor")
 def doctor_queue(request: HttpRequest) -> HttpResponse:
     """View da fila médica: casos pendentes e decididos hoje."""
 
@@ -249,6 +251,7 @@ def _build_decision_context(case: Case, form: DoctorDecisionForm) -> dict[str, A
 
 
 @login_required
+@role_required("doctor")
 def doctor_decision(request: HttpRequest, case_id: str) -> HttpResponse:
     """GET: Renderiza formulário de decisão para um caso em WAIT_DOCTOR."""
     case = get_object_or_404(Case, pk=case_id)
@@ -261,6 +264,7 @@ def doctor_decision(request: HttpRequest, case_id: str) -> HttpResponse:
 
 
 @login_required
+@role_required("doctor")
 def doctor_submit(request: HttpRequest, case_id: str) -> HttpResponse:
     """POST: Valida formulário, persiste decisão e executa transições FSM."""
     if request.method != "POST":

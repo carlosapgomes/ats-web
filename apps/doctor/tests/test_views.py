@@ -44,6 +44,41 @@ class TestDoctorQueueView:
         response = client.get("/doctor/")
         assert response.status_code == 200
 
+    # ── Role guard tests ─────────────────────────────────────────────
+
+    def test_queue_blocks_nir(self, client) -> None:
+        """NIR with active_role='nir' cannot access /doctor/."""
+        self._login_as(client, "nir")
+        response = client.get("/doctor/")
+        assert response.status_code == 302
+        assert response.url == "/"
+
+    def test_queue_blocks_scheduler(self, client) -> None:
+        """Scheduler with active_role='scheduler' cannot access /doctor/."""
+        self._login_as(client, "scheduler")
+        response = client.get("/doctor/")
+        assert response.status_code == 302
+        assert response.url == "/"
+
+    def test_queue_blocks_manager(self, client) -> None:
+        """Manager with active_role='manager' cannot access /doctor/."""
+        self._login_as(client, "manager")
+        response = client.get("/doctor/")
+        assert response.status_code == 302
+        assert response.url == "/"
+
+    def test_queue_allows_manager_with_active_doctor(self, client) -> None:
+        """Manager who selects active_role='doctor' can access /doctor/."""
+        user = User.objects.create_user(username="manager-doctor@test.com", password="testpass123")
+        user.roles.add(self._create_role("manager"))
+        user.roles.add(self._create_role("doctor"))
+        client.force_login(user)
+        session = client.session
+        session["active_role"] = "doctor"
+        session.save()
+        response = client.get("/doctor/")
+        assert response.status_code == 200
+
     # ── Content tests ─────────────────────────────────────────────────
 
     def test_queue_shows_pending_cases(self, client) -> None:
@@ -465,6 +500,16 @@ class TestDoctorDecisionView:
             case = _advance_case_to(case, status)
         return case
 
+    def test_decision_requires_doctor_role(self, client) -> None:
+        """NIR with active_role='nir' cannot GET /doctor/<case_id>/."""
+        case = self._create_case_in_status(CaseStatus.WAIT_DOCTOR)
+        case.structured_data = {"patient": {"name": "João", "age": 50, "gender": "Masculino"}}
+        case.save()
+        self._login_as(client, "nir")
+        response = client.get(f"/doctor/{case.case_id}/")
+        assert response.status_code == 302
+        assert response.url == "/"
+
     def test_decision_returns_200_for_wait_doctor(self, client) -> None:
         """GET /doctor/<case_id>/ returns 200 for WAIT_DOCTOR case."""
         case = self._create_case_in_status(CaseStatus.WAIT_DOCTOR)
@@ -875,6 +920,25 @@ class TestDoctorSubmitView:
         if status != CaseStatus.NEW:
             case = _advance_case_to(case, status)
         return case
+
+    def test_submit_blocks_nir(self, client) -> None:
+        """NIR with active_role='nir' cannot POST /doctor/<case_id>/submit/."""
+        case = self._create_case_in_status(CaseStatus.WAIT_DOCTOR)
+        case.structured_data = {"patient": {"name": "Blocked", "age": 40, "gender": "Masculino"}}
+        case.save()
+
+        self._login_as(client, "nir")
+
+        response = client.post(
+            f"/doctor/{case.case_id}/submit/",
+            data={
+                "decision": "accept",
+                "support_flag": "none",
+                "admission_flow": "scheduled",
+            },
+        )
+        assert response.status_code == 302
+        assert response.url == "/"
 
     def test_submit_accept_persists_fields_and_transitions(self, client) -> None:
         """POST accept → fields persisted, FSM: WAIT_DOCTOR → DOCTOR_ACCEPTED → R3_POST_REQUEST → WAIT_APPT."""
