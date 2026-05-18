@@ -4,7 +4,6 @@ Validates and normalizes the LLM response against the schema 1.1 contract
 ported from the legacy augmented-triage-system.
 
 Key differences from legacy:
-- No language retry (deferred to future slice).
 - No interaction repository (audit via CaseEvent in orchestrator).
 - Sync interface (legacy was async).
 """
@@ -17,7 +16,15 @@ from pydantic import ValidationError as PydanticValidationError
 
 from apps.pipeline.json_parser import LlmJsonParseError, decode_llm_json_object
 from apps.pipeline.llm import LlmClient
+from apps.pipeline.ptbr_language_guard import collect_forbidden_terms
 from apps.pipeline.schemas.llm1 import Llm1Response
+
+# ── Language retry instruction ──────────────────────────────────────────
+
+_LANGUAGE_RETRY_INSTRUCTION = (
+    "Regra obrigatoria adicional: todo texto narrativo deve estar em portugues "
+    "brasileiro (pt-BR), sem palavras em ingles."
+)
 
 # ── Centralized default prompts (legacy v6) ─────────────────────────────────
 # These are the single source of truth for LLM1 fallback defaults.
@@ -122,10 +129,9 @@ class Llm1Result:
 class Llm1Service:
     """Execute LLM1 call, enforce schema 1.1, and normalize output.
 
-    Simplifications vs legacy (Fase 2/3):
-    - No language retry — will be added in a future phase.
-    - No async — Django Q2 handles async dispatch at the task level.
-    - No interaction repository — audit events handled via CaseEvent in orchestrator.
+    Includes language retry: if validated output contains forbidden
+    English terms in narrative fields, a single retry with an
+    additional pt-BR instruction is attempted.
     """
 
     def __init__(self, client: LlmClient) -> None:
@@ -155,7 +161,7 @@ class Llm1Service:
 
         Raises:
             Llm1ValidationError: If JSON parsing, schema validation,
-                or cross-field consistency checks fail.
+                cross-field consistency checks, or language guard fail.
         """
         # Render the final user prompt with legacy instructions
         user_prompt = _render_user_prompt(
@@ -176,6 +182,23 @@ class Llm1Service:
             raw_response=raw_response,
             agency_record_number=agency_record_number,
         )
+
+        # Language guard: retry once with pt-BR instruction if needed
+        forbidden_terms = _collect_llm1_forbidden_terms(validated=validated)
+        if forbidden_terms:
+            retry_user_prompt = f"{user_prompt}\n\n{_LANGUAGE_RETRY_INSTRUCTION}"
+            retry_response = self._client.complete(
+                system_prompt=system_prompt,
+                user_prompt=retry_user_prompt,
+            )
+            validated = _decode_and_validate(
+                raw_response=retry_response,
+                agency_record_number=agency_record_number,
+            )
+            forbidden_terms = _collect_llm1_forbidden_terms(validated=validated)
+            if forbidden_terms:
+                joined_terms = ", ".join(forbidden_terms)
+                raise Llm1ValidationError(f"LLM1 output contains non-ptbr narrative terms after retry: {joined_terms}")
 
         # Serialize to JSON-safe dict via model_dump
         structured = validated.model_dump(mode="json")
@@ -283,3 +306,20 @@ def _decode_and_validate(
         raise Llm1ValidationError("LLM1 agency_record_number mismatch")
 
     return validated
+
+
+def _collect_llm1_forbidden_terms(*, validated: Llm1Response) -> list[str]:
+    """Collect forbidden English terms across all LLM1 narrative fields.
+
+    Ported from the legacy _collect_llm1_forbidden_terms() in llm1_service.py.
+    """
+    texts: list[str] = [
+        validated.summary.one_liner,
+        *validated.summary.bullet_points,
+    ]
+    optional_texts = [
+        validated.policy_precheck.notes,
+        validated.extraction_quality.notes,
+    ]
+    texts.extend(text for text in optional_texts if text is not None)
+    return collect_forbidden_terms(texts=texts)
