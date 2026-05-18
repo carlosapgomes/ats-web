@@ -289,7 +289,21 @@ def case_detail(request: HttpRequest, case_id: str) -> HttpResponse:
         CaseStatus.WAIT_R1_CLEANUP_THUMBS,
         CaseStatus.CLEANED,
     )
-    if case.status == CaseStatus.APPT_CONFIRMED or terminal_with_result:
+    # Scope-gated manual review takes priority for WAIT_R1_CLEANUP_THUMBS
+    is_scope_gated = (
+        case.suggested_action
+        and isinstance(case.suggested_action, dict)
+        and case.suggested_action.get("decision") == "manual_review_required"
+    )
+    if is_scope_gated:
+        reason_code = case.suggested_action.get("reason_code", "") if isinstance(case.suggested_action, dict) else ""
+        reason_text = case.suggested_action.get("reason_text", "") if isinstance(case.suggested_action, dict) else ""
+        result_info = {
+            "type": "manual_review_required",
+            "reason_code": reason_code,
+            "reason_text": reason_text,
+        }
+    elif case.status == CaseStatus.APPT_CONFIRMED or terminal_with_result:
         result_info = {
             "type": "accepted_scheduled",
             "appointment_at": case.appointment_at,

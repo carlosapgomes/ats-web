@@ -138,12 +138,13 @@ class Case(models.Model):
     @transition(
         field=status,
         source=CaseStatus.LLM_STRUCT,
-        target=CaseStatus.WAIT_DOCTOR,
+        target=CaseStatus.WAIT_R1_CLEANUP_THUMBS,
     )
     def scope_gate_bypass(self, *, reason_code: str = "", user=None):
         """Bypass LLM2 for scope-gated cases (non-EDA / unknown exam type).
 
-        Records an honest audit event instead of a misleading LLM2_OK.
+        Transitions directly to WAIT_R1_CLEANUP_THUMBS so the NIR can
+        confirm receipt — the case never enters the doctor queue.
         """
         self._record_event(
             "SCOPE_GATE_BYPASS",
