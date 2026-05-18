@@ -12,6 +12,7 @@ dependencies = [
     "django-fsm==3.0.1",
     "pymupdf>=1.27.2.3",
     "openai>=2.34.0",
+    "pydantic>=2",
     "gunicorn>=23.0.0",
 ]
 
@@ -106,6 +107,10 @@ disable_error_code = ["no-untyped-def", "no-untyped-call", "assignment", "valid-
 [[tool.mypy.overrides]]
 module = "apps.admin_ui.views"
 disable_error_code = ["untyped-decorator"]
+
+[[tool.mypy.overrides]]
+module = "apps.pipeline.schemas.*"
+disable_error_code = ["valid-type"]
 
 [[tool.mypy.overrides]]
 module = "apps.admin_ui.forms"

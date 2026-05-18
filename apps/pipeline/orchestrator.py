@@ -12,7 +12,11 @@ import uuid
 from apps.cases.models import Case
 from apps.llm.models import PromptTemplate
 from apps.pipeline.llm import LlmClient, get_llm_client
-from apps.pipeline.llm1_service import Llm1Service
+from apps.pipeline.llm1_service import (
+    LLM1_DEFAULT_SYSTEM_PROMPT,
+    LLM1_DEFAULT_USER_PROMPT,
+    Llm1Service,
+)
 from apps.pipeline.llm2_service import Llm2Service
 from apps.pipeline.policy import (
     EdaPolicyPrecheckInput,
@@ -327,28 +331,8 @@ def _get_prompt_content(name: str) -> str:
     # templates were not yet seeded. Production MUST seed templates.
     logger.warning("PromptTemplate %r not found — using fallback", name)
     fallbacks = {
-        "llm1_system": (
-            "Voce e um assistente clinico para triagem de Endoscopia Digestiva Alta (EDA). "
-            "Retorne APENAS JSON valido que siga estritamente o schema_version 1.1. "
-            "Escreva todos os campos narrativos em portugues brasileiro (pt-BR). "
-            "Nao use palavras em ingles nos campos narrativos. "
-            "Nao inclua markdown, blocos de codigo ou chaves extras. "
-            "Nao invente fatos; use null/unknown quando faltar informacao. "
-            "Classifique o procedimento EDA suportado com subtype em standard, gastrostomy, "
-            "esophageal_dilation ou foreign_body. Estime ASA pratico apenas nos buckets "
-            "I-II, III ou mais, ou insufficient_data, sempre de forma conservadora e baseada "
-            "no texto. Nao inferir Mallampati ou risco OSA."
-        ),
-        "llm1_user": (
-            "Tarefa: extrair dados estruturados e gerar resumo conciso de triagem "
-            "a partir de um relatorio clinico para triagem EDA. "
-            "Exigir evidencia textual explicita para cada campo objetivo. "
-            "Quando nao houver evidencia textual, retornar unknown (ou null para numericos). "
-            "Preencher preop_screening.rulebook_signals para o novo rulebook, incluindo "
-            "exames minimos, exames condicionais, subtipo EDA suportado e contexto de "
-            "paciente pediatrico. Incluir preop_screening.evidence_spans com field_path "
-            "e excerpt sempre que houver evidencia."
-        ),
+        "llm1_system": LLM1_DEFAULT_SYSTEM_PROMPT,
+        "llm1_user": LLM1_DEFAULT_USER_PROMPT,
         "llm2_system": (
             "Voce e um assistente de apoio a decisao clinica para triagem de "
             "Endoscopia Digestiva Alta (EDA). Retorne APENAS JSON valido que siga estritamente "

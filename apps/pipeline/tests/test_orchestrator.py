@@ -23,7 +23,7 @@ def _make_case(user, extracted_text="Paciente com dispepsia. Solicito EDA.") -> 
     """Create a minimal Case ready for pipeline execution."""
     case = Case.objects.create(
         created_by=user,
-        agency_record_number="AR12345",
+        agency_record_number="12345",
         extracted_text=extracted_text,
     )
     # Transition: NEW → R1_ACK_PROCESSING → EXTRACTING → LLM_STRUCT
@@ -40,17 +40,31 @@ def _eda_llm1_response() -> str:
     """LLM1 structured data for a standard EDA case that passes all checks."""
     return json.dumps(
         {
-            "schema_version": "1.0",
-            "patient": {"age": 35},
-            "summary": {"one_liner": "EDA eletiva indicada."},
+            "schema_version": "1.1",
+            "language": "pt-BR",
+            "agency_record_number": "12345",
+            "patient": {"name": "Paciente", "age": 35, "sex": "F"},
+            "summary": {
+                "one_liner": "EDA eletiva indicada.",
+                "bullet_points": ["Ponto 1", "Ponto 2", "Ponto 3"],
+            },
+            "extraction_quality": {
+                "confidence": "alta",
+                "missing_fields": [],
+                "notes": None,
+            },
             "preop_screening": {
                 "exam_type": "eda",
+                "has_cardiovascular_disease": "no",
+                "has_active_respiratory_symptoms": "no",
+                "has_prior_respiratory_disease": "no",
+                "has_ecg_report": "unknown",
+                "has_chest_xray_report": "unknown",
+                "hb_g_dl": 13.0,
+                "platelets_per_mm3": 200000,
+                "inr": 1.0,
                 "rulebook_signals": {
-                    "excluded_from_eda_flow": False,
-                    "labs_required": "yes",
-                    "labs_pass": "yes",
-                    "ecg_required": "no",
-                    "ecg_present": "yes",
+                    "eda_subtype": "standard",
                     "minimum_exam_evidence": {
                         "hb_numeric_present": "yes",
                         "platelets_numeric_present": "yes",
@@ -63,10 +77,38 @@ def _eda_llm1_response() -> str:
                     "clinical_flags": {},
                 },
             },
+            "policy_precheck": {
+                "excluded_from_eda_flow": False,
+                "exclusion_reason": None,
+                "labs_required": True,
+                "labs_pass": "yes",
+                "labs_failed_items": [],
+                "ecg_required": False,
+                "ecg_present": "unknown",
+                "pediatric_flag": False,
+                "notes": None,
+            },
             "eda": {
-                "indication_category": "standard",
-                "requested_procedure": {"subtype": "standard"},
-                "labs": {"hb_g_dl": 13.0, "platelets_per_mm3": 200000, "rni": 1.0},
+                "indication_category": "dyspepsia",
+                "exclusion_type": "none",
+                "is_pediatric": False,
+                "foreign_body_suspected": False,
+                "requested_procedure": {
+                    "name": "EDA",
+                    "urgency": "eletivo",
+                    "subtype": "standard",
+                },
+                "labs": {
+                    "hb_g_dl": 13.0,
+                    "platelets_per_mm3": 200000,
+                    "inr": 1.0,
+                    "source_text_hint": None,
+                },
+                "ecg": {
+                    "report_present": "unknown",
+                    "abnormal_flag": "unknown",
+                    "source_text_hint": None,
+                },
             },
         }
     )
@@ -109,14 +151,68 @@ def _non_eda_llm1_response() -> str:
     """LLM1 data for a non-EDA exam (should trigger scope gate)."""
     return json.dumps(
         {
-            "schema_version": "1.0",
-            "patient": {"age": 50},
-            "summary": {"one_liner": "Colonoscopia solicitada."},
+            "schema_version": "1.1",
+            "language": "pt-BR",
+            "agency_record_number": "12345",
+            "patient": {"name": "Paciente", "age": 50, "sex": "M"},
+            "summary": {
+                "one_liner": "Colonoscopia solicitada.",
+                "bullet_points": ["Ponto 1", "Ponto 2", "Ponto 3"],
+            },
+            "extraction_quality": {
+                "confidence": "alta",
+                "missing_fields": [],
+                "notes": None,
+            },
             "preop_screening": {
                 "exam_type": "non_eda",
+                "has_cardiovascular_disease": "no",
+                "has_active_respiratory_symptoms": "no",
+                "has_prior_respiratory_disease": "no",
+                "has_ecg_report": "unknown",
+                "has_chest_xray_report": "unknown",
+                "hb_g_dl": None,
+                "platelets_per_mm3": None,
+                "inr": None,
                 "evidence_spans": [
                     {"field_path": "exam_type", "excerpt": "colonoscopia"},
                 ],
+                "rulebook_signals": {
+                    "eda_subtype": "unknown",
+                },
+            },
+            "policy_precheck": {
+                "excluded_from_eda_flow": True,
+                "exclusion_reason": "non_eda",
+                "labs_required": False,
+                "labs_pass": "unknown",
+                "labs_failed_items": [],
+                "ecg_required": False,
+                "ecg_present": "unknown",
+                "pediatric_flag": False,
+                "notes": None,
+            },
+            "eda": {
+                "indication_category": "unknown",
+                "exclusion_type": "unknown",
+                "is_pediatric": False,
+                "foreign_body_suspected": False,
+                "requested_procedure": {
+                    "name": "Colonoscopia",
+                    "urgency": "eletivo",
+                    "subtype": "unknown",
+                },
+                "labs": {
+                    "hb_g_dl": None,
+                    "platelets_per_mm3": None,
+                    "inr": None,
+                    "source_text_hint": None,
+                },
+                "ecg": {
+                    "report_present": "unknown",
+                    "abnormal_flag": "unknown",
+                    "source_text_hint": None,
+                },
             },
         }
     )
@@ -126,17 +222,31 @@ def _low_hb_llm1_response() -> str:
     """LLM1 data with critically low Hb (triggers preop deny)."""
     return json.dumps(
         {
-            "schema_version": "1.0",
-            "patient": {"age": 45},
-            "summary": {"one_liner": "EDA eletiva."},
+            "schema_version": "1.1",
+            "language": "pt-BR",
+            "agency_record_number": "12345",
+            "patient": {"name": "Paciente", "age": 45, "sex": "F"},
+            "summary": {
+                "one_liner": "EDA eletiva.",
+                "bullet_points": ["Hb 5.0", "Ponto 2", "Ponto 3"],
+            },
+            "extraction_quality": {
+                "confidence": "alta",
+                "missing_fields": [],
+                "notes": None,
+            },
             "preop_screening": {
                 "exam_type": "eda",
+                "has_cardiovascular_disease": "no",
+                "has_active_respiratory_symptoms": "no",
+                "has_prior_respiratory_disease": "no",
+                "has_ecg_report": "unknown",
+                "has_chest_xray_report": "unknown",
+                "hb_g_dl": 5.0,
+                "platelets_per_mm3": 200000,
+                "inr": 1.0,
                 "rulebook_signals": {
-                    "excluded_from_eda_flow": False,
-                    "labs_required": "yes",
-                    "labs_pass": "yes",
-                    "ecg_required": "no",
-                    "ecg_present": "yes",
+                    "eda_subtype": "standard",
                     "minimum_exam_evidence": {
                         "hb_numeric_present": "yes",
                         "platelets_numeric_present": "yes",
@@ -149,10 +259,38 @@ def _low_hb_llm1_response() -> str:
                     "clinical_flags": {},
                 },
             },
+            "policy_precheck": {
+                "excluded_from_eda_flow": False,
+                "exclusion_reason": None,
+                "labs_required": True,
+                "labs_pass": "yes",
+                "labs_failed_items": [],
+                "ecg_required": False,
+                "ecg_present": "unknown",
+                "pediatric_flag": False,
+                "notes": None,
+            },
             "eda": {
-                "indication_category": "standard",
-                "requested_procedure": {"subtype": "standard"},
-                "labs": {"hb_g_dl": 5.0, "platelets_per_mm3": 200000, "rni": 1.0},
+                "indication_category": "dyspepsia",
+                "exclusion_type": "none",
+                "is_pediatric": False,
+                "foreign_body_suspected": False,
+                "requested_procedure": {
+                    "name": "EDA",
+                    "urgency": "eletivo",
+                    "subtype": "standard",
+                },
+                "labs": {
+                    "hb_g_dl": 5.0,
+                    "platelets_per_mm3": 200000,
+                    "inr": 1.0,
+                    "source_text_hint": None,
+                },
+                "ecg": {
+                    "report_present": "unknown",
+                    "abnormal_flag": "unknown",
+                    "source_text_hint": None,
+                },
             },
         }
     )
