@@ -6,6 +6,7 @@ Follows the legacy augmented-triage-system contract (schema 1.1).
 from __future__ import annotations
 
 import json
+from typing import Any
 
 import pytest
 
@@ -21,7 +22,7 @@ from apps.pipeline.llm1_service import (
 # ── Test helpers ────────────────────────────────────────────────────────────
 
 
-def _valid_llm1_payload(*, agency_record_number: str = "12345", age: int | None = 45) -> dict[str, object]:
+def _valid_llm1_payload(*, agency_record_number: str = "12345", age: int | None = 45) -> dict[str, Any]:
     """Build a minimal valid LLM1 response dict (schema 1.1)."""
     return {
         "schema_version": "1.1",
@@ -568,3 +569,133 @@ class TestLlm1StructuredDataJsonMode:
         roundtripped = json.loads(serialized)
         assert roundtripped["schema_version"] == "1.1"
         assert roundtripped["language"] == "pt-BR"
+
+
+# ── Language retry ──────────────────────────────────────────────────────────
+
+
+class TestLlm1LanguageRetry:
+    """LLM1 deve fazer retry de linguagem quando houver termos em inglês."""
+
+    def test_no_retry_when_all_ptbr(self) -> None:
+        """Sem termos proibidos, apenas uma chamada é feita."""
+        payload = _valid_llm1_payload()
+        client = RecordingLlmClient(responses=[json.dumps(payload)])
+        service = Llm1Service(client)
+
+        service.run(
+            case_id="case-lr-001",
+            agency_record_number="12345",
+            extracted_text="Relatório clínico.",
+            system_prompt="SP",
+            user_prompt_template="UT",
+        )
+        assert len(client.calls) == 1
+
+    def test_retries_once_when_first_has_forbidden_terms(self) -> None:
+        """Primeira resposta contém termo proibido → retry é chamado."""
+        # First response: one_liner contains English word
+        payload1 = _valid_llm1_payload()
+        payload1["summary"]["one_liner"] = "Patient with dyspepsia — EDA indicated."
+        # Second response: clean
+        payload2 = _valid_llm1_payload()
+        payload2["summary"]["one_liner"] = "Paciente com dispepsia — EDA indicada."
+
+        client = RecordingLlmClient(
+            responses=[
+                json.dumps(payload1),
+                json.dumps(payload2),
+            ]
+        )
+        service = Llm1Service(client)
+
+        result = service.run(
+            case_id="case-lr-002",
+            agency_record_number="12345",
+            extracted_text="Relatório.",
+            system_prompt="SP",
+            user_prompt_template="UT",
+        )
+        assert len(client.calls) == 2
+        # Second call should include retry instruction
+        user_prompt2 = client.calls[1]["user_prompt"]
+        assert "Regra obrigatoria adicional" in user_prompt2
+        assert "portugues brasileiro" in user_prompt2
+        # Result should be from second (clean) response
+        assert "Paciente com dispepsia" in result.summary_text
+
+    def test_raises_when_both_have_forbidden_terms(self) -> None:
+        """Segunda resposta ainda contém termo proibido → Llm1ValidationError."""
+        payload1 = _valid_llm1_payload()
+        payload1["summary"]["one_liner"] = "Patient with dyspepsia."
+        payload2 = _valid_llm1_payload()
+        payload2["summary"]["one_liner"] = "Patient accepted for EDA."
+
+        client = RecordingLlmClient(
+            responses=[
+                json.dumps(payload1),
+                json.dumps(payload2),
+            ]
+        )
+        service = Llm1Service(client)
+
+        with pytest.raises(Llm1ValidationError, match="non-ptbr"):
+            service.run(
+                case_id="case-lr-003",
+                agency_record_number="12345",
+                extracted_text="Relatório.",
+                system_prompt="SP",
+                user_prompt_template="UT",
+            )
+        assert len(client.calls) == 2
+
+    def test_forbidden_term_in_bullet_points_triggers_retry(self) -> None:
+        """Termo proibido em bullet_points também dispara retry."""
+        payload1 = _valid_llm1_payload()
+        payload1["summary"]["bullet_points"] = [
+            "Patient reported epigastric pain.",
+            "Sem sinais de alarme.",
+            "Exames pendentes.",
+        ]
+        payload2 = _valid_llm1_payload()
+
+        client = RecordingLlmClient(
+            responses=[
+                json.dumps(payload1),
+                json.dumps(payload2),
+            ]
+        )
+        service = Llm1Service(client)
+
+        service.run(
+            case_id="case-lr-004",
+            agency_record_number="12345",
+            extracted_text="Relatório.",
+            system_prompt="SP",
+            user_prompt_template="UT",
+        )
+        assert len(client.calls) == 2
+        assert "Regra obrigatoria adicional" in client.calls[1]["user_prompt"]
+
+    def test_forbidden_term_in_notes_triggers_retry(self) -> None:
+        """Termo proibido em policy_precheck.notes também dispara retry."""
+        payload1 = _valid_llm1_payload()
+        payload1["policy_precheck"]["notes"] = "Patient has no contraindications. Recommend accept."
+        payload2 = _valid_llm1_payload()
+
+        client = RecordingLlmClient(
+            responses=[
+                json.dumps(payload1),
+                json.dumps(payload2),
+            ]
+        )
+        service = Llm1Service(client)
+
+        service.run(
+            case_id="case-lr-005",
+            agency_record_number="12345",
+            extracted_text="Relatório.",
+            system_prompt="SP",
+            user_prompt_template="UT",
+        )
+        assert len(client.calls) == 2

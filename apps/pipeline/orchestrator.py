@@ -11,7 +11,7 @@ import uuid
 
 from apps.cases.models import Case
 from apps.llm.models import PromptTemplate
-from apps.pipeline.llm import LlmClient, get_llm_client
+from apps.pipeline.llm import LlmClient
 from apps.pipeline.llm1_service import (
     LLM1_DEFAULT_SYSTEM_PROMPT,
     LLM1_DEFAULT_USER_PROMPT,
@@ -50,18 +50,28 @@ def run_pipeline(
     Override them in tests to avoid needing DB templates or real LLM calls.
     """
     case = Case.objects.get(case_id=case_id)
-    client = llm_client or get_llm_client()
+
+    # Use separate stage-specific clients in production mode.
+    # When a single client is injected (tests), use it for both.
+    if llm_client is None:
+        from apps.pipeline.llm import create_openai_llm1_client, create_openai_llm2_client
+
+        client_llm1: LlmClient = create_openai_llm1_client()
+        client_llm2: LlmClient = create_openai_llm2_client()
+    else:
+        client_llm1 = llm_client
+        client_llm2 = llm_client
 
     try:
         _run_llm1_step(
             case=case,
-            client=client,
+            client=client_llm1,
             system_prompt=llm1_system_prompt,
             user_template=llm1_user_template,
         )
         _run_scope_and_llm2(
             case=case,
-            client=client,
+            client=client_llm2,
             llm2_system_prompt=llm2_system_prompt,
             llm2_user_template=llm2_user_template,
         )
