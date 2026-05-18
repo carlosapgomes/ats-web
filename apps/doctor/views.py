@@ -204,6 +204,8 @@ def _build_decision_context(case: Case, form: DoctorDecisionForm) -> dict[str, A
         "suggested_support": _get_suggested_support(case),
         "suggested_flow": _get_suggested_flow(case),
         "summary_text": case.summary_text or "",
+        "suggested_action": case.suggested_action or {},
+        "structured_data": case.structured_data or {},
         "prior_context": prior_context,
         "prior_decision_display": prior_decision_display,
     }
