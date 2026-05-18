@@ -111,6 +111,19 @@ Aplicar `@role_required("doctor")` às views médicas:
 
 Adicionar testes garantindo bloqueio para papel ativo não médico.
 
+## D8. Runtime OpenAI strict schema e retry de linguagem
+
+O runtime OpenAI deve preservar o contrato efetivo do legado, não apenas validar depois da resposta.
+
+No legado, clientes LLM1/LLM2 em modo provider são instanciados com schemas específicos:
+
+- LLM1: `response_schema_name="llm1_response"`, `response_schema=Llm1Response.model_json_schema()`
+- LLM2: `response_schema_name="llm2_response"`, `response_schema=Llm2Response.model_json_schema()`
+
+O client envia `response_format={"type": "json_schema", "json_schema": {"strict": True, ...}}` após normalizar o schema Pydantic para strict mode. O Django deve portar essa semântica, preferencialmente com clients/factories específicos por estágio.
+
+Também deve portar o retry de linguagem pt-BR do legado: validar Pydantic, coletar termos narrativos em inglês, repetir uma vez com instrução adicional e falhar claramente se persistir.
+
 ## Plano de Slices
 
 1. `slice-001-canonical-prompts.md` — nomes canônicos, seed e fallback de prompts.
@@ -120,6 +133,7 @@ Adicionar testes garantindo bloqueio para papel ativo não médico.
 5. `slice-005-doctor-report-presenter.md` — relatório médico em 7 blocos equivalente ao legado.
 6. `slice-006-doctor-role-guard.md` — autorização por papel ativo `doctor`.
 7. `slice-007-quality-docs-closeout.md` — quality gate, documentação e relatório final.
+8. `slice-008-openai-strict-schema-and-language-retry.md` — runtime OpenAI com schema strict e retry de linguagem.
 
 ## Gates Globais
 
