@@ -112,10 +112,8 @@ def _build_case_card(case: Case, wait_minutes: int) -> dict[str, Any]:
 # ── View ──────────────────────────────────────────────────────────────────
 
 
-@login_required
-def scheduler_queue(request: HttpRequest) -> HttpResponse:
-    """View da fila de agendamento: casos WAIT_APPT e confirmados hoje."""
-
+def _scheduler_queue_context() -> dict[str, Any]:
+    """Build context for full and HTMX scheduler queue renders."""
     pending_cases: QuerySet[Case] = Case.objects.filter(status=CaseStatus.WAIT_APPT).order_by("created_at")
 
     today: date = date.today()
@@ -168,7 +166,19 @@ def scheduler_queue(request: HttpRequest) -> HttpResponse:
         "total_notice_count": pending_count + immediate_notice_count,
     }
 
-    return render(request, "scheduler/queue.html", context)
+    return context
+
+
+@login_required
+def scheduler_queue(request: HttpRequest) -> HttpResponse:
+    """View da fila de agendamento: casos WAIT_APPT e confirmados hoje."""
+    return render(request, "scheduler/queue.html", _scheduler_queue_context())
+
+
+@login_required
+def scheduler_queue_partial(request: HttpRequest) -> HttpResponse:
+    """HTMX partial for polling the scheduler queue without full refresh."""
+    return render(request, "scheduler/_queue_content.html", _scheduler_queue_context())
 
 
 # ── Immediate admission acknowledgement ────────────────────────────────────
