@@ -2,9 +2,10 @@
 
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
-from django.http import HttpRequest, HttpResponse
+from django.http import FileResponse, Http404, HttpRequest, HttpResponse, HttpResponseBase
 from django.shortcuts import get_object_or_404, redirect, render
 from django.utils import timezone
+from django.views.decorators.clickjacking import xframe_options_sameorigin
 
 from apps.accounts.decorators import role_required
 from apps.cases.models import Case, CaseStatus
@@ -340,6 +341,25 @@ def case_detail(request: HttpRequest, case_id: str) -> HttpResponse:
             "patient_name": patient_name,
             "prior_case_lookup": prior_case_lookup,
         },
+    )
+
+
+@login_required
+@role_required("nir")
+@xframe_options_sameorigin
+def serve_pdf(request: HttpRequest, case_id: str) -> HttpResponseBase:
+    """Serve o PDF original do caso para visualização inline no <embed>."""
+    case = get_object_or_404(
+        Case.objects.select_related("created_by"),
+        case_id=case_id,
+        created_by=request.user,
+    )
+    if not case.pdf_file:
+        raise Http404("PDF não encontrado para este caso.")
+
+    return FileResponse(
+        case.pdf_file.open("rb"),
+        content_type="application/pdf",
     )
 
 

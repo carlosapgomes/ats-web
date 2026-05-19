@@ -15,6 +15,9 @@ import dj_database_url
 from .base import *  # noqa: F401,F403
 
 DEBUG = os.environ.get("DJANGO_DEBUG", "true").lower() in ("true", "1", "yes")
+
+# Allow PDF embedded in same-origin <embed>/<iframe> (dev only)
+X_FRAME_OPTIONS = "SAMEORIGIN"
 SECRET_KEY = os.environ.get("DJANGO_SECRET_KEY", "dev-secret-key-not-for-production")
 ALLOWED_HOSTS = ["*"]
 
