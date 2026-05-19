@@ -100,6 +100,38 @@ class TestSchedulerQueueView:
         assert "ACEITAR" in content
         assert "Anestesista + UTI" in content
 
+    def test_queue_shows_immediate_admission_operational_notice(self, client) -> None:
+        """Immediate admission appears as operational notice, not scheduling gate."""
+        nir_user = User.objects.create_user(username="nir_immediate_notice@test.com", password="testpass123")
+        nir_user.roles.add(self._create_role("nir"))
+
+        case = Case.objects.create(
+            created_by=nir_user,
+            status=CaseStatus.WAIT_R1_CLEANUP_THUMBS,
+            agency_record_number="IMM-001",
+            doctor_decision="accept",
+            doctor_support_flag="anesthesist",
+            doctor_admission_flow="immediate",
+            structured_data={"patient": {"name": "Vinda Imediata", "age": 70, "gender": "Masculino"}},
+        )
+        CaseEvent.objects.create(
+            case=case,
+            actor_type="human",
+            actor=nir_user,
+            event_type="IMMEDIATE_ADMISSION_OPERATIONAL_NOTICE",
+            timestamp=timezone.now(),
+        )
+
+        self._login_as(client, "scheduler")
+        response = client.get("/scheduler/")
+        assert response.status_code == 200
+        content = response.content.decode()
+        assert "Vinda imediata autorizada" in content
+        assert "Não abrir agendamento" in content
+        assert "Vinda Imediata" in content
+        assert "IMM-001" in content
+        assert f'href="/scheduler/{case.case_id}/"' not in content
+
     def test_queue_shows_waiting_time(self, client) -> None:
         """Case cards display waiting time since created_at."""
         nir_user = User.objects.create_user(username="nir_wt@test.com", password="testpass123")

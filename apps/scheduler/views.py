@@ -120,6 +120,17 @@ def scheduler_queue(request: HttpRequest) -> HttpResponse:
 
     today: date = date.today()
 
+    immediate_notice_qs: QuerySet[Case] = (
+        Case.objects.filter(
+            doctor_admission_flow="immediate",
+            events__event_type="IMMEDIATE_ADMISSION_OPERATIONAL_NOTICE",
+            events__timestamp__date=today,
+        )
+        .exclude(status=CaseStatus.WAIT_APPT)
+        .distinct()
+        .order_by("-doctor_decided_at", "-created_at")
+    )
+
     confirmed_qs: QuerySet[Case] = Case.objects.filter(
         status__in=[CaseStatus.APPT_CONFIRMED, CaseStatus.APPT_DENIED],
         events__event_type__startswith="APPT_",
@@ -134,7 +145,14 @@ def scheduler_queue(request: HttpRequest) -> HttpResponse:
         wait_minutes = int(delta.total_seconds() // 60)
         pending_cards.append(_build_case_card(case, wait_minutes))
 
+    immediate_notice_cards: list[dict[str, Any]] = []
+    for case in immediate_notice_qs:
+        delta = now - (case.doctor_decided_at or case.created_at)
+        wait_minutes = int(delta.total_seconds() // 60)
+        immediate_notice_cards.append(_build_case_card(case, wait_minutes))
+
     pending_count = len(pending_cards)
+    immediate_notice_count = len(immediate_notice_cards)
 
     confirmed_cards: list[dict[str, Any]] = []
     for case in confirmed_qs:
@@ -144,6 +162,9 @@ def scheduler_queue(request: HttpRequest) -> HttpResponse:
         "pending_cases": pending_cards,
         "confirmed_today": confirmed_cards,
         "pending_count": pending_count,
+        "immediate_notice_cases": immediate_notice_cards,
+        "immediate_notice_count": immediate_notice_count,
+        "total_notice_count": pending_count + immediate_notice_count,
     }
 
     return render(request, "scheduler/queue.html", context)

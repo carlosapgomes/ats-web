@@ -8,7 +8,7 @@
 <nav class="app-nav mt-3" aria-label="Navegação">
   <ul class="nav nav-pills gap-2">
     <li class="nav-item">
-      <span class="nav-link active notif-badge" data-count="{{ pending_count }}" style="position:relative;">Pendentes</span>
+      <span class="nav-link active notif-badge" data-count="{{ total_notice_count }}" style="position:relative;">Pendentes</span>
     </li>
     <li class="nav-item"><span class="nav-link">Confirmados Hoje</span></li>
     <li class="nav-item"><span class="nav-link">Histórico</span></li>
@@ -19,14 +19,63 @@
 {% block content %}
 
 <!-- Alert / Count -->
-{% if pending_count > 0 %}
+{% if total_notice_count > 0 %}
 <div class="alert alert-info d-flex align-items-center gap-2 mb-4" role="alert">
   <span class="pulse-dot"></span>
-  <strong>{{ pending_count }} solicitação{% if pending_count != 1 %}ções{% endif %} aguardando confirmação.</strong>
+  <strong>
+    {{ pending_count }} solicitação{% if pending_count != 1 %}ções{% endif %} aguardando confirmação
+    {% if immediate_notice_count %} · {{ immediate_notice_count }} vinda{% if immediate_notice_count != 1 %}s{% endif %} imediata{% if immediate_notice_count != 1 %}s{% endif %} para ciência operacional{% endif %}.
+  </strong>
 </div>
 {% else %}
 <div class="alert alert-info d-flex align-items-center gap-2 mb-4" role="alert">
   Nenhuma solicitação aguardando confirmação no momento.
+</div>
+{% endif %}
+
+<!-- Immediate Admission Operational Notices -->
+{% if immediate_notice_cases %}
+<div class="card p-4 mb-4 border-warning">
+  <h5 class="mb-3">⚡ Vinda imediata autorizada — ciência operacional</h5>
+  <p class="text-muted mb-3">Não abrir agendamento para estes casos. Comunicação apenas para ciência operacional.</p>
+  <div class="row g-3">
+    {% for c in immediate_notice_cases %}
+    <div class="col-12">
+      <div class="case-card card p-3 bg-warning bg-opacity-10">
+        <div class="row">
+          <div class="col-lg-8">
+            <div class="patient-name mb-1">{{ c.patient_name }}</div>
+            <div class="case-meta mb-2">
+              {% if c.agency_record_number %}Reg. {{ c.agency_record_number }} · {% endif %}
+              {% if c.patient_age %}{{ c.patient_age }} anos · {% endif %}
+              {{ c.patient_gender }}
+            </div>
+            <div class="summary-box mb-2">
+              <div class="row">
+                <div class="col-sm-5 mb-2">
+                  <div class="summary-label">Diagnóstico</div>
+                  <div class="summary-value">{{ c.diagnosis|default:"—" }}</div>
+                </div>
+                <div class="col-sm-3 mb-2">
+                  <div class="summary-label">Suporte</div>
+                  <div class="summary-value">{{ c.support_flag_display }}</div>
+                </div>
+                <div class="col-sm-4 mb-2">
+                  <div class="summary-label">Fluxo</div>
+                  <div class="summary-value"><strong>{{ c.admission_flow_display }}</strong></div>
+                </div>
+              </div>
+            </div>
+          </div>
+          <div class="col-lg-4 text-lg-end mt-3 mt-lg-0">
+            <span class="badge bg-warning text-dark mb-2">Não agendar</span>
+            <div class="waiting-time">Registrado há {{ c.wait_minutes }} min</div>
+          </div>
+        </div>
+      </div>
+    </div>
+    {% endfor %}
+  </div>
 </div>
 {% endif %}
 
