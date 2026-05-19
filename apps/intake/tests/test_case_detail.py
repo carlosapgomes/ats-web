@@ -137,8 +137,9 @@ class TestCaseDetailRenders:
         response = client.get(reverse("intake:case_detail", args=[case.case_id]))
         assert response.status_code == 200
         content = response.content.decode()
-        # Deve ter um iframe ou embed para o PDF
-        assert ".pdf" in content or "iframe" in content
+        # Deve ter um embed apontando para a view protegida do PDF
+        assert "<embed" in content
+        assert reverse("intake:serve_pdf", args=[case.case_id]) in content
 
     def test_case_detail_shows_pdf_direct_link(self, client) -> None:
         """Quando tem pdf_file, HTML deve ter link direto para abrir o PDF."""
@@ -152,7 +153,8 @@ class TestCaseDetailRenders:
         response = client.get(reverse("intake:case_detail", args=[case.case_id]))
         assert response.status_code == 200
         content = response.content.decode()
-        assert "pdfs/2026/05/test.pdf" in content
+        assert reverse("intake:serve_pdf", args=[case.case_id]) in content
+        assert "Abrir em nova aba" in content
 
 
 @pytest.mark.django_db
