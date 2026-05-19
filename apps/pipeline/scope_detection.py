@@ -273,22 +273,27 @@ def classify_exam_scope(
 
     exam_type = _extract_preop_exam_type(llm1_structured_data=llm1_structured_data)
 
-    supported_subtype = _extract_supported_eda_subtype_from_llm1(
-        llm1_structured_data=llm1_structured_data,
-    )
-    if supported_subtype is None:
-        supported_subtype, _ = _detect_supported_eda_scope_keyword(
-            llm1_structured_data=llm1_structured_data,
-            cleaned_text=cleaned_text,
-        )
-
     explicit_eda_detected, _ = _detect_explicit_eda_scope_keyword(
         llm1_structured_data=llm1_structured_data,
         cleaned_text=cleaned_text,
     )
 
-    if supported_subtype is not None or explicit_eda_detected:
-        exam_type = "eda"
+    # If LLM1 explicitly classified the request as non-EDA, keep that result
+    # authoritative. Real strict-schema runs can still carry default EDA subtype
+    # values (e.g. "standard") in nested fields, and those must not route
+    # colonoscopy/CPRE/etc. to the doctor queue.
+    if exam_type != "non_eda":
+        supported_subtype = _extract_supported_eda_subtype_from_llm1(
+            llm1_structured_data=llm1_structured_data,
+        )
+        if supported_subtype is None:
+            supported_subtype, _ = _detect_supported_eda_scope_keyword(
+                llm1_structured_data=llm1_structured_data,
+                cleaned_text=cleaned_text,
+            )
+
+        if supported_subtype is not None or explicit_eda_detected:
+            exam_type = "eda"
 
     if exam_type not in {"non_eda", "unknown"}:
         return None
