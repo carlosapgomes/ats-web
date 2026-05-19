@@ -67,9 +67,15 @@
               </div>
             </div>
           </div>
-          <div class="col-lg-4 text-lg-end mt-3 mt-lg-0">
-            <span class="badge bg-warning text-dark mb-2">Não agendar</span>
-            <div class="waiting-time">Registrado há {{ c.wait_minutes }} min</div>
+          <div class="col-lg-4 text-lg-end mt-3 mt-lg-0 d-flex flex-lg-column justify-content-between align-items-lg-end">
+            <div>
+              <span class="badge bg-warning text-dark mb-2">Não agendar</span>
+              <div class="waiting-time">Registrado há {{ c.wait_minutes }} min</div>
+            </div>
+            <form method="post" action="{% url 'scheduler:immediate_ack' c.case_id %}" class="mt-2">
+              {% csrf_token %}
+              <button type="submit" class="btn btn-hospital">Confirmar ciência</button>
+            </form>
           </div>
         </div>
       </div>

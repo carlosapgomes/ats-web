@@ -127,6 +127,7 @@ def scheduler_queue(request: HttpRequest) -> HttpResponse:
             events__timestamp__date=today,
         )
         .exclude(status=CaseStatus.WAIT_APPT)
+        .exclude(events__event_type="SCHEDULER_IMMEDIATE_ACK")
         .distinct()
         .order_by("-doctor_decided_at", "-created_at")
     )
@@ -168,6 +169,30 @@ def scheduler_queue(request: HttpRequest) -> HttpResponse:
     }
 
     return render(request, "scheduler/queue.html", context)
+
+
+# ── Immediate admission acknowledgement ────────────────────────────────────
+
+
+@login_required
+def immediate_ack(request: HttpRequest, case_id: str) -> HttpResponse:
+    """POST: scheduler acknowledges immediate admission operational notice."""
+    if request.method != "POST":
+        raise Http404
+
+    case = get_object_or_404(
+        Case,
+        pk=case_id,
+        doctor_admission_flow="immediate",
+        events__event_type="IMMEDIATE_ADMISSION_OPERATIONAL_NOTICE",
+    )
+
+    already_acknowledged = case.events.filter(event_type="SCHEDULER_IMMEDIATE_ACK").exists()
+    if not already_acknowledged:
+        case._record_event("SCHEDULER_IMMEDIATE_ACK", user=request.user)
+        case.save()
+
+    return redirect("scheduler:queue")
 
 
 # ── Confirm helpers ────────────────────────────────────────────────────────
