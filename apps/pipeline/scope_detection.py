@@ -40,6 +40,14 @@ _SCOPE_EXPLICIT_EDA_TERMS: tuple[str, ...] = (
     "endoscopia digestiva superior",
 )
 
+_SCOPE_EXPLICIT_NON_EDA_TERMS: tuple[str, ...] = (
+    "endoscopia digestiva baixa",
+    "endoscopia digestiva baixa - colonoscopia",
+    "colonoscopia",
+    "colonoscopia diagnostica",
+    "colonoscopia terapeutica",
+)
+
 
 def _normalize_scope_keyword_text(*, value: str) -> str:
     """Strip diacritics, lowercase, and collapse whitespace for keyword matching."""
@@ -200,6 +208,53 @@ def _detect_supported_eda_scope_keyword(
     return None, None
 
 
+def _extract_motivo_solicitacao_text(*, cleaned_text: str) -> str | None:
+    """Extract the top-level 'Motivo da Solicitação' value when present."""
+
+    pattern = re.compile(
+        r"motivo\s+da\s+solicitacao\s*:\s*(?P<motive>.+?)(?:\s+unid\.|\s+complemento\s+da\s+solicitacao\s*:)",
+        re.IGNORECASE | re.DOTALL,
+    )
+    normalized_text = _normalize_scope_keyword_text(value=cleaned_text)
+    match = pattern.search(normalized_text)
+    if match is None:
+        return None
+    motive = match.group("motive").strip()
+    return motive or None
+
+
+def _detect_explicit_non_eda_scope_keyword(
+    *,
+    llm1_structured_data: dict[str, object],
+    cleaned_text: str,
+) -> tuple[bool, str | None, str | None]:
+    """Check if the request explicitly names a non-EDA exam.
+
+    The top-level 'Motivo da Solicitação' field is authoritative because the
+    clinical body may mention prior EDA reports or mixed historical context.
+
+    Returns (is_non_eda, matched_term, source) or (False, None, None).
+    """
+
+    motive_text = _extract_motivo_solicitacao_text(cleaned_text=cleaned_text)
+    if motive_text is not None:
+        for term in _SCOPE_EXPLICIT_NON_EDA_TERMS:
+            if _contains_scope_term(normalized_text=motive_text, term=term):
+                return True, term, "motivo_da_solicitacao"
+
+    candidate_texts = _extract_scope_keyword_candidate_texts(
+        llm1_structured_data=llm1_structured_data,
+        cleaned_text=cleaned_text,
+    )
+    for candidate in candidate_texts:
+        normalized_candidate = _normalize_scope_keyword_text(value=candidate)
+        for term in _SCOPE_EXPLICIT_NON_EDA_TERMS:
+            if _contains_scope_term(normalized_text=normalized_candidate, term=term):
+                return True, term, "candidate_text"
+
+    return False, None, None
+
+
 def _detect_explicit_eda_scope_keyword(
     *,
     llm1_structured_data: dict[str, object],
@@ -272,6 +327,13 @@ def classify_exam_scope(
     """
 
     exam_type = _extract_preop_exam_type(llm1_structured_data=llm1_structured_data)
+
+    explicit_non_eda_detected, _, explicit_non_eda_source = _detect_explicit_non_eda_scope_keyword(
+        llm1_structured_data=llm1_structured_data,
+        cleaned_text=cleaned_text,
+    )
+    if explicit_non_eda_detected and explicit_non_eda_source == "motivo_da_solicitacao":
+        exam_type = "non_eda"
 
     explicit_eda_detected, _ = _detect_explicit_eda_scope_keyword(
         llm1_structured_data=llm1_structured_data,

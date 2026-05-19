@@ -275,6 +275,32 @@ def test_non_eda_exam_type_wins_over_default_eda_subtype() -> None:
     assert result["exam_type"] == "non_eda"
 
 
+def test_motivo_endoscopia_digestiva_baixa_wins_over_later_eda_mentions() -> None:
+    """Top-level colonoscopy motive must not be overridden by later EDA text."""
+
+    llm1: dict[str, object] = {
+        "preop_screening": {"exam_type": "eda", "rulebook_signals": {"eda_subtype": "standard"}},
+        "eda": {"requested_procedure": {"name": "EDA", "subtype": "standard"}},
+    }
+    cleaned_text = """
+    Motivo da Solicitação:
+    Endoscopia Digestiva Baixa - Colonoscopia
+    Unid. Origem:
+    HSA - HOSPITAL SANTO ANTONIO
+    Complemento da Solicitação:
+    SOLICITO REGULAÇÃO PARA COLONOSCOPIA DIAGNÓSTICA E EDA DIAGNÓSTICA E TERAPÊUTICA
+    Resumo Clínico:
+    EDA prévia com gastrite erosiva.
+    """
+
+    result = _classify(llm1_structured_data=llm1, cleaned_text=cleaned_text)
+
+    assert result is not None
+    assert result["decision"] == "manual_review_required"
+    assert result["reason_code"] == "non_eda_request"
+    assert result["exam_type"] == "non_eda"
+
+
 def test_cpre_non_eda_returns_manual_review() -> None:
     """CPRE text without EDA keywords → still requires LLM1 to detect non_eda."""
 
