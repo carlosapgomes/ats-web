@@ -294,8 +294,22 @@ def doctor_submit(request: HttpRequest, case_id: str) -> HttpResponse:
     case.doctor_decide(decision=decision, user=request.user)
     case.save()
 
-    # If accepted, advance to WAIT_APPT
-    if decision == "accept":
+    if decision == "accept" and case.doctor_admission_flow == "immediate":
+        # Immediate admission does not open a scheduling gate. Room-3/scheduler is
+        # only informed for operational awareness; NIR receives the final result.
+        case._record_event(
+            "IMMEDIATE_ADMISSION_OPERATIONAL_NOTICE",
+            user=request.user,
+            payload={
+                "support_flag": case.doctor_support_flag,
+                "admission_flow": case.doctor_admission_flow,
+            },
+        )
+        case.save()
+        case.final_reply_posted(user=request.user)
+        case.save()
+    # If accepted for scheduled admission, advance to WAIT_APPT
+    elif decision == "accept":
         case.ready_for_scheduler(user=request.user)
         case.save()
         case.scheduler_request_posted(user=request.user)

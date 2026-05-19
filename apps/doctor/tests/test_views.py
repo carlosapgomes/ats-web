@@ -967,6 +967,34 @@ class TestDoctorSubmitView:
         assert case.doctor_decided_at is not None
         assert case.status == CaseStatus.WAIT_APPT
 
+    def test_submit_accept_immediate_bypasses_scheduler_and_posts_final_reply(self, client) -> None:
+        """POST accept/immediate → no scheduling gate; final result returns to NIR."""
+        case = self._create_case_in_status(CaseStatus.WAIT_DOCTOR)
+        case.structured_data = {"patient": {"name": "Immediate", "age": 70, "gender": "Masculino"}}
+        case.save()
+
+        self._login_as(client, "doctor")
+
+        response = client.post(
+            f"/doctor/{case.case_id}/submit/",
+            data={
+                "decision": "accept",
+                "support_flag": "anesthesist",
+                "admission_flow": "immediate",
+            },
+        )
+        assert response.status_code == 302
+
+        case = Case.objects.get(pk=case.pk)
+        assert case.doctor_decision == "accept"
+        assert case.doctor_admission_flow == "immediate"
+        assert case.status == CaseStatus.WAIT_R1_CLEANUP_THUMBS
+
+        events = CaseEvent.objects.filter(case=case)
+        assert events.filter(event_type="IMMEDIATE_ADMISSION_OPERATIONAL_NOTICE").exists()
+        assert events.filter(event_type="FINAL_REPLY_POSTED").exists()
+        assert not events.filter(event_type="SCHEDULER_REQUEST_POSTED").exists()
+
     def test_submit_accept_creates_scheduler_event(self, client) -> None:
         """POST accept creates SCHEDULER_REQUEST_POSTED event (auto-transition)."""
         case = self._create_case_in_status(CaseStatus.WAIT_DOCTOR)
