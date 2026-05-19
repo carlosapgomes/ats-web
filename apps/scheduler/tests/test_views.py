@@ -128,9 +128,73 @@ class TestSchedulerQueueView:
         content = response.content.decode()
         assert "Vinda imediata autorizada" in content
         assert "Não abrir agendamento" in content
+        assert "Confirmar ciência" in content
         assert "Vinda Imediata" in content
         assert "IMM-001" in content
         assert f'href="/scheduler/{case.case_id}/"' not in content
+
+    def test_immediate_admission_ack_removes_notice_from_queue(self, client) -> None:
+        """Scheduler can acknowledge immediate notice and remove it from queue."""
+        nir_user = User.objects.create_user(username="nir_immediate_ack@test.com", password="testpass123")
+        nir_user.roles.add(self._create_role("nir"))
+        case = Case.objects.create(
+            created_by=nir_user,
+            status=CaseStatus.WAIT_R1_CLEANUP_THUMBS,
+            agency_record_number="IMM-ACK",
+            doctor_decision="accept",
+            doctor_admission_flow="immediate",
+            structured_data={"patient": {"name": "Ack Imediata", "age": 70, "gender": "Masculino"}},
+        )
+        CaseEvent.objects.create(
+            case=case,
+            actor_type="human",
+            actor=nir_user,
+            event_type="IMMEDIATE_ADMISSION_OPERATIONAL_NOTICE",
+            timestamp=timezone.now(),
+        )
+
+        self._login_as(client, "scheduler")
+        response = client.post(f"/scheduler/{case.case_id}/immediate-ack/", follow=True)
+        assert response.status_code == 200
+
+        assert CaseEvent.objects.filter(case=case, event_type="SCHEDULER_IMMEDIATE_ACK").exists()
+        content = response.content.decode()
+        assert "Ack Imediata" not in content
+        assert "IMM-ACK" not in content
+
+    def test_queue_hides_acknowledged_immediate_admission_notice(self, client) -> None:
+        """Acknowledged immediate notices do not remain stuck in scheduler queue."""
+        nir_user = User.objects.create_user(username="nir_immediate_hidden@test.com", password="testpass123")
+        nir_user.roles.add(self._create_role("nir"))
+        case = Case.objects.create(
+            created_by=nir_user,
+            status=CaseStatus.WAIT_R1_CLEANUP_THUMBS,
+            agency_record_number="IMM-HIDDEN",
+            doctor_decision="accept",
+            doctor_admission_flow="immediate",
+            structured_data={"patient": {"name": "Hidden Imediata", "age": 70, "gender": "Masculino"}},
+        )
+        CaseEvent.objects.create(
+            case=case,
+            actor_type="human",
+            actor=nir_user,
+            event_type="IMMEDIATE_ADMISSION_OPERATIONAL_NOTICE",
+            timestamp=timezone.now(),
+        )
+        CaseEvent.objects.create(
+            case=case,
+            actor_type="human",
+            actor=nir_user,
+            event_type="SCHEDULER_IMMEDIATE_ACK",
+            timestamp=timezone.now(),
+        )
+
+        self._login_as(client, "scheduler")
+        response = client.get("/scheduler/")
+        assert response.status_code == 200
+        content = response.content.decode()
+        assert "Hidden Imediata" not in content
+        assert "IMM-HIDDEN" not in content
 
     def test_queue_shows_waiting_time(self, client) -> None:
         """Case cards display waiting time since created_at."""

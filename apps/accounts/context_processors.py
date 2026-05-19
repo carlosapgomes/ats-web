@@ -44,6 +44,7 @@ def queue_counts(request):  # type: ignore[no-untyped-def]
                 events__timestamp__date=today,
             )
             .exclude(status=CaseStatus.WAIT_APPT)
+            .exclude(events__event_type="SCHEDULER_IMMEDIATE_ACK")
             .distinct()
             .count()
         )
