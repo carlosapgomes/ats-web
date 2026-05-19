@@ -223,6 +223,28 @@ class TestCaseDetailResultInfo:
         assert "Agendamento" in content  # flow
         assert "Chegar 30min antes" in content
 
+    def test_waiting_receipt_after_immediate_acceptance_shows_immediate_not_scheduled(self, client) -> None:
+        """Immediate admission final result must not look like scheduling."""
+        client, user = _nir_client(client)
+        case = _case_with_patient(
+            Case.objects.create(
+                created_by=user,
+                agency_record_number="RES-IMMEDIATE",
+                status=CaseStatus.WAIT_R1_CLEANUP_THUMBS,
+                doctor_decision="accept",
+                doctor_support_flag="anesthesist",
+                doctor_admission_flow="immediate",
+            )
+        )
+        response = client.get(reverse("intake:case_detail", args=[case.case_id]))
+        assert response.status_code == 200
+        content = response.content.decode()
+        assert "Vinda Imediata Autorizada" in content
+        assert "Não abrir agendamento" in content
+        assert "Anestesista" in content
+        assert "Agendamento Confirmado" not in content
+        assert "📅</span> Agendamento" not in content
+
     def test_result_shows_accepted_scheduled_no_instructions(self, client) -> None:
         """APPT_CONFIRMED sem instruções → não quebra."""
         client, user = _nir_client(client)

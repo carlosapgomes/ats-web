@@ -112,6 +112,21 @@
       <span class="badge bg-warning text-dark fs-6 px-3 py-2">⚠ Revisão Manual Obrigatória</span>
     </div>
     <p class="mb-0">{{ result_info.reason_text }}</p>
+  {% elif result_info.type == "accepted_immediate" %}
+    <div class="d-flex align-items-center gap-3 mb-3">
+      <span class="badge bg-success fs-6 px-3 py-2">✓ Vinda Imediata Autorizada</span>
+    </div>
+    <p class="mb-3">Caso aceito para vinda imediata. Não abrir agendamento para este caso.</p>
+    <div class="row g-3">
+      <div class="col-md-6">
+        <p class="mb-1 text-muted small">Suporte</p>
+        <p class="mb-0 fw-medium">{{ result_info.support }}</p>
+      </div>
+      <div class="col-md-6">
+        <p class="mb-1 text-muted small">Fluxo</p>
+        <p class="mb-0 fw-medium">{{ result_info.flow }}</p>
+      </div>
+    </div>
   {% elif result_info.type == "accepted_scheduled" %}
     <div class="d-flex align-items-center gap-3 mb-3">
       <span class="badge bg-success fs-6 px-3 py-2">✓ Agendamento Confirmado</span>

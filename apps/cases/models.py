@@ -230,6 +230,7 @@ class Case(models.Model):
         field=status,
         source=[
             CaseStatus.DOCTOR_DENIED,
+            CaseStatus.DOCTOR_ACCEPTED,
             CaseStatus.APPT_CONFIRMED,
             CaseStatus.APPT_DENIED,
             CaseStatus.FAILED,

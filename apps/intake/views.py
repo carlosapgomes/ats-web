@@ -259,11 +259,13 @@ def case_detail(request: HttpRequest, case_id: str) -> HttpResponse:
 
     current_step_idx = STEP_STATUS_INDEX.get(case.status, 0)
     steps = STEPS
-    is_doctor_denied_final = case.doctor_decision == "deny" and case.status in (
+    terminal_without_scheduling = case.status in (
         CaseStatus.WAIT_R1_CLEANUP_THUMBS,
         CaseStatus.CLEANED,
-    )
-    if is_doctor_denied_final:
+    ) and (case.doctor_decision == "deny" or case.doctor_admission_flow == "immediate")
+    is_doctor_denied_final = terminal_without_scheduling and case.doctor_decision == "deny"
+    is_immediate_final = terminal_without_scheduling and case.doctor_admission_flow == "immediate"
+    if terminal_without_scheduling:
         steps = [step for step in STEPS if step["label"] != "Agendamento"]
         current_step_idx = len(steps) - 1
 
@@ -314,6 +316,12 @@ def case_detail(request: HttpRequest, case_id: str) -> HttpResponse:
         }
     elif is_doctor_denied_final or case.status == CaseStatus.DOCTOR_DENIED:
         result_info = {"type": "doctor_denied", "reason": case.doctor_reason}
+    elif is_immediate_final:
+        result_info = {
+            "type": "accepted_immediate",
+            "support": SUPPORT_FLAG_MAP.get(case.doctor_support_flag, case.doctor_support_flag),
+            "flow": ADMISSION_FLOW_MAP.get(case.doctor_admission_flow, case.doctor_admission_flow),
+        }
     elif case.status == CaseStatus.APPT_CONFIRMED or terminal_with_result:
         result_info = {
             "type": "accepted_scheduled",
