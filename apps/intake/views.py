@@ -198,10 +198,8 @@ def intake_home(request: HttpRequest) -> HttpResponse:
     )
 
 
-@login_required
-@role_required("nir")
-def my_cases(request: HttpRequest) -> HttpResponse:
-    """Lista de 'Meus Casos' do NIR — cards com filtros."""
+def _my_cases_context(request: HttpRequest) -> dict[str, object]:
+    """Build context for full and HTMX NIR case-list renders."""
     user = request.user
     assert user.is_authenticated
 
@@ -213,17 +211,14 @@ def my_cases(request: HttpRequest) -> HttpResponse:
         .order_by("-created_at")
     )
 
-    # Filtro por status
     status_filter = request.GET.get("status", "")
     if status_filter:
         qs = qs.filter(status=status_filter)
 
-    # Busca por número de registro
     search = request.GET.get("q", "")
     if search:
         qs = qs.filter(agency_record_number__icontains=search)
 
-    # Prepara dados enriquecidos: label + css class por caso
     case_data = [
         {
             "case": c,
@@ -233,17 +228,33 @@ def my_cases(request: HttpRequest) -> HttpResponse:
         for c in qs
     ]
 
-    return render(
-        request,
-        "intake/my_cases.html",
-        {
-            "case_data": case_data,
-            "status_filter": status_filter,
-            "search": search,
-            "status_labels": STATUS_LABELS,
-            "status_css": STATUS_CSS_CLASS,
-        },
-    )
+    query_string = request.META.get("QUERY_STRING", "")
+    partial_url = "/cases/my-cases/partial/"
+    if query_string:
+        partial_url = f"{partial_url}?{query_string}"
+
+    return {
+        "case_data": case_data,
+        "status_filter": status_filter,
+        "search": search,
+        "status_labels": STATUS_LABELS,
+        "status_css": STATUS_CSS_CLASS,
+        "my_cases_partial_url": partial_url,
+    }
+
+
+@login_required
+@role_required("nir")
+def my_cases(request: HttpRequest) -> HttpResponse:
+    """Lista de 'Meus Casos' do NIR — cards com filtros."""
+    return render(request, "intake/my_cases.html", _my_cases_context(request))
+
+
+@login_required
+@role_required("nir")
+def my_cases_partial(request: HttpRequest) -> HttpResponse:
+    """HTMX partial for polling the NIR case list without full refresh."""
+    return render(request, "intake/_my_cases_content.html", _my_cases_context(request))
 
 
 @login_required

@@ -44,6 +44,24 @@ class TestSchedulerQueueView:
         response = client.get("/scheduler/")
         assert response.status_code == 200
 
+    def test_queue_has_htmx_polling_container(self, client) -> None:
+        """Full scheduler page polls the partial endpoint with HTMX."""
+        self._login_as(client, "scheduler")
+        response = client.get("/scheduler/")
+        assert response.status_code == 200
+        content = response.content.decode()
+        assert 'hx-get="/scheduler/partials/queue/"' in content
+        assert 'hx-trigger="every 20s"' in content
+
+    def test_queue_partial_renders_without_layout(self, client) -> None:
+        """HTMX partial returns scheduler queue content without full layout."""
+        self._login_as(client, "scheduler")
+        response = client.get("/scheduler/partials/queue/")
+        assert response.status_code == 200
+        content = response.content.decode()
+        assert "<!DOCTYPE html>" not in content
+        assert "Atualizado automaticamente" in content
+
     # ── Content tests ─────────────────────────────────────────────────
 
     def test_queue_shows_pending_cases(self, client) -> None:

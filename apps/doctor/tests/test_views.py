@@ -45,6 +45,24 @@ class TestDoctorQueueView:
         response = client.get("/doctor/")
         assert response.status_code == 200
 
+    def test_queue_has_htmx_polling_container(self, client) -> None:
+        """Full queue page polls the partial endpoint with HTMX."""
+        self._login_as(client, "doctor")
+        response = client.get("/doctor/")
+        assert response.status_code == 200
+        content = response.content.decode()
+        assert 'hx-get="/doctor/partials/queue/"' in content
+        assert 'hx-trigger="every 20s"' in content
+
+    def test_queue_partial_renders_without_layout(self, client) -> None:
+        """HTMX partial returns queue content without full base layout."""
+        self._login_as(client, "doctor")
+        response = client.get("/doctor/partials/queue/")
+        assert response.status_code == 200
+        content = response.content.decode()
+        assert "<!DOCTYPE html>" not in content
+        assert "Atualizado automaticamente" in content
+
     # ── Role guard tests ─────────────────────────────────────────────
 
     def test_queue_blocks_nir(self, client) -> None:

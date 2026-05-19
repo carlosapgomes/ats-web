@@ -7,6 +7,7 @@ app_name = "intake"
 urlpatterns = [
     path("", views.intake_home, name="home"),
     path("my-cases/", views.my_cases, name="my_cases"),
+    path("my-cases/partial/", views.my_cases_partial, name="my_cases_partial"),
     path("<uuid:case_id>/", views.case_detail, name="case_detail"),
     path("<uuid:case_id>/pdf/", views.serve_pdf, name="serve_pdf"),
     path("<uuid:case_id>/confirm/", views.confirm_receipt, name="confirm_receipt"),

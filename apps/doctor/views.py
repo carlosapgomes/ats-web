@@ -153,9 +153,8 @@ def _build_case_card(case: Case, wait_minutes: int) -> dict[str, Any]:
 
 @login_required
 @role_required("doctor")
-def doctor_queue(request: HttpRequest) -> HttpResponse:
-    """View da fila médica: casos pendentes e decididos hoje."""
-
+def _doctor_queue_context(request: HttpRequest) -> dict[str, Any]:
+    """Build context for full and HTMX doctor queue renders."""
     pending_cases: QuerySet[Case] = Case.objects.filter(status=CaseStatus.WAIT_DOCTOR).order_by("created_at")
 
     today: date = date.today()
@@ -185,14 +184,26 @@ def doctor_queue(request: HttpRequest) -> HttpResponse:
     for case in decided_qs:
         decided_cards.append(_build_case_card(case, 0))
 
-    context: dict[str, Any] = {
+    return {
         "pending_cases": pending_cards,
         "decided_today": decided_cards,
         "pending_count": len(pending_cards),
         "avg_wait_minutes": avg_wait,
     }
 
-    return render(request, "doctor/queue.html", context)
+
+@login_required
+@role_required("doctor")
+def doctor_queue(request: HttpRequest) -> HttpResponse:
+    """View da fila médica: casos pendentes e decididos hoje."""
+    return render(request, "doctor/queue.html", _doctor_queue_context(request))
+
+
+@login_required
+@role_required("doctor")
+def doctor_queue_partial(request: HttpRequest) -> HttpResponse:
+    """HTMX partial for polling the doctor queue without full refresh."""
+    return render(request, "doctor/_queue_content.html", _doctor_queue_context(request))
 
 
 # ── Decision helpers ─────────────────────────────────────────────────────
