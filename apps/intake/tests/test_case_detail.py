@@ -292,6 +292,26 @@ class TestCaseDetailResultInfo:
         content = response.content.decode()
         assert "Falha no Processamento" in content
 
+    def test_waiting_receipt_after_doctor_denial_shows_denial_not_scheduled(self, client) -> None:
+        """WAIT_R1 after doctor denial must show medical refusal, not scheduling."""
+        client, user = _nir_client(client)
+        case = _case_with_patient(
+            Case.objects.create(
+                created_by=user,
+                agency_record_number="RES-DOCDENY-FINAL",
+                status=CaseStatus.WAIT_R1_CLEANUP_THUMBS,
+                doctor_decision="deny",
+                doctor_reason="Faltam exames obrigatórios",
+            )
+        )
+        response = client.get(reverse("intake:case_detail", args=[case.case_id]))
+        assert response.status_code == 200
+        content = response.content.decode()
+        assert "Recusado pelo Médico" in content
+        assert "Faltam exames obrigatórios" in content
+        assert "Agendamento Confirmado" not in content
+        assert "📅</span> Agendamento" not in content
+
     def test_result_shows_terminal_with_result(self, client) -> None:
         """WAIT_R1_CLEANUP_THUMBS → mostra badge Agendamento Confirmado."""
         client, user = _nir_client(client)
