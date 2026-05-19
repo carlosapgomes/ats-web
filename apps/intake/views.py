@@ -258,6 +258,14 @@ def case_detail(request: HttpRequest, case_id: str) -> HttpResponse:
     events = case.events.all()
 
     current_step_idx = STEP_STATUS_INDEX.get(case.status, 0)
+    steps = STEPS
+    is_doctor_denied_final = case.doctor_decision == "deny" and case.status in (
+        CaseStatus.WAIT_R1_CLEANUP_THUMBS,
+        CaseStatus.CLEANED,
+    )
+    if is_doctor_denied_final:
+        steps = [step for step in STEPS if step["label"] != "Agendamento"]
+        current_step_idx = len(steps) - 1
 
     # Enriquecer eventos com labels e cores
     enriched_events = []
@@ -304,6 +312,8 @@ def case_detail(request: HttpRequest, case_id: str) -> HttpResponse:
             "reason_code": reason_code,
             "reason_text": reason_text,
         }
+    elif is_doctor_denied_final or case.status == CaseStatus.DOCTOR_DENIED:
+        result_info = {"type": "doctor_denied", "reason": case.doctor_reason}
     elif case.status == CaseStatus.APPT_CONFIRMED or terminal_with_result:
         result_info = {
             "type": "accepted_scheduled",
@@ -314,8 +324,6 @@ def case_detail(request: HttpRequest, case_id: str) -> HttpResponse:
         }
     elif case.status == CaseStatus.APPT_DENIED:
         result_info = {"type": "appt_denied", "reason": case.appointment_reason}
-    elif case.status == CaseStatus.DOCTOR_DENIED:
-        result_info = {"type": "doctor_denied", "reason": case.doctor_reason}
     elif case.status == CaseStatus.FAILED:
         result_info = {"type": "failed"}
 
@@ -332,7 +340,7 @@ def case_detail(request: HttpRequest, case_id: str) -> HttpResponse:
         {
             "case": case,
             "events": enriched_events,
-            "steps": STEPS,
+            "steps": steps,
             "current_step_idx": current_step_idx,
             "status_label": STATUS_LABELS.get(case.status, case.get_status_display()),
             "status_css": STATUS_CSS_CLASS.get(case.status, "status-pending"),
