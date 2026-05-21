@@ -190,14 +190,17 @@ class TestExecutePdfExtractionSuccess:
 class TestExecutePdfExtractionIdempotency:
     """Task não deve reprocessar se já estiver além de LLM_STRUCT."""
 
-    def test_skips_when_already_at_llm_struct_with_text(self, user, monkeypatch) -> None:
-        """LLM_STRUCT com texto → não reextrai e não chama enqueue_pipeline."""
+    def test_llm_struct_enqueues_pipeline_without_re_extracting(self, user, monkeypatch) -> None:
+        """LLM_STRUCT → chama enqueue_pipeline, não reextrai PDF."""
         from apps.intake.tasks import execute_pdf_extraction
 
-        monkeypatch.setattr(
-            "apps.intake.pdf_utils.extract_pdf_text",
-            lambda _path: "NOVO TEXTO",
-        )
+        extract_called: list[bool] = []
+
+        def _extract(_path: str) -> str:
+            extract_called.append(True)
+            return "NOVO TEXTO"
+
+        monkeypatch.setattr("apps.intake.pdf_utils.extract_pdf_text", _extract)
         monkeypatch.setattr(
             "apps.intake.pdf_utils.strip_watermark_and_extract_record",
             lambda text: ("NOVO TEXTO", "99999"),
@@ -215,20 +218,26 @@ class TestExecutePdfExtractionIdempotency:
 
         execute_pdf_extraction(str(case.case_id))
 
+        # Não reextraiu
+        assert len(extract_called) == 0, "extract_pdf_text should NOT be called for LLM_STRUCT"
         case = Case.objects.get(case_id=case.case_id)
-        # Fields must remain unchanged
         assert case.extracted_text == original_text
         assert case.agency_record_number == original_record
-        assert len(pipeline_calls) == 0
+        # Pipeline enfileirada
+        assert len(pipeline_calls) == 1
+        assert pipeline_calls[0][0] == case.case_id
 
     def test_skips_status_after_llm_struct(self, user, monkeypatch) -> None:
-        """Status WAIT_DOCTOR → não reextrai."""
+        """LLM_STRUCT → enfileira pipeline e não reextrai."""
         from apps.intake.tasks import execute_pdf_extraction
 
-        monkeypatch.setattr(
-            "apps.intake.pdf_utils.extract_pdf_text",
-            lambda _path: "NOVO TEXTO",
-        )
+        extract_called: list[bool] = []
+
+        def _extract(_path: str) -> str:
+            extract_called.append(True)
+            return "NOVO TEXTO"
+
+        monkeypatch.setattr("apps.intake.pdf_utils.extract_pdf_text", _extract)
 
         pipeline_calls: list[tuple[object, ...]] = []
         monkeypatch.setattr(
@@ -239,7 +248,6 @@ class TestExecutePdfExtractionIdempotency:
         case = Case.objects.create(created_by=user)
         case.pdf_file = "pdfs/2026/05/test.pdf"
         case.save()
-        # Use raw transition sequence
         case.start_processing(user=user)
         case.save()
         case.start_extraction(user=user)
@@ -250,8 +258,9 @@ class TestExecutePdfExtractionIdempotency:
         execute_pdf_extraction(str(case.case_id))
 
         case = Case.objects.get(case_id=case.case_id)
-        assert case.status == CaseStatus.LLM_STRUCT  # should stay at LLM_STRUCT
-        assert len(pipeline_calls) == 0
+        assert case.status == CaseStatus.LLM_STRUCT
+        assert len(extract_called) == 0, "extract_pdf_text should NOT be called"
+        assert len(pipeline_calls) == 1
 
     def test_skips_failed_status(self, user, monkeypatch) -> None:
         """Status FAILED → não reextrai."""
@@ -371,6 +380,67 @@ class TestExecutePdfExtractionException:
         execute_pdf_extraction(str(case.case_id))
 
         assert len(pipeline_calls) == 0
+
+    def test_enqueue_pipeline_failure_after_extraction_propagates(self, user, monkeypatch) -> None:
+        """Falha de enqueue_pipeline após extração propaga e case fica LLM_STRUCT."""
+        from apps.intake.tasks import execute_pdf_extraction
+
+        monkeypatch.setattr(
+            "apps.intake.pdf_utils.extract_pdf_text",
+            lambda _path: "Paciente: João\nCódigo: 12345",
+        )
+        monkeypatch.setattr(
+            "apps.intake.pdf_utils.strip_watermark_and_extract_record",
+            lambda text: ("Paciente: João", "12345"),
+        )
+
+        def _explode_enqueue(_case_id: object) -> None:
+            raise RuntimeError("Queue failure")
+
+        monkeypatch.setattr(
+            "apps.pipeline.tasks.enqueue_pipeline",
+            _explode_enqueue,
+        )
+
+        case = _make_case_at_r1_ack(user)
+
+        with pytest.raises(RuntimeError, match="Queue failure"):
+            execute_pdf_extraction(str(case.case_id))
+
+        # Case deve permanecer em LLM_STRUCT (não FAILED)
+        case = Case.objects.get(case_id=case.case_id)
+        assert case.status == CaseStatus.LLM_STRUCT, f"Expected LLM_STRUCT, got {case.status}"
+        assert case.extracted_text == "Paciente: João"
+
+    def test_retry_on_llm_struct_calls_enqueue_pipeline_again(self, user, monkeypatch) -> None:
+        """Reexecução em LLM_STRUCT chama enqueue_pipeline novamente."""
+        from apps.intake.tasks import execute_pdf_extraction
+
+        extract_called: list[bool] = []
+
+        def _extract(_path: str) -> str:
+            extract_called.append(True)
+            return "NÃO DEVE CHAMAR"
+
+        monkeypatch.setattr("apps.intake.pdf_utils.extract_pdf_text", _extract)
+
+        pipeline_calls: list[tuple[object, ...]] = []
+        monkeypatch.setattr(
+            "apps.pipeline.tasks.enqueue_pipeline",
+            lambda case_id: pipeline_calls.append((case_id,)),
+        )
+
+        case = _make_case_at_llm_struct(user, with_text=True)
+
+        # Primeira chamada (recovery)
+        execute_pdf_extraction(str(case.case_id))
+        assert len(pipeline_calls) == 1
+        assert len(extract_called) == 0
+
+        # Segunda chamada (retry fictício)
+        execute_pdf_extraction(str(case.case_id))
+        assert len(pipeline_calls) == 2
+        assert len(extract_called) == 0
 
 
 # ── Test: execute_pdf_extraction — case not found ───────────────────────

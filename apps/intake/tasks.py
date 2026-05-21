@@ -34,16 +34,25 @@ def enqueue_pdf_extraction(case_id: uuid.UUID) -> None:
 def execute_pdf_extraction(case_id_str: str) -> None:
     """Entry point for django-q2 pdf_worker.
 
-    Loads the ``Case``, validates preconditions, extracts text from the
-    PDF file, persists extracted data, advances the FSM to ``LLM_STRUCT``,
-    and enqueues the LLM pipeline.
+    Loads the ``Case`` and:
 
-    Idempotency
-    -----------
-    - If ``case.status`` is ``LLM_STRUCT`` or later the task returns
-      immediately without re-extracting.
-    - If the case has no ``pdf_file`` the task transitions to ``FAILED``
-      and records an audit event.
+    - If status is ``LLM_STRUCT``: re-enqueues the LLM pipeline **without**
+      re-extracting the PDF (recovery path for when ``enqueue_pipeline``
+      failed on a previous run).
+    - If status is ``R1_ACK_PROCESSING`` or ``EXTRACTING``: extracts text
+      from the PDF, persists data, advances FSM to ``LLM_STRUCT``, then
+      enqueues the LLM pipeline **outside** the extraction try/except so
+      that an ``enqueue_pipeline`` failure does **not** attempt an invalid
+      FSM transition (the extraction was already successful).
+    - If status is ``FAILED`` or beyond: skips (idempotency).
+
+    The ``enqueue_pipeline`` call is deliberately *outside* the extraction
+    error handler so that:
+
+    - A failure *during* extraction correctly transitions to ``FAILED``.
+    - A failure *after* extraction (enqueue) propagates to django-q2 for
+      retry, and on retry the ``LLM_STRUCT`` recovery path re-enqueues
+      the pipeline without re-extracting.
 
     Args:
         case_id_str: String representation of the case UUID.
@@ -60,8 +69,12 @@ def execute_pdf_extraction(case_id_str: str) -> None:
         logger.error("execute_pdf_extraction: Case %s not found", case_id)
         raise ValueError(f"Case {case_id} not found")
 
-    # 2. Idempotency guard — only process cases waiting for extraction
-    if case.status not in (CaseStatus.R1_ACK_PROCESSING, CaseStatus.EXTRACTING):
+    # 2. Idempotency guard — FAILED or beyond → skip
+    if case.status not in (
+        CaseStatus.R1_ACK_PROCESSING,
+        CaseStatus.EXTRACTING,
+        CaseStatus.LLM_STRUCT,
+    ):
         logger.info(
             "Case %s already processed (status=%s), skipping",
             case_id,
@@ -69,27 +82,51 @@ def execute_pdf_extraction(case_id_str: str) -> None:
         )
         return
 
-    # 3. Validate pdf_file presence
+    # 3. LLM_STRUCT recovery path — enqueue pipeline without re-extracting
+    if case.status == CaseStatus.LLM_STRUCT:
+        logger.info(
+            "Case %s already at LLM_STRUCT — re-enqueuing pipeline",
+            case_id,
+        )
+        from apps.pipeline.tasks import enqueue_pipeline
+
+        enqueue_pipeline(case.case_id)
+        return
+
+    # 4. Validate pdf_file presence
     if not case.pdf_file:
         logger.warning("Case %s has no pdf_file, marking as failed", case_id)
         _fail_extraction(case)
         return
 
-    # 4. Perform extraction
+    # 5. Perform extraction (FSM: R1_ACK → EXTRACTING → LLM_STRUCT)
     try:
         _do_extraction(case)
     except Exception:
         logger.exception("PDF extraction failed for case %s", case_id)
         _fail_extraction(case)
+        return
+
+    # 6. Enqueue pipeline AFTER successful extraction, OUTSIDE try/except.
+    #    If this fails the exception propagates → django-q2 retries →
+    #    step 3 (LLM_STRUCT recovery) calls enqueue_pipeline again.
+    from apps.pipeline.tasks import enqueue_pipeline
+
+    enqueue_pipeline(case.case_id)
 
 
 # ── Internal helpers ─────────────────────────────────────────────────────────
 
 
 def _do_extraction(case: Case) -> None:
-    """Core extraction logic — extracted for clarity and testability."""
+    """Core extraction logic — extracted for clarity and testability.
+
+    Transitions FSM: R1_ACK → EXTRACTING → LLM_STRUCT.
+    Does **not** call ``enqueue_pipeline`` — that is the caller's
+    responsibility, so that a failure there does not interfere with
+    the FSM state.
+    """
     from apps.intake.pdf_utils import extract_pdf_text, strip_watermark_and_extract_record
-    from apps.pipeline.tasks import enqueue_pipeline
 
     # Transition: R1_ACK_PROCESSING → EXTRACTING (if not already there)
     if case.status == CaseStatus.R1_ACK_PROCESSING:
@@ -110,15 +147,15 @@ def _do_extraction(case: Case) -> None:
     case.extraction_complete(success=True, user=None)
     case.save()
 
-    # Enqueue LLM pipeline
-    enqueue_pipeline(case.case_id)
-
 
 def _fail_extraction(case: Case) -> None:
     """Transition case through EXTRACTING to FAILED.
 
     Handles the FSM path: R1_ACK_PROCESSING → EXTRACTING → FAILED.
     If the case is already at EXTRACTING, skips the first transition.
+
+    **Safe guard:** only intended for cases at ``R1_ACK_PROCESSING``
+    or ``EXTRACTING``.  Callers must ensure this precondition.
     """
     if case.status == CaseStatus.R1_ACK_PROCESSING:
         case.start_extraction(user=None)
