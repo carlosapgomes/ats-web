@@ -4,14 +4,13 @@ from django.contrib import messages
 from django.contrib.auth.decorators import login_required
 from django.http import FileResponse, Http404, HttpRequest, HttpResponse, HttpResponseBase
 from django.shortcuts import get_object_or_404, redirect, render
-from django.utils import timezone
 from django.views.decorators.clickjacking import xframe_options_sameorigin
 
 from apps.accounts.decorators import role_required
 from apps.cases.models import Case, CaseStatus
 
 from .forms import CaseUploadForm
-from .pdf_utils import extract_pdf_text, strip_watermark_and_extract_record
+from .services import process_uploaded_files
 
 STATUS_LABELS: dict[str, str] = {
     "NEW": "Novo",
@@ -149,39 +148,19 @@ def intake_home(request: HttpRequest) -> HttpResponse:
 
     if request.method == "POST":
         form = CaseUploadForm(request.POST, request.FILES)
-        if form.is_valid():
-            case = Case.objects.create(
-                created_by=user,
-            )
-            # Salvar PDF
-            case.pdf_file = form.cleaned_data["pdf_file"]
-            case.save()
+        files = request.FILES.getlist("pdf_files")
+        cases, errors = process_uploaded_files(files, user)
 
-            # FSM: NEW → R1_ACK_PROCESSING → EXTRACTING
-            case.start_processing(user=user)
-            case.save()
-            case.start_extraction(user=user)
-            case.save()
+        for error in errors:
+            messages.warning(request, error)
 
-            # Extrair texto do PDF (com remoção de marca d'água)
-            extracted = extract_pdf_text(case.pdf_file.path)
-            cleaned_text, record_number = strip_watermark_and_extract_record(extracted)
-            case.extracted_text = cleaned_text
-            case.agency_record_number = record_number
-            case.agency_record_extracted_at = timezone.now()
-            case.save()
-
-            # Marcar extração como concluída com sucesso → LLM_STRUCT
-            case.extraction_complete(success=True, user=user)
-            case.save()
-
-            # Disparar pipeline LLM assíncrona
-            from apps.pipeline.tasks import enqueue_pipeline
-
-            enqueue_pipeline(case.case_id)
-
-            messages.success(request, "Encaminhamento enviado com sucesso.")
-            return redirect("intake:case_detail", case_id=case.case_id)
+        if cases:
+            count = len(cases)
+            msg = f"{count} encaminhamento{'s' if count > 1 else ''} recebido{'s' if count > 1 else ''} com sucesso. O processamento continuará em background."
+            messages.success(request, msg)
+            return redirect("intake:my_cases")
+        elif not errors:
+            messages.warning(request, "Nenhum arquivo enviado.")
     else:
         form = CaseUploadForm()
 

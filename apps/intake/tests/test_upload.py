@@ -1,4 +1,7 @@
-"""Testes de upload de PDF e criação de caso — Slice 3."""
+"""Testes de upload de PDF e criação de caso — Slice 003.
+
+Upload múltiplo com extração assíncrona.
+"""
 
 from __future__ import annotations
 
@@ -7,6 +10,7 @@ from io import BytesIO
 
 import fitz  # type: ignore[import-untyped]  # PyMuPDF
 import pytest
+from django.conf import settings
 from django.contrib.auth import get_user_model
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.urls import reverse
@@ -58,6 +62,17 @@ def _doctor_client(client):
     return client, user
 
 
+def _simple_pdf() -> SimpleUploadedFile:
+    """Retorna um SimpleUploadedFile PDF válido."""
+    pdf_bytes = _create_test_pdf_bytes()
+    return SimpleUploadedFile("test.pdf", pdf_bytes, content_type="application/pdf")
+
+
+def _simple_txt() -> SimpleUploadedFile:
+    """Retorna um SimpleUploadedFile .txt (inválido)."""
+    return SimpleUploadedFile("test.txt", b"not a pdf", content_type="text/plain")
+
+
 # ── Tests ────────────────────────────────────────────────────────────────
 
 
@@ -87,34 +102,27 @@ class TestUploadPage:
 
 @pytest.mark.django_db
 class TestUploadPost:
-    """POST /cases/ — criação de caso via upload."""
+    """POST /cases/ — criação de caso via upload único (compatibilidade)."""
 
     def test_upload_creates_case(self, client) -> None:
-        """POST com PDF cria Case no banco e extrai texto."""
+        """POST com PDF cria Case no banco."""
         client, _ = _nir_client(client)
-        pdf_text = "Paciente: João da Silva\nCódigo: 12345"
-        pdf_bytes = _create_test_pdf_bytes(text=pdf_text)
-        pdf_file = SimpleUploadedFile("test.pdf", pdf_bytes, content_type="application/pdf")
+        pdf_file = _simple_pdf()
         response = client.post(
             reverse("intake:home"),
-            {"pdf_file": pdf_file},
+            {"pdf_files": [pdf_file]},
             follow=True,
         )
         assert response.status_code == 200
         assert Case.objects.count() == 1
-        case = Case.objects.first()
-        assert case is not None
-        # agency_record_number is extracted from PDF text
-        assert case.agency_record_number == "12345"
 
     def test_upload_sets_created_by(self, client) -> None:
         """case.created_by deve ser o usuário logado."""
         client, user = _nir_client(client)
-        pdf_bytes = _create_test_pdf_bytes()
-        pdf_file = SimpleUploadedFile("test.pdf", pdf_bytes, content_type="application/pdf")
+        pdf_file = _simple_pdf()
         client.post(
             reverse("intake:home"),
-            {"pdf_file": pdf_file},
+            {"pdf_files": [pdf_file]},
             follow=True,
         )
         case = Case.objects.first()
@@ -124,11 +132,10 @@ class TestUploadPost:
     def test_upload_saves_pdf_file(self, client) -> None:
         """case.pdf_file deve existir no MEDIA_ROOT."""
         client, _ = _nir_client(client)
-        pdf_bytes = _create_test_pdf_bytes()
-        pdf_file = SimpleUploadedFile("test.pdf", pdf_bytes, content_type="application/pdf")
+        pdf_file = _simple_pdf()
         client.post(
             reverse("intake:home"),
-            {"pdf_file": pdf_file},
+            {"pdf_files": [pdf_file]},
             follow=True,
         )
         case = Case.objects.first()
@@ -136,82 +143,64 @@ class TestUploadPost:
         assert case.pdf_file is not None
         assert os.path.exists(case.pdf_file.path)
 
-    def test_upload_transitions_to_llm_struct(self, client) -> None:
-        """Após upload e extração, status deve ser LLM_STRUCT."""
+    def test_upload_transitions_to_r1_ack_processing(self, client) -> None:
+        """Após upload, status deve ser R1_ACK_PROCESSING (extração assíncrona)."""
         client, _ = _nir_client(client)
-        pdf_bytes = _create_test_pdf_bytes()
-        pdf_file = SimpleUploadedFile("test.pdf", pdf_bytes, content_type="application/pdf")
+        pdf_file = _simple_pdf()
         client.post(
             reverse("intake:home"),
-            {"pdf_file": pdf_file},
+            {"pdf_files": [pdf_file]},
             follow=True,
         )
         case = Case.objects.first()
         assert case is not None
-        assert case.status == CaseStatus.LLM_STRUCT
+        assert case.status == CaseStatus.R1_ACK_PROCESSING
 
-    def test_upload_extracts_text(self, client) -> None:
-        """case.extracted_text deve conter o texto do PDF (sem marca d'água)."""
+    def test_upload_does_not_extract_text(self, client) -> None:
+        """case.extracted_text deve estar vazio (extração é assíncrona)."""
         client, _ = _nir_client(client)
-        pdf_text = "Paciente: João da Silva\nCódigo: 12345"
-        pdf_bytes = _create_test_pdf_bytes(text=pdf_text)
-        pdf_file = SimpleUploadedFile("test.pdf", pdf_bytes, content_type="application/pdf")
+        pdf_file = _simple_pdf()
         client.post(
             reverse("intake:home"),
-            {"pdf_file": pdf_file},
+            {"pdf_files": [pdf_file]},
             follow=True,
         )
         case = Case.objects.first()
         assert case is not None
-        assert "João da Silva" in case.extracted_text
-        assert case.agency_record_extracted_at is not None
-
-    def test_upload_extracts_record_number_from_text(self, client) -> None:
-        """agency_record_number deve ser extraído do texto do PDF."""
-        client, _ = _nir_client(client)
-        pdf_text = "RELATÓRIO DE OCORRÊNCIAS\nCódigo: 98765"
-        pdf_bytes = _create_test_pdf_bytes(text=pdf_text)
-        pdf_file = SimpleUploadedFile("test.pdf", pdf_bytes, content_type="application/pdf")
-        client.post(
-            reverse("intake:home"),
-            {"pdf_file": pdf_file},
-            follow=True,
-        )
-        case = Case.objects.first()
-        assert case is not None
-        assert case.agency_record_number == "98765"
+        assert case.extracted_text == ""
+        assert case.agency_record_number == ""
+        assert case.agency_record_extracted_at is None
 
     def test_upload_rejects_non_pdf(self, client) -> None:
-        """POST com arquivo .txt deve falhar validação."""
+        """POST com arquivo .txt deve falhar validação e não criar Case."""
         client, _ = _nir_client(client)
-        txt_file = SimpleUploadedFile("test.txt", b"not a pdf", content_type="text/plain")
+        txt_file = _simple_txt()
         response = client.post(
             reverse("intake:home"),
-            {"pdf_file": txt_file},
+            {"pdf_files": [txt_file]},
+            follow=True,
         )
-        assert response.status_code == 200  # form re-rendered with errors
         assert Case.objects.count() == 0
+        content = response.content.decode()
+        assert "não é um arquivo PDF" in content
 
     def test_upload_requires_nir_role(self, client) -> None:
         """Usuário doctor não pode fazer upload."""
         client, _ = _doctor_client(client)
-        pdf_bytes = _create_test_pdf_bytes()
-        pdf_file = SimpleUploadedFile("test.pdf", pdf_bytes, content_type="application/pdf")
+        pdf_file = _simple_pdf()
         response = client.post(
             reverse("intake:home"),
-            {"pdf_file": pdf_file},
+            {"pdf_files": [pdf_file]},
         )
-        # Redirected away because role_required blocks
         assert response.status_code == 302
         assert Case.objects.count() == 0
 
     def test_upload_requires_login(self, client) -> None:
         """Sem login, POST deve redirecionar para /login/."""
-        pdf_bytes = _create_test_pdf_bytes()
-        pdf_file = SimpleUploadedFile("test.pdf", pdf_bytes, content_type="application/pdf")
+        pdf_file = _simple_pdf()
         response = client.post(
             reverse("intake:home"),
-            {"pdf_file": pdf_file},
+            {"pdf_files": [pdf_file]},
         )
         assert response.status_code == 302
         assert "/login/" in response.url.lower()
@@ -225,11 +214,10 @@ class TestUploadAuditEvents:
     def test_upload_generates_case_created_event(self, client) -> None:
         """Deve gerar CaseEvent CASE_CREATED."""
         client, _ = _nir_client(client)
-        pdf_bytes = _create_test_pdf_bytes()
-        pdf_file = SimpleUploadedFile("test.pdf", pdf_bytes, content_type="application/pdf")
+        pdf_file = _simple_pdf()
         client.post(
             reverse("intake:home"),
-            {"pdf_file": pdf_file},
+            {"pdf_files": [pdf_file]},
             follow=True,
         )
         case = Case.objects.first()
@@ -238,14 +226,13 @@ class TestUploadAuditEvents:
         event_types = set(e.event_type for e in events)
         assert "CASE_CREATED" in event_types
 
-    def test_upload_generates_processing_events(self, client) -> None:
-        """Deve gerar CASE_START_PROCESSING, CASE_START_EXTRACTION, CASE_EXTRACTION_OK."""
+    def test_upload_generates_start_processing_event(self, client) -> None:
+        """Deve gerar CASE_START_PROCESSING."""
         client, _ = _nir_client(client)
-        pdf_bytes = _create_test_pdf_bytes()
-        pdf_file = SimpleUploadedFile("test.pdf", pdf_bytes, content_type="application/pdf")
+        pdf_file = _simple_pdf()
         client.post(
             reverse("intake:home"),
-            {"pdf_file": pdf_file},
+            {"pdf_files": [pdf_file]},
             follow=True,
         )
         case = Case.objects.first()
@@ -253,5 +240,238 @@ class TestUploadAuditEvents:
         events = CaseEvent.objects.filter(case=case)
         event_types = set(e.event_type for e in events)
         assert "CASE_START_PROCESSING" in event_types
-        assert "CASE_START_EXTRACTION" in event_types
-        assert "CASE_EXTRACTION_OK" in event_types
+
+    def test_upload_does_not_generate_extraction_events(self, client) -> None:
+        """Não deve gerar CASE_START_EXTRACTION ou CASE_EXTRACTION_OK (assíncrono)."""
+        client, _ = _nir_client(client)
+        pdf_file = _simple_pdf()
+        client.post(
+            reverse("intake:home"),
+            {"pdf_files": [pdf_file]},
+            follow=True,
+        )
+        case = Case.objects.first()
+        assert case is not None
+        events = CaseEvent.objects.filter(case=case)
+        event_types = set(e.event_type for e in events)
+        assert "CASE_START_EXTRACTION" not in event_types
+        assert "CASE_EXTRACTION_OK" not in event_types
+
+
+# ── Multi-upload Tests ──────────────────────────────────────────────────
+
+
+@pytest.mark.django_db
+class TestMultiUploadPost:
+    """POST /cases/ com múltiplos PDFs."""
+
+    def test_three_pdfs_create_three_cases(self, client) -> None:
+        """POST com 3 PDFs cria 3 Cases."""
+        client, _ = _nir_client(client)
+        files = [_simple_pdf() for _ in range(3)]
+        response = client.post(
+            reverse("intake:home"),
+            {"pdf_files": files},
+            follow=True,
+        )
+        assert response.status_code == 200
+        assert Case.objects.count() == 3
+
+    def test_three_pdfs_all_at_r1_ack(self, client) -> None:
+        """Todos os casos criados ficam em R1_ACK_PROCESSING."""
+        client, _ = _nir_client(client)
+        files = [_simple_pdf() for _ in range(3)]
+        client.post(
+            reverse("intake:home"),
+            {"pdf_files": files},
+            follow=True,
+        )
+        for case in Case.objects.all():
+            assert case.status == CaseStatus.R1_ACK_PROCESSING
+
+    def test_three_pdfs_all_have_created_by(self, client) -> None:
+        """Todos os casos têm created_by = usuário logado."""
+        client, user = _nir_client(client)
+        files = [_simple_pdf() for _ in range(3)]
+        client.post(
+            reverse("intake:home"),
+            {"pdf_files": files},
+            follow=True,
+        )
+        for case in Case.objects.all():
+            assert case.created_by == user
+
+    def test_three_pdfs_all_have_pdf_file(self, client) -> None:
+        """Todos os casos têm pdf_file salvo."""
+        client, _ = _nir_client(client)
+        files = [_simple_pdf() for _ in range(3)]
+        client.post(
+            reverse("intake:home"),
+            {"pdf_files": files},
+            follow=True,
+        )
+        for case in Case.objects.all():
+            assert case.pdf_file is not None
+            assert os.path.exists(case.pdf_file.path)
+
+    def test_mixed_valid_and_invalid(self, client) -> None:
+        """Mistura de PDFs válidos e .txt inválido: válidos processados, inválido reportado."""
+        client, _ = _nir_client(client)
+        valid1 = _simple_pdf()
+        invalid = _simple_txt()
+        valid2 = _simple_pdf()
+        response = client.post(
+            reverse("intake:home"),
+            {"pdf_files": [valid1, invalid, valid2]},
+            follow=True,
+        )
+        # Verificar mensagens
+        content = response.content.decode()
+        assert "2 encaminhamentos recebidos" in content
+        assert "não é um arquivo PDF" in content
+        assert Case.objects.count() == 2
+        for case in Case.objects.all():
+            assert case.status == CaseStatus.R1_ACK_PROCESSING
+
+    def test_all_invalid_no_cases(self, client) -> None:
+        """Todos arquivos inválidos → nenhum Case criado."""
+        client, _ = _nir_client(client)
+        files = [_simple_txt() for _ in range(3)]
+        response = client.post(
+            reverse("intake:home"),
+            {"pdf_files": files},
+            follow=True,
+        )
+        assert Case.objects.count() == 0
+        content = response.content.decode()
+        # Cada arquivo deve gerar um erro
+        for i in range(3):
+            assert "não é um arquivo PDF" in content
+
+    def test_empty_batch_rejected(self, client) -> None:
+        """Nenhum arquivo → mensagem de erro e nenhum Case."""
+        client, _ = _nir_client(client)
+        response = client.post(
+            reverse("intake:home"),
+            {"pdf_files": []},
+            follow=True,
+        )
+        assert Case.objects.count() == 0
+        content = response.content.decode()
+        assert "Nenhum arquivo" in content
+
+    def test_redirects_to_my_cases(self, client) -> None:
+        """Após upload bem-sucedido, redireciona para my_cases."""
+        client, _ = _nir_client(client)
+        pdf_file = _simple_pdf()
+        response = client.post(
+            reverse("intake:home"),
+            {"pdf_files": [pdf_file]},
+        )
+        assert response.status_code == 302
+        assert response.url == reverse("intake:my_cases")
+
+    def test_enqueue_pdf_extraction_called_per_case(self, client, monkeypatch) -> None:
+        """Para cada PDF, enqueue_pdf_extraction deve ser chamado."""
+        from apps.intake import tasks
+
+        calls: list[str] = []
+
+        def _fake_enqueue(case_id: object) -> None:
+            calls.append(str(case_id))
+
+        monkeypatch.setattr(tasks, "enqueue_pdf_extraction", _fake_enqueue)
+
+        client, _ = _nir_client(client)
+        files = [_simple_pdf() for _ in range(3)]
+        client.post(
+            reverse("intake:home"),
+            {"pdf_files": files},
+            follow=True,
+        )
+
+        assert len(calls) == 3
+        # Verificar que os case_ids chamados correspondem aos criados
+        case_ids = {str(c.case_id) for c in Case.objects.all()}
+        assert set(calls) == case_ids
+
+    def test_enqueue_not_called_for_invalid_files(self, client, monkeypatch) -> None:
+        """Arquivo inválido não chama enqueue_pdf_extraction."""
+        from apps.intake import tasks
+
+        calls: list[str] = []
+
+        def _fake_enqueue(case_id: object) -> None:
+            calls.append(str(case_id))
+
+        monkeypatch.setattr(tasks, "enqueue_pdf_extraction", _fake_enqueue)
+
+        client, _ = _nir_client(client)
+        client.post(
+            reverse("intake:home"),
+            {"pdf_files": [_simple_txt()]},
+            follow=True,
+        )
+
+        assert len(calls) == 0
+        assert Case.objects.count() == 0
+
+
+@pytest.mark.django_db
+class TestMultiUploadBatchLimits:
+    """Testes de limites do lote."""
+
+    def test_exceeds_max_files(self, client) -> None:
+        """Acima de INTAKE_MAX_FILES_PER_BATCH → batch rejeitado."""
+        client, _ = _nir_client(client)
+        max_files = settings.INTAKE_MAX_FILES_PER_BATCH
+        files = [_simple_pdf() for _ in range(max_files + 1)]
+        response = client.post(
+            reverse("intake:home"),
+            {"pdf_files": files},
+            follow=True,
+        )
+        assert Case.objects.count() == 0
+        content = response.content.decode()
+        assert "Máximo" in content or "excede" in content
+
+    def test_exceeds_max_file_size(self, client, monkeypatch) -> None:
+        """Arquivo acima de INTAKE_MAX_UPLOAD_BYTES_PER_FILE → rejeitado."""
+        import django.conf
+
+        client, _ = _nir_client(client)
+
+        # Reduzir limite temporariamente para um valor pequeno
+        monkeypatch.setattr(django.conf.settings, "INTAKE_MAX_UPLOAD_BYTES_PER_FILE", 100)
+
+        pdf_bytes = _create_test_pdf_bytes()
+        # Forçar size grande via SimpleUploadedFile com conteúdo grande
+        big_file = SimpleUploadedFile("big.pdf", pdf_bytes + b"x" * 200, content_type="application/pdf")
+
+        response = client.post(
+            reverse("intake:home"),
+            {"pdf_files": [big_file]},
+            follow=True,
+        )
+        assert Case.objects.count() == 0
+        content = response.content.decode()
+        assert "excede o limite" in content
+
+
+@pytest.mark.django_db
+class TestMultiUploadEvents:
+    """Eventos de auditoria para upload múltiplo."""
+
+    def test_each_case_gets_case_created_event(self, client) -> None:
+        """Cada Case deve ter seu próprio CASE_CREATED."""
+        client, _ = _nir_client(client)
+        files = [_simple_pdf() for _ in range(2)]
+        client.post(
+            reverse("intake:home"),
+            {"pdf_files": files},
+            follow=True,
+        )
+        for case in Case.objects.all():
+            events = CaseEvent.objects.filter(case=case)
+            event_types = set(e.event_type for e in events)
+            assert "CASE_CREATED" in event_types

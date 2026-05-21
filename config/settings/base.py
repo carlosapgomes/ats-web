@@ -87,6 +87,11 @@ MEDIA_ROOT = BASE_DIR / "media"
 DATA_UPLOAD_MAX_MEMORY_SIZE = 20 * 1024 * 1024  # 20 MB
 FILE_UPLOAD_MAX_MEMORY_SIZE = 20 * 1024 * 1024  # 20 MB
 
+# INTAKE limits — upload múltiplo NIR
+INTAKE_MAX_FILES_PER_BATCH = 30
+INTAKE_MAX_UPLOAD_BYTES_PER_FILE = 20 * 1024 * 1024  # 20 MB
+INTAKE_MAX_UPLOAD_BYTES_PER_BATCH = 600 * 1024 * 1024  # 600 MB
+
 # Intranet Guard
 # Range CIDR da intranet (ex: "10.0.0.0/8" ou "192.168.0.0/16")
 # Se vazio, papéis nir/scheduler são bloqueados de qualquer IP.

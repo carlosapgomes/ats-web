@@ -31,12 +31,12 @@
     <!-- Upload zone com drag & drop -->
     <div class="upload-zone mb-3" id="upload-zone">
       <div class="upload-zone__icon">📎</div>
-      <div class="upload-zone__text fw-semibold">Arraste o PDF aqui ou clique para selecionar</div>
-      <div class="upload-zone__hint mt-1">Apenas arquivos PDF — até 20 MB</div>
-      {{ form.pdf_file }}
+      <div class="upload-zone__text fw-semibold">Arraste os PDFs aqui ou clique para selecionar</div>
+      <div class="upload-zone__hint mt-1">Apenas arquivos PDF — até 20 MB cada</div>
+      <input type="file" name="pdf_files" id="file-input" class="d-none" accept=".pdf" multiple>
     </div>
 
-    <!-- Exibição do arquivo selecionado -->
+    <!-- Exibição dos arquivos selecionados -->
     <div class="d-none mb-3" id="upload-preview">
       <div class="d-flex align-items-center gap-3 p-3 border rounded-3 bg-light">
         <span style="font-size:2rem;">📄</span>
@@ -46,10 +46,6 @@
         </div>
       </div>
     </div>
-
-    {% if form.pdf_file.errors %}
-    <div class="text-danger small mb-2">{{ form.pdf_file.errors }}</div>
-    {% endif %}
 
     <button type="submit" class="btn btn-hospital w-100 w-md-auto" id="btn-upload" disabled>
       Enviar para Triagem
