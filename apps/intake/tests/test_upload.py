@@ -99,6 +99,35 @@ class TestUploadPage:
         assert "2026-0001" in content
         assert "2026-0002" in content
 
+    def test_upload_page_input_has_multiple(self, client) -> None:
+        """Input de arquivo deve ter atributo multiple."""
+        client, _ = _nir_client(client)
+        response = client.get(reverse("intake:home"))
+        assert response.status_code == 200
+        content = response.content.decode()
+        # Verificar que o input tem 'multiple' e name='pdf_files'
+        assert 'multiple' in content
+        assert 'name="pdf_files"' in content
+        assert 'accept=".pdf"' in content
+
+    def test_upload_page_mentions_background_processing(self, client) -> None:
+        """Página menciona processamento em background/fila."""
+        client, _ = _nir_client(client)
+        response = client.get(reverse("intake:home"))
+        assert response.status_code == 200
+        content = response.content.decode()
+        # Verificar que o template contém texto sobre processamento async
+        assert "background" in content or "fila" in content or "background" in content.lower()
+
+    def test_upload_page_shows_batch_count(self, client) -> None:
+        """Template deve conter elemento para contagem do lote."""
+        client, _ = _nir_client(client)
+        response = client.get(reverse("intake:home"))
+        assert response.status_code == 200
+        content = response.content.decode()
+        # Verificar que existe um elemento para contagem de arquivos
+        assert "id=" in content and ("count" in content.lower() or "lote" in content.lower())
+
 
 @pytest.mark.django_db
 class TestUploadPost:
