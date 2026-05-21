@@ -43,9 +43,41 @@ SESSION_COOKIE_SECURE = False
 
 # django-q2: use ORM backend without sync (tasks are queued but not
 # executed automatically in tests — prevents pipeline side effects)
+# ALT_CLUSTERS from base.py are preserved for cluster-routing tests.
 Q_CLUSTER = {
-    "sync": False,
+    "name": "ats",
+    "workers": 1,
+    "timeout": 900,
+    "retry": 1200,
+    "save_limit": 250,
+    "queue_limit": 50,
+    "catch_up": False,
+    "poll": 1.0,
+    "label": "ATS Pipeline Worker",
     "orm": "default",
+    "sync": False,
+    "ALT_CLUSTERS": {
+        "pdf": {
+            "workers": 2,
+            "timeout": 180,
+            "retry": 300,
+            "save_limit": 500,
+            "queue_limit": 500,
+            "catch_up": False,
+            "poll": 1.0,
+            "orm": "default",
+        },
+        "llm": {
+            "workers": 1,
+            "timeout": 900,
+            "retry": 1200,
+            "save_limit": 500,
+            "queue_limit": 200,
+            "catch_up": False,
+            "poll": 2.0,
+            "orm": "default",
+        },
+    },
 }
 
 # LLM: Use StaticLlmClient in tests by default
