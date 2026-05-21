@@ -18,6 +18,8 @@ services:
       dockerfile: Dockerfile
     ports:
       - "8000:8000"
+    volumes:
+      - media_prod:/app/media
     environment:
       DJANGO_SETTINGS_MODULE: config.settings.prod
       DATABASE_URL: postgres://ats_web:${POSTGRES_PASSWORD}@db:5432/ats_web
@@ -47,6 +49,32 @@ services:
       OPENAI_API_KEY: ${OPENAI_API_KEY:?Set OPENAI_API_KEY}
       OPENAI_MODEL: ${OPENAI_MODEL:-gpt-4o}
       OPENAI_BASE_URL: ${OPENAI_BASE_URL:-https://api.openai.com/v1}
+      Q_CLUSTER_NAME: llm
+    volumes:
+      - media_prod:/app/media
+    depends_on:
+      db:
+        condition: service_healthy
+    networks:
+      - ats-net
+    restart: unless-stopped
+
+  pdf_worker:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    command: uv run python manage.py qcluster --settings=config.settings.prod
+    environment:
+      DJANGO_SETTINGS_MODULE: config.settings.prod
+      DATABASE_URL: postgres://ats_web:${POSTGRES_PASSWORD}@db:5432/ats_web
+      DJANGO_SECRET_KEY: ${DJANGO_SECRET_KEY:?Set DJANGO_SECRET_KEY}
+      INTRANET_IP_RANGE: ${INTRANET_IP_RANGE:-10.0.0.0/8}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      OPENAI_MODEL: ${OPENAI_MODEL:-gpt-4o}
+      OPENAI_BASE_URL: ${OPENAI_BASE_URL:-https://api.openai.com/v1}
+      Q_CLUSTER_NAME: pdf
+    volumes:
+      - media_prod:/app/media
     depends_on:
       db:
         condition: service_healthy
@@ -56,3 +84,4 @@ services:
 
 volumes:
   pgdata_prod:
+  media_prod:

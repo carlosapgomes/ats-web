@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from typing import Any
 
 import pytest
 
@@ -636,8 +637,59 @@ class TestPipelineSupportSynthesisSaved:
 
 
 @pytest.mark.django_db
+class TestQClusterSettings:
+    """Q_CLUSTER deve ter ALT_CLUSTERS com clusters e retry > timeout."""
+
+    @staticmethod
+    def _cluster() -> dict[str, Any]:
+        from django.conf import settings
+
+        return dict(settings.Q_CLUSTER)
+
+    @staticmethod
+    def _alt() -> dict[str, Any]:
+        return dict(TestQClusterSettings._cluster().get("ALT_CLUSTERS", {}))
+
+    @staticmethod
+    def _sub(name: str) -> dict[str, Any]:
+        return dict(TestQClusterSettings._alt().get(name, {}))
+
+    def test_alt_clusters_contains_pdf_and_llm(self) -> None:
+        alt_clusters = self._alt()
+        assert "pdf" in alt_clusters, "ALT_CLUSTERS must contain 'pdf' cluster"
+        assert "llm" in alt_clusters, "ALT_CLUSTERS must contain 'llm' cluster"
+
+    def test_default_cluster_retry_greater_than_timeout(self) -> None:
+        c = self._cluster()
+        timeout = int(c.get("timeout", 0))
+        retry = int(c.get("retry", 0))
+        assert retry > timeout, f"Default cluster: retry ({retry}) must be > timeout ({timeout})"
+
+    def test_pdf_cluster_retry_greater_than_timeout(self) -> None:
+        pdf = self._sub("pdf")
+        timeout = int(pdf.get("timeout", 0))
+        retry = int(pdf.get("retry", 0))
+        assert retry > timeout, f"PDF cluster: retry ({retry}) must be > timeout ({timeout})"
+
+    def test_llm_cluster_retry_greater_than_timeout(self) -> None:
+        llm = self._sub("llm")
+        timeout = int(llm.get("timeout", 0))
+        retry = int(llm.get("retry", 0))
+        assert retry > timeout, f"LLM cluster: retry ({retry}) must be > timeout ({timeout})"
+
+    def test_llm_alt_cluster_has_workers_1(self) -> None:
+        llm = self._sub("llm")
+        workers = int(llm.get("workers", 0))
+        assert workers <= 2, f"LLM cluster workers ({workers}) should be conservative (<=2)"
+
+    def test_pdf_alt_cluster_has_workers_at_least_1(self) -> None:
+        pdf = self._sub("pdf")
+        workers = int(pdf.get("workers", 0))
+        assert workers >= 1, f"PDF cluster must have at least 1 worker, got {workers}"
+
+
 class TestEnqueuePipeline:
-    """enqueue_pipeline deve chamar django-q2 async_task."""
+    """enqueue_pipeline deve chamar django-q2 async_task com cluster llm."""
 
     def test_enqueue_pipeline_creates_task(self, django_user_model, monkeypatch) -> None:
         user = django_user_model.objects.create_user(username="nir10", password="pw")
@@ -645,19 +697,28 @@ class TestEnqueuePipeline:
 
         from apps.pipeline.tasks import enqueue_pipeline
 
-        # Monkeypatch async_task to capture the call
         calls: list[tuple[object, ...]] = []
-        monkeypatch.setattr(
-            "apps.pipeline.tasks.async_task",
-            lambda *args, **kwargs: calls.append((args, kwargs)),
-        )
+
+        def _capture(*args: object, **kwargs: object) -> None:
+            calls.append((args, kwargs))
+
+        monkeypatch.setattr("apps.pipeline.tasks.async_task", _capture)
 
         enqueue_pipeline(case.case_id)
 
         assert len(calls) == 1
-        args, _kwargs = calls[0]
-        assert args[0] == "apps.pipeline.tasks.execute_pipeline"  # type: ignore[index]
-        assert args[1] == str(case.case_id)  # type: ignore[index]
+        call_args, call_kwargs = calls[0]
+        assert isinstance(call_args, tuple)
+        assert isinstance(call_kwargs, dict)
+        assert call_args[0] == "apps.pipeline.tasks.execute_pipeline"
+        assert call_args[1] == str(case.case_id)
+
+        # Must route to cluster "llm"
+        q_options: dict[str, Any] = call_kwargs.get("q_options", {})
+        assert q_options.get("cluster") == "llm", f"Expected cluster='llm', got {q_options.get('cluster')}"
+        assert q_options.get("task_name") == f"llm:{case.case_id}", (
+            f"Expected task_name='llm:{case.case_id}', got {q_options.get('task_name')}"
+        )
 
 
 @pytest.mark.django_db
