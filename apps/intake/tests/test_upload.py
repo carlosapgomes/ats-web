@@ -106,7 +106,7 @@ class TestUploadPage:
         assert response.status_code == 200
         content = response.content.decode()
         # Verificar que o input tem 'multiple' e name='pdf_files'
-        assert 'multiple' in content
+        assert "multiple" in content
         assert 'name="pdf_files"' in content
         assert 'accept=".pdf"' in content
 
@@ -504,3 +504,146 @@ class TestMultiUploadEvents:
             events = CaseEvent.objects.filter(case=case)
             event_types = set(e.event_type for e in events)
             assert "CASE_CREATED" in event_types
+
+
+@pytest.mark.django_db
+class TestLargeBatchUpload:
+    """Lote representativo de 20-30 PDFs pequenos."""
+
+    def test_twenty_pdfs_create_twenty_cases(self, client) -> None:
+        """Upload de 20 PDFs pequenos cria 20 Cases, todos em R1_ACK."""
+        client, _ = _nir_client(client)
+        files = [_simple_pdf() for _ in range(20)]
+        response = client.post(
+            reverse("intake:home"),
+            {"pdf_files": files},
+            follow=True,
+        )
+        assert response.status_code == 200
+        assert Case.objects.count() == 20
+        for case in Case.objects.all():
+            assert case.status == CaseStatus.R1_ACK_PROCESSING
+            assert case.pdf_file is not None
+            assert case.extracted_text == ""
+
+    def test_twenty_pdfs_redirects_to_my_cases(self, client) -> None:
+        """POST com 20 PDFs redireciona para my_cases sem timeout."""
+        client, _ = _nir_client(client)
+        files = [_simple_pdf() for _ in range(20)]
+        response = client.post(
+            reverse("intake:home"),
+            {"pdf_files": files},
+        )
+        assert response.status_code == 302
+        assert response.url == reverse("intake:my_cases")
+
+    def test_thirty_pdfs_at_limit(self, client) -> None:
+        """30 PDFs (limite exato) são aceitos e criam 30 Cases."""
+        client, _ = _nir_client(client)
+        max_files = settings.INTAKE_MAX_FILES_PER_BATCH
+        assert max_files == 30, f"Expected 30, got {max_files}"
+        files = [_simple_pdf() for _ in range(max_files)]
+        response = client.post(
+            reverse("intake:home"),
+            {"pdf_files": files},
+            follow=True,
+        )
+        assert response.status_code == 200
+        assert Case.objects.count() == max_files
+        for case in Case.objects.all():
+            assert case.status == CaseStatus.R1_ACK_PROCESSING
+
+    def test_twenty_pdfs_enqueues_extraction_per_case(self, client, monkeypatch) -> None:
+        """20 PDFs → enqueue_pdf_extraction chamado 20 vezes."""
+        from apps.intake import tasks
+
+        calls: list[str] = []
+
+        def _fake_enqueue(case_id: object) -> None:
+            calls.append(str(case_id))
+
+        monkeypatch.setattr(tasks, "enqueue_pdf_extraction", _fake_enqueue)
+
+        client, _ = _nir_client(client)
+        files = [_simple_pdf() for _ in range(20)]
+        client.post(
+            reverse("intake:home"),
+            {"pdf_files": files},
+            follow=True,
+        )
+
+        assert len(calls) == 20
+        case_ids = {str(c.case_id) for c in Case.objects.all()}
+        assert set(calls) == case_ids
+
+    def test_partial_failure_one_invalid_does_not_create_case(self, client) -> None:
+        """Arquivo inválido em lote grande não cria Case, válidos sim."""
+        client, _ = _nir_client(client)
+        valid1 = _simple_pdf()
+        invalid = _simple_txt()
+        valid2 = _simple_pdf()
+        response = client.post(
+            reverse("intake:home"),
+            {"pdf_files": [valid1, invalid, valid2]},
+            follow=True,
+        )
+        content = response.content.decode()
+        assert "2 encaminhamentos recebidos" in content
+        assert "não é um arquivo PDF" in content
+        assert Case.objects.count() == 2
+        for case in Case.objects.all():
+            assert case.status == CaseStatus.R1_ACK_PROCESSING
+
+
+class TestQClusterConfig:
+    """Verificações da configuração dos clusters django-q2."""
+
+    def test_retry_greater_than_timeout_in_all_clusters(self) -> None:
+        """Para todos os clusters configurados, retry deve ser > timeout."""
+        from typing import Any, cast
+
+        q_config: dict[str, Any] = cast("dict[str, Any]", settings.Q_CLUSTER)
+
+        # Verificar cluster principal
+        assert q_config["retry"] > q_config["timeout"], (
+            f"Cluster 'ats': retry ({q_config['retry']}) <= timeout ({q_config['timeout']})"
+        )
+
+        alt = q_config.get("ALT_CLUSTERS", {})
+        assert "pdf" in alt, "ALT_CLUSTERS deve ter cluster 'pdf'"
+        assert "llm" in alt, "ALT_CLUSTERS deve ter cluster 'llm'"
+
+        for name, cfg in alt.items():
+            assert cfg["retry"] > cfg["timeout"], (
+                f"Cluster '{name}': retry ({cfg['retry']}) <= timeout ({cfg['timeout']})"
+            )
+
+    def test_intake_limits_are_centralized(self) -> None:
+        """Limites de upload devem estar em settings e ter valores esperados."""
+        assert hasattr(settings, "INTAKE_MAX_FILES_PER_BATCH")
+        assert hasattr(settings, "INTAKE_MAX_UPLOAD_BYTES_PER_FILE")
+        assert hasattr(settings, "INTAKE_MAX_UPLOAD_BYTES_PER_BATCH")
+
+        assert settings.INTAKE_MAX_FILES_PER_BATCH == 30
+        assert settings.INTAKE_MAX_UPLOAD_BYTES_PER_FILE == 20 * 1024 * 1024
+        assert settings.INTAKE_MAX_UPLOAD_BYTES_PER_BATCH == 600 * 1024 * 1024
+
+    @pytest.mark.django_db
+    def test_file_size_limit_applied_server_side(self, client, monkeypatch) -> None:
+        """Limite por arquivo é aplicado server-side (não apenas no JS)."""
+        import django.conf
+
+        client, _ = _nir_client(client)
+        monkeypatch.setattr(django.conf.settings, "INTAKE_MAX_UPLOAD_BYTES_PER_FILE", 100)
+
+        pdf_bytes = _create_test_pdf_bytes()
+        big_file = SimpleUploadedFile("big.pdf", pdf_bytes + b"x" * 200, content_type="application/pdf")
+
+        response = client.post(
+            reverse("intake:home"),
+            {"pdf_files": [big_file]},
+            follow=True,
+        )
+        assert Case.objects.count() == 0
+        content = response.content.decode()
+        assert "excede o limite" in content
