@@ -2,7 +2,9 @@
 
 ## Status
 
-Change criado após validação com usuário solicitando upload simultâneo de múltiplos PDFs no NIR. O desenho aprovado usa `django-q2` com clusters separados (`pdf` e `llm`) e mantém FSM/`CaseEvent` como fonte de verdade operacional.
+Change concluído e validado. Criado após validação com usuário solicitando upload simultâneo de múltiplos PDFs no NIR. O desenho aprovado usa `django-q2` com clusters separados (`pdf` e `llm`) e mantém FSM/`CaseEvent` como fonte de verdade operacional.
+
+Validação manual reportada pelo usuário: upload de 2 PDFs simultâneos funcionou corretamente.
 
 ## Slices
 
