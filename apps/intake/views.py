@@ -2,15 +2,15 @@
 
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
-from django.http import HttpRequest, HttpResponse
+from django.http import FileResponse, Http404, HttpRequest, HttpResponse, HttpResponseBase
 from django.shortcuts import get_object_or_404, redirect, render
-from django.utils import timezone
+from django.views.decorators.clickjacking import xframe_options_sameorigin
 
 from apps.accounts.decorators import role_required
 from apps.cases.models import Case, CaseStatus
 
 from .forms import CaseUploadForm
-from .pdf_utils import extract_pdf_text, strip_watermark_and_extract_record
+from .services import process_uploaded_files
 
 STATUS_LABELS: dict[str, str] = {
     "NEW": "Novo",
@@ -148,39 +148,19 @@ def intake_home(request: HttpRequest) -> HttpResponse:
 
     if request.method == "POST":
         form = CaseUploadForm(request.POST, request.FILES)
-        if form.is_valid():
-            case = Case.objects.create(
-                created_by=user,
-            )
-            # Salvar PDF
-            case.pdf_file = form.cleaned_data["pdf_file"]
-            case.save()
+        files = request.FILES.getlist("pdf_files")
+        cases, errors = process_uploaded_files(files, user)
 
-            # FSM: NEW → R1_ACK_PROCESSING → EXTRACTING
-            case.start_processing(user=user)
-            case.save()
-            case.start_extraction(user=user)
-            case.save()
+        for error in errors:
+            messages.warning(request, error)
 
-            # Extrair texto do PDF (com remoção de marca d'água)
-            extracted = extract_pdf_text(case.pdf_file.path)
-            cleaned_text, record_number = strip_watermark_and_extract_record(extracted)
-            case.extracted_text = cleaned_text
-            case.agency_record_number = record_number
-            case.agency_record_extracted_at = timezone.now()
-            case.save()
-
-            # Marcar extração como concluída com sucesso → LLM_STRUCT
-            case.extraction_complete(success=True, user=user)
-            case.save()
-
-            # Disparar pipeline LLM assíncrona
-            from apps.pipeline.tasks import enqueue_pipeline
-
-            enqueue_pipeline(case.case_id)
-
-            messages.success(request, "Encaminhamento enviado com sucesso.")
-            return redirect("intake:case_detail", case_id=case.case_id)
+        if cases:
+            count = len(cases)
+            msg = f"{count} encaminhamento{'s' if count > 1 else ''} recebido{'s' if count > 1 else ''} com sucesso. O processamento continuará em background."
+            messages.success(request, msg)
+            return redirect("intake:my_cases")
+        elif not errors:
+            messages.warning(request, "Nenhum arquivo enviado.")
     else:
         form = CaseUploadForm()
 
@@ -197,10 +177,8 @@ def intake_home(request: HttpRequest) -> HttpResponse:
     )
 
 
-@login_required
-@role_required("nir")
-def my_cases(request: HttpRequest) -> HttpResponse:
-    """Lista de 'Meus Casos' do NIR — cards com filtros."""
+def _my_cases_context(request: HttpRequest) -> dict[str, object]:
+    """Build context for full and HTMX NIR case-list renders."""
     user = request.user
     assert user.is_authenticated
 
@@ -212,17 +190,14 @@ def my_cases(request: HttpRequest) -> HttpResponse:
         .order_by("-created_at")
     )
 
-    # Filtro por status
     status_filter = request.GET.get("status", "")
     if status_filter:
         qs = qs.filter(status=status_filter)
 
-    # Busca por número de registro
     search = request.GET.get("q", "")
     if search:
         qs = qs.filter(agency_record_number__icontains=search)
 
-    # Prepara dados enriquecidos: label + css class por caso
     case_data = [
         {
             "case": c,
@@ -232,17 +207,33 @@ def my_cases(request: HttpRequest) -> HttpResponse:
         for c in qs
     ]
 
-    return render(
-        request,
-        "intake/my_cases.html",
-        {
-            "case_data": case_data,
-            "status_filter": status_filter,
-            "search": search,
-            "status_labels": STATUS_LABELS,
-            "status_css": STATUS_CSS_CLASS,
-        },
-    )
+    query_string = request.META.get("QUERY_STRING", "")
+    partial_url = "/cases/my-cases/partial/"
+    if query_string:
+        partial_url = f"{partial_url}?{query_string}"
+
+    return {
+        "case_data": case_data,
+        "status_filter": status_filter,
+        "search": search,
+        "status_labels": STATUS_LABELS,
+        "status_css": STATUS_CSS_CLASS,
+        "my_cases_partial_url": partial_url,
+    }
+
+
+@login_required
+@role_required("nir")
+def my_cases(request: HttpRequest) -> HttpResponse:
+    """Lista de 'Meus Casos' do NIR — cards com filtros."""
+    return render(request, "intake/my_cases.html", _my_cases_context(request))
+
+
+@login_required
+@role_required("nir")
+def my_cases_partial(request: HttpRequest) -> HttpResponse:
+    """HTMX partial for polling the NIR case list without full refresh."""
+    return render(request, "intake/_my_cases_content.html", _my_cases_context(request))
 
 
 @login_required
@@ -257,6 +248,16 @@ def case_detail(request: HttpRequest, case_id: str) -> HttpResponse:
     events = case.events.all()
 
     current_step_idx = STEP_STATUS_INDEX.get(case.status, 0)
+    steps = STEPS
+    terminal_without_scheduling = case.status in (
+        CaseStatus.WAIT_R1_CLEANUP_THUMBS,
+        CaseStatus.CLEANED,
+    ) and (case.doctor_decision == "deny" or case.doctor_admission_flow == "immediate")
+    is_doctor_denied_final = terminal_without_scheduling and case.doctor_decision == "deny"
+    is_immediate_final = terminal_without_scheduling and case.doctor_admission_flow == "immediate"
+    if terminal_without_scheduling:
+        steps = [step for step in STEPS if step["label"] != "Agendamento"]
+        current_step_idx = len(steps) - 1
 
     # Enriquecer eventos com labels e cores
     enriched_events = []
@@ -289,7 +290,29 @@ def case_detail(request: HttpRequest, case_id: str) -> HttpResponse:
         CaseStatus.WAIT_R1_CLEANUP_THUMBS,
         CaseStatus.CLEANED,
     )
-    if case.status == CaseStatus.APPT_CONFIRMED or terminal_with_result:
+    # Scope-gated manual review takes priority for WAIT_R1_CLEANUP_THUMBS
+    is_scope_gated = (
+        case.suggested_action
+        and isinstance(case.suggested_action, dict)
+        and case.suggested_action.get("decision") == "manual_review_required"
+    )
+    if is_scope_gated:
+        reason_code = case.suggested_action.get("reason_code", "") if isinstance(case.suggested_action, dict) else ""
+        reason_text = case.suggested_action.get("reason_text", "") if isinstance(case.suggested_action, dict) else ""
+        result_info = {
+            "type": "manual_review_required",
+            "reason_code": reason_code,
+            "reason_text": reason_text,
+        }
+    elif is_doctor_denied_final or case.status == CaseStatus.DOCTOR_DENIED:
+        result_info = {"type": "doctor_denied", "reason": case.doctor_reason}
+    elif is_immediate_final:
+        result_info = {
+            "type": "accepted_immediate",
+            "support": SUPPORT_FLAG_MAP.get(case.doctor_support_flag, case.doctor_support_flag),
+            "flow": ADMISSION_FLOW_MAP.get(case.doctor_admission_flow, case.doctor_admission_flow),
+        }
+    elif case.status == CaseStatus.APPT_CONFIRMED or terminal_with_result:
         result_info = {
             "type": "accepted_scheduled",
             "appointment_at": case.appointment_at,
@@ -299,8 +322,6 @@ def case_detail(request: HttpRequest, case_id: str) -> HttpResponse:
         }
     elif case.status == CaseStatus.APPT_DENIED:
         result_info = {"type": "appt_denied", "reason": case.appointment_reason}
-    elif case.status == CaseStatus.DOCTOR_DENIED:
-        result_info = {"type": "doctor_denied", "reason": case.doctor_reason}
     elif case.status == CaseStatus.FAILED:
         result_info = {"type": "failed"}
 
@@ -317,7 +338,7 @@ def case_detail(request: HttpRequest, case_id: str) -> HttpResponse:
         {
             "case": case,
             "events": enriched_events,
-            "steps": STEPS,
+            "steps": steps,
             "current_step_idx": current_step_idx,
             "status_label": STATUS_LABELS.get(case.status, case.get_status_display()),
             "status_css": STATUS_CSS_CLASS.get(case.status, "status-pending"),
@@ -326,6 +347,25 @@ def case_detail(request: HttpRequest, case_id: str) -> HttpResponse:
             "patient_name": patient_name,
             "prior_case_lookup": prior_case_lookup,
         },
+    )
+
+
+@login_required
+@role_required("nir")
+@xframe_options_sameorigin
+def serve_pdf(request: HttpRequest, case_id: str) -> HttpResponseBase:
+    """Serve o PDF original do caso para visualização inline no <embed>."""
+    case = get_object_or_404(
+        Case.objects.select_related("created_by"),
+        case_id=case_id,
+        created_by=request.user,
+    )
+    if not case.pdf_file:
+        raise Http404("PDF não encontrado para este caso.")
+
+    return FileResponse(
+        case.pdf_file.open("rb"),
+        content_type="application/pdf",
     )
 
 

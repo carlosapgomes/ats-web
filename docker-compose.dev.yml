@@ -11,6 +11,11 @@ services:
       POSTGRES_DB: ats_web_dev
     volumes:
       - pgdata_dev:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ats_web -d ats_web_dev"]
+      interval: 2s
+      timeout: 3s
+      retries: 5
 
   web:
     build:
@@ -56,6 +61,31 @@ services:
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
       OPENAI_MODEL: ${OPENAI_MODEL:-gpt-4o}
       OPENAI_BASE_URL: ${OPENAI_BASE_URL:-https://api.openai.com/v1}
+      Q_CLUSTER_NAME: llm
+    depends_on:
+      db:
+        condition: service_healthy
+    networks:
+      - ats-net
+
+  pdf_worker:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    command: uv run python manage.py qcluster --settings=config.settings.dev
+    volumes:
+      - .:/app
+      - app_venv:/app/.venv
+    environment:
+      DJANGO_SETTINGS_MODULE: config.settings.dev
+      DATABASE_URL: postgres://ats_web:ats_web_dev@db:5432/ats_web_dev
+      DJANGO_SECRET_KEY: dev-secret-key-not-for-production
+      DJANGO_DEBUG: "true"
+      INTRANET_IP_RANGE: ${INTRANET_IP_RANGE:-127.0.0.0/8,192.168.0.0/16,10.0.0.0/8,172.16.0.0/12}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      OPENAI_MODEL: ${OPENAI_MODEL:-gpt-4o}
+      OPENAI_BASE_URL: ${OPENAI_BASE_URL:-https://api.openai.com/v1}
+      Q_CLUSTER_NAME: pdf
     depends_on:
       db:
         condition: service_healthy

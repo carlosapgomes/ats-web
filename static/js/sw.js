@@ -1,6 +1,6 @@
 /* ATS Web — Service Worker */
 
-const CACHE_NAME = "ats-cache-v1";
+const CACHE_NAME = "ats-cache-v2";
 const STATIC_ASSETS = [
   "/static/manifest.json",
   "/static/js/app.js",
@@ -36,19 +36,25 @@ self.addEventListener("activate", (event) => {
 
 /* Fetch: cache-first for static, network-first for HTML */
 self.addEventListener("fetch", (event) => {
+  // Never intercept POST/PUT/DELETE form submissions. They must go directly to
+  // Django with the browser's normal cookie/CSRF semantics.
+  if (event.request.method !== "GET") {
+    return;
+  }
+
   const url = new URL(event.request.url);
 
-  // Cache-first for static assets
+  // Network-first for static assets to avoid stale JS after quick fixes.
   if (url.pathname.startsWith("/static/")) {
     event.respondWith(
-      caches.match(event.request).then((cached) => {
-        return cached || fetch(event.request).then((response) => {
+      fetch(event.request)
+        .then((response) => {
           return caches.open(CACHE_NAME).then((cache) => {
             cache.put(event.request, response.clone());
             return response;
           });
-        });
-      })
+        })
+        .catch(() => caches.match(event.request))
     );
     return;
   }

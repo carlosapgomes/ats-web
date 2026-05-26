@@ -7,197 +7,169 @@
 
 {% block content %}
 
-<div class="row g-4 decision-two-col">
+<div class="doctor-decision-layout">
 
-  <!-- Left: Case Summary -->
-  <div class="col-lg-5">
-    <div class="card p-4 mb-3">
-      <h5 class="mb-3">📋 Dados do Paciente</h5>
-      <table class="table table-sm mb-0">
-        <tr><td class="text-muted" style="width:40%;">Paciente</td><td><strong>{{ patient_name }}</strong></td></tr>
-        <tr><td class="text-muted">Registro</td><td>{{ case.agency_record_number|default:case.case_id|truncatechars:20 }}</td></tr>
-        <tr><td class="text-muted">Idade</td><td>{% if patient_age %}{{ patient_age }} anos{% else %}—{% endif %}</td></tr>
-        <tr><td class="text-muted">Sexo</td><td>{{ patient_gender|default:"—" }}</td></tr>
-        <tr><td class="text-muted">Enviado em</td><td>{{ case.created_at|date:"d/m/Y H:i" }}</td></tr>
-        <tr><td class="text-muted">Aguardando</td><td><span class="waiting-time">⏱ {{ case.created_at|timesince }}</span></td></tr>
-      </table>
+  <!-- Top: patient context + decision form -->
+  <div class="row g-4 align-items-start mb-4">
+    <div class="col-xl-5 col-lg-6">
+      <div class="card p-4 h-100">
+        <h5 class="mb-3">📋 Dados do Paciente</h5>
+        <table class="table table-sm mb-0">
+          <tr><td class="text-muted" style="width:40%;">Paciente</td><td><strong>{{ patient_name }}</strong></td></tr>
+          <tr><td class="text-muted">Registro</td><td>{{ case.agency_record_number|default:case.case_id|truncatechars:20 }}</td></tr>
+          <tr><td class="text-muted">Idade</td><td>{% if patient_age %}{{ patient_age }} anos{% else %}—{% endif %}</td></tr>
+          <tr><td class="text-muted">Sexo</td><td>{{ patient_gender|default:"—" }}</td></tr>
+          <tr><td class="text-muted">Enviado em</td><td>{{ case.created_at|date:"d/m/Y H:i" }}</td></tr>
+          <tr><td class="text-muted">Aguardando</td><td><span class="waiting-time">⏱ {{ case.created_at|timesince }}</span></td></tr>
+        </table>
+      </div>
     </div>
 
-    <div class="card p-4 mb-3">
-      <h5 class="mb-3">🤖 Relatório da IA</h5>
-      {% if summary_text %}
-      <div class="summary-box mb-3">
-        <div class="summary-label">Resumo</div>
-        <div class="summary-value">{{ summary_text }}</div>
-      </div>
-      {% endif %}
-      {% if suggested_action.reasoning %}
-      <div class="summary-box mb-3">
-        <div class="summary-label">Justificativa da IA</div>
-        <div class="summary-value">{{ suggested_action.reasoning }}</div>
-      </div>
-      {% endif %}
-      <div class="summary-box mb-3">
-        <div class="summary-label">Sugestão da IA</div>
-        <div class="summary-value">
-          <span class="badge bg-info me-1">Suporte: {{ suggested_support }}</span>
-          <span class="badge bg-secondary">Fluxo: {{ suggested_flow }}</span>
-        </div>
-      </div>
-      {% if suggested_action %}
-      <div class="mt-2">
-        <a data-bs-toggle="collapse" href="#llmFullReport" class="text-decoration-none small">
-          Ver relatório completo da IA ▾
-        </a>
-        <div class="collapse mt-2" id="llmFullReport">
-          <pre class="bg-light p-3 rounded" style="white-space: pre-wrap; font-size: 0.8rem; max-height: 300px; overflow-y: auto;">{{ suggested_action|pprint }}</pre>
-        </div>
-      </div>
-      {% endif %}
-      {% if not summary_text and not suggested_action %}
-      <div class="text-muted">Relatório da IA não disponível.</div>
-      {% endif %}
-    </div>
+    <div class="col-xl-7 col-lg-6">
+      <div class="card p-4 doctor-decision-form-card">
+        <h5 class="mb-4">🩺 Formulário de Decisão</h5>
 
-    <div class="card p-4">
-      <h5 class="mb-3">
-        <a data-bs-toggle="collapse" href="#extractedText" role="button" aria-expanded="false" aria-controls="extractedText" class="text-decoration-none d-flex align-items-center gap-2">
-          📄 Texto Extraído do PDF
-          <span class="badge bg-secondary">clique para expandir</span>
-        </a>
-      </h5>
-      <div class="collapse" id="extractedText">
-        <div class="card card-body bg-light">
-          <pre class="mb-0" style="white-space: pre-wrap; font-size: 0.9rem; max-height: 400px; overflow-y: auto;">{{ case.extracted_text|default:"Texto não disponível" }}</pre>
-        </div>
+        <form id="decision-form" method="post" action="{% url 'doctor:submit' case.case_id %}" novalidate>
+          {% csrf_token %}
+
+          <div class="mb-4">
+            <label class="form-label">Decisão <span class="text-danger">*</span></label>
+            <div class="decision-radio-group">
+              <div class="form-check">
+                <input class="form-check-input" type="radio" name="decision" id="decision-accept" value="accept" required{% if form.decision.value == "accept" %} checked{% endif %}>
+                <label class="form-check-label d-block" for="decision-accept">
+                  <strong>✓ Aceitar</strong>
+                  <div class="text-muted small">Encaminhar para agendamento ou vinda imediata</div>
+                </label>
+              </div>
+              <div class="form-check">
+                <input class="form-check-input" type="radio" name="decision" id="decision-deny" value="deny"{% if form.decision.value == "deny" %} checked{% endif %}>
+                <label class="form-check-label d-block" for="decision-deny">
+                  <strong>✗ Negar</strong>
+                  <div class="text-muted small">Triagem não indicada para este caso</div>
+                </label>
+              </div>
+            </div>
+            {% if form.decision.errors %}
+            <div class="invalid-feedback d-block">{{ form.decision.errors.0 }}</div>
+            {% else %}
+            <div class="invalid-feedback" id="decision-error">Selecione uma decisão.</div>
+            {% endif %}
+          </div>
+
+          <div class="decision-section{% if form.decision.value == 'accept' %} active{% endif %}" id="accept-section">
+            <div class="row g-3">
+              <div class="col-md-6">
+                <label for="support-flag" class="form-label">Suporte Necessário <span class="text-danger">*</span></label>
+                <select class="form-select{% if form.support_flag.errors %} is-invalid{% endif %}" id="support-flag" name="support_flag">
+                  <option value="" selected disabled>Selecione...</option>
+                  <option value="none"{% if form.support_flag.value == "none" %} selected{% endif %}>Nenhum</option>
+                  <option value="anesthesist"{% if form.support_flag.value == "anesthesist" %} selected{% endif %}>Anestesista</option>
+                  <option value="anesthesist_icu"{% if form.support_flag.value == "anesthesist_icu" %} selected{% endif %}>Anestesista + UTI</option>
+                </select>
+                {% if form.support_flag.errors %}<div class="invalid-feedback d-block">{{ form.support_flag.errors.0 }}</div>{% else %}<div class="invalid-feedback">Selecione o tipo de suporte.</div>{% endif %}
+              </div>
+
+              <div class="col-md-6">
+                <label for="admission-flow" class="form-label">Fluxo de Admissão <span class="text-danger">*</span></label>
+                <select class="form-select{% if form.admission_flow.errors %} is-invalid{% endif %}" id="admission-flow" name="admission_flow">
+                  <option value="" selected disabled>Selecione...</option>
+                  <option value="scheduled"{% if form.admission_flow.value == "scheduled" %} selected{% endif %}>Agendamento</option>
+                  <option value="immediate"{% if form.admission_flow.value == "immediate" %} selected{% endif %}>Vinda Imediata</option>
+                </select>
+                {% if form.admission_flow.errors %}<div class="invalid-feedback d-block">{{ form.admission_flow.errors.0 }}</div>{% else %}<div class="invalid-feedback">Selecione o fluxo de admissão.</div>{% endif %}
+              </div>
+            </div>
+          </div>
+
+          <div class="decision-section{% if form.decision.value == 'deny' %} active{% endif %}" id="deny-section">
+            <div class="mb-3">
+              <label for="deny-reason" class="form-label">Motivo da Negativa <span class="text-danger">*</span></label>
+              <textarea class="form-control{% if form.reason.errors %} is-invalid{% endif %}" id="deny-reason" name="reason" rows="3" placeholder="Descreva o motivo pelo qual a triagem não se aplica a este caso...">{{ form.reason.value|default:"" }}</textarea>
+              {% if form.reason.errors %}<div class="invalid-feedback d-block">{{ form.reason.errors.0 }}</div>{% else %}<div class="invalid-feedback">Informe o motivo da negativa.</div>{% endif %}
+            </div>
+          </div>
+
+          <div class="mb-4">
+            <label for="case-id-display" class="form-label">ID do Caso</label>
+            <input type="text" class="form-control" id="case-id-display" value="{{ case.case_id }}" readonly style="background:#f8f9fa;">
+            <div class="form-text">Preenchido automaticamente pelo sistema.</div>
+          </div>
+
+          <div class="d-flex gap-2">
+            <button type="submit" class="btn btn-hospital btn-lg flex-grow-1" id="btn-submit">Enviar Decisão</button>
+            <a href="{% url 'doctor:queue' %}" class="btn btn-outline-secondary btn-lg">Cancelar</a>
+          </div>
+        </form>
       </div>
     </div>
   </div>
 
-  <!-- Right: Decision Form -->
-  <div class="col-lg-7">
+  {% if prior_context and prior_context.prior_case %}
+  <div class="card p-4 mb-4 border-warning">
+    <div class="card-header bg-warning text-dark fw-semibold py-2 px-3 mb-3" style="margin: -1rem -1rem 0 -1rem; border-radius: 0.375rem 0.375rem 0 0;">
+      ⚠️ Caso Anterior — Negação Recente
+      {% if prior_context.prior_denial_count_7d > 1 %}<span class="badge bg-danger ms-2">{{ prior_context.prior_denial_count_7d }} negações em 7 dias</span>{% endif %}
+    </div>
+    <table class="table table-sm mb-0">
+      <tr><td class="text-muted" style="width:20%;">Decisão</td><td><strong>{{ prior_decision_display }}</strong></td></tr>
+      <tr><td class="text-muted">Data</td><td>{{ prior_context.prior_case.decided_at|slice:":10"|default:"—" }}</td></tr>
+      <tr><td class="text-muted">Motivo</td><td>{{ prior_context.prior_case.reason }}</td></tr>
+    </table>
+  </div>
+  {% endif %}
 
-    {% if prior_context and prior_context.prior_case %}
-    <!-- Prior Case Card -->
-    <div class="card p-4 mb-3 border-warning">
-      <div class="card-header bg-warning text-dark fw-semibold py-2 px-3 mb-3" style="margin: -1rem -1rem 0 -1rem; border-radius: 0.375rem 0.375rem 0 0;">
-        ⚠️ Caso Anterior — Negação Recente
-        {% if prior_context.prior_denial_count_7d > 1 %}
-        <span class="badge bg-danger ms-2">{{ prior_context.prior_denial_count_7d }} negações em 7 dias</span>
-        {% endif %}
-      </div>
-      <div class="card-body pt-3">
-        <table class="table table-sm mb-0">
-          <tr>
-            <td class="text-muted" style="width:35%;">Decisão</td>
-            <td><strong>{{ prior_decision_display }}</strong></td>
-          </tr>
-          <tr>
-            <td class="text-muted">Data</td>
-            <td>{{ prior_context.prior_case.decided_at|slice:":10"|default:"—" }}</td>
-          </tr>
-          <tr>
-            <td class="text-muted">Motivo</td>
-            <td>{{ prior_context.prior_case.reason }}</td>
-          </tr>
-        </table>
-      </div>
+  <!-- Full-width technical report -->
+  <div class="card p-4 mb-4 doctor-report-card">
+    <h5 class="mb-3">🤖 Relatório Técnico da Triagem</h5>
+
+    <div class="report-meta mb-3 small text-muted">
+      <div>{{ report.context.procedure }}</div>
+      <div>{{ report.context.origin }}</div>
+      {% for line in report.context.transfusion_lines %}<div>{{ line }}</div>{% endfor %}
+      {% for line in report.context.tracked_exam_lines %}<div>{{ line }}</div>{% endfor %}
+      {% if report.context.pediatric %}<div>{{ report.context.pediatric }}</div>{% endif %}
+    </div>
+
+    <div class="doctor-report-grid">
+      <div class="report-block"><div class="report-block-title">📋 Resumo Clínico</div><div class="report-block-body">{% for line in report.blocks.resumo_clinico %}<p class="mb-1">{{ line }}</p>{% endfor %}</div></div>
+      <div class="report-block"><div class="report-block-title">🔍 Achados Críticos</div><div class="report-block-body">{% for line in report.blocks.achados_criticos %}<div>{{ line }}</div>{% endfor %}</div></div>
+      <div class="report-block"><div class="report-block-title">⚠️ Pendências Críticas</div><div class="report-block-body">{% for line in report.blocks.pendencias_criticas %}<div>{{ line }}</div>{% endfor %}</div></div>
+      <div class="report-block"><div class="report-block-title">✅ Decisão Sugerida</div><div class="report-block-body">{% for line in report.blocks.decisao_sugerida %}<span class="badge bg-info me-1">{{ line|cut:"- " }}</span>{% endfor %}</div></div>
+      <div class="report-block"><div class="report-block-title">🏥 Suporte Recomendado</div><div class="report-block-body">{% for line in report.blocks.suporte_recomendado %}<span class="badge bg-secondary me-1">{{ line|cut:"- " }}</span>{% endfor %}</div></div>
+      <div class="report-block"><div class="report-block-title">💉 ASA Estimado</div><div class="report-block-body">{% for line in report.blocks.asa_estimado %}<div>{{ line }}</div>{% endfor %}</div></div>
+      <div class="report-block doctor-report-wide"><div class="report-block-title">📝 Motivo Objetivo</div><div class="report-block-body">{% for line in report.blocks.motivo_objetivo %}<p class="mb-1">{{ line }}</p>{% endfor %}</div></div>
+    </div>
+
+    {% if report.recent_denial %}
+    <div class="report-block border-warning border rounded p-2 bg-warning bg-opacity-10 mt-3">
+      <div class="report-block-title">🕓 Histórico de Negativa Recente</div>
+      <div class="report-block-body">{% for line in report.recent_denial.lines %}<div class="small">{{ line }}</div>{% endfor %}</div>
     </div>
     {% endif %}
 
-    <div class="card p-4">
-      <h5 class="mb-4">🩺 Formulário de Decisão</h5>
+    {% if suggested_action %}
+    <div class="mt-3">
+      <a data-bs-toggle="collapse" href="#llmFullReport" class="text-decoration-none small">Ver JSON completo da IA ▾</a>
+      <div class="collapse mt-2" id="llmFullReport">
+        <pre class="bg-light p-3 rounded" style="white-space: pre-wrap; font-size: 0.8rem; max-height: 300px; overflow-y: auto;">{{ suggested_action|pprint }}</pre>
+      </div>
+    </div>
+    {% endif %}
+    {% if not summary_text and not suggested_action %}<div class="text-muted">Relatório da IA não disponível.</div>{% endif %}
+  </div>
 
-      <form id="decision-form" method="post" action="{% url 'doctor:submit' case.case_id %}" novalidate>
-        {% csrf_token %}
-
-        <!-- Step 1: Decision -->
-        <div class="mb-4">
-          <label class="form-label">Decisão <span class="text-danger">*</span></label>
-          <div class="decision-radio-group">
-            <div class="form-check">
-              <input class="form-check-input" type="radio" name="decision" id="decision-accept" value="accept" required{% if form.decision.value == "accept" %} checked{% endif %}>
-              <label class="form-check-label d-block" for="decision-accept">
-                <strong>✓ Aceitar</strong>
-                <div class="text-muted small">Encaminhar para agendamento</div>
-              </label>
-            </div>
-            <div class="form-check">
-              <input class="form-check-input" type="radio" name="decision" id="decision-deny" value="deny"{% if form.decision.value == "deny" %} checked{% endif %}>
-              <label class="form-check-label d-block" for="decision-deny">
-                <strong>✗ Negar</strong>
-                <div class="text-muted small">Triagem não indicada para este caso</div>
-              </label>
-            </div>
-          </div>
-          {% if form.decision.errors %}
-          <div class="invalid-feedback d-block">{{ form.decision.errors.0 }}</div>
-          {% else %}
-          <div class="invalid-feedback" id="decision-error">Selecione uma decisão.</div>
-          {% endif %}
-        </div>
-
-        <!-- Accept Fields (conditional) -->
-        <div class="decision-section{% if form.decision.value == 'accept' %} active{% endif %}" id="accept-section">
-          <div class="mb-3">
-            <label for="support-flag" class="form-label">Suporte Necessário <span class="text-danger">*</span></label>
-            <select class="form-select{% if form.support_flag.errors %} is-invalid{% endif %}" id="support-flag" name="support_flag">
-              <option value="" selected disabled>Selecione o tipo de suporte...</option>
-              <option value="none"{% if form.support_flag.value == "none" %} selected{% endif %}>Nenhum</option>
-              <option value="anesthesist"{% if form.support_flag.value == "anesthesist" %} selected{% endif %}>Anestesista</option>
-              <option value="anesthesist_icu"{% if form.support_flag.value == "anesthesist_icu" %} selected{% endif %}>Anestesista + UTI</option>
-            </select>
-            {% if form.support_flag.errors %}
-            <div class="invalid-feedback d-block">{{ form.support_flag.errors.0 }}</div>
-            {% else %}
-            <div class="invalid-feedback">Selecione o tipo de suporte.</div>
-            {% endif %}
-          </div>
-
-          <div class="mb-3">
-            <label for="admission-flow" class="form-label">Fluxo de Admissão <span class="text-danger">*</span></label>
-            <select class="form-select{% if form.admission_flow.errors %} is-invalid{% endif %}" id="admission-flow" name="admission_flow">
-              <option value="" selected disabled>Selecione o fluxo...</option>
-              <option value="scheduled"{% if form.admission_flow.value == "scheduled" %} selected{% endif %}>Agendamento</option>
-              <option value="immediate"{% if form.admission_flow.value == "immediate" %} selected{% endif %}>Vinda Imediata</option>
-            </select>
-            {% if form.admission_flow.errors %}
-            <div class="invalid-feedback d-block">{{ form.admission_flow.errors.0 }}</div>
-            {% else %}
-            <div class="invalid-feedback">Selecione o fluxo de admissão.</div>
-            {% endif %}
-          </div>
-        </div>
-
-        <!-- Deny Fields (conditional) -->
-        <div class="decision-section{% if form.decision.value == 'deny' %} active{% endif %}" id="deny-section">
-          <div class="mb-3">
-            <label for="deny-reason" class="form-label">Motivo da Negativa <span class="text-danger">*</span></label>
-            <textarea class="form-control{% if form.reason.errors %} is-invalid{% endif %}" id="deny-reason" name="reason" rows="3" placeholder="Descreva o motivo pelo qual a triagem não se aplica a este caso...">{{ form.reason.value|default:"" }}</textarea>
-            {% if form.reason.errors %}
-            <div class="invalid-feedback d-block">{{ form.reason.errors.0 }}</div>
-            {% else %}
-            <div class="invalid-feedback">Informe o motivo da negativa.</div>
-            {% endif %}
-          </div>
-        </div>
-
-        <!-- Case ID (auto-filled, hidden in production) -->
-        <div class="mb-4">
-          <label for="case-id-display" class="form-label">ID do Caso</label>
-          <input type="text" class="form-control" id="case-id-display" value="{{ case.case_id }}" readonly style="background:#f8f9fa;">
-          <div class="form-text">Preenchido automaticamente pelo sistema.</div>
-        </div>
-
-        <!-- Submit -->
-        <div class="d-flex gap-2">
-          <button type="submit" class="btn btn-hospital btn-lg flex-grow-1" id="btn-submit">
-            Enviar Decisão
-          </button>
-          <a href="{% url 'doctor:queue' %}" class="btn btn-outline-secondary btn-lg">Cancelar</a>
-        </div>
-
-      </form>
+  <div class="card p-4">
+    <h5 class="mb-3">
+      <a data-bs-toggle="collapse" href="#extractedText" role="button" aria-expanded="false" aria-controls="extractedText" class="text-decoration-none d-flex align-items-center gap-2">
+        📄 Texto Extraído do PDF
+        <span class="badge bg-secondary">clique para expandir</span>
+      </a>
+    </h5>
+    <div class="collapse" id="extractedText">
+      <div class="card card-body bg-light">
+        <pre class="mb-0" style="white-space: pre-wrap; font-size: 0.9rem; max-height: 520px; overflow-y: auto;">{{ case.extracted_text|default:"Texto não disponível" }}</pre>
+      </div>
     </div>
   </div>
 
@@ -211,9 +183,7 @@
         <h5 class="modal-title">Confirmar Decisão</h5>
         <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Fechar"></button>
       </div>
-      <div class="modal-body" id="confirm-body">
-        <!-- Filled by JS -->
-      </div>
+      <div class="modal-body" id="confirm-body"></div>
       <div class="modal-footer border-0">
         <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Revisar</button>
         <button type="button" class="btn btn-hospital" id="btn-confirm-final">Confirmar Decisão</button>

@@ -75,8 +75,13 @@ apps/accounts/   # User, Role, auth views, intranet guard middleware
 apps/cases/      # Case (FSM 17 estados), CaseEvent (auditoria)
 apps/llm/        # PromptTemplate (versionado, 1 ativo por nome)
 apps/pipeline/   # Pipeline LLM: client, services, policy engine, orchestrator, tasks
+apps/pipeline/schemas/  # Pydantic v2 DTOs: llm1.py (StructuredData), llm2.py (Suggestion)
 apps/intake/     # NIR: upload PDF, meus casos, detalhe + timeline
-templates/       # base.html (tema hospitalar), login, switch-role, intake/
+apps/doctor/     # Médico: fila, decisão, presenter de relatório (7 blocos)
+apps/scheduler/  # Agendador: fila, confirmação/desmarcação
+apps/dashboard/  # Dashboard gerencial: métricas, sumários, tabela de casos
+apps/admin_ui/   # Interface admin: gestão de usuários e prompts
+templates/       # base.html (tema hospitalar), login, switch-role, intake/, doctor/
 static/          # css/app.css (paleta hospitalar), js/upload.js
 ```
 
@@ -116,18 +121,39 @@ static/          # css/app.css (paleta hospitalar), js/upload.js
 - Templates textuais e parsers de Matrix nao existem — formularios HTML substituem.
 - Reactions/thumbs-up nao existem — botao "Confirmar Recebimento" substitui.
 
+## Contratos e Validações
+
+- **Prompts canônicos**: nomes legados `llm1_system`, `llm1_user`, `llm2_system`, `llm2_user` são definitivos.
+  `seed_prompts` cria versões ativas com defaults portados do legado. Fallback de código usa os mesmos defaults.
+- **Validação Pydantic v2**: schemas `apps/pipeline/schemas/llm1.py` (StructuredData) e `llm2.py` (Suggestion)
+  validam rigidamente as respostas LLM. Respostas fora do contrato geram falha explícita de pipeline com
+  `CaseEvent` de auditoria.
+- **Scope gate**: casos `non_eda` ou `unknown` (exame fora do escopo EDA) vão direto para
+  `WAIT_R1_CLEANUP_THUMBS` com resultado de revisão manual obrigatória — **não entram na fila médica**.
+- **Presenter médico**: `apps/doctor/presenters.py` gera relatório técnico equivalente ao legado em 7 blocos:
+  Resumo clínico, Achados críticos, Pendências críticas, Decisão sugerida, Suporte recomendado,
+  ASA estimado e Motivo objetivo.
+- **Role guard**: todas as views médicas exigem `@role_required('doctor')` com papel ativo `doctor`.
+  Manager com role `doctor` ativo também acessa.
+
 ## State do Sistema
 
-- **Fase atual**: Fase 2b CONCLUÍDA — próxima: Fase 3 (Fila Médica / Doctor)
+- **Fase atual**: Fase 3 CONCLUÍDA — próxima: a definir
 - **Changes concluídos**:
   - `openspec/archive/bootstrap-django-ats-core/` (7 slices, Fase 0)
   - `openspec/archive/intake-nir/` (6 slices, Fase 1)
   - `openspec/archive/pipeline-llm/` (7 slices, Fase 2)
   - `openspec/archive/ui-alinhamento-mocks/` (3 slices, Fase 2b)
-- **Apps criados**: `apps/accounts/`, `apps/cases/`, `apps/llm/`, `apps/intake/`, `apps/pipeline/`
-- **Testes**: 301 passando, quality gate verde
-- **Templates**: base.html com tema hospitalar, login, switch-role, intake (home, my_cases, case_detail)
+- **Change ativo**: `openspec/changes/align-llm-contract-and-doctor-routing/` (7 slices, concluído)
+  - Alinhamento de contratos LLM e roteamento NIR → médico ao legado
+  - Port dos DTOs Pydantic v2, scope gate, presenter 7 blocos, role guard
+- **Apps criados**: `apps/accounts/`, `apps/cases/`, `apps/llm/`, `apps/intake/`, `apps/pipeline/`,
+  `apps/doctor/`, `apps/scheduler/`, `apps/dashboard/`, `apps/admin_ui/`
+- **Testes**: 605 passando, quality gate verde
+- **Templates**: base.html com tema hospitalar, login, switch-role, intake (home, my_cases, case_detail),
+  doctor (queue, decision)
 - **Documentacao de dominio**: `docs/DOMAIN_ANALYSIS.md`
+- **Investigações**: `docs/investigations/2026-05-18-nir-to-doctor-flow-review.md`
 - **ADR ativa**: `docs/adr/ADR-0001-arquitetura-django-web-ssr-ats-triagem-eda.md`
 - **Dívida técnica**: `django-fsm` deprecated → `viewflow.fsm` (não urgente)
 

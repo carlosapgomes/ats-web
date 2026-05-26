@@ -176,6 +176,25 @@ class TestMyCasesList:
         # Label em português: "Aguardando médico"
         assert "Aguardando médico" in content
 
+    def test_my_cases_has_htmx_polling_container(self, client) -> None:
+        """Full my-cases page polls the partial endpoint with current filters."""
+        client, _ = _nir_client(client)
+        response = client.get(reverse("intake:my_cases") + "?q=0428")
+        assert response.status_code == 200
+        content = response.content.decode()
+        assert 'hx-get="/cases/my-cases/partial/?q=0428"' in content
+        assert 'hx-trigger="every 20s"' in content
+
+    def test_my_cases_partial_renders_without_layout(self, client) -> None:
+        """HTMX partial returns list content without the full base layout."""
+        client, user = _nir_client(client)
+        Case.objects.create(created_by=user, agency_record_number="PARTIAL-001", status=CaseStatus.NEW)
+        response = client.get(reverse("intake:my_cases_partial"))
+        assert response.status_code == 200
+        content = response.content.decode()
+        assert "<!DOCTYPE html>" not in content
+        assert "PARTIAL-001" in content
+
     def test_my_cases_requires_nir_role(self, client) -> None:
         """Usuário com role doctor deve ser bloqueado."""
         client, _ = _doctor_client(client)

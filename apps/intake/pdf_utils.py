@@ -101,9 +101,7 @@ def _strip_repeated_digit_watermarks(text: str, *, protected_token: str) -> str:
         if match:
             repeated_token_counts[match.group(1)] += 1
 
-    candidate_tokens = {
-        token for token, count in repeated_token_counts.items() if count >= 1
-    }
+    candidate_tokens = {token for token, count in repeated_token_counts.items() if count >= 1}
     candidate_tokens.discard(protected_token)
 
     if not candidate_tokens:
@@ -121,9 +119,7 @@ def _strip_repeated_digit_watermarks(text: str, *, protected_token: str) -> str:
 
     # Remove residual isolated tokens
     token_counts = Counter(_DIGIT_TOKEN_PATTERN.findall(partially_cleaned))
-    removable_tokens = {
-        token for token in candidate_tokens if token_counts.get(token, 0) >= 1
-    }
+    removable_tokens = {token for token in candidate_tokens if token_counts.get(token, 0) >= 1}
 
     if not removable_tokens:
         return partially_cleaned

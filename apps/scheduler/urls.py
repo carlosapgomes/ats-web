@@ -8,6 +8,8 @@ app_name = "scheduler"
 
 urlpatterns = [
     path("", views.scheduler_queue, name="queue"),
+    path("partials/queue/", views.scheduler_queue_partial, name="queue_partial"),
+    path("<uuid:case_id>/immediate-ack/", views.immediate_ack, name="immediate_ack"),
     path("<uuid:case_id>/", views.scheduler_confirm, name="confirm"),
     path("<uuid:case_id>/submit/", views.scheduler_submit, name="submit"),
 ]

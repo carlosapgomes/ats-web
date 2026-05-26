@@ -40,13 +40,36 @@ STORAGES = {
 
 # django-q2 production
 Q_CLUSTER = {
+    "name": "ats",
     "workers": 2,
-    "timeout": 600,
-    "retry": 180,
+    "timeout": 900,
+    "retry": 1200,
     "save_limit": 500,
     "queue_limit": 100,
     "catch_up": False,
     "poll": 2.0,
     "label": "ATS Pipeline Worker",
     "orm": "default",
+    "ALT_CLUSTERS": {
+        "pdf": {
+            "workers": 4,
+            "timeout": 180,
+            "retry": 300,
+            "save_limit": 500,
+            "queue_limit": 500,
+            "catch_up": False,
+            "poll": 1.0,
+            "orm": "default",
+        },
+        "llm": {
+            "workers": 2,
+            "timeout": 900,
+            "retry": 1200,
+            "save_limit": 500,
+            "queue_limit": 200,
+            "catch_up": False,
+            "poll": 2.0,
+            "orm": "default",
+        },
+    },
 }
