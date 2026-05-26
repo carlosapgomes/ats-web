@@ -87,6 +87,11 @@ MEDIA_ROOT = BASE_DIR / "media"
 DATA_UPLOAD_MAX_MEMORY_SIZE = 20 * 1024 * 1024  # 20 MB
 FILE_UPLOAD_MAX_MEMORY_SIZE = 20 * 1024 * 1024  # 20 MB
 
+# INTAKE limits — upload múltiplo NIR
+INTAKE_MAX_FILES_PER_BATCH = 30
+INTAKE_MAX_UPLOAD_BYTES_PER_FILE = 20 * 1024 * 1024  # 20 MB
+INTAKE_MAX_UPLOAD_BYTES_PER_BATCH = 600 * 1024 * 1024  # 600 MB
+
 # Intranet Guard
 # Range CIDR da intranet (ex: "10.0.0.0/8" ou "192.168.0.0/16")
 # Se vazio, papéis nir/scheduler são bloqueados de qualquer IP.
@@ -104,15 +109,38 @@ OPENAI_BASE_URL = os.environ.get("OPENAI_BASE_URL", "https://api.openai.com/v1")
 
 # django-q2 — async task queue
 Q_CLUSTER = {
+    "name": "ats",
     "workers": 1,
-    "timeout": 600,
-    "retry": 180,
+    "timeout": 900,
+    "retry": 1200,
     "save_limit": 250,
     "queue_limit": 50,
     "catch_up": False,
     "poll": 1.0,
     "label": "ATS Pipeline Worker",
     "orm": "default",
+    "ALT_CLUSTERS": {
+        "pdf": {
+            "workers": 2,
+            "timeout": 180,
+            "retry": 300,
+            "save_limit": 500,
+            "queue_limit": 500,
+            "catch_up": False,
+            "poll": 1.0,
+            "orm": "default",
+        },
+        "llm": {
+            "workers": 1,
+            "timeout": 900,
+            "retry": 1200,
+            "save_limit": 500,
+            "queue_limit": 200,
+            "catch_up": False,
+            "poll": 2.0,
+            "orm": "default",
+        },
+    },
 }
 
 # Periodic Summary Configuration

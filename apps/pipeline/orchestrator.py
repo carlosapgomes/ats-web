@@ -11,8 +11,12 @@ import uuid
 
 from apps.cases.models import Case
 from apps.llm.models import PromptTemplate
-from apps.pipeline.llm import LlmClient, get_llm_client
-from apps.pipeline.llm1_service import Llm1Service
+from apps.pipeline.llm import LlmClient
+from apps.pipeline.llm1_service import (
+    LLM1_DEFAULT_SYSTEM_PROMPT,
+    LLM1_DEFAULT_USER_PROMPT,
+    Llm1Service,
+)
 from apps.pipeline.llm2_service import Llm2Service
 from apps.pipeline.policy import (
     EdaPolicyPrecheckInput,
@@ -46,18 +50,28 @@ def run_pipeline(
     Override them in tests to avoid needing DB templates or real LLM calls.
     """
     case = Case.objects.get(case_id=case_id)
-    client = llm_client or get_llm_client()
+
+    # Use separate stage-specific clients in production mode.
+    # When a single client is injected (tests), use it for both.
+    if llm_client is None:
+        from apps.pipeline.llm import create_openai_llm1_client, create_openai_llm2_client
+
+        client_llm1: LlmClient = create_openai_llm1_client()
+        client_llm2: LlmClient = create_openai_llm2_client()
+    else:
+        client_llm1 = llm_client
+        client_llm2 = llm_client
 
     try:
         _run_llm1_step(
             case=case,
-            client=client,
+            client=client_llm1,
             system_prompt=llm1_system_prompt,
             user_template=llm1_user_template,
         )
         _run_scope_and_llm2(
             case=case,
-            client=client,
+            client=client_llm2,
             llm2_system_prompt=llm2_system_prompt,
             llm2_user_template=llm2_user_template,
         )
@@ -86,8 +100,8 @@ def _run_llm1_step(
 ) -> None:
     """Run LLM1: structured data extraction + persist artifacts + audit events."""
 
-    sp = system_prompt or _get_prompt_content("llm1_system_prompt")
-    ut = user_template or _get_prompt_content("llm1_user_prompt")
+    sp = system_prompt or _get_prompt_content("llm1_system")
+    ut = user_template or _get_prompt_content("llm1_user")
 
     service = Llm1Service(client)
     result = service.run(
@@ -137,9 +151,11 @@ def _run_scope_and_llm2(
             payload=scope_result,
         )
         case.save()  # persist event BEFORE FSM transition overwrites _pending_event
-        # Direct transition LLM_STRUCT → WAIT_DOCTOR (no misleading LLM2_OK event)
+        # Direct transition LLM_STRUCT → WAIT_R1_CLEANUP_THUMBS (no misleading LLM2_OK event)
         reason_code = str(scope_result.get("reason_code", ""))
         case.scope_gate_bypass(reason_code=reason_code)
+        case.save()
+        case._record_event("FINAL_REPLY_POSTED")
         case.save()
         return
 
@@ -182,8 +198,8 @@ def _run_scope_and_llm2(
         )
 
     # ── 5. LLM2 suggestion ──────────────────────────────────────
-    sp2 = llm2_system_prompt or _get_prompt_content("llm2_system_prompt")
-    ut2 = llm2_user_template or _get_prompt_content("llm2_user_prompt")
+    sp2 = llm2_system_prompt or _get_prompt_content("llm2_system")
+    ut2 = llm2_user_template or _get_prompt_content("llm2_user")
 
     service2 = Llm2Service(client)
     result2 = service2.run(
@@ -319,15 +335,30 @@ def _build_llm2_suggestion_input(suggested_action: dict[str, object]) -> Llm2Sug
 
 
 def _get_prompt_content(name: str) -> str:
-    """Resolve prompt content from DB or return a safe fallback."""
+    """Resolve prompt content from DB or return a legacy-compatible fallback."""
     template = PromptTemplate.get_active(name)
     if template is not None:
         return template.content
-    # Fallback: minimal prompt so the pipeline doesn't crash if templates
-    # were not yet seeded.  Production deployments MUST seed templates.
+    # Fallback: legacy default contents so the pipeline doesn't crash if
+    # templates were not yet seeded. Production MUST seed templates.
     logger.warning("PromptTemplate %r not found — using fallback", name)
-    # Use named placeholder to avoid format errors with keyword args.
-    return "{case_id}"
+    fallbacks = {
+        "llm1_system": LLM1_DEFAULT_SYSTEM_PROMPT,
+        "llm1_user": LLM1_DEFAULT_USER_PROMPT,
+        "llm2_system": (
+            "Voce e um assistente de apoio a decisao clinica para triagem de "
+            "Endoscopia Digestiva Alta (EDA). Retorne APENAS JSON valido que siga estritamente "
+            "o schema_version 1.1. Escreva todos os campos narrativos em portugues "
+            "brasileiro (pt-BR). Nao use palavras em ingles nos campos narrativos. "
+            "Use apenas valores de enum permitidos para suggestion e support_recommendation. "
+            "Nao inclua markdown, blocos de codigo ou chaves extras."
+        ),
+        "llm2_user": (
+            "Tarefa: sugerir accept/deny e recomendacao de suporte para triagem EDA "
+            "usando dados estruturados do LLM1 e contexto de caso anterior."
+        ),
+    }
+    return fallbacks.get(name, "{case_id}")
 
 
 # ── Data helpers ─────────────────────────────────────────────────────────────

@@ -1,6 +1,7 @@
 """Tests for doctor queue view."""
 
 from datetime import timedelta
+from pathlib import Path
 
 import pytest
 from django.contrib.auth import get_user_model
@@ -41,6 +42,59 @@ class TestDoctorQueueView:
     def test_queue_accessible_for_doctor(self, client) -> None:
         """GET /doctor/ returns 200 for user with active_role='doctor'."""
         self._login_as(client, "doctor")
+        response = client.get("/doctor/")
+        assert response.status_code == 200
+
+    def test_queue_has_htmx_polling_container(self, client) -> None:
+        """Full queue page polls the partial endpoint with HTMX."""
+        self._login_as(client, "doctor")
+        response = client.get("/doctor/")
+        assert response.status_code == 200
+        content = response.content.decode()
+        assert 'hx-get="/doctor/partials/queue/"' in content
+        assert 'hx-trigger="every 20s"' in content
+
+    def test_queue_partial_renders_without_layout(self, client) -> None:
+        """HTMX partial returns queue content without full base layout."""
+        self._login_as(client, "doctor")
+        response = client.get("/doctor/partials/queue/")
+        assert response.status_code == 200
+        content = response.content.decode()
+        assert "<!DOCTYPE html>" not in content
+        assert "Atualizado automaticamente" in content
+
+    # ── Role guard tests ─────────────────────────────────────────────
+
+    def test_queue_blocks_nir(self, client) -> None:
+        """NIR with active_role='nir' cannot access /doctor/."""
+        self._login_as(client, "nir")
+        response = client.get("/doctor/")
+        assert response.status_code == 302
+        assert response.url == "/"
+
+    def test_queue_blocks_scheduler(self, client) -> None:
+        """Scheduler with active_role='scheduler' cannot access /doctor/."""
+        self._login_as(client, "scheduler")
+        response = client.get("/doctor/")
+        assert response.status_code == 302
+        assert response.url == "/"
+
+    def test_queue_blocks_manager(self, client) -> None:
+        """Manager with active_role='manager' cannot access /doctor/."""
+        self._login_as(client, "manager")
+        response = client.get("/doctor/")
+        assert response.status_code == 302
+        assert response.url == "/"
+
+    def test_queue_allows_manager_with_active_doctor(self, client) -> None:
+        """Manager who selects active_role='doctor' can access /doctor/."""
+        user = User.objects.create_user(username="manager-doctor@test.com", password="testpass123")
+        user.roles.add(self._create_role("manager"))
+        user.roles.add(self._create_role("doctor"))
+        client.force_login(user)
+        session = client.session
+        session["active_role"] = "doctor"
+        session.save()
         response = client.get("/doctor/")
         assert response.status_code == 200
 
@@ -292,6 +346,31 @@ class TestDoctorQueueView:
 
     # ── Navigation links ──────────────────────────────────────────────
 
+    def test_queue_excludes_scope_gated_cases(self, client) -> None:
+        """Scope-gated cases (WAIT_R1_CLEANUP_THUMBS) do not appear in doctor queue."""
+        nir_user = User.objects.create_user(username="nir_scopegate@test.com", password="testpass123")
+        nir_user.roles.add(self._create_role("nir"))
+
+        # Create a scope-gated case that ended in WAIT_R1_CLEANUP_THUMBS
+        gated = Case.objects.create(
+            created_by=nir_user,
+            status=CaseStatus.WAIT_R1_CLEANUP_THUMBS,
+            suggested_action={
+                "decision": "manual_review_required",
+                "reason_code": "non_eda_request",
+                "reason_text": "Fora de escopo.",
+            },
+        )
+        gated.structured_data = {"patient": {"name": "Gated Case", "age": 40, "gender": "Masculino"}}
+        gated.save()
+
+        self._login_as(client, "doctor")
+        response = client.get("/doctor/")
+        assert response.status_code == 200
+        content = response.content.decode()
+        # Scope-gated case should NOT appear
+        assert "Gated Case" not in content
+
     def test_queue_has_evaluate_case_link(self, client) -> None:
         """Each pending case card has a link to the decision page."""
         nir_user = User.objects.create_user(username="nir_link@test.com", password="testpass123")
@@ -440,6 +519,16 @@ class TestDoctorDecisionView:
             case = _advance_case_to(case, status)
         return case
 
+    def test_decision_requires_doctor_role(self, client) -> None:
+        """NIR with active_role='nir' cannot GET /doctor/<case_id>/."""
+        case = self._create_case_in_status(CaseStatus.WAIT_DOCTOR)
+        case.structured_data = {"patient": {"name": "João", "age": 50, "gender": "Masculino"}}
+        case.save()
+        self._login_as(client, "nir")
+        response = client.get(f"/doctor/{case.case_id}/")
+        assert response.status_code == 302
+        assert response.url == "/"
+
     def test_decision_returns_200_for_wait_doctor(self, client) -> None:
         """GET /doctor/<case_id>/ returns 200 for WAIT_DOCTOR case."""
         case = self._create_case_in_status(CaseStatus.WAIT_DOCTOR)
@@ -504,6 +593,75 @@ class TestDoctorDecisionView:
         assert response.status_code == 200
         content = response.content.decode()
         assert "PDF" in content or "pdf" in content.lower() or "Encaminhamento" in content
+
+    def test_decision_shows_patient_sex_from_schema(self, client) -> None:
+        """Patient sex from LLM1 schema (patient.sex) is displayed."""
+        case = self._create_case_in_status(CaseStatus.WAIT_DOCTOR)
+        case.agency_record_number = "2026-0506-SEX"
+        case.structured_data = {
+            "patient": {"name": "Maria Sex", "age": 35, "sex": "F"},
+        }
+        case.save()
+        self._login_as(client, "doctor")
+        response = client.get(f"/doctor/{case.case_id}/")
+        assert response.status_code == 200
+        content = response.content.decode()
+        assert "F" in content
+
+    def test_decision_shows_patient_gender_fallback(self, client) -> None:
+        """When sex is absent but gender is present, gender is used as fallback."""
+        case = self._create_case_in_status(CaseStatus.WAIT_DOCTOR)
+        case.agency_record_number = "2026-0506-GEN"
+        case.structured_data = {
+            "patient": {"name": "João Gender", "age": 40, "gender": "Masculino"},
+        }
+        case.save()
+        self._login_as(client, "doctor")
+        response = client.get(f"/doctor/{case.case_id}/")
+        assert response.status_code == 200
+        content = response.content.decode()
+        assert "Masculino" in content
+
+    def test_decision_shows_all_seven_report_blocks(self, client) -> None:
+        """Decision page renders all 7 report block titles."""
+        case = self._create_case_in_status(CaseStatus.WAIT_DOCTOR)
+        case.summary_text = "Paciente com HDA. Hb 8.5."
+        case.structured_data = {
+            "patient": {"name": "João Blocos", "age": 45, "gender": "Masculino"},
+            "eda": {
+                "labs": {
+                    "hb_g_dl": 8.5,
+                    "platelets_per_mm3": 120000,
+                    "inr": 1.1,
+                },
+                "ecg": {
+                    "report_present": True,
+                    "abnormal_flag": False,
+                },
+            },
+        }
+        case.suggested_action = {
+            "suggestion": "accept",
+            "support_recommendation": "anesthesist",
+            "asa": {"display_text": "ASA II"},
+        }
+        case.save()
+        self._login_as(client, "doctor")
+        response = client.get(f"/doctor/{case.case_id}/")
+        assert response.status_code == 200
+        content = response.content.decode()
+
+        # All 7 block titles must appear
+        assert "Resumo Clínico" in content
+        assert "Achados Críticos" in content
+        assert "Pendências Críticas" in content
+        assert "Decisão Sugerida" in content
+        assert "Suporte Recomendado" in content
+        assert "ASA Estimado" in content
+        assert "Motivo Objetivo" in content
+
+        # Context must appear
+        assert "procedimento solicitado" in content.lower()
 
 
 # ── Prior case card tests ───────────────────────────────────────────────
@@ -782,6 +940,25 @@ class TestDoctorSubmitView:
             case = _advance_case_to(case, status)
         return case
 
+    def test_submit_blocks_nir(self, client) -> None:
+        """NIR with active_role='nir' cannot POST /doctor/<case_id>/submit/."""
+        case = self._create_case_in_status(CaseStatus.WAIT_DOCTOR)
+        case.structured_data = {"patient": {"name": "Blocked", "age": 40, "gender": "Masculino"}}
+        case.save()
+
+        self._login_as(client, "nir")
+
+        response = client.post(
+            f"/doctor/{case.case_id}/submit/",
+            data={
+                "decision": "accept",
+                "support_flag": "none",
+                "admission_flow": "scheduled",
+            },
+        )
+        assert response.status_code == 302
+        assert response.url == "/"
+
     def test_submit_accept_persists_fields_and_transitions(self, client) -> None:
         """POST accept → fields persisted, FSM: WAIT_DOCTOR → DOCTOR_ACCEPTED → R3_POST_REQUEST → WAIT_APPT."""
         case = self._create_case_in_status(CaseStatus.WAIT_DOCTOR)
@@ -807,6 +984,34 @@ class TestDoctorSubmitView:
         assert case.doctor == doctor
         assert case.doctor_decided_at is not None
         assert case.status == CaseStatus.WAIT_APPT
+
+    def test_submit_accept_immediate_bypasses_scheduler_and_posts_final_reply(self, client) -> None:
+        """POST accept/immediate → no scheduling gate; final result returns to NIR."""
+        case = self._create_case_in_status(CaseStatus.WAIT_DOCTOR)
+        case.structured_data = {"patient": {"name": "Immediate", "age": 70, "gender": "Masculino"}}
+        case.save()
+
+        self._login_as(client, "doctor")
+
+        response = client.post(
+            f"/doctor/{case.case_id}/submit/",
+            data={
+                "decision": "accept",
+                "support_flag": "anesthesist",
+                "admission_flow": "immediate",
+            },
+        )
+        assert response.status_code == 302
+
+        case = Case.objects.get(pk=case.pk)
+        assert case.doctor_decision == "accept"
+        assert case.doctor_admission_flow == "immediate"
+        assert case.status == CaseStatus.WAIT_R1_CLEANUP_THUMBS
+
+        events = CaseEvent.objects.filter(case=case)
+        assert events.filter(event_type="IMMEDIATE_ADMISSION_OPERATIONAL_NOTICE").exists()
+        assert events.filter(event_type="FINAL_REPLY_POSTED").exists()
+        assert not events.filter(event_type="SCHEDULER_REQUEST_POSTED").exists()
 
     def test_submit_accept_creates_scheduler_event(self, client) -> None:
         """POST accept creates SCHEDULER_REQUEST_POSTED event (auto-transition)."""
@@ -910,6 +1115,30 @@ class TestDoctorSubmitView:
         events = CaseEvent.objects.filter(case=case, event_type__startswith="DOCTOR_")
         assert events.filter(event_type="DOCTOR_DENY").exists()
         assert CaseEvent.objects.filter(case=case, event_type="FINAL_REPLY_POSTED").exists()
+
+    def test_decision_js_uses_normal_submit_path_after_modal_confirmation(self) -> None:
+        """Modal confirmation must not use bare form.submit() as the primary path.
+
+        The manual dev flow showed POST /doctor/<id>/submit/ reaching
+        @login_required as anonymous immediately after modal confirmation.
+        Keep the JS on requestSubmit(), with a confirmation guard, so the final
+        POST follows the browser's normal form submission path.
+        """
+        js = Path("static/js/decision.js").read_text()
+        assert "finalSubmitConfirmed" in js
+        assert "form.requestSubmit()" in js
+        assert "if (finalSubmitConfirmed) return;" in js
+
+    def test_service_worker_does_not_intercept_post_requests(self) -> None:
+        """Service worker must not wrap Django form POST requests.
+
+        Role switching and decision/receipt forms rely on normal browser
+        cookie/session/CSRF behavior. The service worker may cache GET assets,
+        but non-GET requests must go straight to Django.
+        """
+        sw = Path("static/js/sw.js").read_text()
+        assert 'event.request.method !== "GET"' in sw
+        assert "ats-cache-v2" in sw
 
     def test_submit_non_wait_doctor_returns_404(self, client) -> None:
         """POST to non-WAIT_DOCTOR case returns 404."""

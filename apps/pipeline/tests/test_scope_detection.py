@@ -247,6 +247,60 @@ def test_non_eda_exam_type_returns_manual_review() -> None:
     assert result["exam_type"] == "non_eda"
 
 
+def test_non_eda_exam_type_wins_over_default_eda_subtype() -> None:
+    """Colonoscopia classified as non_eda must not reach doctor due to subtype noise.
+
+    Real OpenAI runs may correctly set preop_screening.exam_type=non_eda while
+    still leaving requested_procedure.subtype or rulebook eda_subtype as a
+    default EDA subtype. The explicit non_eda classification is authoritative.
+    """
+
+    llm1: dict[str, object] = {
+        "preop_screening": {
+            "exam_type": "non_eda",
+            "evidence_spans": [{"field_path": "preop_screening.exam_type", "excerpt": "colonoscopia"}],
+            "rulebook_signals": {"eda_subtype": "standard"},
+        },
+        "eda": {"requested_procedure": {"name": "Colonoscopia", "subtype": "standard"}},
+        "summary": {"one_liner": "Colonoscopia solicitada.", "bullet_points": ["Exame fora de escopo EDA."]},
+    }
+    result = _classify(
+        llm1_structured_data=llm1,
+        cleaned_text="Solicito colonoscopia para investigação.",
+    )
+
+    assert result is not None
+    assert result["decision"] == "manual_review_required"
+    assert result["reason_code"] == "non_eda_request"
+    assert result["exam_type"] == "non_eda"
+
+
+def test_motivo_endoscopia_digestiva_baixa_wins_over_later_eda_mentions() -> None:
+    """Top-level colonoscopy motive must not be overridden by later EDA text."""
+
+    llm1: dict[str, object] = {
+        "preop_screening": {"exam_type": "eda", "rulebook_signals": {"eda_subtype": "standard"}},
+        "eda": {"requested_procedure": {"name": "EDA", "subtype": "standard"}},
+    }
+    cleaned_text = """
+    Motivo da Solicitação:
+    Endoscopia Digestiva Baixa - Colonoscopia
+    Unid. Origem:
+    HSA - HOSPITAL SANTO ANTONIO
+    Complemento da Solicitação:
+    SOLICITO REGULAÇÃO PARA COLONOSCOPIA DIAGNÓSTICA E EDA DIAGNÓSTICA E TERAPÊUTICA
+    Resumo Clínico:
+    EDA prévia com gastrite erosiva.
+    """
+
+    result = _classify(llm1_structured_data=llm1, cleaned_text=cleaned_text)
+
+    assert result is not None
+    assert result["decision"] == "manual_review_required"
+    assert result["reason_code"] == "non_eda_request"
+    assert result["exam_type"] == "non_eda"
+
+
 def test_cpre_non_eda_returns_manual_review() -> None:
     """CPRE text without EDA keywords → still requires LLM1 to detect non_eda."""
 

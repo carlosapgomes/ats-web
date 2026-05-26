@@ -103,6 +103,87 @@ def _dummy_factory() -> Any:
 
     return StaticLlmClient(response_text="dummy-response")
 
+    def test_adds_additional_properties_false_to_objects(self) -> None:
+        from apps.pipeline.llm import _normalize_openai_strict_schema
+
+        schema: Any = {
+            "type": "object",
+            "properties": {"name": {"type": "string"}},
+        }
+        normalized = _normalize_openai_strict_schema(schema)
+        assert normalized["additionalProperties"] is False
+
+    def test_adds_required_from_property_names(self) -> None:
+        from apps.pipeline.llm import _normalize_openai_strict_schema
+
+        schema: Any = {
+            "type": "object",
+            "properties": {"a": {"type": "string"}, "b": {"type": "integer"}},
+        }
+        normalized = _normalize_openai_strict_schema(schema)
+        assert set(normalized["required"]) == {"a", "b"}
+
+    def test_recurses_into_nested_objects(self) -> None:
+        from apps.pipeline.llm import _normalize_openai_strict_schema
+
+        schema: Any = {
+            "type": "object",
+            "properties": {
+                "inner": {
+                    "type": "object",
+                    "properties": {"x": {"type": "string"}},
+                },
+            },
+        }
+        normalized = _normalize_openai_strict_schema(schema)
+        inner: dict[str, Any] = normalized["properties"]["inner"]
+        assert inner["additionalProperties"] is False
+        assert set(inner["required"]) == {"x"}
+
+    def test_recurses_into_arrays_of_objects(self) -> None:
+        from apps.pipeline.llm import _normalize_openai_strict_schema
+
+        schema: Any = {
+            "type": "object",
+            "properties": {
+                "items": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "properties": {"k": {"type": "string"}},
+                    },
+                },
+            },
+        }
+        normalized = _normalize_openai_strict_schema(schema)
+        items_schema: dict[str, Any] = normalized["properties"]["items"]
+        inner: dict[str, Any] = items_schema["items"]
+        assert inner["additionalProperties"] is False
+        assert "required" in inner
+
+    def test_does_not_modify_non_object_nodes(self) -> None:
+        from apps.pipeline.llm import _normalize_openai_strict_schema
+
+        schema: Any = {
+            "type": "object",
+            "properties": {"name": {"type": "string"}},
+        }
+        _normalize_openai_strict_schema(schema)
+        # Non-object string type is preserved
+        assert schema["properties"]["name"]["type"] == "string"
+
+    def test_preserves_original_schema(self) -> None:
+        """Normalize returns a copy; original is not mutated."""
+        from apps.pipeline.llm import _normalize_openai_strict_schema
+
+        schema: Any = {
+            "type": "object",
+            "properties": {"x": {"type": "string"}},
+        }
+        normalized = _normalize_openai_strict_schema(schema)
+        assert "additionalProperties" not in schema
+        assert normalized["additionalProperties"] is False
+
 
 class TestCreateOpenAiClient:
     """Tests for create_openai_client."""
@@ -154,3 +235,96 @@ class TestCreateOpenAiClient:
             client = create_openai_client()
             with pytest.raises(RuntimeError, match="OpenAI returned empty content"):
                 client.complete(system_prompt="sys", user_prompt="usr")
+
+
+class TestCreateOpenAiStrictSchemaClients:
+    """Tests for stage-specific OpenAI client factories with strict schema."""
+
+    def test_llm1_client_uses_json_schema_not_json_object(self, settings: Any) -> None:
+        with patch("openai.OpenAI") as mock_openai_cls:
+            mock_client = MagicMock()
+            mock_openai_cls.return_value = mock_client
+            mock_completion = MagicMock()
+            mock_choice = MagicMock()
+            mock_choice.message.content = '{"schema_version": "1.1"}'
+            mock_completion.choices = [mock_choice]
+            mock_client.chat.completions.create.return_value = mock_completion
+
+            from apps.pipeline.llm import create_openai_llm1_client
+
+            client = create_openai_llm1_client()
+            client.complete(system_prompt="sys", user_prompt="usr")
+
+            call_kwargs = mock_client.chat.completions.create.call_args.kwargs
+            rf = call_kwargs["response_format"]
+            assert rf["type"] == "json_schema"
+            assert rf["json_schema"]["strict"] is True
+            assert rf["json_schema"]["name"] == "llm1_response"
+            # Schema should contain Llm1Response properties
+            schema = rf["json_schema"]["schema"]
+            assert "additionalProperties" in schema
+            assert "agency_record_number" in schema.get("properties", {})
+
+    def test_llm2_client_uses_json_schema_strict(self, settings: Any) -> None:
+        with patch("openai.OpenAI") as mock_openai_cls:
+            mock_client = MagicMock()
+            mock_openai_cls.return_value = mock_client
+            mock_completion = MagicMock()
+            mock_choice = MagicMock()
+            mock_choice.message.content = '{"schema_version": "1.1"}'
+            mock_completion.choices = [mock_choice]
+            mock_client.chat.completions.create.return_value = mock_completion
+
+            from apps.pipeline.llm import create_openai_llm2_client
+
+            client = create_openai_llm2_client()
+            client.complete(system_prompt="sys", user_prompt="usr")
+
+            call_kwargs = mock_client.chat.completions.create.call_args.kwargs
+            rf = call_kwargs["response_format"]
+            assert rf["type"] == "json_schema"
+            assert rf["json_schema"]["strict"] is True
+            assert rf["json_schema"]["name"] == "llm2_response"
+
+    def test_create_openai_client_with_schema_uses_strict(self, settings: Any) -> None:
+        with patch("openai.OpenAI") as mock_openai_cls:
+            mock_client = MagicMock()
+            mock_openai_cls.return_value = mock_client
+            mock_completion = MagicMock()
+            mock_choice = MagicMock()
+            mock_choice.message.content = '{"key": "value"}'
+            mock_completion.choices = [mock_choice]
+            mock_client.chat.completions.create.return_value = mock_completion
+
+            from apps.pipeline.llm import create_openai_client
+
+            schema: dict[str, Any] = {"type": "object", "properties": {"key": {"type": "string"}}}
+            client = create_openai_client(
+                response_schema_name="test_response",
+                response_schema=schema,
+            )
+            client.complete(system_prompt="sys", user_prompt="usr")
+
+            call_kwargs = mock_client.chat.completions.create.call_args.kwargs
+            rf = call_kwargs["response_format"]
+            assert rf["type"] == "json_schema"
+            assert rf["json_schema"]["strict"] is True
+            assert rf["json_schema"]["name"] == "test_response"
+
+    def test_create_openai_client_without_schema_uses_json_object(self, settings: Any) -> None:
+        with patch("openai.OpenAI") as mock_openai_cls:
+            mock_client = MagicMock()
+            mock_openai_cls.return_value = mock_client
+            mock_completion = MagicMock()
+            mock_choice = MagicMock()
+            mock_choice.message.content = '{"key": "value"}'
+            mock_completion.choices = [mock_choice]
+            mock_client.chat.completions.create.return_value = mock_completion
+
+            from apps.pipeline.llm import create_openai_client
+
+            client = create_openai_client()
+            client.complete(system_prompt="sys", user_prompt="usr")
+
+            call_kwargs = mock_client.chat.completions.create.call_args.kwargs
+            assert call_kwargs["response_format"] == {"type": "json_object"}

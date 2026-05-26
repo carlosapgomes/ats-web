@@ -137,8 +137,9 @@ class TestCaseDetailRenders:
         response = client.get(reverse("intake:case_detail", args=[case.case_id]))
         assert response.status_code == 200
         content = response.content.decode()
-        # Deve ter um iframe ou embed para o PDF
-        assert ".pdf" in content or "iframe" in content
+        # Deve ter um embed apontando para a view protegida do PDF
+        assert "<embed" in content
+        assert reverse("intake:serve_pdf", args=[case.case_id]) in content
 
     def test_case_detail_shows_pdf_direct_link(self, client) -> None:
         """Quando tem pdf_file, HTML deve ter link direto para abrir o PDF."""
@@ -152,7 +153,8 @@ class TestCaseDetailRenders:
         response = client.get(reverse("intake:case_detail", args=[case.case_id]))
         assert response.status_code == 200
         content = response.content.decode()
-        assert "pdfs/2026/05/test.pdf" in content
+        assert reverse("intake:serve_pdf", args=[case.case_id]) in content
+        assert "Abrir em nova aba" in content
 
 
 @pytest.mark.django_db
@@ -220,6 +222,28 @@ class TestCaseDetailResultInfo:
         assert "Anestesista" in content  # support
         assert "Agendamento" in content  # flow
         assert "Chegar 30min antes" in content
+
+    def test_waiting_receipt_after_immediate_acceptance_shows_immediate_not_scheduled(self, client) -> None:
+        """Immediate admission final result must not look like scheduling."""
+        client, user = _nir_client(client)
+        case = _case_with_patient(
+            Case.objects.create(
+                created_by=user,
+                agency_record_number="RES-IMMEDIATE",
+                status=CaseStatus.WAIT_R1_CLEANUP_THUMBS,
+                doctor_decision="accept",
+                doctor_support_flag="anesthesist",
+                doctor_admission_flow="immediate",
+            )
+        )
+        response = client.get(reverse("intake:case_detail", args=[case.case_id]))
+        assert response.status_code == 200
+        content = response.content.decode()
+        assert "Vinda Imediata Autorizada" in content
+        assert "Não abrir agendamento" in content
+        assert "Anestesista" in content
+        assert "Agendamento Confirmado" not in content
+        assert "📅</span> Agendamento" not in content
 
     def test_result_shows_accepted_scheduled_no_instructions(self, client) -> None:
         """APPT_CONFIRMED sem instruções → não quebra."""
@@ -289,6 +313,26 @@ class TestCaseDetailResultInfo:
         assert response.status_code == 200
         content = response.content.decode()
         assert "Falha no Processamento" in content
+
+    def test_waiting_receipt_after_doctor_denial_shows_denial_not_scheduled(self, client) -> None:
+        """WAIT_R1 after doctor denial must show medical refusal, not scheduling."""
+        client, user = _nir_client(client)
+        case = _case_with_patient(
+            Case.objects.create(
+                created_by=user,
+                agency_record_number="RES-DOCDENY-FINAL",
+                status=CaseStatus.WAIT_R1_CLEANUP_THUMBS,
+                doctor_decision="deny",
+                doctor_reason="Faltam exames obrigatórios",
+            )
+        )
+        response = client.get(reverse("intake:case_detail", args=[case.case_id]))
+        assert response.status_code == 200
+        content = response.content.decode()
+        assert "Recusado pelo Médico" in content
+        assert "Faltam exames obrigatórios" in content
+        assert "Agendamento Confirmado" not in content
+        assert "📅</span> Agendamento" not in content
 
     def test_result_shows_terminal_with_result(self, client) -> None:
         """WAIT_R1_CLEANUP_THUMBS → mostra badge Agendamento Confirmado."""
@@ -391,6 +435,110 @@ class TestCaseDetailPatientName:
         assert response.status_code == 200
         content = response.content.decode()
         assert "Caso" in content
+
+
+@pytest.mark.django_db
+class TestCaseDetailScopeGatedResult:
+    """Verifica exibição de resultado de revisão manual para casos scope-gated."""
+
+    def test_scope_gated_shows_manual_review_badge(self, client) -> None:
+        """WAIT_R1_CLEANUP_THUMBS com decision=manual_review_required mostra badge de revisão."""
+        client, user = _nir_client(client)
+        case = Case.objects.create(
+            created_by=user,
+            agency_record_number="SCOPE-001",
+            status=CaseStatus.WAIT_R1_CLEANUP_THUMBS,
+            suggested_action={
+                "decision": "manual_review_required",
+                "suggestion": "manual_review_required",
+                "reason_code": "non_eda_request",
+                "reason_text": "Relatorio fora de escopo EDA; revisao manual obrigatoria.",
+                "exam_type": "non_eda",
+            },
+        )
+        response = client.get(reverse("intake:case_detail", args=[case.case_id]))
+        assert response.status_code == 200
+        content = response.content.decode()
+        assert "Revisão Manual Obrigatória" in content
+        assert "Relatorio fora de escopo EDA" in content
+
+    def test_scope_gated_unknown_shows_manual_review_badge(self, client) -> None:
+        """WAIT_R1_CLEANUP_THUMBS com reason_code=unknown_exam_type mostra badge de revisão."""
+        client, user = _nir_client(client)
+        case = Case.objects.create(
+            created_by=user,
+            agency_record_number="SCOPE-002",
+            status=CaseStatus.WAIT_R1_CLEANUP_THUMBS,
+            suggested_action={
+                "decision": "manual_review_required",
+                "suggestion": "manual_review_required",
+                "reason_code": "unknown_exam_type",
+                "reason_text": "Tipo de exame nao identificado; revisao manual obrigatoria.",
+                "exam_type": "unknown",
+            },
+        )
+        response = client.get(reverse("intake:case_detail", args=[case.case_id]))
+        assert response.status_code == 200
+        content = response.content.decode()
+        assert "Revisão Manual Obrigatória" in content
+        assert "Tipo de exame nao identificado" in content
+
+    def test_scope_gated_has_confirm_button(self, client) -> None:
+        """Scope-gated case em WAIT_R1_CLEANUP_THUMBS mostra botão Confirmar."""
+        client, user = _nir_client(client)
+        case = Case.objects.create(
+            created_by=user,
+            agency_record_number="SCOPE-003",
+            status=CaseStatus.WAIT_R1_CLEANUP_THUMBS,
+            suggested_action={
+                "decision": "manual_review_required",
+                "reason_code": "non_eda_request",
+                "reason_text": "Fora de escopo.",
+            },
+        )
+        response = client.get(reverse("intake:case_detail", args=[case.case_id]))
+        assert response.status_code == 200
+        content = response.content.decode()
+        assert "Confirmar" in content
+
+    def test_scope_gated_can_confirm_receipt(self, client) -> None:
+        """Scope-gated case: POST confirm → transita para CLEANED."""
+        client, user = _nir_client(client)
+        case = Case.objects.create(
+            created_by=user,
+            agency_record_number="SCOPE-004",
+            status=CaseStatus.WAIT_R1_CLEANUP_THUMBS,
+            suggested_action={
+                "decision": "manual_review_required",
+                "reason_code": "non_eda_request",
+                "reason_text": "Fora de escopo.",
+            },
+        )
+        response = client.post(
+            reverse("intake:confirm_receipt", args=[case.case_id]),
+            follow=True,
+        )
+        assert response.status_code == 200
+        case = Case.objects.get(pk=case.pk)
+        assert case.status == CaseStatus.CLEANED
+
+    def test_scope_gated_does_not_show_accepted_badge(self, client) -> None:
+        """Scope-gated case não mostra badge 'Agendamento Confirmado'."""
+        client, user = _nir_client(client)
+        case = Case.objects.create(
+            created_by=user,
+            agency_record_number="SCOPE-005",
+            status=CaseStatus.WAIT_R1_CLEANUP_THUMBS,
+            suggested_action={
+                "decision": "manual_review_required",
+                "reason_code": "non_eda_request",
+                "reason_text": "Fora de escopo.",
+            },
+        )
+        response = client.get(reverse("intake:case_detail", args=[case.case_id]))
+        assert response.status_code == 200
+        content = response.content.decode()
+        assert "Agendamento Confirmado" not in content
 
 
 @pytest.mark.django_db

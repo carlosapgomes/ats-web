@@ -1,0 +1,57 @@
+<!-- Header -->
+<div class="card p-4 mb-4">
+  <div class="d-flex justify-content-between align-items-center flex-wrap gap-2">
+    <h3 class="mb-0">Meus Casos</h3>
+    <span class="badge-hospital-primary status-badge">{{ case_data|length }} caso{{ case_data|length|pluralize }}</span>
+  </div>
+</div>
+
+<!-- Lista de Casos -->
+<div class="card p-4">
+  {% if case_data %}
+  <p class="text-muted small mb-3">Todos os seus encaminhamentos. Atualizado automaticamente.</p>
+
+  <div class="row g-3">
+    {% for item in case_data %}
+    <div class="col-12">
+      <div class="case-card card p-3">
+        <div class="row align-items-center">
+          <div class="col-md-4">
+            {% if item.case.extracted_text %}<div class="patient-name">{{ item.case.extracted_text|truncatechars:40 }}</div>{% endif %}
+            <div class="case-meta fs-6 fw-semibold">Reg. {{ item.case.agency_record_number|default:"—" }}</div>
+            <div class="case-meta small text-muted">{{ item.case.case_id|truncatechars:12 }}</div>
+          </div>
+          <div class="col-md-3">
+            <div class="case-meta">📥 {{ item.case.created_at|date:"d/m/Y H:i" }}</div>
+            {% if item.case.doctor_decision %}
+            <div class="case-meta small text-muted">
+              Decisão: {{ item.case.get_doctor_decision_display|default:item.case.doctor_decision|title }}
+            </div>
+            {% endif %}
+          </div>
+          <div class="col-md-3">
+            <span class="status-badge {{ item.status_css }}">
+              {{ item.status_label }}
+            </span>
+          </div>
+          <div class="col-md-2 text-md-end mt-2 mt-md-0">
+            <a href="{% url 'intake:case_detail' item.case.case_id %}" class="btn btn-sm btn-hospital-outline">Ver detalhes</a>
+          </div>
+        </div>
+      </div>
+    </div>
+    {% endfor %}
+  </div>
+  {% else %}
+  <div class="text-center py-5">
+    <p class="text-muted mb-3 fs-5">Nenhum caso encontrado</p>
+    {% if search or status_filter %}
+    <p class="text-muted small mb-3">Nenhum resultado para os filtros aplicados.</p>
+    <a href="{% url 'intake:my_cases' %}" class="btn btn-hospital-outline">Limpar filtros</a>
+    {% else %}
+    <p class="text-muted small mb-3">Você ainda não enviou nenhum encaminhamento.</p>
+    <a href="{% url 'intake:home' %}" class="btn btn-hospital">Novo Encaminhamento</a>
+    {% endif %}
+  </div>
+  {% endif %}
+</div>

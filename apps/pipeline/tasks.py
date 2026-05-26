@@ -15,9 +15,14 @@ if TYPE_CHECKING:
 def enqueue_pipeline(case_id: uuid.UUID) -> None:
     """Enqueue the pipeline task via django-q2.
 
+    Routes to cluster "llm" so the PDF extraction cluster is not blocked.
     Called synchronously from views; the actual work runs in a worker.
     """
-    async_task("apps.pipeline.tasks.execute_pipeline", str(case_id))
+    async_task(
+        "apps.pipeline.tasks.execute_pipeline",
+        str(case_id),
+        q_options={"cluster": "llm", "task_name": f"llm:{case_id}"},
+    )
 
 
 def execute_pipeline(case_id_str: str) -> None:

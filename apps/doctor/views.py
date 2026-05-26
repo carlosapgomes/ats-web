@@ -9,9 +9,21 @@ from django.http import Http404, HttpRequest, HttpResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.utils import timezone
 
+from apps.accounts.decorators import role_required
 from apps.cases.models import Case, CaseStatus
 
 from .forms import DoctorDecisionForm
+from .presenters import DoctorReportPresenter
+
+
+def _map_prior_decision_to_denial_type(decision: str) -> str:
+    """Map PriorCaseSummary.decision to denial type for the presenter."""
+    if decision == "doctor_denied":
+        return "deny_triage"
+    if decision == "appointment_denied":
+        return "deny_appointment"
+    return "deny_triage"
+
 
 DOCTOR_DECISION_STATUSES = [
     CaseStatus.DOCTOR_ACCEPTED,
@@ -65,7 +77,13 @@ def _get_patient_gender(case: Case) -> str:
     if case.structured_data and isinstance(case.structured_data, dict):
         patient = case.structured_data.get("patient", {})
         if isinstance(patient, dict):
-            return str(patient.get("gender", ""))
+            # LLM1 schema uses "sex" — prefer it, with "gender" fallback
+            sex = patient.get("sex")
+            if isinstance(sex, str) and sex.strip():
+                return sex.strip()
+            gender = patient.get("gender")
+            if isinstance(gender, str) and gender.strip():
+                return gender.strip()
     return ""
 
 
@@ -134,9 +152,9 @@ def _build_case_card(case: Case, wait_minutes: int) -> dict[str, Any]:
 
 
 @login_required
-def doctor_queue(request: HttpRequest) -> HttpResponse:
-    """View da fila médica: casos pendentes e decididos hoje."""
-
+@role_required("doctor")
+def _doctor_queue_context(request: HttpRequest) -> dict[str, Any]:
+    """Build context for full and HTMX doctor queue renders."""
     pending_cases: QuerySet[Case] = Case.objects.filter(status=CaseStatus.WAIT_DOCTOR).order_by("created_at")
 
     today: date = date.today()
@@ -166,14 +184,26 @@ def doctor_queue(request: HttpRequest) -> HttpResponse:
     for case in decided_qs:
         decided_cards.append(_build_case_card(case, 0))
 
-    context: dict[str, Any] = {
+    return {
         "pending_cases": pending_cards,
         "decided_today": decided_cards,
         "pending_count": len(pending_cards),
         "avg_wait_minutes": avg_wait,
     }
 
-    return render(request, "doctor/queue.html", context)
+
+@login_required
+@role_required("doctor")
+def doctor_queue(request: HttpRequest) -> HttpResponse:
+    """View da fila médica: casos pendentes e decididos hoje."""
+    return render(request, "doctor/queue.html", _doctor_queue_context(request))
+
+
+@login_required
+@role_required("doctor")
+def doctor_queue_partial(request: HttpRequest) -> HttpResponse:
+    """HTMX partial for polling the doctor queue without full refresh."""
+    return render(request, "doctor/_queue_content.html", _doctor_queue_context(request))
 
 
 # ── Decision helpers ─────────────────────────────────────────────────────
@@ -185,6 +215,7 @@ def _build_decision_context(case: Case, form: DoctorDecisionForm) -> dict[str, A
 
     prior_context = None
     prior_decision_display = ""
+    recent_denial_ctx = None
     if case.agency_record_number:
         pc = lookup_prior_case_context(
             case_id=case.case_id,
@@ -193,6 +224,21 @@ def _build_decision_context(case: Case, form: DoctorDecisionForm) -> dict[str, A
         if pc.prior_case is not None:
             prior_context = pc
             prior_decision_display = PRIOR_DECISION_DISPLAY.get(pc.prior_case.decision, pc.prior_case.decision)
+            recent_denial_ctx = {
+                "decision": _map_prior_decision_to_denial_type(pc.prior_case.decision),
+                "reason": pc.prior_case.reason,
+                "decided_at": pc.prior_case.decided_at,
+                "prior_denial_count_7d": pc.prior_denial_count_7d,
+            }
+
+    # Build 7-block report via presenter
+    presenter = DoctorReportPresenter(
+        structured_data=case.structured_data or {},
+        summary_text=case.summary_text or "",
+        suggested_action=case.suggested_action or {},
+        recent_denial_context=recent_denial_ctx,
+    )
+    report = presenter.build_report()
 
     return {
         "case": case,
@@ -208,6 +254,7 @@ def _build_decision_context(case: Case, form: DoctorDecisionForm) -> dict[str, A
         "structured_data": case.structured_data or {},
         "prior_context": prior_context,
         "prior_decision_display": prior_decision_display,
+        "report": report,
     }
 
 
@@ -215,6 +262,7 @@ def _build_decision_context(case: Case, form: DoctorDecisionForm) -> dict[str, A
 
 
 @login_required
+@role_required("doctor")
 def doctor_decision(request: HttpRequest, case_id: str) -> HttpResponse:
     """GET: Renderiza formulário de decisão para um caso em WAIT_DOCTOR."""
     case = get_object_or_404(Case, pk=case_id)
@@ -227,6 +275,7 @@ def doctor_decision(request: HttpRequest, case_id: str) -> HttpResponse:
 
 
 @login_required
+@role_required("doctor")
 def doctor_submit(request: HttpRequest, case_id: str) -> HttpResponse:
     """POST: Valida formulário, persiste decisão e executa transições FSM."""
     if request.method != "POST":
@@ -256,8 +305,22 @@ def doctor_submit(request: HttpRequest, case_id: str) -> HttpResponse:
     case.doctor_decide(decision=decision, user=request.user)
     case.save()
 
-    # If accepted, advance to WAIT_APPT
-    if decision == "accept":
+    if decision == "accept" and case.doctor_admission_flow == "immediate":
+        # Immediate admission does not open a scheduling gate. Room-3/scheduler is
+        # only informed for operational awareness; NIR receives the final result.
+        case._record_event(
+            "IMMEDIATE_ADMISSION_OPERATIONAL_NOTICE",
+            user=request.user,
+            payload={
+                "support_flag": case.doctor_support_flag,
+                "admission_flow": case.doctor_admission_flow,
+            },
+        )
+        case.save()
+        case.final_reply_posted(user=request.user)
+        case.save()
+    # If accepted for scheduled admission, advance to WAIT_APPT
+    elif decision == "accept":
         case.ready_for_scheduler(user=request.user)
         case.save()
         case.scheduler_request_posted(user=request.user)

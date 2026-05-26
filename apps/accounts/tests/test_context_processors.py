@@ -4,9 +4,10 @@ import pytest
 from django.contrib.auth import get_user_model
 from django.http import HttpRequest
 from django.test import RequestFactory
+from django.utils import timezone
 
 from apps.accounts.context_processors import queue_counts
-from apps.cases.models import Case, CaseStatus
+from apps.cases.models import Case, CaseEvent, CaseStatus
 
 User = get_user_model()
 
@@ -59,6 +60,57 @@ class TestQueueCounts:
         request.session = {"active_role": "scheduler"}
         result = queue_counts(request)
         assert result == {"queue_count": 5}
+
+    def test_scheduler_counts_unacknowledged_immediate_notice(self, rf: RequestFactory) -> None:
+        """Scheduler badge includes immediate admission notices until acknowledged."""
+        user = User.objects.create_user(username="scheduler-immediate@test.com", password="testpass")
+        case = Case.objects.create(
+            created_by=user,
+            status=CaseStatus.WAIT_R1_CLEANUP_THUMBS,
+            doctor_admission_flow="immediate",
+        )
+        CaseEvent.objects.create(
+            case=case,
+            actor_type="human",
+            actor=user,
+            event_type="IMMEDIATE_ADMISSION_OPERATIONAL_NOTICE",
+            timestamp=timezone.now(),
+        )
+
+        request = rf.get("/")
+        request.user = user
+        request.session = {"active_role": "scheduler"}
+        result = queue_counts(request)
+        assert result == {"queue_count": 1}
+
+    def test_scheduler_ignores_acknowledged_immediate_notice(self, rf: RequestFactory) -> None:
+        """Scheduler badge drops immediate notice after operational acknowledgement."""
+        user = User.objects.create_user(username="scheduler-immediate-ack@test.com", password="testpass")
+        case = Case.objects.create(
+            created_by=user,
+            status=CaseStatus.WAIT_R1_CLEANUP_THUMBS,
+            doctor_admission_flow="immediate",
+        )
+        CaseEvent.objects.create(
+            case=case,
+            actor_type="human",
+            actor=user,
+            event_type="IMMEDIATE_ADMISSION_OPERATIONAL_NOTICE",
+            timestamp=timezone.now(),
+        )
+        CaseEvent.objects.create(
+            case=case,
+            actor_type="human",
+            actor=user,
+            event_type="SCHEDULER_IMMEDIATE_ACK",
+            timestamp=timezone.now(),
+        )
+
+        request = rf.get("/")
+        request.user = user
+        request.session = {"active_role": "scheduler"}
+        result = queue_counts(request)
+        assert result == {"queue_count": 0}
 
     def test_nir_returns_empty(self, rf: RequestFactory) -> None:
         """NIR role returns empty dict (no queue for this role)."""
