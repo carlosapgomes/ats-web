@@ -542,6 +542,112 @@ class TestCaseDetailScopeGatedResult:
 
 
 @pytest.mark.django_db
+class TestCaseDetailRegulationGateResult:
+    """Verifica exibição de resultado para invalid_regulation_report (Slice 003)."""
+
+    def test_invalid_regulation_report_shows_manual_review_badge(self, client) -> None:
+        """WAIT_R1_CLEANUP_THUMBS com reason_code=invalid_regulation_report mostra badge de revisão."""
+        client, user = _nir_client(client)
+        case = Case.objects.create(
+            created_by=user,
+            agency_record_number="REG-GATE-001",
+            status=CaseStatus.WAIT_R1_CLEANUP_THUMBS,
+            suggested_action={
+                "decision": "manual_review_required",
+                "suggestion": "manual_review_required",
+                "reason_code": "invalid_regulation_report",
+                "reason_text": "O PDF não apresenta os sinais mínimos de relatório de regulação. "
+                "header 'RELATÓRIO DE OCORRÊNCIAS' não encontrado; "
+                "nenhum sinal institucional encontrado; "
+                "seções operacionais insuficientes.",
+            },
+        )
+        response = client.get(reverse("intake:case_detail", args=[case.case_id]))
+        assert response.status_code == 200
+        content = response.content.decode()
+        assert "Revisão Manual Obrigatória" in content
+        assert "não apresenta os sinais mínimos" in content
+
+    def test_invalid_regulation_report_has_confirm_button(self, client) -> None:
+        """invalid_regulation_report em WAIT_R1_CLEANUP_THUMBS mostra botão Confirmar."""
+        client, user = _nir_client(client)
+        case = Case.objects.create(
+            created_by=user,
+            agency_record_number="REG-GATE-002",
+            status=CaseStatus.WAIT_R1_CLEANUP_THUMBS,
+            suggested_action={
+                "decision": "manual_review_required",
+                "reason_code": "invalid_regulation_report",
+                "reason_text": "O PDF não apresenta os sinais mínimos de relatório de regulação.",
+            },
+        )
+        response = client.get(reverse("intake:case_detail", args=[case.case_id]))
+        assert response.status_code == 200
+        content = response.content.decode()
+        assert "Confirmar" in content
+
+    def test_invalid_regulation_report_can_confirm_receipt(self, client) -> None:
+        """invalid_regulation_report: POST confirm → transita para CLEANED."""
+        client, user = _nir_client(client)
+        case = Case.objects.create(
+            created_by=user,
+            agency_record_number="REG-GATE-003",
+            status=CaseStatus.WAIT_R1_CLEANUP_THUMBS,
+            suggested_action={
+                "decision": "manual_review_required",
+                "reason_code": "invalid_regulation_report",
+                "reason_text": "O PDF não apresenta os sinais mínimos de relatório de regulação.",
+            },
+        )
+        response = client.post(
+            reverse("intake:confirm_receipt", args=[case.case_id]),
+            follow=True,
+        )
+        assert response.status_code == 200
+        case = Case.objects.get(pk=case.pk)
+        assert case.status == CaseStatus.CLEANED
+
+    def test_invalid_regulation_report_does_not_show_scheduling_or_denial(self, client) -> None:
+        """invalid_regulation_report não exibe badges de agendamento ou negativa médica."""
+        client, user = _nir_client(client)
+        case = Case.objects.create(
+            created_by=user,
+            agency_record_number="REG-GATE-004",
+            status=CaseStatus.WAIT_R1_CLEANUP_THUMBS,
+            suggested_action={
+                "decision": "manual_review_required",
+                "reason_code": "invalid_regulation_report",
+                "reason_text": "O PDF não apresenta os sinais mínimos de relatório de regulação.",
+            },
+        )
+        response = client.get(reverse("intake:case_detail", args=[case.case_id]))
+        assert response.status_code == 200
+        content = response.content.decode()
+        assert "Agendamento Confirmado" not in content
+        assert "Recusado pelo Médico" not in content
+        assert "Vinda Imediata Autorizada" not in content
+
+    def test_invalid_regulation_report_shows_extracted_text(self, client) -> None:
+        """invalid_regulation_report com extracted_text preserva acesso para auditoria."""
+        client, user = _nir_client(client)
+        case = Case.objects.create(
+            created_by=user,
+            agency_record_number="REG-GATE-005",
+            status=CaseStatus.WAIT_R1_CLEANUP_THUMBS,
+            extracted_text="Texto extraído do PDF para auditoria.",
+            suggested_action={
+                "decision": "manual_review_required",
+                "reason_code": "invalid_regulation_report",
+                "reason_text": "O PDF não apresenta os sinais mínimos de relatório de regulação.",
+            },
+        )
+        response = client.get(reverse("intake:case_detail", args=[case.case_id]))
+        assert response.status_code == 200
+        content = response.content.decode()
+        assert "Texto extraído do PDF para auditoria" in content
+
+
+@pytest.mark.django_db
 class TestConfirmReceipt:
     """POST /intake/<uuid>/confirm/ — confirmação de recebimento."""
 
