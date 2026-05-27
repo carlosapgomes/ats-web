@@ -78,11 +78,11 @@ def _make_case_at_extracting(user, *, with_pdf: bool = True) -> Case:
     return Case.objects.get(case_id=case.case_id)
 
 
-def _make_case_at_llm_struct(user, *, with_text: bool = True) -> Case:
+def _make_case_at_llm_struct(user, *, with_text: bool = True, extracted_text: str | None = None) -> Case:
     """Create a Case in LLM_STRUCT, optionally with extracted_text."""
     case = _make_case_at_extracting(user, with_pdf=True)
     if with_text:
-        case.extracted_text = "Paciente já processado."
+        case.extracted_text = extracted_text or _GATE_PASSING_TEXT
     case.extraction_complete(success=True, user=user)
     case.save()
     return Case.objects.get(case_id=case.case_id)
@@ -265,6 +265,7 @@ class TestExecutePdfExtractionIdempotency:
 
         case = Case.objects.create(created_by=user)
         case.pdf_file = "pdfs/2026/05/test.pdf"
+        case.extracted_text = _GATE_PASSING_TEXT
         case.save()
         case.start_processing(user=user)
         case.save()
@@ -279,6 +280,42 @@ class TestExecutePdfExtractionIdempotency:
         assert case.status == CaseStatus.LLM_STRUCT
         assert len(extract_called) == 0, "extract_pdf_text should NOT be called"
         assert len(pipeline_calls) == 1
+
+    def test_llm_struct_recovery_blocks_non_regulation_text(self, user, monkeypatch) -> None:
+        """LLM_STRUCT recovery reavalia gate e bloqueia documento não-regulatório."""
+        from apps.intake.tasks import execute_pdf_extraction
+
+        extract_called: list[bool] = []
+
+        def _extract(_path: str) -> str:
+            extract_called.append(True)
+            return "NOVO TEXTO"
+
+        monkeypatch.setattr("apps.intake.pdf_utils.extract_pdf_text", _extract)
+
+        pipeline_calls: list[tuple[object, ...]] = []
+        monkeypatch.setattr(
+            "apps.pipeline.tasks.enqueue_pipeline",
+            lambda case_id: pipeline_calls.append((case_id,)),
+        )
+
+        non_regulation_text = (
+            "ELETROCARDIOGRAMA\n\n"
+            "Paciente: Jose Silva\n"
+            "Ritmo: Sinusal\n"
+            "Conclusao: ECG dentro da normalidade.\n" + "Texto extra para atingir o tamanho minimo. " * 20
+        )
+        case = _make_case_at_llm_struct(user, extracted_text=non_regulation_text)
+
+        execute_pdf_extraction(str(case.case_id))
+
+        case = Case.objects.get(case_id=case.case_id)
+        assert len(extract_called) == 0, "extract_pdf_text should NOT be called for LLM_STRUCT recovery"
+        assert len(pipeline_calls) == 0
+        assert case.status == CaseStatus.WAIT_R1_CLEANUP_THUMBS
+        assert case.suggested_action is not None
+        assert case.suggested_action["decision"] == "manual_review_required"
+        assert case.suggested_action["reason_code"] == "invalid_regulation_report"
 
     def test_skips_failed_status(self, user, monkeypatch) -> None:
         """Status FAILED → não reextrai."""

@@ -82,12 +82,21 @@ def execute_pdf_extraction(case_id_str: str) -> None:
         )
         return
 
-    # 3. LLM_STRUCT recovery path — enqueue pipeline without re-extracting
+    # 3. LLM_STRUCT recovery path — re-evaluate regulation gate before enqueue.
+    #    A previous attempt may have crashed after extraction_complete() but before
+    #    the gate decision; never bypass the gate on django-q2 retry.
     if case.status == CaseStatus.LLM_STRUCT:
         logger.info(
-            "Case %s already at LLM_STRUCT — re-enqueuing pipeline",
+            "Case %s already at LLM_STRUCT — re-evaluating regulation gate before pipeline enqueue",
             case_id,
         )
+        from apps.intake.regulation_gate import evaluate_regulation_report_text
+
+        gate_result = evaluate_regulation_report_text(case.extracted_text or "")
+        if not gate_result.accepted:
+            _handle_regulation_gate_failure(case, gate_result)
+            return
+
         from apps.pipeline.tasks import enqueue_pipeline
 
         enqueue_pipeline(case.case_id)
