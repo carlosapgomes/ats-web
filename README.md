@@ -124,6 +124,64 @@ em background via `django-q2`.
 | `INTAKE_MAX_UPLOAD_BYTES_PER_FILE` | 20 MB | Tamanho máximo por arquivo |
 | `INTAKE_MAX_UPLOAD_BYTES_PER_BATCH` | 600 MB | Tamanho máximo total do lote |
 
+### Barreira de Aceitação — Relatório de Regulação
+
+Após a extração do texto do PDF, o sistema aplica uma barreira determinística
+para verificar se o documento é um relatório de regulação do sistema baiano
+(*Central Estadual de Regulação*).
+
+**Critérios (todos obrigatórios para aceite):**
+
+1. **Texto mínimo**: texto limpo com ≥ `INTAKE_REGULATION_MIN_TEXT_CHARS` (500 chars).
+2. **Header**: contém "RELATÓRIO DE OCORRÊNCIAS" (normalização de acentos/caixa).
+3. **Sinal institucional**: contém ao menos 1 dos seguintes:
+   - "Central Estadual de Regulação"
+   - "Secretaria da Saúde do Estado"
+   - "Governo do Estado da Bahia"
+4. **Seções operacionais**: contém ≥ `INTAKE_REGULATION_MIN_OPERATIONAL_SECTIONS` (3) entre:
+   - Código:, Abertura:, Unid. Origem, Unidade de Origem, Motivo da Solicitação,
+     Complemento da Solicitação, Resumo Clínico, Dias em tela, Data Adm. Unid.
+
+**Comportamento para PDFs barrados:**
+
+- O texto extraído é preservado para auditoria.
+- O número de registro por fallback (timestamp) é removido — evita falsa evidência.
+- `suggested_action` é configurado com `decision=manual_review_required`,
+  `reason_code=invalid_regulation_report` e mensagem clara para o NIR.
+- **Não** é enfileirada tarefa de pipeline LLM (economia de custo).
+- O caso transiciona via FSM para `WAIT_R1_CLEANUP_THUMBS` (revisão manual NIR).
+- Eventos `REGULATION_REPORT_GATE_FAILED`, `SCOPE_GATE_BYPASS` e `FINAL_REPLY_POSTED`
+  são registrados para rastreabilidade.
+
+**Diferença entre barreira de regulação e scope gate EDA:**
+
+| Aspecto | Barreira de Regulação | Scope Gate EDA |
+|---------|----------------------|----------------|
+| **O que valida** | Formato do documento (é relatório de regulação?) | Escopo do exame (é EDA?) |
+| **Onde executa** | Worker de extração, pós-texto, pré-LLM | Pipeline LLM, pós-LLM1 |
+| **Consequência** | Bloqueia pipeline LLM inteiro | Bloqueia fila médica (non_eda/unknown) |
+| **Destino** | `WAIT_R1_CLEANUP_THUMBS` | `WAIT_R1_CLEANUP_THUMBS` |
+
+Relatórios de regulação válidos (ex.: colonoscopia) passam pela barreira e
+seguem para o scope gate EDA existente, que decide o roteamento médico.
+
+**Limitações conhecidas:**
+
+- A barreira não implementa OCR — PDFs escanados sem camada de texto
+  falham por texto insuficiente.
+- A barreira reconhece apenas relatórios com a assinatura textual do
+  sistema baiano. Relatórios de regulação de outros estados/emissores
+  podem ser rejeitados.
+- Relatórios de regulação de formato significativamente diferente do
+  padrão observado podem precisar de ajuste nos critérios.
+
+**Configurações (em `config/settings/base.py`):**
+
+| Config | Default | Descrição |
+|--------|---------|-----------|
+| `INTAKE_REGULATION_MIN_TEXT_CHARS` | 500 | Tamanho mínimo do texto extraído |
+| `INTAKE_REGULATION_MIN_OPERATIONAL_SECTIONS` | 3 | Mínimo de seções operacionais |
+
 ### Garantias operacionais
 
 - `retry > timeout` em todos os clusters — evita reexecução indevida de tasks longas.

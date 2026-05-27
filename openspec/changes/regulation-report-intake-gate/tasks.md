@@ -6,24 +6,24 @@ Change criado após análise exploratória de 12 PDFs de regulação e 4 PDFs n�
 
 ## Slices
 
-- [ ] Slice 001 — Detector determinístico de relatório de regulação (`slices/slice-001-regulation-detector.md`)
-- [ ] Slice 002 — Integração da barreira na extração PDF assíncrona (`slices/slice-002-extraction-gate-integration.md`)
-- [ ] Slice 003 — Resultado NIR, auditoria e UX para documento inválido (`slices/slice-003-nir-result-and-audit.md`)
-- [ ] Slice 004 — Hardening operacional, docs e quality gate (`slices/slice-004-hardening-docs-quality.md`)
+- [x] Slice 001 — Detector determinístico de relatório de regulação (`slices/slice-001-regulation-detector.md`)
+- [x] Slice 002 — Integração da barreira na extração PDF assíncrona (`slices/slice-002-extraction-gate-integration.md`)
+- [x] Slice 003 — Resultado NIR, auditoria e UX para documento inválido (`slices/slice-003-nir-result-and-audit.md`)
+- [x] Slice 004 — Hardening operacional, docs e quality gate (`slices/slice-004-hardening-docs-quality.md`)
 
 ## Definition of Done do Change
 
-- [ ] PDFs de relatório de regulação passam pela barreira antes do LLM.
-- [ ] PDFs fora do padrão de regulação não acionam `enqueue_pipeline()`.
-- [ ] Documento barrado gera `suggested_action.decision = manual_review_required`.
-- [ ] Documento barrado não entra na fila médica.
-- [ ] Documento barrado chega ao NIR em `WAIT_R1_CLEANUP_THUMBS` com motivo claro.
-- [ ] `CaseEvent` registra falha da barreira com evidências não sensíveis.
-- [ ] Relatório de regulação cujo exame seja colonoscopia/CPRE passa pela barreira e segue para scope gate existente.
-- [ ] Número de registro por fallback técnico não é tratado como evidência de regulação válida.
-- [ ] Testes cobrem detector, task de extração, FSM/eventos e UI mínima do NIR.
-- [ ] Quality gate completo executado.
-- [ ] Relatórios dos slices gerados.
+- [x] PDFs de relatório de regulação passam pela barreira antes do LLM.
+- [x] PDFs fora do padrão de regulação não acionam `enqueue_pipeline()`.
+- [x] Documento barrado gera `suggested_action.decision = manual_review_required`.
+- [x] Documento barrado não entra na fila médica.
+- [x] Documento barrado chega ao NIR em `WAIT_R1_CLEANUP_THUMBS` com motivo claro.
+- [x] `CaseEvent` registra falha da barreira com evidências não sensíveis.
+- [x] Relatório de regulação cujo exame seja colonoscopia/CPRE passa pela barreira e segue para scope gate existente.
+- [x] Número de registro por fallback técnico não é tratado como evidência de regulação válida.
+- [x] Testes cobrem detector, task de extração, FSM/eventos e UI mínima do NIR.
+- [x] Quality gate completo executado.
+- [x] Relatórios dos slices gerados.
 
 ## Comandos Globais de Validação
 
