@@ -8,6 +8,24 @@ import pytest
 
 from apps.cases.models import Case, CaseEvent, CaseStatus
 
+# ── Shared helpers ───────────────────────────────────────────────────────
+
+
+_GATE_PASSING_TEXT = (
+    "RELATORIO DE OCORRENCIAS\n"
+    "Governo do Estado da Bahia\n"
+    "Secretaria da Saude do Estado\n"
+    "Codigo: 12345\n"
+    "Abertura: 01/01/2025\n"
+    "Unid. Origem: Hospital Central\n"
+    "Motivo da Solicitacao: EDA diagnostica\n"
+    "Resumo Clinico: Paciente de 45 anos, sem comorbidades, exames de rotina.\n"
+    + "Texto de preenchimento para atingir o minimo de caracteres exigido. "
+    * 20
+)
+"""Texto sintético que passa na regulation gate (≥500 chars, header, sinal institucional, ≥3 seções)."""
+
+
 # ── Test: enqueue_pdf_extraction ────────────────────────────────────────
 
 
@@ -84,11 +102,11 @@ class TestExecutePdfExtractionSuccess:
         # Mock PDF utilities
         monkeypatch.setattr(
             "apps.intake.pdf_utils.extract_pdf_text",
-            lambda _path: "Paciente: João\nCódigo: 12345\nRelatório",
+            lambda _path: _GATE_PASSING_TEXT,
         )
         monkeypatch.setattr(
             "apps.intake.pdf_utils.strip_watermark_and_extract_record",
-            lambda text: ("Paciente: João\nRelatório", "12345"),
+            lambda text: (_GATE_PASSING_TEXT, "12345"),
         )
         # Mock enqueue_pipeline to avoid side effects
         pipeline_calls: list[tuple[object, ...]] = []
@@ -102,7 +120,7 @@ class TestExecutePdfExtractionSuccess:
 
         case = Case.objects.get(case_id=case.case_id)
         assert case.status == CaseStatus.LLM_STRUCT
-        assert "Paciente: João" in case.extracted_text
+        assert "Codigo: 12345" in case.extracted_text
         assert case.agency_record_number == "12345"
         assert case.agency_record_extracted_at is not None
 
@@ -112,11 +130,11 @@ class TestExecutePdfExtractionSuccess:
 
         monkeypatch.setattr(
             "apps.intake.pdf_utils.extract_pdf_text",
-            lambda _path: "Paciente: João\nCódigo: 12345",
+            lambda _path: _GATE_PASSING_TEXT,
         )
         monkeypatch.setattr(
             "apps.intake.pdf_utils.strip_watermark_and_extract_record",
-            lambda text: ("Paciente: João", "12345"),
+            lambda text: (_GATE_PASSING_TEXT, "12345"),
         )
 
         pipeline_calls: list[tuple[object, ...]] = []
@@ -137,11 +155,11 @@ class TestExecutePdfExtractionSuccess:
 
         monkeypatch.setattr(
             "apps.intake.pdf_utils.extract_pdf_text",
-            lambda _path: "Paciente: João\nCódigo: 12345",
+            lambda _path: _GATE_PASSING_TEXT,
         )
         monkeypatch.setattr(
             "apps.intake.pdf_utils.strip_watermark_and_extract_record",
-            lambda text: ("Paciente: João", "12345"),
+            lambda text: (_GATE_PASSING_TEXT, "12345"),
         )
         monkeypatch.setattr(
             "apps.pipeline.tasks.enqueue_pipeline",
@@ -163,11 +181,11 @@ class TestExecutePdfExtractionSuccess:
 
         monkeypatch.setattr(
             "apps.intake.pdf_utils.extract_pdf_text",
-            lambda _path: "Paciente: Maria\nCódigo: 67890",
+            lambda _path: _GATE_PASSING_TEXT,
         )
         monkeypatch.setattr(
             "apps.intake.pdf_utils.strip_watermark_and_extract_record",
-            lambda text: ("Paciente: Maria", "67890"),
+            lambda text: (_GATE_PASSING_TEXT, "12345"),
         )
         monkeypatch.setattr(
             "apps.pipeline.tasks.enqueue_pipeline",
@@ -179,8 +197,8 @@ class TestExecutePdfExtractionSuccess:
 
         case = Case.objects.get(case_id=case.case_id)
         assert case.status == CaseStatus.LLM_STRUCT
-        assert "Paciente: Maria" in case.extracted_text
-        assert case.agency_record_number == "67890"
+        assert "Codigo: 12345" in case.extracted_text
+        assert case.agency_record_number == "12345"
 
 
 # ── Test: execute_pdf_extraction — idempotency ──────────────────────────
@@ -387,11 +405,11 @@ class TestExecutePdfExtractionException:
 
         monkeypatch.setattr(
             "apps.intake.pdf_utils.extract_pdf_text",
-            lambda _path: "Paciente: João\nCódigo: 12345",
+            lambda _path: _GATE_PASSING_TEXT,
         )
         monkeypatch.setattr(
             "apps.intake.pdf_utils.strip_watermark_and_extract_record",
-            lambda text: ("Paciente: João", "12345"),
+            lambda text: (_GATE_PASSING_TEXT, "12345"),
         )
 
         def _explode_enqueue(_case_id: object) -> None:
@@ -410,7 +428,7 @@ class TestExecutePdfExtractionException:
         # Case deve permanecer em LLM_STRUCT (não FAILED)
         case = Case.objects.get(case_id=case.case_id)
         assert case.status == CaseStatus.LLM_STRUCT, f"Expected LLM_STRUCT, got {case.status}"
-        assert case.extracted_text == "Paciente: João"
+        assert "Codigo: 12345" in case.extracted_text
 
     def test_retry_on_llm_struct_calls_enqueue_pipeline_again(self, user, monkeypatch) -> None:
         """Reexecução em LLM_STRUCT chama enqueue_pipeline novamente."""
@@ -472,11 +490,11 @@ class TestExecutePdfExtractionIntegration:
 
         monkeypatch.setattr(
             "apps.intake.pdf_utils.extract_pdf_text",
-            lambda _path: "RELATÓRIO DE OCORRÊNCIAS\nCódigo: 55555\nPaciente tratado.",
+            lambda _path: _GATE_PASSING_TEXT,
         )
         monkeypatch.setattr(
             "apps.intake.pdf_utils.strip_watermark_and_extract_record",
-            lambda text: ("RELATÓRIO DE OCORRÊNCIAS\nPaciente tratado.", "55555"),
+            lambda text: (_GATE_PASSING_TEXT, "12345"),
         )
 
         pipeline_calls: list[tuple[object, ...]] = []
@@ -490,6 +508,263 @@ class TestExecutePdfExtractionIntegration:
 
         case = Case.objects.get(case_id=case.case_id)
         assert case.status == CaseStatus.LLM_STRUCT
-        assert case.agency_record_number == "55555"
-        assert "Paciente tratado." in case.extracted_text
+        assert case.agency_record_number == "12345"
+        assert "Codigo: 12345" in case.extracted_text
+        assert len(pipeline_calls) == 1
+
+
+# ── Test: execute_pdf_extraction — regulation gate integration ────────────
+
+
+class TestExecutePdfExtractionRegulationGate:
+    """Regulation gate integration in extraction flow."""
+
+    @staticmethod
+    def _regulation_text() -> str:
+        """Build synthetic regulation text that passes the gate."""
+        return (
+            "RELATORIO DE OCORRENCIAS\n\n"
+            "Governo do Estado da Bahia\n"
+            "Secretaria da Saude do Estado\n"
+            "Central Estadual de Regulacao\n\n"
+            "Codigo: 123456\n"
+            "Abertura: 01/01/2025\n"
+            "Unid. Origem: Hospital Central\n"
+            "Motivo da Solicitacao: EDA diagnostica\n"
+            "Complemento da Solicitacao: Exame de rotina.\n"
+            "Resumo Clinico: Paciente de 45 anos, assintomatico, "
+            "encaminhado para EDA de rastreamento.\n"
+            "Dias em tela: 3\n"
+            "Data Adm. Unid.: 01/01/2025\n" + "Mais texto para atingir o tamanho minimo exigido " * 15
+        )
+
+    @staticmethod
+    def _non_regulation_text() -> str:
+        """Build synthetic non-regulation text that fails the gate."""
+        return (
+            "ELETROCARDIOGRAMA\n\n"
+            "Paciente: Jose Silva\n"
+            "Idade: 60 anos\n"
+            "Data: 10/01/2025\n\n"
+            "Frequencia cardiaca: 72 bpm\n"
+            "Ritmo: Sinusal\n"
+            "Conclusao: ECG dentro da normalidade.\n\n"
+            "Medico responsavel: Dr. Carlos Andrade\n"
+            "CRM: 12345-BA\n" + "Mais texto para atingir o tamanho minimo. " * 15
+        )
+
+    @pytest.mark.django_db
+    def test_gate_accept_preserves_enqueue_pipeline(self, user, monkeypatch) -> None:
+        """Gate aceita → enqueue_pipeline chamado, case LLM_STRUCT."""
+        from apps.intake.tasks import execute_pdf_extraction
+
+        text = self._regulation_text()
+        monkeypatch.setattr(
+            "apps.intake.pdf_utils.extract_pdf_text",
+            lambda _path: text,
+        )
+        monkeypatch.setattr(
+            "apps.intake.pdf_utils.strip_watermark_and_extract_record",
+            lambda t: (t, "123456"),
+        )
+
+        pipeline_calls: list[tuple[object, ...]] = []
+        monkeypatch.setattr(
+            "apps.pipeline.tasks.enqueue_pipeline",
+            lambda case_id: pipeline_calls.append((case_id,)),
+        )
+
+        case = _make_case_at_r1_ack(user)
+        execute_pdf_extraction(str(case.case_id))
+
+        case = Case.objects.get(case_id=case.case_id)
+        assert case.status == CaseStatus.LLM_STRUCT
+        assert len(pipeline_calls) == 1
+        assert pipeline_calls[0][0] == case.case_id
+
+    @pytest.mark.django_db
+    def test_gate_reject_blocks_enqueue_pipeline(self, user, monkeypatch) -> None:
+        """Gate rejeita → enqueue_pipeline NÃO chamado."""
+        from apps.intake.tasks import execute_pdf_extraction
+
+        text = self._non_regulation_text()
+        monkeypatch.setattr(
+            "apps.intake.pdf_utils.extract_pdf_text",
+            lambda _path: text,
+        )
+        monkeypatch.setattr(
+            "apps.intake.pdf_utils.strip_watermark_and_extract_record",
+            lambda t: (t, "1745000000000"),
+        )
+
+        pipeline_calls: list[tuple[object, ...]] = []
+        monkeypatch.setattr(
+            "apps.pipeline.tasks.enqueue_pipeline",
+            lambda case_id: pipeline_calls.append((case_id,)),
+        )
+
+        case = _make_case_at_r1_ack(user)
+        execute_pdf_extraction(str(case.case_id))
+
+        assert len(pipeline_calls) == 0
+
+    @pytest.mark.django_db
+    def test_gate_reject_goes_to_wait_r1_cleanup_thumbs(self, user, monkeypatch) -> None:
+        """Gate rejeita → status final WAIT_R1_CLEANUP_THUMBS."""
+        from apps.intake.tasks import execute_pdf_extraction
+
+        text = self._non_regulation_text()
+        monkeypatch.setattr(
+            "apps.intake.pdf_utils.extract_pdf_text",
+            lambda _path: text,
+        )
+        monkeypatch.setattr(
+            "apps.intake.pdf_utils.strip_watermark_and_extract_record",
+            lambda t: (t, "1745000000000"),
+        )
+        monkeypatch.setattr(
+            "apps.pipeline.tasks.enqueue_pipeline",
+            lambda case_id: None,
+        )
+
+        case = _make_case_at_r1_ack(user)
+        execute_pdf_extraction(str(case.case_id))
+
+        case = Case.objects.get(case_id=case.case_id)
+        assert case.status == CaseStatus.WAIT_R1_CLEANUP_THUMBS
+
+    @pytest.mark.django_db
+    def test_gate_reject_sets_suggested_action_manual_review(self, user, monkeypatch) -> None:
+        """Gate rejeita → suggested_action com manual_review_required."""
+        from apps.intake.tasks import execute_pdf_extraction
+
+        text = self._non_regulation_text()
+        monkeypatch.setattr(
+            "apps.intake.pdf_utils.extract_pdf_text",
+            lambda _path: text,
+        )
+        monkeypatch.setattr(
+            "apps.intake.pdf_utils.strip_watermark_and_extract_record",
+            lambda t: (t, "1745000000000"),
+        )
+        monkeypatch.setattr(
+            "apps.pipeline.tasks.enqueue_pipeline",
+            lambda case_id: None,
+        )
+
+        case = _make_case_at_r1_ack(user)
+        execute_pdf_extraction(str(case.case_id))
+
+        case = Case.objects.get(case_id=case.case_id)
+        assert case.suggested_action is not None
+        assert case.suggested_action["decision"] == "manual_review_required"
+        assert case.suggested_action["reason_code"] == "invalid_regulation_report"
+
+    @pytest.mark.django_db
+    def test_gate_reject_records_expected_events(self, user, monkeypatch) -> None:
+        """Gate rejeita → 3 eventos: REGULATION_REPORT_GATE_FAILED, SCOPE_GATE_BYPASS, FINAL_REPLY_POSTED."""
+        from apps.intake.tasks import execute_pdf_extraction
+
+        text = self._non_regulation_text()
+        monkeypatch.setattr(
+            "apps.intake.pdf_utils.extract_pdf_text",
+            lambda _path: text,
+        )
+        monkeypatch.setattr(
+            "apps.intake.pdf_utils.strip_watermark_and_extract_record",
+            lambda t: (t, "1745000000000"),
+        )
+        monkeypatch.setattr(
+            "apps.pipeline.tasks.enqueue_pipeline",
+            lambda case_id: None,
+        )
+
+        case = _make_case_at_r1_ack(user)
+        execute_pdf_extraction(str(case.case_id))
+
+        events = CaseEvent.objects.filter(case=case).order_by("timestamp")
+        event_types = [e.event_type for e in events]
+        assert "REGULATION_REPORT_GATE_FAILED" in event_types, f"Eventos encontrados: {event_types}"
+        assert "SCOPE_GATE_BYPASS" in event_types
+        assert "FINAL_REPLY_POSTED" in event_types
+
+    @pytest.mark.django_db
+    def test_gate_reject_preserves_extracted_text(self, user, monkeypatch) -> None:
+        """Gate rejeita → extracted_text preservado para auditoria."""
+        from apps.intake.tasks import execute_pdf_extraction
+
+        text = self._non_regulation_text()
+        monkeypatch.setattr(
+            "apps.intake.pdf_utils.extract_pdf_text",
+            lambda _path: text,
+        )
+        monkeypatch.setattr(
+            "apps.intake.pdf_utils.strip_watermark_and_extract_record",
+            lambda t: (t, "1745000000000"),
+        )
+        monkeypatch.setattr(
+            "apps.pipeline.tasks.enqueue_pipeline",
+            lambda case_id: None,
+        )
+
+        case = _make_case_at_r1_ack(user)
+        execute_pdf_extraction(str(case.case_id))
+
+        case = Case.objects.get(case_id=case.case_id)
+        assert case.extracted_text is not None
+        assert "ELETROCARDIOGRAMA" in case.extracted_text
+
+    @pytest.mark.django_db
+    def test_gate_reject_clears_fallback_record_number(self, user, monkeypatch) -> None:
+        """Gate rejeita sem registro explícito → agency_record_number vazio."""
+        from apps.intake.tasks import execute_pdf_extraction
+
+        text = self._non_regulation_text()  # sem Codigo:
+        monkeypatch.setattr(
+            "apps.intake.pdf_utils.extract_pdf_text",
+            lambda _path: text,
+        )
+        # strip_watermark retorna timestamp como fallback
+        monkeypatch.setattr(
+            "apps.intake.pdf_utils.strip_watermark_and_extract_record",
+            lambda t: (t, "1745000000000"),
+        )
+        monkeypatch.setattr(
+            "apps.pipeline.tasks.enqueue_pipeline",
+            lambda case_id: None,
+        )
+
+        case = _make_case_at_r1_ack(user)
+        execute_pdf_extraction(str(case.case_id))
+
+        case = Case.objects.get(case_id=case.case_id)
+        # Deve estar vazio — sem registro explícito, barreira falhou
+        assert case.agency_record_number == "" or case.agency_record_number is None
+
+    @pytest.mark.django_db
+    def test_gate_accept_keeps_explicit_record_number(self, user, monkeypatch) -> None:
+        """Gate aceita com registro explícito → agency_record_number preservado."""
+        from apps.intake.tasks import execute_pdf_extraction
+
+        text = self._regulation_text()  # contem "Codigo: 123456"
+        monkeypatch.setattr(
+            "apps.intake.pdf_utils.extract_pdf_text",
+            lambda _path: text,
+        )
+        monkeypatch.setattr(
+            "apps.intake.pdf_utils.strip_watermark_and_extract_record",
+            lambda t: (t, "123456"),
+        )
+
+        pipeline_calls: list[tuple[object, ...]] = []
+        monkeypatch.setattr(
+            "apps.pipeline.tasks.enqueue_pipeline",
+            lambda case_id: pipeline_calls.append((case_id,)),
+        )
+
+        case = _make_case_at_r1_ack(user)
+        execute_pdf_extraction(str(case.case_id))
+
+        case = Case.objects.get(case_id=case.case_id)
+        assert case.agency_record_number == "123456"
         assert len(pipeline_calls) == 1

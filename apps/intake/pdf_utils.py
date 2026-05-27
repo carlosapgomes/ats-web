@@ -130,6 +130,16 @@ def _strip_repeated_digit_watermarks(text: str, *, protected_token: str) -> str:
     return result
 
 
+def extract_explicit_record_number(text: str) -> str:
+    """Extract explicit agency record number from raw PDF text.
+
+    Returns the record number if found via explicit patterns
+    (Código:..., RELATÓRIO... header), or empty string if none found
+    (would be fallback/timestamp).
+    """
+    return _extract_record_number(text)
+
+
 def _normalize_whitespace(text: str) -> str:
     """Normalize spaces while preserving paragraph linebreaks."""
     normalized_lines: list[str] = []
