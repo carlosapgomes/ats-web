@@ -107,9 +107,17 @@ def execute_pdf_extraction(case_id_str: str) -> None:
         _fail_extraction(case)
         return
 
-    # 6. Enqueue pipeline AFTER successful extraction, OUTSIDE try/except.
-    #    If this fails the exception propagates → django-q2 retries →
-    #    step 3 (LLM_STRUCT recovery) calls enqueue_pipeline again.
+    # 6. Regulation gate check — block LLM pipeline for non-regulation documents.
+    from apps.intake.regulation_gate import evaluate_regulation_report_text
+
+    gate_result = evaluate_regulation_report_text(case.extracted_text or "")
+    if not gate_result.accepted:
+        _handle_regulation_gate_failure(case, gate_result)
+        return
+
+    # 7. Enqueue pipeline AFTER successful extraction + gate pass, OUTSIDE
+    #    try/except.  If this fails the exception propagates → django-q2
+    #    retries → step 3 (LLM_STRUCT recovery) calls enqueue_pipeline again.
     from apps.pipeline.tasks import enqueue_pipeline
 
     enqueue_pipeline(case.case_id)
@@ -125,8 +133,17 @@ def _do_extraction(case: Case) -> None:
     Does **not** call ``enqueue_pipeline`` — that is the caller's
     responsibility, so that a failure there does not interfere with
     the FSM state.
+
+    Sets ``case._explicit_record_number`` as a transient attribute
+    (not persisted to DB) so the caller can determine whether the
+    saved ``agency_record_number`` was extracted from an explicit
+    pattern or is a timestamp fallback.
     """
-    from apps.intake.pdf_utils import extract_pdf_text, strip_watermark_and_extract_record
+    from apps.intake.pdf_utils import (
+        extract_explicit_record_number,
+        extract_pdf_text,
+        strip_watermark_and_extract_record,
+    )
 
     # Transition: R1_ACK_PROCESSING → EXTRACTING (if not already there)
     if case.status == CaseStatus.R1_ACK_PROCESSING:
@@ -137,15 +154,100 @@ def _do_extraction(case: Case) -> None:
     extracted = extract_pdf_text(case.pdf_file.path)
     cleaned_text, record_number = strip_watermark_and_extract_record(extracted)
 
+    # Track whether record number was extracted from explicit pattern
+    # (not a timestamp fallback) for regulation gate handling.
+    case._explicit_record_number = extract_explicit_record_number(extracted)  # type: ignore[attr-defined]
+
     # Persist extracted data
     case.extracted_text = cleaned_text
-    case.agency_record_number = record_number
+    case.agency_record_number = record_number  # may be fallback; caller can clear
     case.agency_record_extracted_at = timezone.now()
     case.save()
 
     # Transition: EXTRACTING → LLM_STRUCT
     case.extraction_complete(success=True, user=None)
     case.save()
+
+
+def _handle_regulation_gate_failure(case: Case, gate_result: object) -> None:
+    """Handle regulation gate rejection: bypass LLM pipeline, route to manual review.
+
+    The case is at ``LLM_STRUCT`` after a successful extraction.  This helper:
+    1. Clears fallback (timestamp) record numbers to avoid false evidence.
+    2. Sets ``suggested_action`` with ``manual_review_required``.
+    3. Records ``REGULATION_REPORT_GATE_FAILED`` event with gate evidence.
+    4. Calls ``scope_gate_bypass`` (LLM_STRUCT → WAIT_R1_CLEANUP_THUMBS).
+    5. Records ``FINAL_REPLY_POSTED`` event (pattern from orchestrator.py).
+
+    **Does not** call ``enqueue_pipeline`` — that is the caller's choice.
+
+    Args:
+        case: Case instance (must be at LLM_STRUCT).
+        gate_result: ``RegulationReportGateResult`` from ``evaluate_regulation_report_text``.
+    """
+    gate = gate_result  # noqa: F841 — used via local name for brevity
+
+    # 1. Clear fallback record number if not explicitly extracted
+    if not getattr(case, "_explicit_record_number", ""):
+        case.agency_record_number = ""
+        case.agency_record_extracted_at = None
+
+    # 2. Set suggested_action with manual_review_required
+    if hasattr(gate, "reason_text"):
+        reason_text = gate.reason_text
+    elif isinstance(gate, dict):
+        reason_text = gate.get("reason_text", "")
+    else:
+        reason_text = str(gate)
+
+    case.suggested_action = {
+        "schema_version": "1.1",
+        "language": "pt-BR",
+        "decision": "manual_review_required",
+        "suggestion": "manual_review_required",
+        "reason_code": "invalid_regulation_report",
+        "reason_text": reason_text,
+        "evidence": {
+            "matched_header": getattr(gate, "matched_header", False),
+            "matched_institutional_signals": getattr(gate, "matched_institutional_signals", []),
+            "matched_operational_sections": getattr(gate, "matched_operational_sections", []),
+            "text_length": getattr(gate, "text_length", 0),
+        },
+    }
+    case.save()
+
+    # 3. Record gate failure event
+    case._record_event(
+        "REGULATION_REPORT_GATE_FAILED",
+        payload={
+            "reason_code": "invalid_regulation_report",
+            "reason_text": reason_text,
+            "matched_header": getattr(gate, "matched_header", False),
+            "matched_institutional_signals": getattr(gate, "matched_institutional_signals", []),
+            "matched_operational_sections": getattr(gate, "matched_operational_sections", []),
+            "text_length": getattr(gate, "text_length", 0),
+        },
+    )
+    case.save()  # persist event BEFORE FSM transition overwrites _pending_event
+
+    # 4. Scope gate bypass: LLM_STRUCT → WAIT_R1_CLEANUP_THUMBS
+    case.scope_gate_bypass(reason_code="invalid_regulation_report")
+    case.save()
+
+    # 5. Record final reply posted (pattern from orchestrator.py)
+    case._record_event("FINAL_REPLY_POSTED")
+    case.save()
+
+    logger.info(
+        "Regulation gate blocked case %s: reason_code=%s, matched_header=%s, "
+        "matched_signals=%d, matched_sections=%d, text_length=%d",
+        case.case_id,
+        "invalid_regulation_report",
+        getattr(gate, "matched_header", False),
+        len(getattr(gate, "matched_institutional_signals", [])),
+        len(getattr(gate, "matched_operational_sections", [])),
+        getattr(gate, "text_length", 0),
+    )
 
 
 def _fail_extraction(case: Case) -> None:
