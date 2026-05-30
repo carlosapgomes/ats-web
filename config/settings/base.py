@@ -56,6 +56,7 @@ TEMPLATES = [
                 "django.contrib.messages.context_processors.messages",
                 "apps.accounts.context_processors.role_context",
                 "apps.accounts.context_processors.queue_counts",
+                "apps.accounts.context_processors.app_display_name",
             ],
         },
     },
@@ -106,6 +107,9 @@ INTRANET_IP_RANGE = os.environ.get("INTRANET_IP_RANGE", "")
 # Header do proxy/tunnel com IP real do cliente
 # Cloudflare Tunnel padrão usa CF-Connecting-IP
 TRUSTED_PROXY_HEADER = os.environ.get("TRUSTED_PROXY_HEADER", "HTTP_CF_CONNECTING_IP")
+
+# Nome do app exibido no cabeçalho, título da página e meta tags
+APP_DISPLAY_NAME = os.environ.get("APP_DISPLAY_NAME", "ATS")
 
 # LLM Configuration
 LLM_CLIENT_FACTORY = "apps.pipeline.llm.create_openai_client"

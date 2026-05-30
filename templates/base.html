@@ -6,9 +6,9 @@
     <meta name="theme-color" content="#0b4263">
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-    <meta name="apple-mobile-web-app-title" content="ATS">
+    <meta name="apple-mobile-web-app-title" content="{{ app_display_name }}">
     <link rel="apple-touch-icon" href="{% static 'icons/icon-192.png' %}">
-    <title>{% block title %}ATS{% endblock %}</title>
+    <title>{% block title %}{{ app_display_name }}{% endblock %}</title>
     <!-- Google Fonts: hospitalar -->
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -27,7 +27,7 @@
   <div class="container">
     <div class="d-flex flex-column flex-lg-row justify-content-between gap-3 align-items-lg-start">
       <div>
-        <h1 class="app-header__title">ATS</h1>
+        <h1 class="app-header__title">{{ app_display_name }}</h1>
         <p class="app-header__subtitle">{% block subtitle %}Sistema de Triagem Hospitalar{% endblock %}</p>
       </div>
       {% if user.is_authenticated %}

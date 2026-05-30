@@ -1,7 +1,7 @@
 {% extends "base.html" %}
 {% load static %}
 
-{% block title %}{% if is_create %}Novo Usuário{% else %}Editar Usuário{% endif %} — ATS{% endblock %}
+{% block title %}{% if is_create %}Novo Usuário{% else %}Editar Usuário{% endif %} — {{ app_display_name }}{% endblock %}
 {% block subtitle %}{% if is_create %}Criar novo usuário no sistema{% else %}Editar dados do usuário{% endif %}{% endblock %}
 
 {% block nav %}

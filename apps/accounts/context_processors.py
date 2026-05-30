@@ -1,5 +1,6 @@
 """Context processors for the accounts app."""
 
+from django.conf import settings
 from django.utils import timezone
 
 from apps.cases.models import Case, CaseStatus
@@ -18,6 +19,17 @@ def role_context(request):  # type: ignore[no-untyped-def]
     active_role = request.session.get("active_role", "")
     return {
         "active_role_display": ROLE_DISPLAY_NAMES.get(active_role, active_role),
+    }
+
+
+def app_display_name(request):  # type: ignore[no-untyped-def]
+    """Adiciona app_display_name ao contexto de todos os templates.
+
+    Lê de settings.APP_DISPLAY_NAME (configurável via env var APP_DISPLAY_NAME).
+    Default: "ATS".
+    """
+    return {
+        "app_display_name": getattr(settings, "APP_DISPLAY_NAME", "ATS"),
     }
 
 
