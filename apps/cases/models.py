@@ -113,6 +113,54 @@ class Case(models.Model):
     def __str__(self) -> str:
         return f"Case {self.case_id} [{self.status}]"
 
+    @property
+    def patient_name(self) -> str:
+        sd = self.structured_data
+        if isinstance(sd, dict):
+            patient = sd.get("patient", {})
+            if isinstance(patient, dict):
+                name = patient.get("name")
+                if name:
+                    return str(name)
+        return "Paciente"
+
+    @property
+    def patient_age(self) -> str:
+        sd = self.structured_data
+        if isinstance(sd, dict):
+            patient = sd.get("patient", {})
+            if isinstance(patient, dict):
+                age = patient.get("age", "")
+                return str(age) if age else ""
+        return ""
+
+    @property
+    def patient_gender(self) -> str:
+        sd = self.structured_data
+        if isinstance(sd, dict):
+            patient = sd.get("patient", {})
+            if isinstance(patient, dict):
+                sex = patient.get("sex")
+                if isinstance(sex, str) and sex.strip():
+                    return sex.strip()
+                gender = patient.get("gender")
+                if isinstance(gender, str) and gender.strip():
+                    return gender.strip()
+        return ""
+
+    @property
+    def diagnosis(self) -> str:
+        if self.summary_text:
+            return self.summary_text
+        sd = self.structured_data
+        if isinstance(sd, dict):
+            eda = sd.get("eda", {})
+            if isinstance(eda, dict):
+                indication = eda.get("indication_category", "")
+                if indication:
+                    return str(indication)
+        return ""
+
     def get_origin_unit_display(self, compact: bool = True) -> str:
         """Extrai e formata a unidade de origem do structured_data.
 

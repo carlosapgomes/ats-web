@@ -149,3 +149,73 @@ class TestOriginUnitDisplay:
         )
         result = case.get_origin_unit_display()
         assert result == "Hospital Teste"
+
+
+class TestPatientProperties:
+    """Testes das properties patient_name, patient_age, patient_gender, diagnosis."""
+
+    def test_patient_name_from_structured_data(self, user) -> None:
+        case = Case.objects.create(
+            created_by=user,
+            structured_data={"patient": {"name": "João Silva"}},
+        )
+        assert case.patient_name == "João Silva"
+
+    def test_patient_name_returns_paciente_when_no_data(self, user) -> None:
+        case = Case.objects.create(created_by=user)
+        assert case.patient_name == "Paciente"
+
+    def test_patient_name_returns_paciente_when_name_empty(self, user) -> None:
+        case = Case.objects.create(
+            created_by=user,
+            structured_data={"patient": {"name": ""}},
+        )
+        assert case.patient_name == "Paciente"
+
+    def test_patient_age_from_structured_data(self, user) -> None:
+        case = Case.objects.create(
+            created_by=user,
+            structured_data={"patient": {"age": 45}},
+        )
+        assert case.patient_age == "45"
+
+    def test_patient_age_empty_when_no_data(self, user) -> None:
+        case = Case.objects.create(created_by=user)
+        assert case.patient_age == ""
+
+    def test_patient_gender_sex_from_structured_data(self, user) -> None:
+        case = Case.objects.create(
+            created_by=user,
+            structured_data={"patient": {"sex": "Feminino"}},
+        )
+        assert case.patient_gender == "Feminino"
+
+    def test_patient_gender_falls_back_to_gender(self, user) -> None:
+        case = Case.objects.create(
+            created_by=user,
+            structured_data={"patient": {"gender": "Masculino"}},
+        )
+        assert case.patient_gender == "Masculino"
+
+    def test_patient_gender_empty_when_no_data(self, user) -> None:
+        case = Case.objects.create(created_by=user)
+        assert case.patient_gender == ""
+
+    def test_diagnosis_uses_summary_text_first(self, user) -> None:
+        case = Case.objects.create(
+            created_by=user,
+            summary_text="Paciente com indicação de EDA",
+            structured_data={"eda": {"indication_category": "Diagnóstico"}},
+        )
+        assert case.diagnosis == "Paciente com indicação de EDA"
+
+    def test_diagnosis_falls_back_to_indication(self, user) -> None:
+        case = Case.objects.create(
+            created_by=user,
+            structured_data={"eda": {"indication_category": "Triagem"}},
+        )
+        assert case.diagnosis == "Triagem"
+
+    def test_diagnosis_empty_when_no_data(self, user) -> None:
+        case = Case.objects.create(created_by=user)
+        assert case.diagnosis == ""
