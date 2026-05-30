@@ -26,6 +26,7 @@
                 {% if c.agency_record_number %}Reg. {{ c.agency_record_number }} · {% endif %}
                 {% if c.patient_age %}{{ c.patient_age }} anos · {% endif %}
                 {{ c.patient_gender }}
+                {% if c.origin_unit %} · 🏥 {{ c.origin_unit }}{% endif %}
               </div>
               <div class="summary-box mb-2">
                 <div class="row">

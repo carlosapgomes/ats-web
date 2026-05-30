@@ -203,6 +203,7 @@ def _my_cases_context(request: HttpRequest) -> dict[str, object]:
             "case": c,
             "status_label": STATUS_LABELS.get(c.status, c.get_status_display()),
             "status_css": STATUS_CSS_CLASS.get(c.status, "status-pending"),
+            "origin_unit": c.get_origin_unit_display(compact=True),
         }
         for c in qs
     ]

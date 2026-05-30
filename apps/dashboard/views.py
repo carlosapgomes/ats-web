@@ -139,6 +139,7 @@ def _enrich_case(case: Case) -> dict[str, object]:
     status_css = STATUS_CSS_CLASS.get(case.status, "status-pending")
     step_idx = STEP_STATUS_INDEX.get(case.status, 0)
     step_label = STEPS[step_idx]["label"] if step_idx < len(STEPS) else "—"
+    origin_unit = case.get_origin_unit_display(compact=True)
 
     return {
         "case": case,
@@ -146,6 +147,7 @@ def _enrich_case(case: Case) -> dict[str, object]:
         "status_label": status_label,
         "status_css": status_css,
         "step_label": step_label,
+        "origin_unit": origin_unit,
     }
 
 
@@ -251,6 +253,8 @@ def dashboard_case_detail(request: HttpRequest, case_id: str) -> HttpResponse:
         if isinstance(patient, dict):
             patient_name = patient.get("name", "")
 
+    origin_unit = case.get_origin_unit_display(compact=False)
+
     return render(
         request,
         "intake/case_detail.html",
@@ -264,6 +268,7 @@ def dashboard_case_detail(request: HttpRequest, case_id: str) -> HttpResponse:
             "can_confirm_receipt": False,
             "result_info": result_info,
             "patient_name": patient_name,
+            "origin_unit": origin_unit,
         },
     )
 
