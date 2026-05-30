@@ -1,7 +1,7 @@
 {% extends "base.html" %}
 {% load static %}
 
-{% block title %}{{ prompt.name }} v{{ prompt.version }} — ATS{% endblock %}
+{% block title %}{{ prompt.name }} v{{ prompt.version }} — {{ app_display_name }}{% endblock %}
 {% block subtitle %}Detalhes da versão {{ prompt.version }} de {{ prompt.name }}{% endblock %}
 
 {% block nav %}

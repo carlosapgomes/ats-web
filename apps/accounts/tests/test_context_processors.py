@@ -3,10 +3,10 @@
 import pytest
 from django.contrib.auth import get_user_model
 from django.http import HttpRequest
-from django.test import RequestFactory
+from django.test import RequestFactory, override_settings
 from django.utils import timezone
 
-from apps.accounts.context_processors import queue_counts
+from apps.accounts.context_processors import app_display_name, queue_counts
 from apps.cases.models import Case, CaseEvent, CaseStatus
 
 User = get_user_model()
@@ -193,3 +193,46 @@ class TestQueueCountsTemplateBadge:
         # So we check that there's no visible "0" badge count
         # Actually the safest: check badge styling is not present
         assert 'class="badge bg-danger ms-1">0<' not in content
+
+
+class TestAppDisplayName:
+    """Tests for the app_display_name context processor."""
+
+    def test_returns_default_ats_when_not_configured(self, rf: RequestFactory) -> None:
+        """Retorna 'ATS' como default quando APP_DISPLAY_NAME não está definido."""
+        request = rf.get("/")
+        result = app_display_name(request)
+        assert result == {"app_display_name": "ATS"}
+
+    def test_returns_configured_name(self, rf: RequestFactory) -> None:
+        """Retorna o valor configurado em APP_DISPLAY_NAME."""
+        request = rf.get("/")
+        with override_settings(APP_DISPLAY_NAME="HGS"):
+            result = app_display_name(request)
+        assert result == {"app_display_name": "HGS"}
+
+    def test_works_with_empty_string(self, rf: RequestFactory) -> None:
+        """APP_DISPLAY_NAME vazio retorna string vazia."""
+        request = rf.get("/")
+        with override_settings(APP_DISPLAY_NAME=""):
+            result = app_display_name(request)
+        assert result == {"app_display_name": ""}
+
+    def test_available_in_template_context(self, client) -> None:
+        """Verifica que app_display_name está disponível no contexto do template."""
+        # Testa com a página de login (não requer autenticação)
+        with override_settings(APP_DISPLAY_NAME="Hospital Teste"):
+            response = client.get("/login/")
+        assert response.status_code == 200
+        content = response.content.decode()
+        assert "Hospital Teste" in content
+        # Verifica que o nome customizado aparece no header e no h3
+        assert '<h1 class="app-header__title">Hospital Teste</h1>' in content
+        assert "<title>Hospital Teste" in content
+
+    def test_template_renders_default_when_not_configured(self, client) -> None:
+        """Template renderiza 'ATS' quando APP_DISPLAY_NAME não está configurado."""
+        response = client.get("/login/")
+        assert response.status_code == 200
+        content = response.content.decode()
+        assert "ATS" in content

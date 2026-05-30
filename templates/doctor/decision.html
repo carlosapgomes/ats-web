@@ -1,7 +1,7 @@
 {% extends "base.html" %}
 {% load static %}
 
-{% block title %}Decisão Médica · ATS{% endblock %}
+{% block title %}Decisão Médica · {{ app_display_name }}{% endblock %}
 
 {% block subtitle %}Caso {{ case.agency_record_number|default:case.case_id|truncatechars:16 }} · {{ patient_name }}{% endblock %}
 
