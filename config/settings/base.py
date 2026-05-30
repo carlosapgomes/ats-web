@@ -108,6 +108,17 @@ INTRANET_IP_RANGE = os.environ.get("INTRANET_IP_RANGE", "")
 # Cloudflare Tunnel padrão usa CF-Connecting-IP
 TRUSTED_PROXY_HEADER = os.environ.get("TRUSTED_PROXY_HEADER", "HTTP_CF_CONNECTING_IP")
 
+# SSL termina no Cloudflare Tunnel — Django deve confiar no header X-Forwarded-Proto
+SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
+
+# Origens confiáveis para CSRF (necessário para HTTPS via tunnel)
+# Ex: "https://chd.projetoshgrs.com"
+CSRF_TRUSTED_ORIGINS = [
+    origin.strip()
+    for origin in os.environ.get("CSRF_TRUSTED_ORIGINS", "").split(",")
+    if origin.strip()
+]
+
 # Nome do app exibido no cabeçalho, título da página e meta tags
 APP_DISPLAY_NAME = os.environ.get("APP_DISPLAY_NAME", "ATS")
 
