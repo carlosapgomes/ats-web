@@ -346,6 +346,12 @@ def case_detail(request: HttpRequest, case_id: str) -> HttpResponse:
             "flow": ADMISSION_FLOW_MAP.get(case.doctor_admission_flow, case.doctor_admission_flow),
             "doctor_display": case.doctor_display,
         }
+    elif case.status == CaseStatus.APPT_DENIED or (terminal_with_result and case.appointment_status == "denied"):
+        result_info = {
+            "type": "appt_denied",
+            "reason": case.appointment_reason,
+            "doctor_display": case.doctor_display,
+        }
     elif case.status == CaseStatus.APPT_CONFIRMED or terminal_with_result:
         result_info = {
             "type": "accepted_scheduled",
@@ -353,12 +359,6 @@ def case_detail(request: HttpRequest, case_id: str) -> HttpResponse:
             "support": SUPPORT_FLAG_MAP.get(case.doctor_support_flag, case.doctor_support_flag),
             "flow": ADMISSION_FLOW_MAP.get(case.doctor_admission_flow, case.doctor_admission_flow),
             "instructions": case.appointment_instructions or "",
-            "doctor_display": case.doctor_display,
-        }
-    elif case.status == CaseStatus.APPT_DENIED:
-        result_info = {
-            "type": "appt_denied",
-            "reason": case.appointment_reason,
             "doctor_display": case.doctor_display,
         }
     elif case.status == CaseStatus.FAILED:
