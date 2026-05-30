@@ -221,6 +221,7 @@ def _build_confirm_context(case: Case, form: SchedulerDecisionForm) -> dict[str,
         "doctor_decision_display": _get_doctor_decision_display(case),
         "support_flag_display": _get_support_flag_display(case),
         "admission_flow_display": _get_admission_flow_display(case),
+        "origin_unit": case.get_origin_unit_display(compact=False),
     }
 
 

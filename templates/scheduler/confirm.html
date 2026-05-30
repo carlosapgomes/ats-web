@@ -19,6 +19,7 @@
         <tr><td class="text-muted">Idade</td><td>{% if patient_age %}{{ patient_age }} anos{% else %}—{% endif %}</td></tr>
         <tr><td class="text-muted">Sexo</td><td>{{ patient_gender|default:"—" }}</td></tr>
         <tr><td class="text-muted">Diagnóstico</td><td>{{ diagnosis|default:"—" }}</td></tr>
+        {% if origin_unit %}<tr><td class="text-muted">🏥 Origem</td><td><strong>{{ origin_unit }}</strong></td></tr>{% endif %}
         <tr><td class="text-muted">Enviado em</td><td>{{ case.created_at|date:"d/m/Y H:i" }}</td></tr>
         <tr><td class="text-muted">Aguardando</td><td><span class="waiting-time">⏱ {{ case.created_at|timesince }}</span></td></tr>
       </table>
