@@ -167,14 +167,35 @@ def intake_home(request: HttpRequest) -> HttpResponse:
     # Casos recentes do NIR logado
     recent_cases = Case.objects.filter(created_by=user).exclude(status="CLEANED").order_by("-created_at")[:10]
 
+    recent_cases_data = [
+        {
+            "case": c,
+            "status_label": STATUS_LABELS.get(c.status, c.get_status_display()),
+            "status_css": STATUS_CSS_CLASS.get(c.status, "status-pending"),
+        }
+        for c in recent_cases
+    ]
+
     return render(
         request,
         "intake/intake_home.html",
         {
             "form": form,
-            "recent_cases": recent_cases,
+            "recent_cases": recent_cases_data,
         },
     )
+
+
+DOCTOR_DECISION_MAP: dict[str, str] = {
+    "accept": "ACEITAR",
+    "deny": "NEGAR",
+}
+
+
+def _get_doctor_decision_display(case: Case) -> str:
+    if case.doctor_decision:
+        return DOCTOR_DECISION_MAP.get(case.doctor_decision, case.doctor_decision.upper())
+    return ""
 
 
 def _my_cases_context(request: HttpRequest) -> dict[str, object]:
@@ -208,6 +229,7 @@ def _my_cases_context(request: HttpRequest) -> dict[str, object]:
             "patient_age": c.patient_age,
             "patient_gender": c.patient_gender,
             "diagnosis": c.diagnosis,
+            "doctor_decision_display": _get_doctor_decision_display(c),
         }
         for c in qs
     ]

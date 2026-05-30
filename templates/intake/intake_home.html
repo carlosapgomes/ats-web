@@ -73,33 +73,30 @@
   <p class="text-muted small mb-3">Todos os encaminhamentos da sua conta. Atualizado automaticamente.</p>
 
   <div class="row g-3">
-    {% for case in recent_cases %}
+    {% for item in recent_cases %}
     <div class="col-12">
       <div class="case-card card p-3">
         <div class="row align-items-center">
           <div class="col-md-4">
-            <div class="patient-name">{{ case.patient_name }}</div>
+            <div class="patient-name">{{ item.case.patient_name }}</div>
             <div class="case-meta">
-              {% if case.agency_record_number %}Reg. {{ case.agency_record_number }}{% endif %}
-              {% if case.patient_age %} · {{ case.patient_age }} anos{% endif %}
-              {% if case.patient_gender %} · {{ case.patient_gender }}{% endif %}
-              {% with origin=case.get_origin_unit_display %}{% if origin %} · 🏥 {{ origin }}{% endif %}{% endwith %}
+              {% if item.case.agency_record_number %}Reg. {{ item.case.agency_record_number }}{% endif %}
+              {% if item.case.patient_age %} · {{ item.case.patient_age }} anos{% endif %}
+              {% if item.case.patient_gender %} · {{ item.case.patient_gender }}{% endif %}
+              {% with origin=item.case.get_origin_unit_display %}{% if origin %} · 🏥 {{ origin }}{% endif %}{% endwith %}
             </div>
           </div>
           <div class="col-md-3">
-            <div class="case-meta">📥 {{ case.created_at|date:"d/m/Y H:i" }}</div>
-            <div class="case-meta small text-muted">{{ case.get_status_display }}</div>
+            <div class="case-meta">📥 {{ item.case.created_at|date:"d/m/Y H:i" }}</div>
+            <div class="case-meta small text-muted">{{ item.status_label }}</div>
           </div>
           <div class="col-md-3">
-            <span class="status-badge
-              {% if case.status == 'CLEANED' %}status-done
-              {% elif case.status == 'FAILED' or case.status == 'DOCTOR_DENIED' or case.status == 'APPT_DENIED' %}status-denied
-              {% else %}status-progress{% endif %}">
-              {{ case.get_status_display }}
+            <span class="status-badge {{ item.status_css }}">
+              {{ item.status_label }}
             </span>
           </div>
           <div class="col-md-2 text-md-end mt-2 mt-md-0">
-            <a href="{% url 'intake:case_detail' case.case_id %}" class="btn btn-sm btn-hospital-outline">Ver detalhes</a>
+            <a href="{% url 'intake:case_detail' item.case.case_id %}" class="btn btn-sm btn-hospital-outline">Ver detalhes</a>
           </div>
         </div>
       </div>
