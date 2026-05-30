@@ -81,3 +81,42 @@ class TestRoleModel:
 
         with pytest.raises(Exception):
             Role.objects.create(name="test_unique_role")
+
+
+@pytest.mark.django_db
+class TestUserProfessionalCouncil:
+    """Tests for professional council fields in User model."""
+
+    def test_default_empty(self) -> None:
+        """New user has professional_council=="" and professional_council_number==""."""
+        user = User.objects.create_user(username="council@test.com", password="testpass123")
+        assert user.professional_council == ""
+        assert user.professional_council_number == ""
+
+    def test_both_empty_valid(self) -> None:
+        """full_clean passes when both fields are empty."""
+        user = User.objects.create_user(username="empty@test.com", password="testpass123")
+        # Should not raise
+        user.full_clean()
+
+    def test_both_filled_valid(self) -> None:
+        """full_clean passes when professional_council='CRM' and number is filled."""
+        user = User.objects.create_user(username="crm@test.com", password="testpass123")
+        user.professional_council = "CRM"
+        user.professional_council_number = "12345"
+        # Should not raise
+        user.full_clean()
+
+    def test_council_without_number_invalid(self) -> None:
+        """full_clean fails when only council is filled."""
+        user = User.objects.create_user(username="councilonly@test.com", password="testpass123")
+        user.professional_council = "COREN"
+        with pytest.raises(Exception):
+            user.full_clean()
+
+    def test_number_without_council_invalid(self) -> None:
+        """full_clean fails when only number is filled."""
+        user = User.objects.create_user(username="numberonly@test.com", password="testpass123")
+        user.professional_council_number = "67890"
+        with pytest.raises(Exception):
+            user.full_clean()
