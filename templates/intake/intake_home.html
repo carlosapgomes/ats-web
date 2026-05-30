@@ -78,9 +78,13 @@
       <div class="case-card card p-3">
         <div class="row align-items-center">
           <div class="col-md-4">
-            {% if case.extracted_text %}<div class="patient-name">{{ case.extracted_text }}</div>{% endif %}
-            <div class="case-meta fs-6 fw-semibold">Reg. {{ case.agency_record_number|default:"—" }}</div>
-            {% with origin=case.get_origin_unit_display %}{% if origin %}<div class="case-meta small text-muted">🏥 {{ origin }}</div>{% endif %}{% endwith %}
+            <div class="patient-name">{{ case.patient_name }}</div>
+            <div class="case-meta">
+              {% if case.agency_record_number %}Reg. {{ case.agency_record_number }}{% endif %}
+              {% if case.patient_age %} · {{ case.patient_age }} anos{% endif %}
+              {% if case.patient_gender %} · {{ case.patient_gender }}{% endif %}
+              {% with origin=case.get_origin_unit_display %}{% if origin %} · 🏥 {{ origin }}{% endif %}{% endwith %}
+            </div>
           </div>
           <div class="col-md-3">
             <div class="case-meta">📥 {{ case.created_at|date:"d/m/Y H:i" }}</div>

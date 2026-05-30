@@ -17,9 +17,13 @@
       <div class="case-card card p-3">
         <div class="row align-items-center">
           <div class="col-md-4">
-            {% if item.case.extracted_text %}<div class="patient-name">{{ item.case.extracted_text }}</div>{% endif %}
-            <div class="case-meta fs-6 fw-semibold">Reg. {{ item.case.agency_record_number|default:"—" }}</div>
-            {% if item.origin_unit %}<div class="case-meta small text-muted">🏥 {{ item.origin_unit }}</div>{% endif %}
+            <div class="patient-name">{{ item.patient_name }}</div>
+            <div class="case-meta">
+              {% if item.case.agency_record_number %}Reg. {{ item.case.agency_record_number }}{% endif %}
+              {% if item.patient_age %} · {{ item.patient_age }} anos{% endif %}
+              {% if item.patient_gender %} · {{ item.patient_gender }}{% endif %}
+              {% if item.origin_unit %} · 🏥 {{ item.origin_unit }}{% endif %}
+            </div>
           </div>
           <div class="col-md-3">
             <div class="case-meta">📥 {{ item.case.created_at|date:"d/m/Y H:i" }}</div>
