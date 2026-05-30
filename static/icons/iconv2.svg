@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512">
+  <!-- Background -->
+  <rect width="512" height="512" fill="#ffffff" rx="64"/>
+  <!-- Medical shield -->
+  <path d="M256 52 L456 124 L456 284 Q456 404 256 476 Q56 404 56 284 L56 124 Z" fill="#0b4263"/>
+  <!-- Medical cross - horizontal bar -->
+  <rect x="196" y="216" width="120" height="72" rx="12" fill="#ffffff"/>
+  <!-- Medical cross - vertical bar -->
+  <rect x="216" y="136" width="80" height="232" rx="12" fill="#ffffff"/>
+</svg>
