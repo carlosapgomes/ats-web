@@ -114,9 +114,7 @@ SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
 # Origens confiáveis para CSRF (necessário para HTTPS via tunnel)
 # Ex: "https://chd.projetoshgrs.com"
 CSRF_TRUSTED_ORIGINS = [
-    origin.strip()
-    for origin in os.environ.get("CSRF_TRUSTED_ORIGINS", "").split(",")
-    if origin.strip()
+    origin.strip() for origin in os.environ.get("CSRF_TRUSTED_ORIGINS", "").split(",") if origin.strip()
 ]
 
 # Nome do app exibido no cabeçalho, título da página e meta tags

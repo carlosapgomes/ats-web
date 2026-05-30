@@ -242,6 +242,107 @@ class TestUserList:
         assert "usertwo" not in content
 
 
+# ── Professional Council ──────────────────────────────────────────────────
+
+
+@pytest.mark.django_db
+class TestUserProfessionalCouncil:
+    """Verifica campos de conselho profissional no CRUD de usuários."""
+
+    def test_create_with_crm(self, client) -> None:
+        """Create aceita professional_council='CRM' + número e persiste."""
+        _login_as(client, "admin")
+        nir_pk = Role.objects.get_or_create(name="nir")[0].pk
+        data = {
+            "username": "medico-crm",
+            "email": "medico@test.com",
+            "password": "SenhaForte123!",
+            "roles": [nir_pk],
+            "professional_council": "CRM",
+            "professional_council_number": "12345",
+        }
+        response = client.post(reverse("admin_ui:user_create"), data)
+        assert response.status_code == 302
+        user = User.objects.get(username="medico-crm")
+        assert user.professional_council == "CRM"
+        assert user.professional_council_number == "12345"
+
+    def test_create_with_coren(self, client) -> None:
+        """Create aceita professional_council='COREN' + número e persiste."""
+        _login_as(client, "admin")
+        nir_pk = Role.objects.get_or_create(name="nir")[0].pk
+        data = {
+            "username": "enfermeiro-coren",
+            "email": "enfermeiro@test.com",
+            "password": "SenhaForte123!",
+            "roles": [nir_pk],
+            "professional_council": "COREN",
+            "professional_council_number": "67890",
+        }
+        response = client.post(reverse("admin_ui:user_create"), data)
+        assert response.status_code == 302
+        user = User.objects.get(username="enfermeiro-coren")
+        assert user.professional_council == "COREN"
+        assert user.professional_council_number == "67890"
+
+    def test_update_with_council(self, client) -> None:
+        """Update aceita professional_council + número e persiste."""
+        _login_as(client, "admin")
+        target = _create_user("editcouncil")
+        Role.objects.get_or_create(name="nir")
+        nir_pk = Role.objects.get_or_create(name="nir")[0].pk
+        data = {
+            "email": "editcouncil@test.com",
+            "roles": [nir_pk],
+            "professional_council": "COREN",
+            "professional_council_number": "99999",
+        }
+        response = client.post(reverse("admin_ui:user_update", args=[target.pk]), data)
+        assert response.status_code == 302
+        target.refresh_from_db()
+        assert target.professional_council == "COREN"
+        assert target.professional_council_number == "99999"
+
+    def test_partial_council_rejected(self, client) -> None:
+        """Form rejeita preenchimento parcial (só conselho)."""
+        _login_as(client, "admin")
+        nir_pk = Role.objects.get_or_create(name="nir")[0].pk
+        data = {
+            "username": "parcial",
+            "email": "parcial@test.com",
+            "password": "SenhaForte123!",
+            "roles": [nir_pk],
+            "professional_council": "CRM",
+            "professional_council_number": "",
+        }
+        response = client.post(reverse("admin_ui:user_create"), data)
+        assert response.status_code == 200  # mesma página com erro
+        assert not User.objects.filter(username="parcial").exists()
+
+    def test_list_shows_council(self, client) -> None:
+        """Listagem mostra 'CRM 12345' para usuário com registro."""
+        _login_as(client, "admin")
+        user = _create_user("councillist")
+        user.professional_council = "CRM"
+        user.professional_council_number = "12345"
+        user.save()
+        user.refresh_from_db()
+        response = client.get(reverse("admin_ui:user_list"))
+        assert response.status_code == 200
+        content = response.content.decode()
+        assert "CRM" in content
+        assert "12345" in content
+
+    def test_list_shows_dash_for_empty(self, client) -> None:
+        """Listagem mostra '—' para usuário sem registro profissional."""
+        _login_as(client, "admin")
+        _create_user("nocouncil")
+        response = client.get(reverse("admin_ui:user_list"))
+        assert response.status_code == 200
+        content = response.content.decode()
+        assert "—" in content
+
+
 # ── User Create ──────────────────────────────────────────────────────────
 
 

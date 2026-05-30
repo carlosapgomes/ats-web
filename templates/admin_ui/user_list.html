@@ -62,6 +62,7 @@
           <th>Username</th>
           <th>Email</th>
           <th>Papéis</th>
+          <th>Conselho</th>
           <th>Status</th>
           {% if is_admin %}
           <th>Ações</th>
@@ -80,6 +81,13 @@
             {% empty %}
             <span class="text-muted small">Sem papéis</span>
             {% endfor %}
+          </td>
+          <td>
+            {% if u.professional_council and u.professional_council_number %}
+            {{ u.professional_council }} {{ u.professional_council_number }}
+            {% else %}
+            —
+            {% endif %}
           </td>
           <td>
             {% if u.account_status == "active" %}
@@ -112,7 +120,7 @@
         {% endfor %}
         {% else %}
         <tr>
-          <td colspan="{% if is_admin %}5{% else %}4{% endif %}" class="text-center text-muted py-3">
+          <td colspan="{% if is_admin %}6{% else %}5{% endif %}" class="text-center text-muted py-3">
             Nenhum usuário encontrado.
           </td>
         </tr>

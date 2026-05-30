@@ -27,13 +27,15 @@ class UserCreateForm(forms.ModelForm):  # type: ignore[type-arg]
 
     class Meta:
         model = User
-        fields = ["username", "email", "password", "roles"]
+        fields = ["username", "email", "password", "roles", "professional_council", "professional_council_number"]
 
     def __init__(self, *args: Any, **kwargs: Any) -> None:
         super().__init__(*args, **kwargs)
         field_attrs = {"class": "form-control"}
         self.fields["username"].widget.attrs.update(field_attrs)
         self.fields["email"].widget.attrs.update(field_attrs)
+        self.fields["professional_council"].widget.attrs.update({"class": "form-select"})
+        self.fields["professional_council_number"].widget.attrs.update(field_attrs)
 
     def save(self, commit: bool = True) -> Any:
         user = super().save(commit=False)
@@ -74,7 +76,7 @@ class PromptCreateForm(forms.Form):  # type: ignore[type-arg]
 
 
 class UserUpdateForm(forms.ModelForm):  # type: ignore[type-arg]
-    """Formulário para editar usuário (email e papéis apenas).
+    """Formulário para editar usuário (email, papéis e conselho profissional).
 
     Username é exibido como readonly (não editável).
     """
@@ -88,11 +90,13 @@ class UserUpdateForm(forms.ModelForm):  # type: ignore[type-arg]
 
     class Meta:
         model = User
-        fields = ["email", "roles"]
+        fields = ["email", "roles", "professional_council", "professional_council_number"]
 
     def __init__(self, *args: Any, **kwargs: Any) -> None:
         super().__init__(*args, **kwargs)
         self.fields["email"].widget.attrs.update({"class": "form-control"})
+        self.fields["professional_council"].widget.attrs.update({"class": "form-select"})
+        self.fields["professional_council_number"].widget.attrs.update({"class": "form-control"})
         # Armazena username para exibição readonly
         if self.instance and self.instance.pk:
             self._username: str = self.instance.username

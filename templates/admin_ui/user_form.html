@@ -102,6 +102,28 @@
       {% endif %}
     </div>
 
+    <!-- Conselho profissional -->
+    <div class="row mb-3">
+      <div class="col-md-4">
+        <label for="{{ form.professional_council.id_for_label }}" class="form-label">{{ form.professional_council.label }}</label>
+        {{ form.professional_council }}
+        {% if form.professional_council.errors %}
+        <div class="invalid-feedback d-block">
+          {% for error in form.professional_council.errors %}{{ error }}{% endfor %}
+        </div>
+        {% endif %}
+      </div>
+      <div class="col-md-8">
+        <label for="{{ form.professional_council_number.id_for_label }}" class="form-label">{{ form.professional_council_number.label }}</label>
+        {{ form.professional_council_number }}
+        {% if form.professional_council_number.errors %}
+        <div class="invalid-feedback d-block">
+          {% for error in form.professional_council_number.errors %}{{ error }}{% endfor %}
+        </div>
+        {% endif %}
+      </div>
+    </div>
+
     <div class="d-flex gap-2">
       <button type="submit" class="btn btn-hospital">
         {% if is_create %}Criar Usuário{% else %}Salvar Alterações{% endif %}
