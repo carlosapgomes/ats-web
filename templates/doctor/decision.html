@@ -159,10 +159,11 @@
     {% if not summary_text and not suggested_action %}<div class="text-muted">Relatório da IA não disponível.</div>{% endif %}
   </div>
 
-  <div class="card p-4">
+  <!-- Texto Extraído -->
+  <div class="card p-4 mb-4">
     <h5 class="mb-3">
       <a data-bs-toggle="collapse" href="#extractedText" role="button" aria-expanded="false" aria-controls="extractedText" class="text-decoration-none d-flex align-items-center gap-2">
-        📄 Texto Extraído do PDF
+        📝 Texto Extraído do PDF
         <span class="badge bg-secondary">clique para expandir</span>
       </a>
     </h5>
@@ -172,6 +173,26 @@
       </div>
     </div>
   </div>
+
+  <!-- PDF Viewer -->
+  {% if case.pdf_file %}
+  <div class="card p-4">
+    <h5 class="mb-3">
+      <a data-bs-toggle="collapse" href="#pdf-collapse" role="button" aria-expanded="false" aria-controls="pdf-collapse" class="text-decoration-none d-flex align-items-center gap-2">
+        📄 Visualizar PDF Original
+        <span class="badge bg-secondary">clique para expandir</span>
+      </a>
+    </h5>
+    <div class="collapse" id="pdf-collapse">
+      <div class="ratio ratio-1x1 mt-3" style="max-height: 80vh;">
+        <embed src="{% url 'doctor:serve_pdf' case.case_id %}" type="application/pdf" style="width: 100%; height: 100%;">
+      </div>
+      <div class="mt-2 text-end">
+        <a href="{% url 'doctor:serve_pdf' case.case_id %}" class="btn btn-sm btn-hospital-outline" target="_blank">Abrir em nova aba</a>
+      </div>
+    </div>
+  </div>
+  {% endif %}
 
 </div>
 
