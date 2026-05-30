@@ -29,7 +29,7 @@
             <div class="case-meta">📥 {{ item.case.created_at|date:"d/m/Y H:i" }}</div>
             {% if item.case.doctor_decision %}
             <div class="case-meta small text-muted">
-              Decisão: {{ item.case.get_doctor_decision_display|default:item.case.doctor_decision|title }}
+              Decisão: {{ item.doctor_decision_display }}
             </div>
             {% endif %}
           </div>
