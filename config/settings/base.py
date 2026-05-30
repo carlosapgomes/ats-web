@@ -92,6 +92,12 @@ INTAKE_MAX_FILES_PER_BATCH = 30
 INTAKE_MAX_UPLOAD_BYTES_PER_FILE = 20 * 1024 * 1024  # 20 MB
 INTAKE_MAX_UPLOAD_BYTES_PER_BATCH = 600 * 1024 * 1024  # 600 MB
 
+# Regulation report gate — deterministic detection thresholds
+# Minimum cleaned text length to evaluate as a regulation report
+INTAKE_REGULATION_MIN_TEXT_CHARS = 500
+# Minimum number of operational section labels that must be present
+INTAKE_REGULATION_MIN_OPERATIONAL_SECTIONS = 3
+
 # Intranet Guard
 # Range CIDR da intranet (ex: "10.0.0.0/8" ou "192.168.0.0/16")
 # Se vazio, papéis nir/scheduler são bloqueados de qualquer IP.
