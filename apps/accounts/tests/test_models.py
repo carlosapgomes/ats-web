@@ -120,3 +120,44 @@ class TestUserProfessionalCouncil:
         user.professional_council_number = "67890"
         with pytest.raises(Exception):
             user.full_clean()
+
+
+@pytest.mark.django_db
+class TestUserDisplayHelpers:
+    """Tests for User.display_name and User.professional_registration_display."""
+
+    def test_display_name_uses_full_name(self) -> None:
+        """display_name retorna get_full_name() quando first/last name existem."""
+        user = User.objects.create_user(
+            username="doc@test.com",
+            password="pass123",
+            first_name="Maria",
+            last_name="Silva",
+        )
+        assert user.display_name == "Maria Silva"
+
+    def test_display_name_fallback_to_username(self) -> None:
+        """display_name retorna username quando nome completo está vazio."""
+        user = User.objects.create_user(username="drjoao", password="pass123")
+        assert user.display_name == "drjoao"
+
+    def test_professional_registration_display_with_council(self) -> None:
+        """professional_registration_display retorna 'CRM 12345' quando conselho e número existem."""
+        user = User.objects.create_user(username="council@test.com", password="pass123")
+        user.professional_council = "CRM"
+        user.professional_council_number = "12345"
+        user.save()
+        assert user.professional_registration_display == "CRM 12345"
+
+    def test_professional_registration_display_empty(self) -> None:
+        """professional_registration_display retorna '' quando não há conselho/número."""
+        user = User.objects.create_user(username="nocouncil@test.com", password="pass123")
+        assert user.professional_registration_display == ""
+
+    def test_professional_registration_display_coren(self) -> None:
+        """professional_registration_display funciona com COREN."""
+        user = User.objects.create_user(username="nurse@test.com", password="pass123")
+        user.professional_council = "COREN"
+        user.professional_council_number = "98765"
+        user.save()
+        assert user.professional_registration_display == "COREN 98765"

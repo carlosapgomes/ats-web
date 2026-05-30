@@ -3,9 +3,12 @@
 from __future__ import annotations
 
 import pytest
+from django.contrib.auth import get_user_model
 from django.db import IntegrityError
 
 from apps.cases.models import Case, CaseStatus
+
+User = get_user_model()
 
 
 class TestCaseModel:
@@ -219,3 +222,50 @@ class TestPatientProperties:
     def test_diagnosis_empty_when_no_data(self, user) -> None:
         case = Case.objects.create(created_by=user)
         assert case.diagnosis == ""
+
+
+class TestDoctorDisplay:
+    """Testes da property Case.doctor_display."""
+
+    def test_doctor_display_with_registration(self, user) -> None:
+        """doctor_display retorna 'Nome — CRM 12345' quando médico tem registro."""
+        from apps.accounts.models import ProfessionalCouncil
+
+        doctor_user = User.objects.create_user(
+            username="dra.maria",
+            password="pass123",
+            first_name="Maria",
+            last_name="Silva",
+        )
+        doctor_user.professional_council = ProfessionalCouncil.CRM
+        doctor_user.professional_council_number = "12345"
+        doctor_user.save()
+
+        case = Case.objects.create(created_by=user, doctor=doctor_user)
+        assert case.doctor_display == "Maria Silva — CRM 12345"
+
+    def test_doctor_display_without_registration(self, user) -> None:
+        """doctor_display retorna 'Nome' quando médico não tem registro."""
+        doctor_user = User.objects.create_user(
+            username="dr.joao",
+            password="pass123",
+            first_name="João",
+            last_name="Souza",
+        )
+        case = Case.objects.create(created_by=user, doctor=doctor_user)
+        assert case.doctor_display == "João Souza"
+
+    def test_doctor_display_returns_empty_when_no_doctor(self, user) -> None:
+        """doctor_display retorna '' quando case.doctor is None."""
+        case = Case.objects.create(created_by=user)
+        assert case.doctor_display == ""
+
+    def test_doctor_display_fallback_to_username(self, user) -> None:
+        """doctor_display usa username quando first/last name estão vazios."""
+        doctor_user = User.objects.create_user(username="dra.ana", password="pass123")
+        doctor_user.professional_council = "CRM"
+        doctor_user.professional_council_number = "54321"
+        doctor_user.save()
+
+        case = Case.objects.create(created_by=user, doctor=doctor_user)
+        assert case.doctor_display == "dra.ana — CRM 54321"

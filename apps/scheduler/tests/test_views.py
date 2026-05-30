@@ -356,6 +356,136 @@ class TestSchedulerConfirmView:
         assert "2026-0507-001" in content
         assert "ACEITAR" in content
 
+    def test_confirm_shows_doctor_display(self, client) -> None:
+        """Confirm page shows doctor name and CRM."""
+        self._login_as(client, "scheduler")
+        doctor = User.objects.create_user(
+            username="doc.confirm@test.com",
+            password="pass123",
+            first_name="Laura",
+            last_name="Mendes",
+        )
+        doctor.professional_council = "CRM"
+        doctor.professional_council_number = "99999"
+        doctor.save()
+        case = self._create_waited_case(
+            agency_record_number="2026-0507-DOC",
+            doctor=doctor,
+        )
+        response = client.get(f"/scheduler/{case.case_id}/")
+        assert response.status_code == 200
+        content = response.content.decode()
+        assert "Laura Mendes" in content
+        assert "CRM 99999" in content
+
+
+@pytest.mark.django_db
+class TestSchedulerQueueDoctorDisplay:
+    """Tests for doctor display in scheduler queue cards."""
+
+    def _create_role(self, name: str):
+        from apps.accounts.models import Role
+
+        role, _ = Role.objects.get_or_create(name=name)
+        return role
+
+    def _login_as(self, client, role_name: str) -> None:
+        user = User.objects.create_user(username=f"{role_name}@docdisp.test", password="testpass123")
+        user.roles.add(self._create_role(role_name))
+        client.force_login(user)
+        session = client.session
+        session["active_role"] = role_name
+        session.save()
+
+    def _create_nir(self):
+        nir = User.objects.create_user(username="nir_docdisp@test.com", password="testpass123")
+        nir.roles.add(self._create_role("nir"))
+        return nir
+
+    def _create_doctor(self, first_name: str, last_name: str, council: str = "", number: str = ""):
+        doc = User.objects.create_user(
+            username=f"{first_name.lower()}.{last_name.lower()}",
+            password="pass123",
+            first_name=first_name,
+            last_name=last_name,
+        )
+        if council and number:
+            doc.professional_council = council
+            doc.professional_council_number = number
+            doc.save()
+        return doc
+
+    def test_pending_case_shows_doctor_display(self, client) -> None:
+        """WAIT_APPT card shows doctor name and CRM."""
+        nir = self._create_nir()
+        doctor = self._create_doctor("Rafael", "Oliveira", "CRM", "77777")
+        case = Case.objects.create(
+            created_by=nir,
+            status=CaseStatus.WAIT_APPT,
+            doctor=doctor,
+            doctor_decision="accept",
+            doctor_support_flag="anesthesist",
+            doctor_admission_flow="scheduled",
+            structured_data={"patient": {"name": "Paciente Teste", "age": 50, "gender": "M"}},
+        )
+        case.save()
+
+        self._login_as(client, "scheduler")
+        response = client.get("/scheduler/")
+        assert response.status_code == 200
+        content = response.content.decode()
+        assert "Rafael Oliveira" in content
+        assert "CRM 77777" in content
+
+    def test_immediate_notice_shows_doctor_display(self, client) -> None:
+        """Immediate admission notice shows doctor name and CRM."""
+        nir = self._create_nir()
+        doctor = self._create_doctor("Juliana", "Lima", "CRM", "88888")
+        case = Case.objects.create(
+            created_by=nir,
+            status=CaseStatus.WAIT_R1_CLEANUP_THUMBS,
+            doctor=doctor,
+            doctor_decision="accept",
+            doctor_support_flag="anesthesist",
+            doctor_admission_flow="immediate",
+            structured_data={"patient": {"name": "Paciente Imediata", "age": 60, "gender": "F"}},
+        )
+        CaseEvent.objects.create(
+            case=case,
+            actor_type="human",
+            actor=nir,
+            event_type="IMMEDIATE_ADMISSION_OPERATIONAL_NOTICE",
+            timestamp=timezone.now(),
+        )
+
+        self._login_as(client, "scheduler")
+        response = client.get("/scheduler/")
+        assert response.status_code == 200
+        content = response.content.decode()
+        assert "Juliana Lima" in content
+        assert "CRM 88888" in content
+
+    def test_pending_case_shows_doctor_without_crm(self, client) -> None:
+        """WAIT_APPT card shows at least doctor name when no CRM."""
+        nir = self._create_nir()
+        doctor = self._create_doctor("Fernando", "Almeida")
+        case = Case.objects.create(
+            created_by=nir,
+            status=CaseStatus.WAIT_APPT,
+            doctor=doctor,
+            doctor_decision="accept",
+            doctor_support_flag="none",
+            doctor_admission_flow="scheduled",
+            structured_data={"patient": {"name": "Paciente Nocrm", "age": 45, "gender": "M"}},
+        )
+        case.save()
+
+        self._login_as(client, "scheduler")
+        response = client.get("/scheduler/")
+        assert response.status_code == 200
+        content = response.content.decode()
+        assert "Fernando Almeida" in content
+
 
 @pytest.mark.django_db
 class TestSchedulerDecisionForm:

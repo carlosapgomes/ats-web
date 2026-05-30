@@ -36,6 +36,11 @@
                 <div class="col-sm-3 mb-2"><div class="summary-label">Suporte</div><div class="summary-value">{{ c.support_flag_display }}</div></div>
                 <div class="col-sm-4 mb-2"><div class="summary-label">Fluxo</div><div class="summary-value"><strong>{{ c.admission_flow_display }}</strong></div></div>
               </div>
+              {% if c.doctor_display %}
+              <div class="row mt-1">
+                <div class="col-sm-12"><div class="summary-label">Médico</div><div class="summary-value">{{ c.doctor_display }}</div></div>
+              </div>
+              {% endif %}
             </div>
           </div>
           <div class="col-lg-4 text-lg-end mt-3 mt-lg-0 d-flex flex-lg-column justify-content-between align-items-lg-end">
@@ -69,6 +74,11 @@
               <div class="col-sm-2 mb-2"><div class="summary-label">Suporte</div><div class="summary-value">{{ c.support_flag_display }}</div></div>
               <div class="col-sm-3 mb-2"><div class="summary-label">Fluxo</div><div class="summary-value">{{ c.admission_flow_display }}</div></div>
             </div>
+            {% if c.doctor_display %}
+            <div class="row mt-1">
+              <div class="col-sm-12"><div class="summary-label">Médico</div><div class="summary-value">{{ c.doctor_display }}</div></div>
+            </div>
+            {% endif %}
           </div>
         </div>
         <div class="col-lg-4 text-lg-end mt-3 mt-lg-0 d-flex flex-lg-column justify-content-between align-items-lg-end">
