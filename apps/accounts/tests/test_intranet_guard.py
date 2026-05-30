@@ -1,6 +1,7 @@
 """Tests for IntranetGuardMiddleware."""
 
 from typing import Any
+from unittest.mock import patch
 
 from django.contrib.auth import get_user_model
 from django.test import RequestFactory
@@ -10,10 +11,10 @@ from apps.accounts.middleware import IntranetGuardMiddleware
 User = get_user_model()
 
 
-def _make_request(user=None, active_role=None, ip="1.2.3.4") -> Any:
+def _make_request(user=None, active_role=None, ip="1.2.3.4", path="/") -> Any:
     """Helper: cria um request mock com user, session active_role, e REMOTE_ADDR."""
     factory = RequestFactory()
-    request = factory.get("/")
+    request = factory.get(path)
     request.META["REMOTE_ADDR"] = ip
     request.user = user or User()
     if active_role:
@@ -166,3 +167,110 @@ class TestIntranetGuardMiddleware:
 
         response = middleware(request)
         assert response is None
+
+    # ── EXEMPT_PATHS ──────────────────────────────────────────────
+
+    def test_switch_role_path_exempt_from_intranet_guard(self):
+        """nir + IP externo + path /switch-role/ → passa (EXEMPT_PATHS)."""
+        from apps.accounts.models import Role
+
+        user = User(username="nir@test.com")
+        assert Role(name="nir")
+
+        request = _make_request(user=user, active_role="nir", ip="1.2.3.4", path="/switch-role/")
+        middleware = _make_middleware()
+
+        response = middleware(request)
+        assert response is None  # exempt path should pass
+
+    def test_login_path_exempt_from_intranet_guard(self):
+        """nir + IP externo + path /login/ → passa (EXEMPT_PATHS)."""
+        from apps.accounts.models import Role
+
+        user = User(username="nir@test.com")
+        assert Role(name="nir")
+
+        request = _make_request(user=user, active_role="nir", ip="1.2.3.4", path="/login/")
+        middleware = _make_middleware()
+
+        response = middleware(request)
+        assert response is None
+
+    def test_logout_path_exempt_from_intranet_guard(self):
+        """scheduler + IP externo + path /logout/ → passa (EXEMPT_PATHS)."""
+        from apps.accounts.models import Role
+
+        user = User(username="scheduler@test.com")
+        assert Role(name="scheduler")
+
+        request = _make_request(user=user, active_role="scheduler", ip="1.2.3.4", path="/logout/")
+        middleware = _make_middleware()
+
+        response = middleware(request)
+        assert response is None
+
+    # ── Multi-role bypass ─────────────────────────────────────────
+
+    def test_nir_role_bypass_when_user_also_has_admin_role(self):
+        """Usuário com nir + admin → não bloqueado de IP externo."""
+        from apps.accounts.models import Role
+
+        user = User(username="admin+nir@test.com")
+        assert Role(name="nir")
+        assert Role(name="admin")
+
+        request = _make_request(user=user, active_role="nir", ip="1.2.3.4")
+        middleware = _make_middleware()
+
+        with patch.object(User, "roles") as mock_roles:
+            mock_roles.values_list.return_value = ["nir", "admin"]
+            response = middleware(request)
+        assert response is None  # bypass porque também é admin
+
+    def test_scheduler_role_bypass_when_user_also_has_manager_role(self):
+        """Usuário com scheduler + manager → não bloqueado de IP externo."""
+        from apps.accounts.models import Role
+
+        user = User(username="manager+scheduler@test.com")
+        assert Role(name="scheduler")
+        assert Role(name="manager")
+
+        request = _make_request(user=user, active_role="scheduler", ip="1.2.3.4")
+        middleware = _make_middleware()
+
+        with patch.object(User, "roles") as mock_roles:
+            mock_roles.values_list.return_value = ["scheduler", "manager"]
+            response = middleware(request)
+        assert response is None
+
+    def test_nir_only_user_still_blocked_from_external_ip(self):
+        """Usuário SOMENTE com nir → continua bloqueado de IP externo."""
+        from apps.accounts.models import Role
+
+        user = User(username="nir-only@test.com")
+        assert Role(name="nir")
+
+        request = _make_request(user=user, active_role="nir", ip="1.2.3.4")
+        middleware = _make_middleware()
+
+        with patch.object(User, "roles") as mock_roles:
+            mock_roles.values_list.return_value = ["nir"]
+            response = middleware(request)
+        assert response is not None
+        assert response.status_code == 403
+
+    def test_scheduler_only_user_still_blocked_from_external_ip(self):
+        """Usuário SOMENTE com scheduler → continua bloqueado de IP externo."""
+        from apps.accounts.models import Role
+
+        user = User(username="scheduler-only@test.com")
+        assert Role(name="scheduler")
+
+        request = _make_request(user=user, active_role="scheduler", ip="1.2.3.4")
+        middleware = _make_middleware()
+
+        with patch.object(User, "roles") as mock_roles:
+            mock_roles.values_list.return_value = ["scheduler"]
+            response = middleware(request)
+        assert response is not None
+        assert response.status_code == 403
