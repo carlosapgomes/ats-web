@@ -1,7 +1,7 @@
 {
-  "name": "ATS — Sistema de Triagem Hospitalar",
-  "short_name": "ATS",
-  "description": "Sistema de Triagem de Endoscopia Digestiva Alta",
+  "name": "Regulação - CHD",
+  "short_name": "CHD",
+  "description": "Sistema Suporte para Regulação de Endoscopia Digestiva Alta",
   "start_url": "/",
   "display": "standalone",
   "theme_color": "#0b4263",
