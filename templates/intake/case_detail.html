@@ -36,6 +36,11 @@
       <p class="text-muted mb-1">
         Registro: <strong>{{ case.agency_record_number|default:"—" }}</strong>
       </p>
+      {% if origin_unit %}
+      <p class="text-muted mb-1">
+        🏥 Unidade de origem: <strong>{{ origin_unit }}</strong>
+      </p>
+      {% endif %}
       <p class="text-muted mb-0">
         Enviado por: <strong>{{ case.created_by.get_full_name|default:case.created_by.username }}</strong>
         em {{ case.created_at|date:"d/m/Y H:i" }}

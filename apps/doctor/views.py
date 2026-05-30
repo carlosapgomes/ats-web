@@ -137,6 +137,7 @@ def _build_case_card(case: Case, wait_minutes: int) -> dict[str, Any]:
         "patient_age": _get_patient_age(case),
         "patient_gender": _get_patient_gender(case),
         "agency_record_number": case.agency_record_number or "",
+        "origin_unit": case.get_origin_unit_display(compact=True),
         "diagnosis": _get_diagnosis(case),
         "suggested_support": _get_suggested_support(case),
         "suggested_flow": _get_suggested_flow(case),

@@ -171,6 +171,7 @@
           <th>Paciente</th>
           <th>Registro</th>
           <th class="hide-mobile">Idade</th>
+          <th class="hide-mobile">Origem</th>
           <th>Status</th>
           <th class="hide-mobile">Etapa</th>
           <th class="hide-mobile">Enviado</th>
@@ -190,6 +191,7 @@
               —
             {% endif %}
           </td>
+          <td class="hide-mobile">{{ item.origin_unit|default:"—" }}</td>
           <td><span class="status-badge {{ item.status_css }}">{{ item.status_label }}</span></td>
           <td class="hide-mobile">{{ item.step_label }}</td>
           <td class="hide-mobile">{{ item.case.created_at|date:"d/m/Y H:i" }}</td>

@@ -113,6 +113,46 @@ class Case(models.Model):
     def __str__(self) -> str:
         return f"Case {self.case_id} [{self.status}]"
 
+    def get_origin_unit_display(self, compact: bool = True) -> str:
+        """Extrai e formata a unidade de origem do structured_data.
+
+        Retorna string vazia se structured_data ou origin_context
+        estiverem ausentes/vazios.
+
+        Modo compacto (cards): ``🏥 {hospital} · {unit}``
+        Modo completo (detalhes): ``{city} ({state_uf}) · {hospital} · {unit}``
+        """
+        sd = self.structured_data
+        if not isinstance(sd, dict):
+            return ""
+
+        origin = sd.get("origin_context")
+        if not isinstance(origin, dict):
+            return ""
+
+        city = (origin.get("city") or "").strip()
+        uf = (origin.get("state_uf") or "").strip()
+        hospital = (origin.get("hospital") or "").strip()
+        unit = (origin.get("unit") or "").strip()
+
+        if compact:
+            compact_parts: list[str] = []
+            if hospital:
+                compact_parts.append(hospital)
+            if unit and unit != hospital:
+                compact_parts.append(unit)
+            return " · ".join(compact_parts) if compact_parts else ""
+
+        full_parts: list[str] = []
+        if city:
+            label = f"{city} ({uf})" if uf else city
+            full_parts.append(label)
+        if hospital:
+            full_parts.append(hospital)
+        if unit and unit != hospital:
+            full_parts.append(unit)
+        return " · ".join(full_parts) if full_parts else ""
+
     # ── FSM Transitions ──────────────────────────────────────────────────
 
     @transition(field=status, source=CaseStatus.NEW, target=CaseStatus.R1_ACK_PROCESSING)

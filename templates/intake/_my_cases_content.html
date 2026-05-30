@@ -17,9 +17,9 @@
       <div class="case-card card p-3">
         <div class="row align-items-center">
           <div class="col-md-4">
-            {% if item.case.extracted_text %}<div class="patient-name">{{ item.case.extracted_text|truncatechars:40 }}</div>{% endif %}
+            {% if item.case.extracted_text %}<div class="patient-name">{{ item.case.extracted_text }}</div>{% endif %}
             <div class="case-meta fs-6 fw-semibold">Reg. {{ item.case.agency_record_number|default:"—" }}</div>
-            <div class="case-meta small text-muted">{{ item.case.case_id|truncatechars:12 }}</div>
+            {% if item.origin_unit %}<div class="case-meta small text-muted">🏥 {{ item.origin_unit }}</div>{% endif %}
           </div>
           <div class="col-md-3">
             <div class="case-meta">📥 {{ item.case.created_at|date:"d/m/Y H:i" }}</div>
