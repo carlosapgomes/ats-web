@@ -201,3 +201,53 @@ class TestMyCasesList:
         response = client.get(reverse("intake:my_cases"))
         # role_required redireciona para /
         assert response.status_code == 302
+
+    def test_my_cases_shows_doctor_with_crm(self, client) -> None:
+        """Card do NIR mostra nome do médico e CRM quando preenchido."""
+        client, user = _nir_client(client)
+        doctor_user = User.objects.create_user(
+            username="doc.crm@test.com",
+            password="pass123",
+            first_name="Maria",
+            last_name="Silva",
+        )
+        doctor_user.professional_council = "CRM"
+        doctor_user.professional_council_number = "12345"
+        doctor_user.save()
+
+        Case.objects.create(
+            created_by=user,
+            agency_record_number="DOC-CRM-001",
+            status=CaseStatus.DOCTOR_ACCEPTED,
+            doctor=doctor_user,
+            doctor_decision="accept",
+        )
+
+        response = client.get(reverse("intake:my_cases"))
+        assert response.status_code == 200
+        content = response.content.decode()
+        assert "Maria Silva" in content
+        assert "CRM 12345" in content
+
+    def test_my_cases_shows_doctor_without_crm(self, client) -> None:
+        """Card do NIR mostra ao menos o nome do médico quando não há CRM."""
+        client, user = _nir_client(client)
+        doctor_user = User.objects.create_user(
+            username="doc.nocrm@test.com",
+            password="pass123",
+            first_name="João",
+            last_name="Souza",
+        )
+
+        Case.objects.create(
+            created_by=user,
+            agency_record_number="DOC-NOCRM-001",
+            status=CaseStatus.DOCTOR_ACCEPTED,
+            doctor=doctor_user,
+            doctor_decision="accept",
+        )
+
+        response = client.get(reverse("intake:my_cases"))
+        assert response.status_code == 200
+        content = response.content.decode()
+        assert "João Souza" in content

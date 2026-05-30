@@ -59,5 +59,17 @@ class User(AbstractUser):
             raise ValidationError("Os campos de conselho profissional devem ser preenchidos juntos ou ambos vazios.")
 
     @property
+    def display_name(self) -> str:
+        """Nome preferencial: full name ou fallback para username."""
+        return self.get_full_name() or self.username
+
+    @property
+    def professional_registration_display(self) -> str:
+        """Registro profissional formatado: ex: 'CRM 12345' ou '' se vazio."""
+        if self.professional_council and self.professional_council_number:
+            return f"{self.professional_council} {self.professional_council_number}"
+        return ""
+
+    @property
     def is_account_active(self) -> bool:
         return self.account_status == "active" and self.is_active

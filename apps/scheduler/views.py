@@ -104,6 +104,7 @@ def _build_case_card(case: Case, wait_minutes: int) -> dict[str, Any]:
         "origin_unit": case.get_origin_unit_display(compact=True),
         "diagnosis": _get_diagnosis(case),
         "doctor_decision_display": _get_doctor_decision_display(case),
+        "doctor_display": case.doctor_display,
         "support_flag_display": _get_support_flag_display(case),
         "admission_flow_display": _get_admission_flow_display(case),
         "wait_minutes": wait_minutes,
@@ -115,7 +116,9 @@ def _build_case_card(case: Case, wait_minutes: int) -> dict[str, Any]:
 
 def _scheduler_queue_context() -> dict[str, Any]:
     """Build context for full and HTMX scheduler queue renders."""
-    pending_cases: QuerySet[Case] = Case.objects.filter(status=CaseStatus.WAIT_APPT).order_by("created_at")
+    pending_cases: QuerySet[Case] = (
+        Case.objects.filter(status=CaseStatus.WAIT_APPT).select_related("doctor").order_by("created_at")
+    )
 
     today: date = date.today()
 
@@ -127,15 +130,20 @@ def _scheduler_queue_context() -> dict[str, Any]:
         )
         .exclude(status=CaseStatus.WAIT_APPT)
         .exclude(events__event_type="SCHEDULER_IMMEDIATE_ACK")
+        .select_related("doctor")
         .distinct()
         .order_by("-doctor_decided_at", "-created_at")
     )
 
-    confirmed_qs: QuerySet[Case] = Case.objects.filter(
-        status__in=[CaseStatus.APPT_CONFIRMED, CaseStatus.APPT_DENIED],
-        events__event_type__startswith="APPT_",
-        events__timestamp__date=today,
-    ).distinct()
+    confirmed_qs: QuerySet[Case] = (
+        Case.objects.filter(
+            status__in=[CaseStatus.APPT_CONFIRMED, CaseStatus.APPT_DENIED],
+            events__event_type__startswith="APPT_",
+            events__timestamp__date=today,
+        )
+        .select_related("doctor")
+        .distinct()
+    )
 
     now = timezone.now()
 
@@ -219,6 +227,7 @@ def _build_confirm_context(case: Case, form: SchedulerDecisionForm) -> dict[str,
         "patient_gender": _get_patient_gender(case),
         "diagnosis": _get_diagnosis(case),
         "doctor_decision_display": _get_doctor_decision_display(case),
+        "doctor_display": case.doctor_display,
         "support_flag_display": _get_support_flag_display(case),
         "admission_flow_display": _get_admission_flow_display(case),
         "origin_unit": case.get_origin_unit_display(compact=False),
@@ -231,7 +240,7 @@ def _build_confirm_context(case: Case, form: SchedulerDecisionForm) -> dict[str,
 @login_required
 def scheduler_confirm(request: HttpRequest, case_id: str) -> HttpResponse:
     """GET: Renderiza formulário de confirmação para um caso em WAIT_APPT."""
-    case = get_object_or_404(Case, pk=case_id)
+    case = get_object_or_404(Case.objects.select_related("doctor"), pk=case_id)
 
     if case.status != CaseStatus.WAIT_APPT:
         raise Http404("Caso não está aguardando agendamento.")
@@ -246,7 +255,7 @@ def scheduler_submit(request: HttpRequest, case_id: str) -> HttpResponse:
     if request.method != "POST":
         raise Http404
 
-    case = get_object_or_404(Case, pk=case_id)
+    case = get_object_or_404(Case.objects.select_related("doctor"), pk=case_id)
 
     if case.status != CaseStatus.WAIT_APPT:
         raise Http404("Caso não está aguardando agendamento.")

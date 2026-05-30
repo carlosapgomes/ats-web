@@ -122,6 +122,12 @@
       <span class="badge bg-success fs-6 px-3 py-2">✓ Vinda Imediata Autorizada</span>
     </div>
     <p class="mb-3">Caso aceito para vinda imediata. Não abrir agendamento para este caso.</p>
+    {% if result_info.doctor_display %}
+    <div class="mb-3">
+      <p class="mb-1 text-muted small">Médico responsável</p>
+      <p class="mb-0 fw-medium">{{ result_info.doctor_display }}</p>
+    </div>
+    {% endif %}
     <div class="row g-3">
       <div class="col-md-6">
         <p class="mb-1 text-muted small">Suporte</p>
@@ -136,6 +142,12 @@
     <div class="d-flex align-items-center gap-3 mb-3">
       <span class="badge bg-success fs-6 px-3 py-2">✓ Agendamento Confirmado</span>
     </div>
+    {% if result_info.doctor_display %}
+    <div class="mb-3">
+      <p class="mb-1 text-muted small">Médico responsável</p>
+      <p class="mb-0 fw-medium">{{ result_info.doctor_display }}</p>
+    </div>
+    {% endif %}
     <div class="row g-3">
       <div class="col-md-6">
         <p class="mb-1 text-muted small">Data/Hora</p>
@@ -160,6 +172,12 @@
     <div class="d-flex align-items-center gap-3 mb-3">
       <span class="badge bg-danger fs-6 px-3 py-2">✗ Agendamento Negado</span>
     </div>
+    {% if result_info.doctor_display %}
+    <div class="mb-3">
+      <p class="mb-1 text-muted small">Médico responsável</p>
+      <p class="mb-0 fw-medium">{{ result_info.doctor_display }}</p>
+    </div>
+    {% endif %}
     {% if result_info.reason %}
     <p class="mb-0"><strong>Motivo:</strong> {{ result_info.reason }}</p>
     {% endif %}
@@ -167,6 +185,12 @@
     <div class="d-flex align-items-center gap-3 mb-3">
       <span class="badge bg-warning text-dark fs-6 px-3 py-2">✗ Recusado pelo Médico</span>
     </div>
+    {% if result_info.doctor_display %}
+    <div class="mb-3">
+      <p class="mb-1 text-muted small">Médico responsável</p>
+      <p class="mb-0 fw-medium">{{ result_info.doctor_display }}</p>
+    </div>
+    {% endif %}
     {% if result_info.reason %}
     <p class="mb-0"><strong>Motivo:</strong> {{ result_info.reason }}</p>
     {% endif %}

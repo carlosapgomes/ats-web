@@ -33,6 +33,12 @@
           <span class="status-badge status-accepted">{{ doctor_decision_display|default:"—" }}</span>
         </div>
       </div>
+      {% if doctor_display %}
+      <div class="summary-box mb-3">
+        <div class="summary-label">Médico responsável</div>
+        <div class="summary-value">{{ doctor_display }}</div>
+      </div>
+      {% endif %}
       <div class="summary-box mb-3">
         <div class="summary-label">Suporte Necessário</div>
         <div class="summary-value">{{ support_flag_display|default:"—" }}</div>

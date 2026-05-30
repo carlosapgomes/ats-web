@@ -32,6 +32,11 @@
               Decisão: {{ item.doctor_decision_display }}
             </div>
             {% endif %}
+            {% if item.doctor_display %}
+            <div class="case-meta small text-muted">
+              Médico: {{ item.doctor_display }}
+            </div>
+            {% endif %}
           </div>
           <div class="col-md-3">
             <span class="status-badge {{ item.status_css }}">

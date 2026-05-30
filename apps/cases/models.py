@@ -161,6 +161,20 @@ class Case(models.Model):
                     return str(indication)
         return ""
 
+    @property
+    def doctor_display(self) -> str:
+        """Exibe o médico responsável com nome e registro profissional.
+
+        Formato: 'Nome — CRM 12345' ou apenas 'Nome' quando não há registro.
+        Retorna '' quando não há médico atribuído.
+        """
+        if not self.doctor:
+            return ""
+        registration = self.doctor.professional_registration_display
+        if registration:
+            return f"{self.doctor.display_name} — {registration}"
+        return self.doctor.display_name
+
     def get_origin_unit_display(self, compact: bool = True) -> str:
         """Extrai e formata a unidade de origem do structured_data.
 

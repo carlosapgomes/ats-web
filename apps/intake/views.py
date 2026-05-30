@@ -208,6 +208,7 @@ def _my_cases_context(request: HttpRequest) -> dict[str, object]:
             created_by=user,
         )
         .exclude(status="CLEANED")
+        .select_related("doctor")
         .order_by("-created_at")
     )
 
@@ -230,6 +231,7 @@ def _my_cases_context(request: HttpRequest) -> dict[str, object]:
             "patient_gender": c.patient_gender,
             "diagnosis": c.diagnosis,
             "doctor_decision_display": _get_doctor_decision_display(c),
+            "doctor_display": c.doctor_display,
         }
         for c in qs
     ]
@@ -268,7 +270,7 @@ def my_cases_partial(request: HttpRequest) -> HttpResponse:
 def case_detail(request: HttpRequest, case_id: str) -> HttpResponse:
     """Detalhes de um caso para o NIR — timeline, stepper e PDF inline."""
     case = get_object_or_404(
-        Case.objects.select_related("created_by"),
+        Case.objects.select_related("created_by", "doctor"),
         case_id=case_id,
         created_by=request.user,
     )
@@ -332,12 +334,17 @@ def case_detail(request: HttpRequest, case_id: str) -> HttpResponse:
             "reason_text": reason_text,
         }
     elif is_doctor_denied_final or case.status == CaseStatus.DOCTOR_DENIED:
-        result_info = {"type": "doctor_denied", "reason": case.doctor_reason}
+        result_info = {
+            "type": "doctor_denied",
+            "reason": case.doctor_reason,
+            "doctor_display": case.doctor_display,
+        }
     elif is_immediate_final:
         result_info = {
             "type": "accepted_immediate",
             "support": SUPPORT_FLAG_MAP.get(case.doctor_support_flag, case.doctor_support_flag),
             "flow": ADMISSION_FLOW_MAP.get(case.doctor_admission_flow, case.doctor_admission_flow),
+            "doctor_display": case.doctor_display,
         }
     elif case.status == CaseStatus.APPT_CONFIRMED or terminal_with_result:
         result_info = {
@@ -346,9 +353,14 @@ def case_detail(request: HttpRequest, case_id: str) -> HttpResponse:
             "support": SUPPORT_FLAG_MAP.get(case.doctor_support_flag, case.doctor_support_flag),
             "flow": ADMISSION_FLOW_MAP.get(case.doctor_admission_flow, case.doctor_admission_flow),
             "instructions": case.appointment_instructions or "",
+            "doctor_display": case.doctor_display,
         }
     elif case.status == CaseStatus.APPT_DENIED:
-        result_info = {"type": "appt_denied", "reason": case.appointment_reason}
+        result_info = {
+            "type": "appt_denied",
+            "reason": case.appointment_reason,
+            "doctor_display": case.doctor_display,
+        }
     elif case.status == CaseStatus.FAILED:
         result_info = {"type": "failed"}
 

@@ -370,6 +370,130 @@ class TestCaseDetailResultInfo:
         content = response.content.decode()
         assert "Agendamento Confirmado" in content
 
+
+@pytest.mark.django_db
+class TestCaseDetailDoctorDisplay:
+    """Verifica exibição do médico responsável no resultado final."""
+
+    def _create_doctor(self, first_name: str, last_name: str, council: str = "", number: str = ""):
+        doc = User.objects.create_user(
+            username=f"{first_name.lower()}.{last_name.lower()}",
+            password="pass123",
+            first_name=first_name,
+            last_name=last_name,
+        )
+        if council and number:
+            doc.professional_council = council
+            doc.professional_council_number = number
+            doc.save()
+        return doc
+
+    def test_doctor_denied_shows_doctor(self, client) -> None:
+        """DOCTOR_DENIED mostra médico responsável com CRM no resultado final."""
+        client, user = _nir_client(client)
+        doctor = self._create_doctor("Maria", "Silva", "CRM", "12345")
+        case = _case_with_patient(
+            Case.objects.create(
+                created_by=user,
+                agency_record_number="RES-DOCDOC",
+                status=CaseStatus.DOCTOR_DENIED,
+                doctor=doctor,
+                doctor_decision="deny",
+                doctor_reason="Paciente não se enquadra",
+            )
+        )
+        response = client.get(reverse("intake:case_detail", args=[case.case_id]))
+        assert response.status_code == 200
+        content = response.content.decode()
+        assert "Maria Silva" in content
+        assert "CRM 12345" in content
+
+    def test_accepted_immediate_shows_doctor(self, client) -> None:
+        """Vinda imediata mostra médico responsável com CRM no resultado final."""
+        client, user = _nir_client(client)
+        doctor = self._create_doctor("João", "Souza", "CRM", "98765")
+        case = _case_with_patient(
+            Case.objects.create(
+                created_by=user,
+                agency_record_number="RES-IMMDOC",
+                status=CaseStatus.WAIT_R1_CLEANUP_THUMBS,
+                doctor=doctor,
+                doctor_decision="accept",
+                doctor_admission_flow="immediate",
+                doctor_support_flag="anesthesist",
+            )
+        )
+        response = client.get(reverse("intake:case_detail", args=[case.case_id]))
+        assert response.status_code == 200
+        content = response.content.decode()
+        assert "João Souza" in content
+        assert "CRM 98765" in content
+
+    def test_accepted_scheduled_shows_doctor(self, client) -> None:
+        """Agendamento confirmado mostra médico responsável com CRM no resultado final."""
+        client, user = _nir_client(client)
+        doctor = self._create_doctor("Ana", "Costa", "CRM", "54321")
+        case = _case_with_patient(
+            Case.objects.create(
+                created_by=user,
+                agency_record_number="RES-SCHDOC",
+                status=CaseStatus.APPT_CONFIRMED,
+                doctor=doctor,
+                doctor_decision="accept",
+                doctor_admission_flow="scheduled",
+                doctor_support_flag="none",
+                appointment_at=timezone.now(),
+            )
+        )
+        response = client.get(reverse("intake:case_detail", args=[case.case_id]))
+        assert response.status_code == 200
+        content = response.content.decode()
+        assert "Ana Costa" in content
+        assert "CRM 54321" in content
+
+    def test_appt_denied_shows_doctor(self, client) -> None:
+        """Agendamento negado mostra médico que aceitou originalmente (se existir)."""
+        client, user = _nir_client(client)
+        doctor = self._create_doctor("Pedro", "Alves", "CRM", "11111")
+        case = _case_with_patient(
+            Case.objects.create(
+                created_by=user,
+                agency_record_number="RES-APPTDENY",
+                status=CaseStatus.APPT_DENIED,
+                doctor=doctor,
+                doctor_decision="accept",
+                doctor_admission_flow="scheduled",
+                doctor_support_flag="none",
+                appointment_reason="Vaga indisponível",
+            )
+        )
+        response = client.get(reverse("intake:case_detail", args=[case.case_id]))
+        assert response.status_code == 200
+        content = response.content.decode()
+        assert "Pedro Alves" in content
+        assert "CRM 11111" in content
+
+    def test_doctor_denied_without_crm_shows_name(self, client) -> None:
+        """Médico sem CRM mostra apenas o nome no resultado de recusa."""
+        client, user = _nir_client(client)
+        doctor = self._create_doctor("Carlos", "Eduardo")
+        case = _case_with_patient(
+            Case.objects.create(
+                created_by=user,
+                agency_record_number="RES-NOCRM",
+                status=CaseStatus.DOCTOR_DENIED,
+                doctor=doctor,
+                doctor_decision="deny",
+                doctor_reason="Fora do perfil",
+            )
+        )
+        response = client.get(reverse("intake:case_detail", args=[case.case_id]))
+        assert response.status_code == 200
+        content = response.content.decode()
+        assert "Carlos Eduardo" in content
+        # Nenhum CRM/COREN deve aparecer
+        assert "CRM" not in content or "Carlos Eduardo" in content
+
     def test_result_hidden_for_in_progress(self, client) -> None:
         """WAIT_DOCTOR → badges de resultado não aparecem (stepper tem "Resultado Final" como label)."""
         client, user = _nir_client(client)
