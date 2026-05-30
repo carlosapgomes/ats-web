@@ -494,6 +494,40 @@ class TestCaseDetailDoctorDisplay:
         # Nenhum CRM/COREN deve aparecer
         assert "CRM" not in content or "Carlos Eduardo" in content
 
+    def test_terminal_appointment_denied_shows_denied_not_confirmed(self, client) -> None:
+        """WAIT_R1_CLEANUP_THUMBS com appointment_status="denied" mostra Agendamento Negado, não Confirmado."""
+        client, user = _nir_client(client)
+        doctor = User.objects.create_user(
+            username="doc.denied@test.com",
+            password="pass123",
+            first_name="Paulo",
+            last_name="Henrique",
+        )
+        doctor.professional_council = "CRM"
+        doctor.professional_council_number = "12345"
+        doctor.save()
+        case = _case_with_patient(
+            Case.objects.create(
+                created_by=user,
+                agency_record_number="TERM-DENIED",
+                status=CaseStatus.WAIT_R1_CLEANUP_THUMBS,
+                doctor=doctor,
+                doctor_decision="accept",
+                doctor_admission_flow="scheduled",
+                doctor_support_flag="none",
+                appointment_status="denied",
+                appointment_reason="Vaga indisponível",
+            )
+        )
+        response = client.get(reverse("intake:case_detail", args=[case.case_id]))
+        assert response.status_code == 200
+        content = response.content.decode()
+        assert "Agendamento Negado" in content
+        assert "Vaga indisponível" in content
+        assert "Paulo Henrique" in content
+        assert "CRM 12345" in content
+        assert "Agendamento Confirmado" not in content
+
     def test_result_hidden_for_in_progress(self, client) -> None:
         """WAIT_DOCTOR → badges de resultado não aparecem (stepper tem "Resultado Final" como label)."""
         client, user = _nir_client(client)
