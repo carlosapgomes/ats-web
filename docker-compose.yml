@@ -21,3 +21,5 @@ services:
 networks:
   ats-net:
     driver: bridge
+  hospital_edge:
+    external: true
