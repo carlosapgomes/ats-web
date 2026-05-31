@@ -73,6 +73,7 @@ class Case(models.Model):
         blank=True,
         related_name="cases_decided",
     )
+    doctor_observation = models.CharField(max_length=500, blank=True)
     doctor_decision = models.CharField(max_length=10, blank=True)
     doctor_support_flag = models.CharField(max_length=20, blank=True, default="none")
     doctor_admission_flow = models.CharField(max_length=15, blank=True)

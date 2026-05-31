@@ -842,6 +842,66 @@ class TestDoctorDecisionForm:
         )
         assert form.is_valid()
 
+    # ── Observation field tests ──────────────────────────────────────────
+
+    def test_accept_with_empty_observation_is_valid(self) -> None:
+        """Accept decision with empty observation is valid."""
+        from apps.doctor.forms import DoctorDecisionForm
+
+        form = DoctorDecisionForm(
+            data={
+                "decision": "accept",
+                "support_flag": "anesthesist",
+                "admission_flow": "scheduled",
+                "observation": "",
+            }
+        )
+        assert form.is_valid()
+
+    def test_accept_with_500_char_observation_is_valid(self) -> None:
+        """Accept decision with observation of exactly 500 chars is valid."""
+        from apps.doctor.forms import DoctorDecisionForm
+
+        text_500 = "x" * 500
+        form = DoctorDecisionForm(
+            data={
+                "decision": "accept",
+                "support_flag": "anesthesist",
+                "admission_flow": "scheduled",
+                "observation": text_500,
+            }
+        )
+        assert form.is_valid()
+
+    def test_accept_with_501_char_observation_is_invalid(self) -> None:
+        """Accept decision with observation of 501 chars is invalid."""
+        from apps.doctor.forms import DoctorDecisionForm
+
+        text_501 = "x" * 501
+        form = DoctorDecisionForm(
+            data={
+                "decision": "accept",
+                "support_flag": "anesthesist",
+                "admission_flow": "scheduled",
+                "observation": text_501,
+            }
+        )
+        assert not form.is_valid()
+        assert "observation" in form.errors
+
+    def test_deny_with_observation_is_valid(self) -> None:
+        """Deny decision with observation filled is valid."""
+        from apps.doctor.forms import DoctorDecisionForm
+
+        form = DoctorDecisionForm(
+            data={
+                "decision": "deny",
+                "reason": "Contorno clínico não indicado",
+                "observation": "Paciente pode ser reavaliado em 30 dias.",
+            }
+        )
+        assert form.is_valid()
+
 
 # ── FSM tests ────────────────────────────────────────────────────────────
 
@@ -1139,6 +1199,100 @@ class TestDoctorSubmitView:
         sw = Path("static/js/sw.js").read_text()
         assert 'event.request.method !== "GET"' in sw
         assert "ats-cache-v2" in sw
+
+    # ── Observation submit tests ──────────────────────────────────────────
+
+    def test_submit_accept_with_observation_persists(self, client) -> None:
+        """POST accept with observation persists case.doctor_observation."""
+        case = self._create_case_in_status(CaseStatus.WAIT_DOCTOR)
+        case.structured_data = {"patient": {"name": "Obs Accept", "age": 40, "gender": "Masculino"}}
+        case.save()
+
+        self._login_as(client, "doctor")
+
+        response = client.post(
+            f"/doctor/{case.case_id}/submit/",
+            data={
+                "decision": "accept",
+                "support_flag": "anesthesist",
+                "admission_flow": "scheduled",
+                "observation": "Paciente com comorbidades. Necessário leito UTI.",
+            },
+        )
+        assert response.status_code == 302
+
+        case = Case.objects.get(pk=case.pk)
+        assert case.doctor_observation == "Paciente com comorbidades. Necessário leito UTI."
+
+    def test_submit_deny_with_observation_persists(self, client) -> None:
+        """POST deny with observation persists case.doctor_observation."""
+        case = self._create_case_in_status(CaseStatus.WAIT_DOCTOR)
+        case.structured_data = {"patient": {"name": "Obs Deny", "age": 50, "gender": "Feminino"}}
+        case.save()
+
+        self._login_as(client, "doctor")
+
+        response = client.post(
+            f"/doctor/{case.case_id}/submit/",
+            data={
+                "decision": "deny",
+                "reason": "Sem indicação cirúrgica",
+                "observation": "Encaminhar para avaliação clínica.",
+            },
+        )
+        assert response.status_code == 302
+
+        case = Case.objects.get(pk=case.pk)
+        assert case.doctor_observation == "Encaminhar para avaliação clínica."
+
+    def test_submit_without_observation_persists_empty_string(self, client) -> None:
+        """POST without observation persists empty string and doesn't break flow."""
+        case = self._create_case_in_status(CaseStatus.WAIT_DOCTOR)
+        case.structured_data = {"patient": {"name": "No Obs", "age": 35, "gender": "Masculino"}}
+        case.save()
+
+        self._login_as(client, "doctor")
+
+        response = client.post(
+            f"/doctor/{case.case_id}/submit/",
+            data={
+                "decision": "accept",
+                "support_flag": "none",
+                "admission_flow": "scheduled",
+            },
+        )
+        assert response.status_code == 302
+
+        case = Case.objects.get(pk=case.pk)
+        assert case.doctor_observation == ""
+        assert case.status == CaseStatus.WAIT_APPT
+
+    def test_submit_with_observation_over_500_chars_shows_error(self, client) -> None:
+        """POST with observation over 500 chars re-renders form with error."""
+        case = self._create_case_in_status(CaseStatus.WAIT_DOCTOR)
+        case.structured_data = {"patient": {"name": "Long Obs", "age": 45, "gender": "Masculino"}}
+        case.save()
+
+        self._login_as(client, "doctor")
+
+        text_501 = "x" * 501
+        response = client.post(
+            f"/doctor/{case.case_id}/submit/",
+            data={
+                "decision": "accept",
+                "support_flag": "none",
+                "admission_flow": "scheduled",
+                "observation": text_501,
+            },
+        )
+        assert response.status_code == 200  # re-renders form
+        content = response.content.decode()
+        assert "error" in content.lower() or "caractere" in content.lower()
+
+        # Case status should NOT have changed
+        case = Case.objects.get(pk=case.pk)
+        assert case.status == CaseStatus.WAIT_DOCTOR
+        assert case.doctor_observation == ""
 
     def test_submit_non_wait_doctor_returns_404(self, client) -> None:
         """POST to non-WAIT_DOCTOR case returns 404."""
