@@ -1,8 +1,10 @@
 """Views for the doctor app."""
 
+import uuid
 from datetime import date
 from typing import Any
 
+from django.contrib import messages
 from django.contrib.auth.decorators import login_required
 from django.db.models import QuerySet
 from django.http import FileResponse, Http404, HttpRequest, HttpResponse, HttpResponseBase
@@ -12,6 +14,7 @@ from django.views.decorators.clickjacking import xframe_options_sameorigin
 
 from apps.accounts.decorators import role_required
 from apps.cases.models import Case, CaseStatus
+from apps.cases.services import assert_case_lock, claim_case_lock, expire_stale_locks_for_statuses
 
 from .forms import DoctorDecisionForm
 from .presenters import DoctorReportPresenter
@@ -130,9 +133,9 @@ def _get_doctor_decision_display(case: Case) -> str:
 # ── Card builder ─────────────────────────────────────────────────────────
 
 
-def _build_case_card(case: Case, wait_minutes: int) -> dict[str, Any]:
+def _build_case_card(case: Case, wait_minutes: int, user: Any = None) -> dict[str, Any]:
     """Build a dict with all display data for a case card."""
-    return {
+    card: dict[str, Any] = {
         "case_id": str(case.case_id),
         "patient_name": _get_patient_name(case),
         "patient_age": _get_patient_age(case),
@@ -149,6 +152,17 @@ def _build_case_card(case: Case, wait_minutes: int) -> dict[str, Any]:
         "is_urgent": wait_minutes <= 15,
     }
 
+    # Lock info
+    now = timezone.now()
+    is_locked = case.locked_by is not None and case.locked_until is not None and case.locked_until > now
+    card["is_locked"] = is_locked
+    card["is_locked_by_current_user"] = bool(is_locked and user and case.locked_by_id == user.pk)
+    card["locked_by_display"] = case.locked_by.display_name if is_locked and case.locked_by else ""
+    card["locked_until"] = case.locked_until.isoformat() if is_locked and case.locked_until else ""
+    card["lock_context"] = case.lock_context if is_locked else ""
+
+    return card
+
 
 # ── View ──────────────────────────────────────────────────────────────────
 
@@ -157,6 +171,9 @@ def _build_case_card(case: Case, wait_minutes: int) -> dict[str, Any]:
 @role_required("doctor")
 def _doctor_queue_context(request: HttpRequest) -> dict[str, Any]:
     """Build context for full and HTMX doctor queue renders."""
+    # Lazily expire stale locks before querying
+    expire_stale_locks_for_statuses(statuses=[CaseStatus.WAIT_DOCTOR])
+
     pending_cases: QuerySet[Case] = Case.objects.filter(status=CaseStatus.WAIT_DOCTOR).order_by("created_at")
 
     today: date = date.today()
@@ -177,7 +194,7 @@ def _doctor_queue_context(request: HttpRequest) -> dict[str, Any]:
     for case in pending_cases:
         delta = now - case.created_at
         wait_minutes = int(delta.total_seconds() // 60)
-        pending_cards.append(_build_case_card(case, wait_minutes))
+        pending_cards.append(_build_case_card(case, wait_minutes, user=doctor_user))
 
     total_wait = sum(c["wait_minutes"] for c in pending_cards)
     avg_wait = int(total_wait / len(pending_cards)) if pending_cards else 0
@@ -266,20 +283,57 @@ def _build_decision_context(case: Case, form: DoctorDecisionForm) -> dict[str, A
 @login_required
 @role_required("doctor")
 def doctor_decision(request: HttpRequest, case_id: str) -> HttpResponse:
-    """GET: Renderiza formulário de decisão para um caso em WAIT_DOCTOR."""
+    """GET: Renderiza formulário de decisão para um caso em WAIT_DOCTOR.
+
+    Acquires a lock on the case before rendering. If the lock cannot be
+    acquired (another user has it), redirects to the queue with a warning.
+    """
     case = get_object_or_404(Case, pk=case_id)
 
     if case.status != CaseStatus.WAIT_DOCTOR:
         raise Http404("Caso não está aguardando decisão médica.")
 
+    user = request.user
+
+    # Attempt to claim the lock
+    result = claim_case_lock(
+        case_id=case.case_id,
+        user=user,
+        expected_status=CaseStatus.WAIT_DOCTOR,
+        context="doctor_decision",
+        role="doctor",
+    )
+
+    if not result.acquired:
+        if result.locked_by_display:
+            messages.warning(
+                request,
+                f"Este caso está reservado por {result.locked_by_display}. "
+                f"Aguarde até que a reserva expire para acessá-lo.",
+            )
+        else:
+            messages.warning(
+                request,
+                "Não foi possível acessar este caso no momento. Tente novamente.",
+            )
+        return redirect("doctor:queue")
+
+    # Use fresh DB instance (refresh_from_db conflicts with django-fsm)
+    case = get_object_or_404(Case, pk=case_id)
     form = DoctorDecisionForm()
-    return render(request, "doctor/decision.html", _build_decision_context(case, form))
+    context = _build_decision_context(case, form)
+    context["lock_token"] = str(result.token)
+    return render(request, "doctor/decision.html", context)
 
 
 @login_required
 @role_required("doctor")
 def doctor_submit(request: HttpRequest, case_id: str) -> HttpResponse:
-    """POST: Valida formulário, persiste decisão e executa transições FSM."""
+    """POST: Valida formulário, persiste decisão e executa transições FSM.
+
+    Requires a valid lock_token to proceed. If the lock is invalid or
+    expired, re-renders the form with an error message.
+    """
     if request.method != "POST":
         raise Http404
 
@@ -288,10 +342,41 @@ def doctor_submit(request: HttpRequest, case_id: str) -> HttpResponse:
     if case.status != CaseStatus.WAIT_DOCTOR:
         raise Http404("Caso não está aguardando decisão médica.")
 
+    # Validate lock token
+    raw_token = request.POST.get("lock_token", "")
+    try:
+        token = uuid.UUID(raw_token) if raw_token else None
+    except (ValueError, AttributeError):
+        token = None
+
+    if token is None:
+        form = DoctorDecisionForm(request.POST)
+        ctx = _build_decision_context(case, form)
+        ctx["lock_error"] = "Sua reserva para este caso expirou ou não é válida. Volte para a fila e tente novamente."
+        messages.warning(request, "Token de reserva não encontrado. Volte para a fila.")
+        return render(request, "doctor/decision.html", ctx)
+
+    # Check lock validity before proceeding
+    try:
+        assert_case_lock(
+            case=case,
+            user=request.user,
+            token=token,
+            context="doctor_decision",
+        )
+    except PermissionError as exc:
+        form = DoctorDecisionForm(request.POST)
+        ctx = _build_decision_context(case, form)
+        ctx["lock_error"] = str(exc)
+        messages.warning(request, str(exc))
+        return render(request, "doctor/decision.html", ctx)
+
     form = DoctorDecisionForm(request.POST)
 
     if not form.is_valid():
-        return render(request, "doctor/decision.html", _build_decision_context(case, form))
+        ctx = _build_decision_context(case, form)
+        ctx["lock_token"] = raw_token
+        return render(request, "doctor/decision.html", ctx)
 
     decision = form.cleaned_data["decision"]
 

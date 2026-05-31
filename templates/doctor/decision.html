@@ -103,6 +103,15 @@
             <div class="form-text">{{ form.observation.help_text }}</div>
           </div>
 
+          {% if lock_error %}
+          <div class="alert alert-danger mb-3">
+            🔒 {{ lock_error }}
+            <a href="{% url 'doctor:queue' %}" class="alert-link">Voltar para fila</a>
+          </div>
+          {% endif %}
+
+          <input type="hidden" name="lock_token" value="{{ lock_token|default:"" }}">
+
           <div class="d-flex gap-2">
             <button type="submit" class="btn btn-hospital btn-lg flex-grow-1" id="btn-submit">Enviar Decisão</button>
             <a href="{% url 'doctor:queue' %}" class="btn btn-outline-secondary btn-lg">Cancelar</a>
