@@ -752,6 +752,20 @@ class TestSchedulerSubmitView:
         case.save()
         return case
 
+    def _claim_lock(self, case_id, scheduler) -> str:
+        """Acquire a scheduler_confirm lock for the given case and user."""
+        from apps.cases.services import claim_case_lock
+
+        result = claim_case_lock(
+            case_id=case_id,
+            user=scheduler,
+            expected_status=CaseStatus.WAIT_APPT,
+            context="scheduler_confirm",
+            role="scheduler",
+        )
+        assert result.acquired is True
+        return str(result.token)
+
     # ── Confirm submit ────────────────────────────────────────────────
 
     def test_submit_confirm_updates_case(self, client) -> None:
@@ -759,6 +773,7 @@ class TestSchedulerSubmitView:
         self._login_as(client, "scheduler")
         case = self._create_waited_case()
         scheduler_user = User.objects.get(username="scheduler@submit.test")
+        token = self._claim_lock(case.case_id, scheduler_user)
 
         response = client.post(
             f"/scheduler/{case.case_id}/submit/",
@@ -768,6 +783,7 @@ class TestSchedulerSubmitView:
                 "appointment_time": "14:30",
                 "notes": "Trazer exames.",
                 "reason": "",
+                "lock_token": token,
             },
         )
         assert response.status_code == 302
@@ -789,6 +805,8 @@ class TestSchedulerSubmitView:
         """POST confirm registra CaseEvent APPT_CONFIRMED + FINAL_REPLY_POSTED."""
         self._login_as(client, "scheduler")
         case = self._create_waited_case()
+        scheduler_user = User.objects.get(username="scheduler@submit.test")
+        token = self._claim_lock(case.case_id, scheduler_user)
 
         client.post(
             f"/scheduler/{case.case_id}/submit/",
@@ -798,6 +816,7 @@ class TestSchedulerSubmitView:
                 "appointment_time": "14:30",
                 "notes": "",
                 "reason": "",
+                "lock_token": token,
             },
         )
 
@@ -811,6 +830,7 @@ class TestSchedulerSubmitView:
         self._login_as(client, "scheduler")
         case = self._create_waited_case()
         scheduler_user = User.objects.get(username="scheduler@submit.test")
+        token = self._claim_lock(case.case_id, scheduler_user)
 
         response = client.post(
             f"/scheduler/{case.case_id}/submit/",
@@ -820,6 +840,7 @@ class TestSchedulerSubmitView:
                 "appointment_time": "",
                 "notes": "",
                 "reason": "Indisponibilidade de vaga.",
+                "lock_token": token,
             },
         )
         assert response.status_code == 302
@@ -836,6 +857,8 @@ class TestSchedulerSubmitView:
         """POST deny registra CaseEvent APPT_DENIED + FINAL_REPLY_POSTED."""
         self._login_as(client, "scheduler")
         case = self._create_waited_case()
+        scheduler_user = User.objects.get(username="scheduler@submit.test")
+        token = self._claim_lock(case.case_id, scheduler_user)
 
         client.post(
             f"/scheduler/{case.case_id}/submit/",
@@ -845,6 +868,7 @@ class TestSchedulerSubmitView:
                 "appointment_time": "",
                 "notes": "",
                 "reason": "Conflito de agenda.",
+                "lock_token": token,
             },
         )
 
@@ -931,3 +955,621 @@ class TestSchedulerSubmitView:
         case = self._create_waited_case()
         response = client.get(f"/scheduler/{case.case_id}/submit/")
         assert response.status_code == 404
+
+
+@pytest.mark.django_db
+class TestSchedulerConfirmLock:
+    """Tests for scheduler_confirm lock acquisition and template."""
+
+    def _create_role(self, name: str):
+        role, _ = Role.objects.get_or_create(name=name)
+        return role
+
+    def _login_as(self, client, role_name: str):
+        user = User.objects.create_user(username=f"{role_name}@lock.test", password="testpass123")
+        user.roles.add(self._create_role(role_name))
+        client.force_login(user)
+        session = client.session
+        session["active_role"] = role_name
+        session.save()
+        return user
+
+    def _create_waited_case(self, **overrides) -> Case:
+        nir_user = User.objects.create_user(username="nir_lock@test.com", password="testpass123")
+        nir_user.roles.add(self._create_role("nir"))
+        defaults = {
+            "created_by": nir_user,
+            "status": CaseStatus.WAIT_APPT,
+            "doctor_decision": "accept",
+            "doctor_support_flag": "anesthesist",
+            "doctor_admission_flow": "scheduled",
+            "structured_data": {
+                "patient": {
+                    "name": "Maria Lock",
+                    "age": 75,
+                    "gender": "Feminino",
+                },
+            },
+        }
+        defaults.update(overrides)
+        case = Case.objects.create(**defaults)
+        case.save()
+        return case
+
+    def test_confirm_acquires_lock_on_get(self, client) -> None:
+        """GET scheduler_confirm acquires a WORK_LOCK_CLAIMED with context scheduler_confirm."""
+        self._login_as(client, "scheduler")
+        case = self._create_waited_case()
+
+        response = client.get(f"/scheduler/{case.case_id}/")
+        assert response.status_code == 200
+
+        # Lock should be acquired
+        case = Case.objects.get(pk=case.case_id)
+        assert case.locked_by is not None
+        assert case.lock_context == "scheduler_confirm"
+        assert case.lock_role == "scheduler"
+        assert case.lock_token is not None
+        assert case.locked_until is not None
+        assert case.locked_at is not None
+
+        # Verify event
+        assert CaseEvent.objects.filter(case=case, event_type="WORK_LOCK_CLAIMED").exists()
+
+    def test_confirm_template_contains_lock_token_and_js_config(self, client) -> None:
+        """Template contains hidden lock_token and work-lock-config for JS heartbeat."""
+        self._login_as(client, "scheduler")
+        case = self._create_waited_case()
+
+        response = client.get(f"/scheduler/{case.case_id}/")
+        assert response.status_code == 200
+        content = response.content.decode()
+
+        # Hidden lock_token input
+        assert 'name="lock_token"' in content
+        assert 'type="hidden"' in content
+
+        # Work lock JS config
+        assert "data-work-lock-config" in content
+        assert "data-renew-url" in content
+        assert "data-release-url" in content
+        assert "data-lock-token" in content
+
+        # work_lock.js script loaded
+        assert "work_lock.js" in content
+
+        # Warning element exists
+        assert "work-lock-warning" in content
+
+    def test_second_scheduler_blocked_from_locked_case(self, client) -> None:
+        """Second scheduler cannot open confirm page for case locked by another scheduler."""
+        self._login_as(client, "scheduler")
+        case = self._create_waited_case()
+
+        # First scheduler acquires lock
+        response = client.get(f"/scheduler/{case.case_id}/")
+        assert response.status_code == 200
+
+        # Second scheduler tries to open
+        scheduler_b = User.objects.create_user(username="scheduler_b@lock.test", password="testpass123")
+        scheduler_b.roles.add(self._create_role("scheduler"))
+        client.force_login(scheduler_b)
+        session = client.session
+        session["active_role"] = "scheduler"
+        session.save()
+
+        response = client.get(f"/scheduler/{case.case_id}/")
+        # Should redirect to queue with a warning
+        assert response.status_code == 302
+        assert response.url == "/scheduler/"
+
+    def test_submit_with_valid_token_succeeds(self, client) -> None:
+        """POST submit with valid lock_token confirms and follows FSM."""
+        self._login_as(client, "scheduler")
+        case = self._create_waited_case()
+
+        # First acquire lock via GET
+        client.get(f"/scheduler/{case.case_id}/")
+        case = Case.objects.get(pk=case.case_id)
+        token = str(case.lock_token)
+
+        response = client.post(
+            f"/scheduler/{case.case_id}/submit/",
+            {
+                "decision": "confirm",
+                "appointment_date": "2026-06-15",
+                "appointment_time": "14:30",
+                "notes": "Confirmado",
+                "reason": "",
+                "lock_token": token,
+            },
+        )
+        assert response.status_code == 302
+        assert response.url == "/scheduler/"
+
+        # Verify FSM transition
+        updated_case = Case.objects.get(pk=case.case_id)
+        assert updated_case.status == CaseStatus.WAIT_R1_CLEANUP_THUMBS
+        assert updated_case.appointment_status == "confirmed"
+
+    def test_submit_without_token_does_not_submit(self, client) -> None:
+        """POST submit without lock_token does not alter case status."""
+        self._login_as(client, "scheduler")
+        case = self._create_waited_case()
+
+        response = client.post(
+            f"/scheduler/{case.case_id}/submit/",
+            {
+                "decision": "confirm",
+                "appointment_date": "2026-06-15",
+                "appointment_time": "14:30",
+                "notes": "",
+                "reason": "",
+            },
+        )
+        assert response.status_code == 200  # Re-renders with error
+        content = response.content.decode()
+        assert "reserva" in content.lower() or "Token" in content
+
+        # Case should still be WAIT_APPT
+        updated_case = Case.objects.get(pk=case.case_id)
+        assert updated_case.status == CaseStatus.WAIT_APPT
+
+    def test_submit_with_invalid_token_returns_error(self, client) -> None:
+        """POST submit with invalid lock_token does not alter case."""
+        self._login_as(client, "scheduler")
+        case = self._create_waited_case()
+
+        response = client.post(
+            f"/scheduler/{case.case_id}/submit/",
+            {
+                "decision": "confirm",
+                "appointment_date": "2026-06-15",
+                "appointment_time": "14:30",
+                "notes": "",
+                "reason": "",
+                "lock_token": "00000000-0000-0000-0000-000000000000",
+            },
+        )
+        assert response.status_code == 200
+        content = response.content.decode()
+        assert "reserva" in content.lower()
+
+        updated_case = Case.objects.get(pk=case.case_id)
+        assert updated_case.status == CaseStatus.WAIT_APPT
+
+    def test_expired_lock_can_be_assumed_by_another_scheduler(self, client) -> None:
+        """Expired lock can be taken over by another scheduler."""
+        scheduler_a = self._login_as(client, "scheduler")
+        case = self._create_waited_case()
+
+        # Acquire lock with lease_seconds=0 (expired immediately via manual override not possible through view)
+        # We'll use the service directly
+        from apps.cases.services import claim_case_lock
+
+        result = claim_case_lock(
+            case_id=case.case_id,
+            user=scheduler_a,
+            expected_status=CaseStatus.WAIT_APPT,
+            context="scheduler_confirm",
+            role="scheduler",
+            lease_seconds=0,
+        )
+        assert result.acquired is True
+
+        # Force expiration
+        from datetime import timedelta
+
+        from django.utils import timezone
+
+        Case.objects.filter(case_id=case.case_id).update(locked_until=timezone.now() - timedelta(seconds=1))
+
+        # Second scheduler claims expired lock
+        scheduler_b = User.objects.create_user(username="scheduler_exp@lock.test", password="testpass123")
+        scheduler_b.first_name = "Sched"
+        scheduler_b.last_name = "B"
+        scheduler_b.roles.add(self._create_role("scheduler"))
+        client.force_login(scheduler_b)
+        session = client.session
+        session["active_role"] = "scheduler"
+        session.save()
+
+        response = client.get(f"/scheduler/{case.case_id}/")
+        assert response.status_code == 200
+
+        # Must have WORK_LOCK_EXPIRED event
+        expired_event = CaseEvent.objects.filter(
+            case=case,
+            event_type="WORK_LOCK_EXPIRED",
+        ).last()
+        assert expired_event is not None
+        assert expired_event.payload.get("expired_locked_by_id") is not None
+        assert expired_event.payload.get("context") == "scheduler_confirm"
+
+
+@pytest.mark.django_db
+class TestSchedulerLockEndpoints:
+    """Tests for scheduler lock renew/release endpoints."""
+
+    def _create_role(self, name: str):
+        role, _ = Role.objects.get_or_create(name=name)
+        return role
+
+    def _login_as(self, client, role_name: str):
+        user = User.objects.create_user(username=f"{role_name}@locksvc.test", password="testpass123")
+        user.roles.add(self._create_role(role_name))
+        client.force_login(user)
+        session = client.session
+        session["active_role"] = role_name
+        session.save()
+        return user
+
+    def _create_waited_case(self, **overrides) -> Case:
+        nir_user = User.objects.create_user(username="nir_locksvc@test.com", password="testpass123")
+        nir_user.roles.add(self._create_role("nir"))
+        defaults = {
+            "created_by": nir_user,
+            "status": CaseStatus.WAIT_APPT,
+            "doctor_decision": "accept",
+            "doctor_support_flag": "anesthesist",
+            "doctor_admission_flow": "scheduled",
+            "structured_data": {
+                "patient": {
+                    "name": "Lock Svc",
+                    "age": 50,
+                    "gender": "M",
+                },
+            },
+        }
+        defaults.update(overrides)
+        case = Case.objects.create(**defaults)
+        case.save()
+        return case
+
+    def test_renew_requires_scheduler_role(self, client) -> None:
+        """Renew endpoint redirects non-scheduler roles."""
+        case = self._create_waited_case()
+        self._login_as(client, "nir")
+        response = client.post(f"/scheduler/{case.case_id}/lock/renew/")
+        assert response.status_code == 302
+        assert response.url == "/"
+
+    def test_release_requires_scheduler_role(self, client) -> None:
+        """Release endpoint redirects non-scheduler roles."""
+        case = self._create_waited_case()
+        self._login_as(client, "nir")
+        response = client.post(f"/scheduler/{case.case_id}/lock/release/")
+        assert response.status_code == 302
+        assert response.url == "/"
+
+    def test_renew_rejects_get(self, client) -> None:
+        """Renew endpoint returns 404 for GET."""
+        case = self._create_waited_case()
+        self._login_as(client, "scheduler")
+        response = client.get(f"/scheduler/{case.case_id}/lock/renew/")
+        assert response.status_code == 404
+
+    def test_release_rejects_get(self, client) -> None:
+        """Release endpoint returns 404 for GET."""
+        case = self._create_waited_case()
+        self._login_as(client, "scheduler")
+        response = client.get(f"/scheduler/{case.case_id}/lock/release/")
+        assert response.status_code == 404
+
+    def test_renew_with_valid_token_returns_success(self, client) -> None:
+        """POST renew with valid token returns JSON success."""
+        user = self._login_as(client, "scheduler")
+        case = self._create_waited_case()
+
+        # Acquire lock first
+        from apps.cases.services import claim_case_lock
+
+        result = claim_case_lock(
+            case_id=case.case_id,
+            user=user,
+            expected_status=CaseStatus.WAIT_APPT,
+            context="scheduler_confirm",
+            role="scheduler",
+        )
+        assert result.acquired is True
+
+        response = client.post(
+            f"/scheduler/{case.case_id}/lock/renew/",
+            data={"lock_token": str(result.token)},
+        )
+        assert response.status_code == 200
+        import json
+
+        data = json.loads(response.content)
+        assert data.get("success") is True
+        assert "locked_until" in data
+
+    def test_renew_with_invalid_token_returns_error(self, client) -> None:
+        """POST renew with invalid token returns error."""
+        user = self._login_as(client, "scheduler")
+        case = self._create_waited_case()
+
+        from apps.cases.services import claim_case_lock
+
+        result = claim_case_lock(
+            case_id=case.case_id,
+            user=user,
+            expected_status=CaseStatus.WAIT_APPT,
+            context="scheduler_confirm",
+            role="scheduler",
+        )
+        assert result.acquired is True
+
+        import uuid
+
+        response = client.post(
+            f"/scheduler/{case.case_id}/lock/renew/",
+            data={"lock_token": str(uuid.uuid4())},
+        )
+        assert response.status_code == 200
+        import json
+
+        data = json.loads(response.content)
+        assert data.get("success") is False
+        assert "error" in data
+
+    def test_release_with_valid_token_clears_lock(self, client) -> None:
+        """POST release with valid token clears lock fields."""
+        user = self._login_as(client, "scheduler")
+        case = self._create_waited_case()
+
+        from apps.cases.services import claim_case_lock
+
+        result = claim_case_lock(
+            case_id=case.case_id,
+            user=user,
+            expected_status=CaseStatus.WAIT_APPT,
+            context="scheduler_confirm",
+            role="scheduler",
+        )
+        assert result.acquired is True
+
+        response = client.post(
+            f"/scheduler/{case.case_id}/lock/release/",
+            data={"lock_token": str(result.token)},
+        )
+        assert response.status_code == 200
+        import json
+
+        data = json.loads(response.content)
+        assert data.get("success") is True
+
+        case = Case.objects.get(pk=case.case_id)
+        assert case.locked_by is None
+        assert case.lock_token is None
+
+    def test_release_with_invalid_token_does_not_clear(self, client) -> None:
+        """POST release with invalid token does not clear lock."""
+        user = self._login_as(client, "scheduler")
+        case = self._create_waited_case()
+
+        from apps.cases.services import claim_case_lock
+
+        result = claim_case_lock(
+            case_id=case.case_id,
+            user=user,
+            expected_status=CaseStatus.WAIT_APPT,
+            context="scheduler_confirm",
+            role="scheduler",
+        )
+        assert result.acquired is True
+
+        import uuid
+
+        response = client.post(
+            f"/scheduler/{case.case_id}/lock/release/",
+            data={"lock_token": str(uuid.uuid4())},
+        )
+        assert response.status_code == 200
+        import json
+
+        data = json.loads(response.content)
+        assert data.get("success") is False
+
+        case = Case.objects.get(pk=case.case_id)
+        assert case.locked_by == user
+
+
+@pytest.mark.django_db
+class TestSchedulerQueueLockDisplay:
+    """Tests for lock display in scheduler queue."""
+
+    def _create_role(self, name: str):
+        role, _ = Role.objects.get_or_create(name=name)
+        return role
+
+    def _login_as(self, client, role_name: str):
+        user = User.objects.create_user(username=f"{role_name}@qldisp.test", password="testpass123")
+        user.roles.add(self._create_role(role_name))
+        client.force_login(user)
+        session = client.session
+        session["active_role"] = role_name
+        session.save()
+        return user
+
+    def _create_waited_case(self, **overrides) -> Case:
+        nir_user = User.objects.create_user(username="nir_qldisp@test.com", password="testpass123")
+        nir_user.roles.add(self._create_role("nir"))
+        defaults = {
+            "created_by": nir_user,
+            "status": CaseStatus.WAIT_APPT,
+            "doctor_decision": "accept",
+            "doctor_support_flag": "anesthesist",
+            "doctor_admission_flow": "scheduled",
+            "structured_data": {
+                "patient": {
+                    "name": "Queue Lock",
+                    "age": 45,
+                    "gender": "M",
+                },
+            },
+        }
+        defaults.update(overrides)
+        case = Case.objects.create(**defaults)
+        case.save()
+        return case
+
+    def test_queue_shows_locked_by_other_scheduler(self, client) -> None:
+        """WAIT_APPT case locked by another scheduler shows lock info."""
+        self._login_as(client, "scheduler")
+        case = self._create_waited_case()
+
+        # Lock the case to another user directly
+        other = User.objects.create_user(username="other_sched@qldisp.test", password="testpass123")
+        other.first_name = "Outro"
+        other.last_name = "Agendador"
+        other.roles.add(self._create_role("scheduler"))
+        other.save()
+
+        import uuid
+        from datetime import timedelta
+
+        from django.utils import timezone
+
+        Case.objects.filter(case_id=case.case_id).update(
+            locked_by=other,
+            locked_at=timezone.now(),
+            locked_until=timezone.now() + timedelta(minutes=5),
+            lock_token=uuid.uuid4(),
+            lock_context="scheduler_confirm",
+            lock_role="scheduler",
+        )
+
+        response = client.get("/scheduler/")
+        assert response.status_code == 200
+        content = response.content.decode()
+
+        assert "Outro Agendador" in content or other.display_name in content
+        assert "Agendar" not in content or "disabled" in content
+
+    def test_queue_shows_continue_for_own_lock(self, client) -> None:
+        """WAIT_APPT case locked by current user shows continue button."""
+        user = self._login_as(client, "scheduler")
+        case = self._create_waited_case()
+
+        # Lock the case to current user
+        import uuid
+        from datetime import timedelta
+
+        from django.utils import timezone
+
+        Case.objects.filter(case_id=case.case_id).update(
+            locked_by=user,
+            locked_at=timezone.now(),
+            locked_until=timezone.now() + timedelta(minutes=5),
+            lock_token=uuid.uuid4(),
+            lock_context="scheduler_confirm",
+            lock_role="scheduler",
+        )
+
+        response = client.get("/scheduler/")
+        assert response.status_code == 200
+        content = response.content.decode()
+
+        # Should show a way to continue, not a disabled button
+        assert "disabled" not in content or "Reservado" not in content
+        # The case should still be visible
+        assert "Queue Lock" in content or "Agendar" in content
+
+
+@pytest.mark.django_db
+class TestImmediateAckIdempotent:
+    """Tests for immediate_ack idempotency under concurrency."""
+
+    def _create_role(self, name: str):
+        role, _ = Role.objects.get_or_create(name=name)
+        return role
+
+    def _login_as(self, client, role_name: str):
+        user = User.objects.create_user(username=f"{role_name}@immack.test", password="testpass123")
+        user.roles.add(self._create_role(role_name))
+        client.force_login(user)
+        session = client.session
+        session["active_role"] = role_name
+        session.save()
+        return user
+
+    def test_immediate_ack_requires_scheduler_role(self, client) -> None:
+        """POST immediate_ack blocks non-scheduler roles."""
+        nir_user = User.objects.create_user(username="nir_immack@test.com", password="testpass123")
+        nir_user.roles.add(self._create_role("nir"))
+        case = Case.objects.create(
+            created_by=nir_user,
+            status=CaseStatus.WAIT_R1_CLEANUP_THUMBS,
+            doctor_decision="accept",
+            doctor_admission_flow="immediate",
+            structured_data={"patient": {"name": "Imm Ack", "age": 50, "gender": "M"}},
+        )
+        CaseEvent.objects.create(
+            case=case,
+            actor_type="human",
+            actor=nir_user,
+            event_type="IMMEDIATE_ADMISSION_OPERATIONAL_NOTICE",
+            timestamp=timezone.now(),
+        )
+
+        self._login_as(client, "nir")
+        response = client.post(f"/scheduler/{case.case_id}/immediate-ack/")
+        assert response.status_code == 302
+        assert response.url == "/"
+
+    def test_immediate_ack_does_not_duplicate_event(self, client) -> None:
+        """Repeated POST immediate_ack does not create multiple SCHEDULER_IMMEDIATE_ACK events."""
+        self._login_as(client, "scheduler")
+        nir_user = User.objects.create_user(username="nir_dup@test.com", password="testpass123")
+        nir_user.roles.add(self._create_role("nir"))
+        case = Case.objects.create(
+            created_by=nir_user,
+            status=CaseStatus.WAIT_R1_CLEANUP_THUMBS,
+            doctor_decision="accept",
+            doctor_admission_flow="immediate",
+            structured_data={"patient": {"name": "Dup Imm", "age": 50, "gender": "M"}},
+        )
+        CaseEvent.objects.create(
+            case=case,
+            actor_type="human",
+            actor=nir_user,
+            event_type="IMMEDIATE_ADMISSION_OPERATIONAL_NOTICE",
+            timestamp=timezone.now(),
+        )
+
+        # Call twice
+        client.post(f"/scheduler/{case.case_id}/immediate-ack/")
+        client.post(f"/scheduler/{case.case_id}/immediate-ack/")
+
+        events = CaseEvent.objects.filter(case=case, event_type="SCHEDULER_IMMEDIATE_ACK")
+        assert events.count() == 1
+
+    def test_immediate_ack_removes_notice_from_queue(self, client) -> None:
+        """After ack, case no longer appears in immediate notice section."""
+        self._login_as(client, "scheduler")
+        nir_user = User.objects.create_user(username="nir_imm_remove@test.com", password="testpass123")
+        nir_user.roles.add(self._create_role("nir"))
+        case = Case.objects.create(
+            created_by=nir_user,
+            status=CaseStatus.WAIT_R1_CLEANUP_THUMBS,
+            doctor_decision="accept",
+            doctor_admission_flow="immediate",
+            structured_data={"patient": {"name": "Remove Imm", "age": 50, "gender": "M"}},
+        )
+        CaseEvent.objects.create(
+            case=case,
+            actor_type="human",
+            actor=nir_user,
+            event_type="IMMEDIATE_ADMISSION_OPERATIONAL_NOTICE",
+            timestamp=timezone.now(),
+        )
+
+        # Before ack: notice should appear
+        response = client.get("/scheduler/")
+        assert "Remove Imm" in response.content.decode()
+
+        # After ack: notice should disappear
+        client.post(f"/scheduler/{case.case_id}/immediate-ack/")
+        response = client.get("/scheduler/")
+        assert "Remove Imm" not in response.content.decode()
