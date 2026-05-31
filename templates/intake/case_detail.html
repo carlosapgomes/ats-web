@@ -143,6 +143,12 @@
       <p class="mb-0 fw-medium">{{ result_info.doctor_display }}</p>
     </div>
     {% endif %}
+    {% if result_info.scheduler_display %}
+    <div class="mb-3">
+      <p class="mb-1 text-muted small">Agendador responsável</p>
+      <p class="mb-0 fw-medium">{{ result_info.scheduler_display }}</p>
+    </div>
+    {% endif %}
     {% if result_info.reason %}
     <p class="mb-0"><strong>Motivo:</strong> {{ result_info.reason }}</p>
     {% endif %}

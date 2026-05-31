@@ -472,6 +472,8 @@ class TestCaseDetailDoctorDisplay:
         content = response.content.decode()
         assert "Pedro Alves" in content
         assert "CRM 11111" in content
+        # Sem agendador atribuído → campo não aparece
+        assert "Agendador responsável" not in content
 
     def test_doctor_denied_without_crm_shows_name(self, client) -> None:
         """Médico sem CRM mostra apenas o nome no resultado de recusa."""
@@ -506,6 +508,15 @@ class TestCaseDetailDoctorDisplay:
         doctor.professional_council = "CRM"
         doctor.professional_council_number = "12345"
         doctor.save()
+        scheduler = User.objects.create_user(
+            username="sched.denied@test.com",
+            password="pass123",
+            first_name="Marina",
+            last_name="Silva",
+        )
+        scheduler.professional_council = "COREN"
+        scheduler.professional_council_number = "54321"
+        scheduler.save()
         case = _case_with_patient(
             Case.objects.create(
                 created_by=user,
@@ -515,6 +526,7 @@ class TestCaseDetailDoctorDisplay:
                 doctor_decision="accept",
                 doctor_admission_flow="scheduled",
                 doctor_support_flag="none",
+                scheduler=scheduler,
                 appointment_status="denied",
                 appointment_reason="Vaga indisponível",
             )
@@ -526,6 +538,9 @@ class TestCaseDetailDoctorDisplay:
         assert "Vaga indisponível" in content
         assert "Paulo Henrique" in content
         assert "CRM 12345" in content
+        assert "Marina Silva" in content
+        assert "COREN 54321" in content
+        assert "Agendador responsável" in content
         assert "Agendamento Confirmado" not in content
 
     def test_result_hidden_for_in_progress(self, client) -> None:

@@ -127,27 +127,64 @@ def _compute_average_times() -> dict[str, str]:
     }
 
 
+def _compute_result(case: Case) -> tuple[str, str]:
+    """Computa label e classe CSS (Bootstrap badge) do resultado final."""
+    # Scope-gated manual review
+    if (
+        case.suggested_action
+        and isinstance(case.suggested_action, dict)
+        and case.suggested_action.get("decision") == "manual_review_required"
+    ):
+        return ("⚠ Revisão Manual", "bg-warning text-dark")
+
+    # Doctor denied
+    if case.doctor_decision == "deny":
+        return ("✗ Negado pelo Médico", "bg-danger")
+
+    # Appointment denied
+    if case.appointment_status == "denied":
+        return ("✗ Agendamento Negado", "bg-danger")
+
+    # Accepted — scheduled confirmed
+    if case.doctor_decision == "accept" and case.appointment_status == "confirmed":
+        return ("✓ Agendamento Confirmado", "bg-success")
+
+    # Accepted — immediate admission
+    if case.doctor_decision == "accept" and case.doctor_admission_flow == "immediate":
+        return ("✓ Vinda Imediata", "bg-success")
+
+    # Failed
+    if case.status == CaseStatus.FAILED:
+        return ("✗ Falha no Processamento", "bg-danger")
+
+    # Accepted by doctor — awaiting scheduler
+    if case.doctor_decision == "accept":
+        return ("⏳ Aguardando Agendamento", "bg-secondary")
+
+    # In progress — show current pipeline step
+    step_idx = STEP_STATUS_INDEX.get(case.status, 0)
+    step_label = STEPS[step_idx]["label"] if step_idx < len(STEPS) else "..."
+    return (f"⏳ {step_label}", "bg-secondary")
+
+
 def _enrich_case(case: Case) -> dict[str, object]:
-    """Enriquece um Case com labels e dados do paciente."""
+    """Enriquece um Case com dados de apresentação para cards do dashboard."""
     patient_name = ""
     if case.structured_data and isinstance(case.structured_data, dict):
         patient = case.structured_data.get("patient", {})
         if isinstance(patient, dict):
             patient_name = patient.get("name", "")
 
-    status_label = STATUS_LABELS.get(case.status, case.get_status_display())
-    status_css = STATUS_CSS_CLASS.get(case.status, "status-pending")
-    step_idx = STEP_STATUS_INDEX.get(case.status, 0)
-    step_label = STEPS[step_idx]["label"] if step_idx < len(STEPS) else "—"
-    origin_unit = case.get_origin_unit_display(compact=True)
+    result_label, result_css = _compute_result(case)
 
     return {
         "case": case,
         "patient_name": patient_name,
-        "status_label": status_label,
-        "status_css": status_css,
-        "step_label": step_label,
-        "origin_unit": origin_unit,
+        "patient_age": case.patient_age,
+        "patient_gender": case.patient_gender,
+        "result_label": result_label,
+        "result_css": result_css,
+        "origin_unit": case.get_origin_unit_display(compact=True),
     }
 
 
@@ -216,6 +253,16 @@ def dashboard_case_detail(request: HttpRequest, case_id: str) -> HttpResponse:
     events = case.events.all()
 
     current_step_idx = STEP_STATUS_INDEX.get(case.status, 0)
+    steps = STEPS
+    terminal_without_scheduling = case.status in (
+        CaseStatus.WAIT_R1_CLEANUP_THUMBS,
+        CaseStatus.CLEANED,
+    ) and (case.doctor_decision == "deny" or case.doctor_admission_flow == "immediate")
+    is_doctor_denied_final = terminal_without_scheduling and case.doctor_decision == "deny"
+    is_immediate_final = terminal_without_scheduling and case.doctor_admission_flow == "immediate"
+    if terminal_without_scheduling:
+        steps = [step for step in STEPS if step["label"] != "Agendamento"]
+        current_step_idx = len(steps) - 1
 
     enriched_events = []
     for e in events:
@@ -232,18 +279,49 @@ def dashboard_case_detail(request: HttpRequest, case_id: str) -> HttpResponse:
         CaseStatus.WAIT_R1_CLEANUP_THUMBS,
         CaseStatus.CLEANED,
     )
-    if case.status == CaseStatus.APPT_CONFIRMED or terminal_with_result:
+    # Scope-gated manual review takes priority for WAIT_R1_CLEANUP_THUMBS
+    is_scope_gated = (
+        case.suggested_action
+        and isinstance(case.suggested_action, dict)
+        and case.suggested_action.get("decision") == "manual_review_required"
+    )
+    if is_scope_gated:
+        reason_code = case.suggested_action.get("reason_code", "") if isinstance(case.suggested_action, dict) else ""
+        reason_text = case.suggested_action.get("reason_text", "") if isinstance(case.suggested_action, dict) else ""
+        result_info = {
+            "type": "manual_review_required",
+            "reason_code": reason_code,
+            "reason_text": reason_text,
+        }
+    elif is_doctor_denied_final or case.status == CaseStatus.DOCTOR_DENIED:
+        result_info = {
+            "type": "doctor_denied",
+            "reason": case.doctor_reason,
+            "doctor_display": case.doctor_display,
+        }
+    elif is_immediate_final:
+        result_info = {
+            "type": "accepted_immediate",
+            "support": SUPPORT_FLAG_MAP.get(case.doctor_support_flag, case.doctor_support_flag),
+            "flow": ADMISSION_FLOW_MAP.get(case.doctor_admission_flow, case.doctor_admission_flow),
+            "doctor_display": case.doctor_display,
+        }
+    elif case.status == CaseStatus.APPT_DENIED or (terminal_with_result and case.appointment_status == "denied"):
+        result_info = {
+            "type": "appt_denied",
+            "reason": case.appointment_reason,
+            "doctor_display": case.doctor_display,
+            "scheduler_display": case.scheduler_display,
+        }
+    elif case.status == CaseStatus.APPT_CONFIRMED or terminal_with_result:
         result_info = {
             "type": "accepted_scheduled",
             "appointment_at": case.appointment_at,
             "support": SUPPORT_FLAG_MAP.get(case.doctor_support_flag, case.doctor_support_flag),
             "flow": ADMISSION_FLOW_MAP.get(case.doctor_admission_flow, case.doctor_admission_flow),
             "instructions": case.appointment_instructions or "",
+            "doctor_display": case.doctor_display,
         }
-    elif case.status == CaseStatus.APPT_DENIED:
-        result_info = {"type": "appt_denied", "reason": case.appointment_reason}
-    elif case.status == CaseStatus.DOCTOR_DENIED:
-        result_info = {"type": "doctor_denied", "reason": case.doctor_reason}
     elif case.status == CaseStatus.FAILED:
         result_info = {"type": "failed"}
 
@@ -261,7 +339,7 @@ def dashboard_case_detail(request: HttpRequest, case_id: str) -> HttpResponse:
         {
             "case": case,
             "events": enriched_events,
-            "steps": STEPS,
+            "steps": steps,
             "current_step_idx": current_step_idx,
             "status_label": STATUS_LABELS.get(case.status, case.get_status_display()),
             "status_css": STATUS_CSS_CLASS.get(case.status, "status-pending"),

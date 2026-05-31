@@ -351,6 +351,7 @@ def case_detail(request: HttpRequest, case_id: str) -> HttpResponse:
             "type": "appt_denied",
             "reason": case.appointment_reason,
             "doctor_display": case.doctor_display,
+            "scheduler_display": case.scheduler_display,
         }
     elif case.status == CaseStatus.APPT_CONFIRMED or terminal_with_result:
         result_info = {

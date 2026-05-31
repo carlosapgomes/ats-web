@@ -175,6 +175,20 @@ class Case(models.Model):
             return f"{self.doctor.display_name} — {registration}"
         return self.doctor.display_name
 
+    @property
+    def scheduler_display(self) -> str:
+        """Exibe o agendador responsável com nome e registro profissional.
+
+        Formato: 'Nome — COREN 12345' ou apenas 'Nome' quando não há registro.
+        Retorna '' quando não há agendador atribuído.
+        """
+        if not self.scheduler:
+            return ""
+        registration = self.scheduler.professional_registration_display
+        if registration:
+            return f"{self.scheduler.display_name} — {registration}"
+        return self.scheduler.display_name
+
     def get_origin_unit_display(self, compact: bool = True) -> str:
         """Extrai e formata a unidade de origem do structured_data.
 

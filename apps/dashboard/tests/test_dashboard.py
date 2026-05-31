@@ -309,10 +309,10 @@ class TestDashboardSubMetrics:
 
 @pytest.mark.django_db
 class TestDashboardCaseTable:
-    """Verifica a tabela de todos os casos."""
+    """Verifica a lista de cards de todos os casos."""
 
     def test_case_table_shows_all_cases(self, client) -> None:
-        """Tabela lista todos os casos sem filtro de usuário."""
+        """Cards listam todos os casos sem filtro de usuário."""
         nir_user = User.objects.create_user(username="nir@table.test", password="testpass123")
         from apps.accounts.models import Role
 
@@ -340,7 +340,7 @@ class TestDashboardCaseTable:
         assert "select" in content or "Todos os status" in content or "status" in content.lower()
 
     def test_case_table_has_pagination(self, client) -> None:
-        """Paginação aparece na tabela de casos (>20 casos)."""
+        """Paginação aparece na lista (>20 casos)."""
         user = _login_as(client, "manager")
         for i in range(25):
             _create_case(created_by=user, status=CaseStatus.NEW, agency_record_number=f"PAG-{i:03d}")
@@ -362,13 +362,123 @@ class TestDashboardCaseTable:
         assert "Paciente Tabela Teste" in content
 
     def test_case_table_has_action_links(self, client) -> None:
-        """Tabela tem link 'Ver' para cada caso."""
+        """Cards têm link 'Ver detalhes' para cada caso."""
         user = _login_as(client, "manager")
-        case = _create_case(created_by=user, status=CaseStatus.NEW, agency_record_number="LINK-001")
+        _create_case(created_by=user, status=CaseStatus.NEW, agency_record_number="LINK-001")
         response = client.get("/dashboard/")
         assert response.status_code == 200
         content = response.content.decode()
-        assert str(case.case_id)[:8] in content or "LINK-001" in content
+        assert "Ver detalhes" in content
+
+
+# ── Dashboard: Case Result Badges ───────────────────────────────────────
+
+
+@pytest.mark.django_db
+class TestDashboardCaseResultBadges:
+    """Verifica que os cards mostram o badge de resultado correto."""
+
+    def test_in_progress_shows_step_label(self, client) -> None:
+        """Caso em WAIT_DOCTOR mostra badge '⏳ Avaliação Médica'."""
+        user = _login_as(client, "manager")
+        _create_case(created_by=user, status=CaseStatus.WAIT_DOCTOR, agency_record_number="BADGE-WAIT")
+        response = client.get("/dashboard/")
+        assert response.status_code == 200
+        content = response.content.decode()
+        assert "Avaliação Médica" in content
+        assert "bg-secondary" in content
+
+    def test_accepted_scheduled_shows_badge(self, client) -> None:
+        """Caso aceito com agendamento confirmado mostra badge verde (Bootstrap success)."""
+        user = _login_as(client, "manager")
+        _create_case(
+            created_by=user,
+            status=CaseStatus.WAIT_R1_CLEANUP_THUMBS,
+            agency_record_number="BADGE-ACCEPT",
+            doctor_decision="accept",
+            appointment_status="confirmed",
+        )
+        response = client.get("/dashboard/")
+        assert response.status_code == 200
+        content = response.content.decode()
+        assert "Agendamento Confirmado" in content
+        assert "bg-success" in content
+
+    def test_accepted_immediate_shows_badge(self, client) -> None:
+        """Caso aceito para vinda imediata mostra badge verde (Bootstrap success)."""
+        user = _login_as(client, "manager")
+        _create_case(
+            created_by=user,
+            status=CaseStatus.WAIT_R1_CLEANUP_THUMBS,
+            agency_record_number="BADGE-IMMED",
+            doctor_decision="accept",
+            doctor_admission_flow="immediate",
+        )
+        response = client.get("/dashboard/")
+        assert response.status_code == 200
+        content = response.content.decode()
+        assert "Vinda Imediata" in content
+        assert "bg-success" in content
+
+    def test_doctor_denied_shows_badge(self, client) -> None:
+        """Caso negado pelo médico mostra badge vermelho (Bootstrap danger)."""
+        user = _login_as(client, "manager")
+        _create_case(
+            created_by=user,
+            status=CaseStatus.DOCTOR_DENIED,
+            agency_record_number="BADGE-DRDENY",
+            doctor_decision="deny",
+        )
+        response = client.get("/dashboard/")
+        assert response.status_code == 200
+        content = response.content.decode()
+        assert "Negado pelo Médico" in content
+        assert "bg-danger" in content
+
+    def test_appointment_denied_shows_badge(self, client) -> None:
+        """Caso com agendamento negado mostra badge vermelho (Bootstrap danger)."""
+        user = _login_as(client, "manager")
+        _create_case(
+            created_by=user,
+            status=CaseStatus.WAIT_R1_CLEANUP_THUMBS,
+            agency_record_number="BADGE-APTDENY",
+            doctor_decision="accept",
+            appointment_status="denied",
+        )
+        response = client.get("/dashboard/")
+        assert response.status_code == 200
+        content = response.content.decode()
+        assert "Agendamento Negado" in content
+        assert "bg-danger" in content
+
+    def test_scope_gated_shows_manual_review_badge(self, client) -> None:
+        """Caso scope-gated mostra badge de revisão manual (Bootstrap warning)."""
+        user = _login_as(client, "manager")
+        _create_case(
+            created_by=user,
+            status=CaseStatus.WAIT_R1_CLEANUP_THUMBS,
+            agency_record_number="BADGE-SCOPE",
+            suggested_action={"decision": "manual_review_required", "reason_code": "non_eda"},
+        )
+        response = client.get("/dashboard/")
+        assert response.status_code == 200
+        content = response.content.decode()
+        assert "Revisão Manual" in content
+        assert "bg-warning" in content
+
+    def test_failed_shows_badge(self, client) -> None:
+        """Caso com falha mostra badge vermelho (Bootstrap danger)."""
+        user = _login_as(client, "manager")
+        _create_case(
+            created_by=user,
+            status=CaseStatus.FAILED,
+            agency_record_number="BADGE-FAIL",
+        )
+        response = client.get("/dashboard/")
+        assert response.status_code == 200
+        content = response.content.decode()
+        assert "Falha no Processamento" in content
+        assert "bg-danger" in content
 
 
 # ── Dashboard: Navigation Pills ─────────────────────────────────────────
@@ -457,6 +567,51 @@ class TestDashboardCaseDetailAdmin:
         assert response.status_code == 200
         content = response.content.decode()
         assert "Confirmar" not in content
+
+    def test_terminal_appointment_denied_shows_denied_not_confirmed(self, client) -> None:
+        """WAIT_R1_CLEANUP_THUMBS com appointment_status="denied" mostra Agendamento Negado, não Confirmado."""
+        user = _login_as(client, "manager")
+        doctor = User.objects.create_user(
+            username="doc.dash.denied@test.com",
+            password="pass123",
+            first_name="Paulo",
+            last_name="Henrique",
+        )
+        doctor.professional_council = "CRM"
+        doctor.professional_council_number = "12345"
+        doctor.save()
+        scheduler = User.objects.create_user(
+            username="sched.dash.denied@test.com",
+            password="pass123",
+            first_name="Marina",
+            last_name="Silva",
+        )
+        scheduler.professional_council = "COREN"
+        scheduler.professional_council_number = "54321"
+        scheduler.save()
+        case = _create_case(
+            created_by=user,
+            status=CaseStatus.WAIT_R1_CLEANUP_THUMBS,
+            agency_record_number="DASH-TERM-DENIED",
+            doctor=doctor,
+            doctor_decision="accept",
+            doctor_admission_flow="scheduled",
+            doctor_support_flag="none",
+            scheduler=scheduler,
+            appointment_status="denied",
+            appointment_reason="Vaga indisponível",
+        )
+        response = client.get(reverse("dashboard:case_detail", args=[case.case_id]))
+        assert response.status_code == 200
+        content = response.content.decode()
+        assert "Agendamento Negado" in content
+        assert "Vaga indisponível" in content
+        assert "Paulo Henrique" in content
+        assert "CRM 12345" in content
+        assert "Marina Silva" in content
+        assert "COREN 54321" in content
+        assert "Agendador responsável" in content
+        assert "Agendamento Confirmado" not in content
 
     def test_case_detail_404_for_nonexistent(self, client) -> None:
         """UUID inexistente → 404."""
