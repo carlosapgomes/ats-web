@@ -7,7 +7,7 @@ from typing import Any
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
 from django.db.models import QuerySet
-from django.http import FileResponse, Http404, HttpRequest, HttpResponse, HttpResponseBase
+from django.http import FileResponse, Http404, HttpRequest, HttpResponse, HttpResponseBase, JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.utils import timezone
 from django.views.decorators.clickjacking import xframe_options_sameorigin
@@ -15,6 +15,8 @@ from django.views.decorators.clickjacking import xframe_options_sameorigin
 from apps.accounts.decorators import role_required
 from apps.cases.models import Case, CaseStatus
 from apps.cases.services import assert_case_lock, claim_case_lock, expire_stale_locks_for_statuses
+from apps.cases.services import release_case_lock as release_lock_service
+from apps.cases.services import renew_case_lock as renew_lock_service
 
 from .forms import DoctorDecisionForm
 from .presenters import DoctorReportPresenter
@@ -434,3 +436,70 @@ def serve_pdf(request: HttpRequest, case_id: str) -> HttpResponseBase:
         case.pdf_file.open("rb"),
         content_type="application/pdf",
     )
+
+
+@login_required
+@role_required("doctor")
+def doctor_lock_renew(request: HttpRequest, case_id: uuid.UUID) -> HttpResponse:
+    """POST: Renova a reserva de um caso (heartbeat).
+
+    Requer lock_token no body do POST.
+    Retorna JsonResponse com 'success' e 'locked_until' ou erro.
+    """
+    if request.method != "POST":
+        raise Http404
+
+    raw_token = request.POST.get("lock_token", "")
+    try:
+        token = uuid.UUID(raw_token) if raw_token else None
+    except (ValueError, AttributeError):
+        token = None
+
+    if token is None:
+        return JsonResponse({"success": False, "error": "Token de reserva não fornecido."}, status=200)
+
+    result = renew_lock_service(
+        case_id=case_id,
+        user=request.user,
+        token=token,
+        context="doctor_decision",
+    )
+
+    if result.acquired:
+        return JsonResponse(
+            {
+                "success": True,
+                "locked_until": result.locked_until.isoformat() if result.locked_until else None,
+            }
+        )
+    return JsonResponse({"success": False, "error": result.reason}, status=200)
+
+
+@login_required
+@role_required("doctor")
+def doctor_lock_release(request: HttpRequest, case_id: uuid.UUID) -> HttpResponse:
+    """POST: Libera a reserva de um caso explicitamente.
+
+    Requer lock_token no body do POST.
+    Retorna JsonResponse com 'success'.
+    """
+    if request.method != "POST":
+        raise Http404
+
+    raw_token = request.POST.get("lock_token", "")
+    try:
+        token = uuid.UUID(raw_token) if raw_token else None
+    except (ValueError, AttributeError):
+        token = None
+
+    if token is None:
+        return JsonResponse({"success": False, "error": "Token de reserva não fornecido."}, status=200)
+
+    released = release_lock_service(
+        case_id=case_id,
+        user=request.user,
+        token=token,
+        context="doctor_decision",
+    )
+
+    return JsonResponse({"success": released})

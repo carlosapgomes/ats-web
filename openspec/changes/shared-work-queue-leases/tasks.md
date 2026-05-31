@@ -8,7 +8,7 @@ Change planejado. Implementar **um slice por vez**, seguindo TDD e aguardando co
 
 - [x] Slice 001 — Scheduler role guard (`slices/slice-001-scheduler-role-guard.md`)
 - [x] Slice 002 — Médico: lease básico end-to-end (`slices/slice-002-doctor-basic-lease.md`)
-- [ ] Slice 003 — Médico: heartbeat, idle detection e release (`slices/slice-003-doctor-heartbeat-release.md`)
+- [x] Slice 003 — Médico: heartbeat, idle detection e release (`slices/slice-003-doctor-heartbeat-release.md`)
 - [ ] Slice 004 — Agendador: lease end-to-end e ciência operacional segura (`slices/slice-004-scheduler-lease.md`)
 - [ ] Slice 005 — NIR: casos operacionais compartilhados (`slices/slice-005-nir-shared-operational-cases.md`)
 - [ ] Slice 006 — NIR: lease para confirmação de recebimento (`slices/slice-006-nir-receipt-lease.md`)

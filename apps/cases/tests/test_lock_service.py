@@ -434,6 +434,260 @@ class TestReleaseCaseLock:
 
 
 @pytest.mark.django_db
+@pytest.mark.django_db
+class TestRenewCaseLock:
+    """Tests for renew_case_lock service function."""
+
+    def _doctor_user(self):
+        user = User.objects.create_user(username="doc_renew@test.com", password="testpass123")
+        user.roles.add(_create_role("doctor"))
+        return user
+
+    def _make_case_wait_doctor(self, user) -> Case:
+        case = Case.objects.create(created_by=user)
+        return _advance_to(case, CaseStatus.WAIT_DOCTOR)
+
+    def test_renews_valid_lock_and_extends_locked_until(self):
+        """Renew extends locked_until for a valid lock."""
+        from apps.cases.services import claim_case_lock, renew_case_lock
+
+        user = self._doctor_user()
+        case = self._make_case_wait_doctor(user)
+
+        result = claim_case_lock(
+            case_id=case.case_id,
+            user=user,
+            expected_status=CaseStatus.WAIT_DOCTOR,
+            context="doctor_decision",
+            role="doctor",
+            lease_seconds=60,
+        )
+        assert result.acquired is True
+        assert result.token is not None
+
+        original_locked_until = Case.objects.get(pk=case.case_id).locked_until
+        assert original_locked_until is not None
+
+        renew_result = renew_case_lock(
+            case_id=case.case_id,
+            user=user,
+            token=result.token,
+            context="doctor_decision",
+            lease_seconds=120,
+        )
+
+        assert renew_result.acquired is True
+        assert renew_result.locked_until is not None
+        assert renew_result.locked_until > original_locked_until
+
+        # Same user+token still holds the lock
+        case = Case.objects.get(pk=case.case_id)
+        assert case.locked_by == user
+        assert case.lock_token == result.token
+
+    def test_does_not_renew_expired_lock(self):
+        """Renew does not extend an expired lock."""
+        from apps.cases.services import claim_case_lock, renew_case_lock
+
+        user = self._doctor_user()
+        case = self._make_case_wait_doctor(user)
+
+        result = claim_case_lock(
+            case_id=case.case_id,
+            user=user,
+            expected_status=CaseStatus.WAIT_DOCTOR,
+            context="doctor_decision",
+            role="doctor",
+            lease_seconds=0,
+        )
+        assert result.acquired is True
+
+        # Force expiration
+        Case.objects.filter(case_id=case.case_id).update(locked_until=timezone.now() - timedelta(seconds=1))
+
+        assert result.token is not None
+        renew_result = renew_case_lock(
+            case_id=case.case_id,
+            user=user,
+            token=result.token,
+            context="doctor_decision",
+        )
+
+        assert renew_result.acquired is False
+
+    def test_does_not_renew_with_wrong_token(self):
+        """Renew with wrong token does not extend lock."""
+        from apps.cases.services import claim_case_lock, renew_case_lock
+
+        user = self._doctor_user()
+        case = self._make_case_wait_doctor(user)
+
+        result = claim_case_lock(
+            case_id=case.case_id,
+            user=user,
+            expected_status=CaseStatus.WAIT_DOCTOR,
+            context="doctor_decision",
+            role="doctor",
+        )
+        assert result.acquired is True
+
+        original_locked_until = Case.objects.get(pk=case.case_id).locked_until
+
+        renew_result = renew_case_lock(
+            case_id=case.case_id,
+            user=user,
+            token=uuid.uuid4(),
+            context="doctor_decision",
+        )
+
+        assert renew_result.acquired is False
+
+        # locked_until unchanged
+        case = Case.objects.get(pk=case.case_id)
+        assert case.locked_until == original_locked_until
+
+    def test_does_not_renew_for_wrong_user(self):
+        """Renew for wrong user does not extend lock."""
+        from apps.cases.services import claim_case_lock, renew_case_lock
+
+        doc_a = self._doctor_user()
+        doc_b = User.objects.create_user(username="doc_renew_b@test.com", password="testpass123")
+        doc_b.roles.add(_create_role("doctor"))
+
+        case = self._make_case_wait_doctor(doc_a)
+
+        result = claim_case_lock(
+            case_id=case.case_id,
+            user=doc_a,
+            expected_status=CaseStatus.WAIT_DOCTOR,
+            context="doctor_decision",
+            role="doctor",
+        )
+        assert result.acquired is True
+
+        original_locked_until = Case.objects.get(pk=case.case_id).locked_until
+
+        assert result.token is not None
+        renew_result = renew_case_lock(
+            case_id=case.case_id,
+            user=doc_b,
+            token=result.token,
+            context="doctor_decision",
+        )
+
+        assert renew_result.acquired is False
+
+        # locked_until unchanged
+        case = Case.objects.get(pk=case.case_id)
+        assert case.locked_until == original_locked_until
+
+    def test_does_not_create_case_event_on_heartbeat(self):
+        """Renew (heartbeat) should NOT create a CaseEvent."""
+        from apps.cases.services import claim_case_lock, renew_case_lock
+
+        user = self._doctor_user()
+        case = self._make_case_wait_doctor(user)
+
+        result = claim_case_lock(
+            case_id=case.case_id,
+            user=user,
+            expected_status=CaseStatus.WAIT_DOCTOR,
+            context="doctor_decision",
+            role="doctor",
+        )
+        assert result.acquired is True
+        assert result.token is not None
+
+        # Count events before renew
+        before_count = CaseEvent.objects.filter(case=case).count()
+
+        renew_case_lock(
+            case_id=case.case_id,
+            user=user,
+            token=result.token,
+            context="doctor_decision",
+        )
+
+        after_count = CaseEvent.objects.filter(case=case).count()
+        assert after_count == before_count, "Renew (heartbeat) must not create CaseEvent"
+
+
+@pytest.mark.django_db
+class TestReleaseCaseLockExtended:
+    """Extended tests for release_case_lock."""
+
+    def _doctor_user(self):
+        user = User.objects.create_user(username="doc_rel_ext@test.com", password="testpass123")
+        user.roles.add(_create_role("doctor"))
+        return user
+
+    def _make_case_wait_doctor(self, user) -> Case:
+        case = Case.objects.create(created_by=user)
+        return _advance_to(case, CaseStatus.WAIT_DOCTOR)
+
+    def test_release_with_wrong_token_does_not_clear_lock(self):
+        """Release with wrong token does not clear lock of another token."""
+        from apps.cases.services import claim_case_lock, release_case_lock
+
+        user = self._doctor_user()
+        case = self._make_case_wait_doctor(user)
+
+        result = claim_case_lock(
+            case_id=case.case_id,
+            user=user,
+            expected_status=CaseStatus.WAIT_DOCTOR,
+            context="doctor_decision",
+            role="doctor",
+        )
+        assert result.acquired is True
+
+        # Attempt release with wrong token
+        released = release_case_lock(
+            case_id=case.case_id,
+            user=user,
+            token=uuid.uuid4(),
+            context="doctor_decision",
+        )
+        assert released is False
+
+        # Lock should still be intact
+        case = Case.objects.get(pk=case.case_id)
+        assert case.locked_by == user
+        assert case.lock_token == result.token
+
+    def test_release_creates_work_lock_released_once(self):
+        """Release creates exactly one WORK_LOCK_RELEASED event."""
+        from apps.cases.services import claim_case_lock, release_case_lock
+
+        user = self._doctor_user()
+        case = self._make_case_wait_doctor(user)
+
+        result = claim_case_lock(
+            case_id=case.case_id,
+            user=user,
+            expected_status=CaseStatus.WAIT_DOCTOR,
+            context="doctor_decision",
+            role="doctor",
+        )
+        assert result.acquired is True
+        assert result.token is not None
+
+        released = release_case_lock(
+            case_id=case.case_id,
+            user=user,
+            token=result.token,
+            context="doctor_decision",
+        )
+        assert released is True
+
+        events = CaseEvent.objects.filter(
+            case=case,
+            event_type="WORK_LOCK_RELEASED",
+        )
+        assert events.count() == 1
+
+
+@pytest.mark.django_db
 class TestExpireStaleLocks:
     """Tests for expire_stale_locks_for_statuses service function."""
 

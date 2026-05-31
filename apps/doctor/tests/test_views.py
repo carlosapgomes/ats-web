@@ -1,5 +1,6 @@
 """Tests for doctor queue view."""
 
+import uuid
 from datetime import timedelta
 from pathlib import Path
 
@@ -912,6 +913,197 @@ class TestDoctorDecisionForm:
             }
         )
         assert form.is_valid()
+
+
+# ── Lock renew/release endpoint tests ────────────────────────────────────
+
+
+@pytest.mark.django_db
+class TestDoctorLockEndpoints:
+    """Tests for POST /doctor/<case_id>/lock/renew/ and /lock/release/."""
+
+    def _create_role(self, name: str):
+        from apps.accounts.models import Role
+
+        role, _ = Role.objects.get_or_create(name=name)
+        return role
+
+    def _login_as(self, client, role_name: str):
+        user = User.objects.create_user(username=f"{role_name}@lockep.test", password="testpass123")
+        user.roles.add(self._create_role(role_name))
+        client.force_login(user)
+        session = client.session
+        session["active_role"] = role_name
+        session.save()
+        return user
+
+    def _create_case_in_status(self, status: str) -> Case:
+        nir_user = User.objects.create_user(
+            username=f"nir_lockep_{(status or 'new').lower()}@test.com", password="testpass123"
+        )
+        nir_user.roles.add(self._create_role("nir"))
+        case = Case.objects.create(created_by=nir_user, status=CaseStatus.NEW)
+        if status != CaseStatus.NEW:
+            case = _advance_case_to(case, status)
+        return case
+
+    def _claim_lock(self, case_id, doctor) -> str:
+        from apps.cases.services import claim_case_lock
+
+        result = claim_case_lock(
+            case_id=case_id,
+            user=doctor,
+            expected_status=CaseStatus.WAIT_DOCTOR,
+            context="doctor_decision",
+            role="doctor",
+        )
+        assert result.acquired is True
+        return str(result.token)
+
+    def test_renew_with_valid_token_returns_json_success(self, client):
+        """POST renew with valid token returns JSON success."""
+        case = self._create_case_in_status(CaseStatus.WAIT_DOCTOR)
+        case.structured_data = {"patient": {"name": "Renew OK", "age": 40, "gender": "M"}}
+        case.save()
+
+        doctor = self._login_as(client, "doctor")
+        token = self._claim_lock(case.case_id, doctor)
+
+        response = client.post(
+            f"/doctor/{case.case_id}/lock/renew/",
+            data={"lock_token": token},
+        )
+        assert response.status_code == 200
+        assert response["Content-Type"] == "application/json"
+        import json
+
+        data = json.loads(response.content)
+        assert data.get("success") is True
+        assert "locked_until" in data
+
+    def test_renew_with_invalid_token_returns_error(self, client):
+        """POST renew with invalid token returns error and does not alter lock."""
+        from apps.cases.services import claim_case_lock
+
+        case = self._create_case_in_status(CaseStatus.WAIT_DOCTOR)
+        case.structured_data = {"patient": {"name": "Renew Bad", "age": 40, "gender": "M"}}
+        case.save()
+
+        doctor = self._login_as(client, "doctor")
+        # First claim to establish lock
+        result = claim_case_lock(
+            case_id=case.case_id,
+            user=doctor,
+            expected_status=CaseStatus.WAIT_DOCTOR,
+            context="doctor_decision",
+            role="doctor",
+        )
+        assert result.acquired is True
+
+        original_locked_until = Case.objects.get(pk=case.case_id).locked_until
+
+        response = client.post(
+            f"/doctor/{case.case_id}/lock/renew/",
+            data={"lock_token": str(uuid.uuid4())},
+        )
+        assert response.status_code == 200
+        assert response["Content-Type"] == "application/json"
+        import json
+
+        data = json.loads(response.content)
+        assert data.get("success") is False
+        assert "error" in data or "detail" in data
+
+        # locked_until unchanged
+        case = Case.objects.get(pk=case.case_id)
+        assert case.locked_until == original_locked_until
+
+    def test_release_with_valid_token_clears_lock(self, client):
+        """POST release with valid token clears lock fields."""
+        case = self._create_case_in_status(CaseStatus.WAIT_DOCTOR)
+        case.structured_data = {"patient": {"name": "Release OK", "age": 40, "gender": "M"}}
+        case.save()
+
+        doctor = self._login_as(client, "doctor")
+        token = self._claim_lock(case.case_id, doctor)
+
+        response = client.post(
+            f"/doctor/{case.case_id}/lock/release/",
+            data={"lock_token": token},
+        )
+        assert response.status_code == 200
+        assert response["Content-Type"] == "application/json"
+        import json
+
+        data = json.loads(response.content)
+        assert data.get("success") is True
+
+        case = Case.objects.get(pk=case.case_id)
+        assert case.locked_by is None
+        assert case.lock_token is None
+
+    def test_release_with_invalid_token_does_not_clear(self, client):
+        """POST release with invalid token does not clear lock."""
+        from apps.cases.services import claim_case_lock
+
+        case = self._create_case_in_status(CaseStatus.WAIT_DOCTOR)
+        case.structured_data = {"patient": {"name": "Release Fail", "age": 40, "gender": "M"}}
+        case.save()
+
+        doctor = self._login_as(client, "doctor")
+        # Claim lock
+        claim_case_lock(
+            case_id=case.case_id,
+            user=doctor,
+            expected_status=CaseStatus.WAIT_DOCTOR,
+            context="doctor_decision",
+            role="doctor",
+        )
+
+        response = client.post(
+            f"/doctor/{case.case_id}/lock/release/",
+            data={"lock_token": str(uuid.uuid4())},
+        )
+        assert response.status_code == 200
+        assert response["Content-Type"] == "application/json"
+        import json
+
+        data = json.loads(response.content)
+        assert data.get("success") is False
+
+        # Lock still intact
+        case = Case.objects.get(pk=case.case_id)
+        assert case.locked_by == doctor
+
+    def test_lock_endpoints_require_doctor_role(self, client):
+        """Lock endpoints return redirect for non-doctor roles."""
+        case = self._create_case_in_status(CaseStatus.WAIT_DOCTOR)
+        case.structured_data = {"patient": {"name": "Role Check", "age": 40, "gender": "M"}}
+        case.save()
+
+        self._login_as(client, "nir")
+
+        response = client.post(f"/doctor/{case.case_id}/lock/renew/")
+        assert response.status_code == 302
+        assert response.url == "/"
+
+        response = client.post(f"/doctor/{case.case_id}/lock/release/")
+        assert response.status_code == 302
+        assert response.url == "/"
+
+    def test_lock_endpoints_reject_get(self, client):
+        """Lock endpoints return 404 for GET requests."""
+        case = self._create_case_in_status(CaseStatus.WAIT_DOCTOR)
+        case.structured_data = {"patient": {"name": "GET Check", "age": 40, "gender": "M"}}
+        case.save()
+
+        self._login_as(client, "doctor")
+
+        response = client.get(f"/doctor/{case.case_id}/lock/renew/")
+        assert response.status_code == 404
+
+        response = client.get(f"/doctor/{case.case_id}/lock/release/")
+        assert response.status_code == 404
 
 
 # ── FSM tests ────────────────────────────────────────────────────────────
