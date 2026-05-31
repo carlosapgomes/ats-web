@@ -80,5 +80,8 @@ Q_CLUSTER = {
     },
 }
 
+# UI: keep tests deterministic regardless of local .env
+APP_DISPLAY_NAME = "ATS"
+
 # LLM: Use StaticLlmClient in tests by default
 LLM_CLIENT_FACTORY = None  # type: ignore[assignment]

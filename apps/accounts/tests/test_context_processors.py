@@ -199,9 +199,10 @@ class TestAppDisplayName:
     """Tests for the app_display_name context processor."""
 
     def test_returns_default_ats_when_not_configured(self, rf: RequestFactory) -> None:
-        """Retorna 'ATS' como default quando APP_DISPLAY_NAME não está definido."""
+        """Retorna 'ATS' como default determinístico do ambiente de teste."""
         request = rf.get("/")
-        result = app_display_name(request)
+        with override_settings(APP_DISPLAY_NAME="ATS"):
+            result = app_display_name(request)
         assert result == {"app_display_name": "ATS"}
 
     def test_returns_configured_name(self, rf: RequestFactory) -> None:
