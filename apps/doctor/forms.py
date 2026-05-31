@@ -29,6 +29,13 @@ class DoctorDecisionForm(forms.Form):
         required=False,
     )
     reason = forms.CharField(widget=forms.Textarea, required=False)
+    observation = forms.CharField(
+        required=False,
+        max_length=500,
+        widget=forms.Textarea(attrs={"rows": 2, "maxlength": 500}),
+        label="Observação Médica",
+        help_text="Visível para NIR, agendamento, supervisão e administração. Máx. 500 caracteres.",
+    )
 
     def clean(self) -> dict[str, Any]:
         cleaned: dict[str, Any] = super().clean() or {}

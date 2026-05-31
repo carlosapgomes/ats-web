@@ -224,6 +224,25 @@ class TestPatientProperties:
         assert case.diagnosis == ""
 
 
+class TestDoctorObservation:
+    """Testes do campo Case.doctor_observation."""
+
+    def test_new_case_doctor_observation_is_empty(self, user) -> None:
+        """Caso recém-criado deve ter doctor_observation == ""."""
+        case = Case.objects.create(created_by=user)
+        assert case.doctor_observation == ""
+
+    def test_can_save_doctor_observation(self, user) -> None:
+        """Case aceita salvar observação de até 500 caracteres."""
+        case = Case.objects.create(
+            created_by=user,
+            doctor_observation="Paciente apresenta risco anestésico elevado. Necessário UTI.",
+        )
+        # Recupera do banco via get() para evitar conflito com FSM protected
+        retrieved = Case.objects.get(pk=case.pk)
+        assert retrieved.doctor_observation == "Paciente apresenta risco anestésico elevado. Necessário UTI."
+
+
 class TestDoctorDisplay:
     """Testes da property Case.doctor_display."""
 
