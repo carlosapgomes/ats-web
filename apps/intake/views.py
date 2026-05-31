@@ -199,18 +199,15 @@ def _get_doctor_decision_display(case: Case) -> str:
 
 
 def _my_cases_context(request: HttpRequest) -> dict[str, object]:
-    """Build context for full and HTMX NIR case-list renders."""
+    """Build context for full and HTMX NIR case-list renders.
+
+    All active NIR users see all operational cases (status != CLEANED)
+    for shift continuity, regardless of who created the case.
+    """
     user = request.user
     assert user.is_authenticated
 
-    qs = (
-        Case.objects.filter(
-            created_by=user,
-        )
-        .exclude(status="CLEANED")
-        .select_related("doctor")
-        .order_by("-created_at")
-    )
+    qs = Case.objects.exclude(status="CLEANED").select_related("doctor", "created_by").order_by("-created_at")
 
     status_filter = request.GET.get("status", "")
     if status_filter:
@@ -233,6 +230,8 @@ def _my_cases_context(request: HttpRequest) -> dict[str, object]:
             "doctor_decision_display": _get_doctor_decision_display(c),
             "doctor_display": c.doctor_display,
             "has_doctor_observation": c.has_doctor_observation,
+            "created_by_other_nir": c.created_by_id != user.pk,
+            "created_by_display": c.created_by.get_full_name() or c.created_by.username,
         }
         for c in qs
     ]
@@ -269,12 +268,18 @@ def my_cases_partial(request: HttpRequest) -> HttpResponse:
 @login_required
 @role_required("nir")
 def case_detail(request: HttpRequest, case_id: str) -> HttpResponse:
-    """Detalhes de um caso para o NIR — timeline, stepper e PDF inline."""
+    """Detalhes de um caso para o NIR — timeline, stepper e PDF inline.
+
+    Any active NIR can open any operational case (status != CLEANED)
+    for shift continuity, regardless of who created the case.
+    """
     case = get_object_or_404(
         Case.objects.select_related("created_by", "doctor"),
         case_id=case_id,
-        created_by=request.user,
     )
+    # Block access to CLEANED cases via the operational route
+    if case.status == CaseStatus.CLEANED:
+        raise Http404("Caso concluído não está disponível na fila operacional.")
     events = case.events.all()
 
     current_step_idx = STEP_STATUS_INDEX.get(case.status, 0)
@@ -399,12 +404,19 @@ def case_detail(request: HttpRequest, case_id: str) -> HttpResponse:
 @role_required("nir")
 @xframe_options_sameorigin
 def serve_pdf(request: HttpRequest, case_id: str) -> HttpResponseBase:
-    """Serve o PDF original do caso para visualização inline no <embed>."""
+    """Serve o PDF original do caso para visualização inline no <embed>.
+
+    Any active NIR can view PDFs of operational cases (status != CLEANED)
+    for shift continuity.
+    """
     case = get_object_or_404(
         Case.objects.select_related("created_by"),
         case_id=case_id,
-        created_by=request.user,
     )
+    if case.status == CaseStatus.CLEANED:
+        raise Http404("PDF de caso concluído não está disponível na fila operacional.")
+    if not case.pdf_file:
+        raise Http404("PDF não encontrado para este caso.")
     if not case.pdf_file:
         raise Http404("PDF não encontrado para este caso.")
 
@@ -417,7 +429,11 @@ def serve_pdf(request: HttpRequest, case_id: str) -> HttpResponseBase:
 @login_required
 @role_required("nir")
 def confirm_receipt(request: HttpRequest, case_id: str) -> HttpResponse:
-    """Confirma recebimento do resultado final e conclui o caso."""
+    """Confirma recebimento do resultado final e conclui o caso.
+
+    Após confirmação, o caso vai para CLEANED e não fica mais acessível
+    pela rota operacional NIR — redireciona para a lista.
+    """
     case = get_object_or_404(
         Case,
         case_id=case_id,
@@ -430,5 +446,6 @@ def confirm_receipt(request: HttpRequest, case_id: str) -> HttpResponse:
         case.cleanup_completed(user=request.user)
         case.save()
         messages.success(request, "Recebimento confirmado. Caso concluído.")
+        return redirect("intake:my_cases")
 
     return redirect("intake:case_detail", case_id=case.case_id)

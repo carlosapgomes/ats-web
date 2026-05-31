@@ -10,7 +10,7 @@ Change planejado. Implementar **um slice por vez**, seguindo TDD e aguardando co
 - [x] Slice 002 — Médico: lease básico end-to-end (`slices/slice-002-doctor-basic-lease.md`)
 - [x] Slice 003 — Médico: heartbeat, idle detection e release (`slices/slice-003-doctor-heartbeat-release.md`)
 - [x] Slice 004 — Agendador: lease end-to-end e ciência operacional segura (`slices/slice-004-scheduler-lease.md`)
-- [ ] Slice 005 — NIR: casos operacionais compartilhados (`slices/slice-005-nir-shared-operational-cases.md`)
+- [x] Slice 005 — NIR: casos operacionais compartilhados (`slices/slice-005-nir-shared-operational-cases.md`)
 - [ ] Slice 006 — NIR: lease para confirmação de recebimento (`slices/slice-006-nir-receipt-lease.md`)
 - [ ] Slice 007 — Hardening, auditoria cruzada e quality gate final (`slices/slice-007-hardening-quality-closeout.md`)
 
@@ -27,8 +27,8 @@ Change planejado. Implementar **um slice por vez**, seguindo TDD e aguardando co
 - [ ] Agendador só submete confirmação/negação com lock válido.
 - [ ] Fila do agendador mostra lock ativo e bloqueia ação para outro usuário.
 - [ ] Ciência operacional de vinda imediata fica protegida por papel e idempotente sob concorrência.
-- [ ] Todos os NIR veem todos os casos operacionais (`status != CLEANED`) de todos os NIR.
-- [ ] NIR consegue abrir detalhe de qualquer caso operacional compartilhado (`status != CLEANED`).
+- [x] Todos os NIR veem todos os casos operacionais (`status != CLEANED`) de todos os NIR.
+- [x] NIR consegue abrir detalhe de qualquer caso operacional compartilhado (`status != CLEANED`).
 - [ ] NIR só confirma recebimento com lock válido.
 - [ ] Locks expirados voltam a ficar disponíveis.
 - [ ] `WORK_LOCK_EXPIRED` registra quem estava com o caso quando expirou.
