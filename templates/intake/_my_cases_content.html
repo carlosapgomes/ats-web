@@ -42,6 +42,9 @@
             <span class="status-badge {{ item.status_css }}">
               {{ item.status_label }}
             </span>
+            {% if item.has_doctor_observation %}
+            <span class="badge bg-info text-dark ms-1">📝 Obs. médica</span>
+            {% endif %}
           </div>
           <div class="col-md-2 text-md-end mt-2 mt-md-0">
             <a href="{% url 'intake:case_detail' item.case.case_id %}" class="btn btn-sm btn-hospital-outline">Ver detalhes</a>

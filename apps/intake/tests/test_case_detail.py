@@ -156,6 +156,49 @@ class TestCaseDetailRenders:
         assert reverse("intake:serve_pdf", args=[case.case_id]) in content
         assert "Abrir em nova aba" in content
 
+    def test_case_detail_shows_doctor_observation(self, client) -> None:
+        """Detalhe do NIR mostra card com a observação médica completa."""
+        client, user = _nir_client(client)
+        observation = "Observação Médica completa\nPreservar quebras de linha."
+        case = Case.objects.create(
+            created_by=user,
+            agency_record_number="OBS-DETAIL-001",
+            status=CaseStatus.DOCTOR_ACCEPTED,
+            doctor_observation=observation,
+        )
+
+        response = client.get(reverse("intake:case_detail", args=[case.case_id]))
+
+        assert response.status_code == 200
+        content = response.content.decode()
+        assert "Observação Médica" in content
+        assert "Observação Médica completa" in content
+        assert "Preservar quebras de linha." in content
+        assert "white-space: pre-wrap" in content
+
+    def test_case_detail_hides_doctor_observation_card_when_empty_or_spaces(self, client) -> None:
+        """Detalhe do NIR não mostra card vazio quando observação está vazia ou só com espaços."""
+        client, user = _nir_client(client)
+        empty_case = Case.objects.create(
+            created_by=user,
+            agency_record_number="OBS-DETAIL-EMPTY",
+            status=CaseStatus.DOCTOR_ACCEPTED,
+        )
+        spaces_case = Case.objects.create(
+            created_by=user,
+            agency_record_number="OBS-DETAIL-SPACES",
+            status=CaseStatus.DOCTOR_ACCEPTED,
+            doctor_observation="   ",
+        )
+
+        empty_response = client.get(reverse("intake:case_detail", args=[empty_case.case_id]))
+        spaces_response = client.get(reverse("intake:case_detail", args=[spaces_case.case_id]))
+
+        assert empty_response.status_code == 200
+        assert spaces_response.status_code == 200
+        assert "Observação Médica" not in empty_response.content.decode()
+        assert "Observação Médica" not in spaces_response.content.decode()
+
 
 @pytest.mark.django_db
 class TestCaseDetailAuthorization:

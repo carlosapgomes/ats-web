@@ -568,6 +568,40 @@ class TestDashboardCaseDetailAdmin:
         content = response.content.decode()
         assert "Confirmar" not in content
 
+    @pytest.mark.parametrize("role_name", ["manager", "admin"])
+    def test_case_detail_shows_doctor_observation_for_manager_and_admin(self, client, role_name: str) -> None:
+        """Manager/admin veem a observação médica completa pelo detalhe do dashboard."""
+        user = _login_as(client, role_name)
+        case = _create_case(
+            created_by=user,
+            status=CaseStatus.DOCTOR_ACCEPTED,
+            agency_record_number="DASH-OBS-001",
+            doctor_observation="Observação importante para supervisão e administração",
+        )
+
+        response = client.get(reverse("dashboard:case_detail", args=[case.case_id]))
+
+        assert response.status_code == 200
+        content = response.content.decode()
+        assert "Observação Médica" in content
+        assert "Observação importante para supervisão e administração" in content
+        assert "Confirmar" not in content
+
+    def test_case_detail_hides_empty_doctor_observation_for_manager(self, client) -> None:
+        """Dashboard não mostra card vazio quando observação médica está ausente."""
+        user = _login_as(client, "manager")
+        case = _create_case(
+            created_by=user,
+            status=CaseStatus.DOCTOR_ACCEPTED,
+            agency_record_number="DASH-OBS-EMPTY",
+            doctor_observation="   ",
+        )
+
+        response = client.get(reverse("dashboard:case_detail", args=[case.case_id]))
+
+        assert response.status_code == 200
+        assert "Observação Médica" not in response.content.decode()
+
     def test_terminal_appointment_denied_shows_denied_not_confirmed(self, client) -> None:
         """WAIT_R1_CLEANUP_THUMBS com appointment_status="denied" mostra Agendamento Negado, não Confirmado."""
         user = _login_as(client, "manager")
