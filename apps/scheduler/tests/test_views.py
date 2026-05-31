@@ -6,6 +6,7 @@ import pytest
 from django.contrib.auth import get_user_model
 from django.utils import timezone
 
+from apps.accounts.models import Role
 from apps.cases.models import Case, CaseEvent, CaseStatus
 
 User = get_user_model()
@@ -16,8 +17,6 @@ class TestSchedulerQueueView:
     """Tests for the scheduler queue view (GET /scheduler/)."""
 
     def _create_role(self, name: str):
-        from apps.accounts.models import Role
-
         role, _ = Role.objects.get_or_create(name=name)
         return role
 
@@ -300,7 +299,60 @@ class TestSchedulerQueueView:
         content = response.content.decode()
         assert "30" in content
 
-    def test_queue_excludes_non_wait_appt(self, client) -> None:
+    # ── Role guard tests ────────────────────────────────────────────
+
+    def test_queue_blocks_nir(self, client) -> None:
+        """NIR with active_role='nir' cannot access /scheduler/."""
+        self._login_as(client, "nir")
+        response = client.get("/scheduler/")
+        assert response.status_code == 302
+        assert response.url == "/"
+
+    def test_queue_blocks_doctor(self, client) -> None:
+        """Doctor with active_role='doctor' cannot access /scheduler/."""
+        self._login_as(client, "doctor")
+        response = client.get("/scheduler/")
+        assert response.status_code == 302
+        assert response.url == "/"
+
+    def test_queue_blocks_manager(self, client) -> None:
+        """Manager with active_role='manager' cannot access /scheduler/."""
+        self._login_as(client, "manager")
+        response = client.get("/scheduler/")
+        assert response.status_code == 302
+        assert response.url == "/"
+
+    def test_queue_partial_blocks_nir(self, client) -> None:
+        """NIR with active_role='nir' cannot access HTMX partial."""
+        self._login_as(client, "nir")
+        response = client.get("/scheduler/partials/queue/")
+        assert response.status_code == 302
+        assert response.url == "/"
+
+    def test_immediate_ack_blocks_nir(self, client) -> None:
+        """NIR with active_role='nir' cannot POST immediate ack."""
+        nir_user = User.objects.create_user(username="nir_ackblock@test.com", password="testpass123")
+        nir_user.roles.add(self._create_role("nir"))
+        case = Case.objects.create(
+            created_by=nir_user,
+            status=CaseStatus.WAIT_R1_CLEANUP_THUMBS,
+            doctor_decision="accept",
+            doctor_admission_flow="immediate",
+            structured_data={"patient": {"name": "Ack Block", "age": 50, "gender": "M"}},
+        )
+        CaseEvent.objects.create(
+            case=case,
+            actor_type="human",
+            actor=nir_user,
+            event_type="IMMEDIATE_ADMISSION_OPERATIONAL_NOTICE",
+            timestamp=timezone.now(),
+        )
+        self._login_as(client, "nir")
+        response = client.post(f"/scheduler/{case.case_id}/immediate-ack/")
+        assert response.status_code == 302
+        assert response.url == "/"
+
+    def test_exclude_non_wait_appt(self, client) -> None:
         """Cases with status != WAIT_APPT do not appear in pending list."""
         nir_user = User.objects.create_user(username="nir_excl@test.com", password="testpass123")
         nir_user.roles.add(self._create_role("nir"))
@@ -334,8 +386,6 @@ class TestSchedulerConfirmView:
     """Tests for the scheduler confirm view (GET /scheduler/<uuid>/)."""
 
     def _create_role(self, name: str):
-        from apps.accounts.models import Role
-
         role, _ = Role.objects.get_or_create(name=name)
         return role
 
@@ -384,6 +434,32 @@ class TestSchedulerConfirmView:
         case = self._create_waited_case()
         response = client.get(f"/scheduler/{case.case_id}/")
         assert response.status_code == 200
+
+    # ── Role guard tests ────────────────────────────────────────────
+
+    def test_confirm_blocks_nir(self, client) -> None:
+        """NIR with active_role='nir' cannot access confirm."""
+        self._login_as(client, "nir")
+        case = self._create_waited_case()
+        response = client.get(f"/scheduler/{case.case_id}/")
+        assert response.status_code == 302
+        assert response.url == "/"
+
+    def test_confirm_blocks_doctor(self, client) -> None:
+        """Doctor with active_role='doctor' cannot access confirm."""
+        self._login_as(client, "doctor")
+        case = self._create_waited_case()
+        response = client.get(f"/scheduler/{case.case_id}/")
+        assert response.status_code == 302
+        assert response.url == "/"
+
+    def test_confirm_blocks_manager(self, client) -> None:
+        """Manager with active_role='manager' cannot access confirm."""
+        self._login_as(client, "manager")
+        case = self._create_waited_case()
+        response = client.get(f"/scheduler/{case.case_id}/")
+        assert response.status_code == 302
+        assert response.url == "/"
 
     # ── Guard ─────────────────────────────────────────────────────────
 
@@ -470,8 +546,6 @@ class TestSchedulerQueueDoctorDisplay:
     """Tests for doctor display in scheduler queue cards."""
 
     def _create_role(self, name: str):
-        from apps.accounts.models import Role
-
         role, _ = Role.objects.get_or_create(name=name)
         return role
 
@@ -645,8 +719,6 @@ class TestSchedulerSubmitView:
     """Tests for the scheduler submit view (POST /scheduler/<uuid>/submit/)."""
 
     def _create_role(self, name: str):
-        from apps.accounts.models import Role
-
         role, _ = Role.objects.get_or_create(name=name)
         return role
 
@@ -778,6 +850,41 @@ class TestSchedulerSubmitView:
 
         assert CaseEvent.objects.filter(case=case, event_type="APPT_DENIED").exists()
         assert CaseEvent.objects.filter(case=case, event_type="FINAL_REPLY_POSTED").exists()
+
+    # ── Role guard tests ────────────────────────────────────────────
+
+    def test_submit_blocks_nir(self, client) -> None:
+        """NIR with active_role='nir' cannot POST submit."""
+        self._login_as(client, "nir")
+        case = self._create_waited_case()
+        response = client.post(
+            f"/scheduler/{case.case_id}/submit/",
+            {"decision": "confirm", "appointment_date": "2026-05-15", "appointment_time": "14:30"},
+        )
+        assert response.status_code == 302
+        assert response.url == "/"
+
+    def test_submit_blocks_doctor(self, client) -> None:
+        """Doctor with active_role='doctor' cannot POST submit."""
+        self._login_as(client, "doctor")
+        case = self._create_waited_case()
+        response = client.post(
+            f"/scheduler/{case.case_id}/submit/",
+            {"decision": "confirm", "appointment_date": "2026-05-15", "appointment_time": "14:30"},
+        )
+        assert response.status_code == 302
+        assert response.url == "/"
+
+    def test_submit_blocks_manager(self, client) -> None:
+        """Manager with active_role='manager' cannot POST submit."""
+        self._login_as(client, "manager")
+        case = self._create_waited_case()
+        response = client.post(
+            f"/scheduler/{case.case_id}/submit/",
+            {"decision": "confirm", "appointment_date": "2026-05-15", "appointment_time": "14:30"},
+        )
+        assert response.status_code == 302
+        assert response.url == "/"
 
     # ── Guards ────────────────────────────────────────────────────────
 
