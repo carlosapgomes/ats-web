@@ -69,9 +69,10 @@ class TestRecordingLlmClient:
 class TestGetLlmClient:
     """Tests for get_llm_client factory."""
 
-    def test_returns_static_client_when_no_factory_configured(self) -> None:
+    def test_returns_static_client_when_no_factory_configured(self, settings: Any) -> None:
         from apps.pipeline.llm import LlmClient, get_llm_client
 
+        settings.LLM_CLIENT_FACTORY = None
         client = get_llm_client()
         assert isinstance(client, LlmClient)
         result = client.complete(system_prompt="sys", user_prompt="usr")
