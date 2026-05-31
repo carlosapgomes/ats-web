@@ -138,7 +138,7 @@
 </div>
 {% endif %}
 
-<!-- Case Table -->
+<!-- Case Cards -->
 <div class="card p-4">
   <div class="d-flex justify-content-between align-items-center mb-3 flex-wrap gap-2">
     <h5 class="mb-0">Todos os Casos</h5>
@@ -164,51 +164,53 @@
     </div>
   </div>
 
-  <div class="table-responsive">
-    <table class="table table-sm align-middle">
-      <thead class="table-light">
-        <tr>
-          <th>Paciente</th>
-          <th>Registro</th>
-          <th class="hide-mobile">Idade</th>
-          <th class="hide-mobile">Origem</th>
-          <th>Status</th>
-          <th class="hide-mobile">Etapa</th>
-          <th class="hide-mobile">Enviado</th>
-          <th>Ações</th>
-        </tr>
-      </thead>
-      <tbody>
-        {% if cases %}
-        {% for item in cases %}
-        <tr>
-          <td><strong>{{ item.patient_name|default:"—" }}</strong></td>
-          <td>{{ item.case.agency_record_number|default:item.case.case_id|truncatechars:12 }}</td>
-          <td class="hide-mobile">
-            {% if item.case.structured_data.patient.age %}
-              {{ item.case.structured_data.patient.age }}
-            {% else %}
-              —
-            {% endif %}
-          </td>
-          <td class="hide-mobile">{{ item.origin_unit|default:"—" }}</td>
-          <td><span class="status-badge {{ item.status_css }}">{{ item.status_label }}</span></td>
-          <td class="hide-mobile">{{ item.step_label }}</td>
-          <td class="hide-mobile">{{ item.case.created_at|date:"d/m/Y H:i" }}</td>
-          <td>
+  {% if cases %}
+  <div class="d-flex flex-column gap-2">
+    {% for item in cases %}
+    <div class="card">
+      <div class="card-body py-2 px-3">
+        <div class="row align-items-center g-2">
+          <div class="col-12 col-lg-3">
+            <div class="fw-semibold text-truncate">{{ item.patient_name|default:"Paciente" }}</div>
+            <small class="text-muted">
+              Reg. {{ item.case.agency_record_number|default:item.case.case_id|truncatechars:12 }}
+            </small>
+          </div>
+          <div class="col-6 col-lg-2">
+            <div class="text-muted small">
+              {% if item.origin_unit %}🏥 {{ item.origin_unit }}{% endif %}
+            </div>
+          </div>
+          <div class="col-6 col-lg-1">
+            <small class="text-muted">
+              {% if item.patient_age %}{{ item.patient_age }}a{% endif %}
+              {% if item.patient_gender %} · {{ item.patient_gender }}{% endif %}
+            </small>
+          </div>
+          <div class="col-8 col-lg-3">
+            <span class="badge {{ item.result_css }}">{{ item.result_label }}</span>
+          </div>
+          <div class="col-4 col-lg-1">
+            <small class="text-muted text-nowrap">{{ item.case.created_at|date:"d/m/Y H:i" }}</small>
+          </div>
+          <div class="col-12 col-lg-2 text-lg-end mt-1 mt-lg-0">
             <a href="{% url 'dashboard:case_detail' item.case.case_id %}"
-               class="btn btn-sm btn-outline-secondary">Ver</a>
-          </td>
-        </tr>
-        {% endfor %}
-        {% else %}
-        <tr>
-          <td colspan="7" class="text-center text-muted py-3">Nenhum caso encontrado.</td>
-        </tr>
-        {% endif %}
-      </tbody>
-    </table>
+               class="btn btn-sm btn-outline-secondary">Ver detalhes</a>
+          </div>
+        </div>
+      </div>
+    </div>
+    {% endfor %}
   </div>
+  {% else %}
+  <div class="text-center py-5">
+    <p class="text-muted mb-3 fs-5">Nenhum caso encontrado</p>
+    {% if status_filter or date_from or date_to %}
+    <p class="text-muted small mb-3">Nenhum resultado para os filtros aplicados.</p>
+    <a href="{% url 'dashboard:index' %}" class="btn btn-hospital-outline">Limpar filtros</a>
+    {% endif %}
+  </div>
+  {% endif %}
 
   <!-- Pagination -->
   {% if page_obj.paginator.num_pages > 1 %}
