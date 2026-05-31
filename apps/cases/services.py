@@ -290,6 +290,79 @@ def release_case_lock(
     return True
 
 
+def renew_case_lock(
+    *,
+    case_id: uuid.UUID,
+    user: Any,
+    token: uuid.UUID,
+    context: str,
+    lease_seconds: int | None = None,
+) -> CaseLockResult:
+    """Renew an existing lock on a case (heartbeat).
+
+    Only succeeds if:
+    - The lock exists and is not expired.
+    - The user matches the locked_by user.
+    - The token matches the lock_token.
+    - The context matches the lock_context.
+
+    This is a heartbeat operation and does NOT create CaseEvent entries
+    to avoid polluting the audit timeline.
+
+    Returns:
+        CaseLockResult with acquired=True and new locked_until if successful.
+    """
+    seconds = _get_lease_seconds(lease_seconds)
+    now = timezone.now()
+    locked_until = now + timedelta(seconds=seconds)
+
+    with transaction.atomic():
+        case = Case.objects.select_for_update().get(pk=case_id)
+
+        # Lock must exist and be active
+        if case.locked_by is None or case.locked_until is None:
+            return CaseLockResult(
+                acquired=False,
+                reason="Caso não possui reserva ativa para renovar.",
+            )
+
+        if case.locked_until <= now:
+            return CaseLockResult(
+                acquired=False,
+                reason="Reserva expirou. Adquira uma nova reserva.",
+            )
+
+        if case.locked_by_id != user.pk:
+            return CaseLockResult(
+                acquired=False,
+                reason="Reserva pertence a outro usuário.",
+            )
+
+        if case.lock_token is None or case.lock_token != token:
+            return CaseLockResult(
+                acquired=False,
+                reason="Token de reserva inválido.",
+            )
+
+        if case.lock_context != context:
+            return CaseLockResult(
+                acquired=False,
+                reason=f"Contexto de reserva inválido: esperado '{context}', obtido '{case.lock_context}'.",
+            )
+
+        # Renew: extend locked_until, update locked_at
+        case.locked_at = now
+        case.locked_until = locked_until
+        case.save(update_fields=["locked_at", "locked_until"])
+
+    return CaseLockResult(
+        acquired=True,
+        token=token,
+        locked_by_display=user.display_name,
+        locked_until=locked_until,
+    )
+
+
 def expire_stale_locks_for_statuses(
     *,
     statuses: Iterable[CaseStatus],
