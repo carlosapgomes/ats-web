@@ -47,6 +47,12 @@
         <div class="summary-label">Fluxo</div>
         <div class="summary-value">{{ admission_flow_display|default:"—" }}</div>
       </div>
+      {% if case.has_doctor_observation %}
+      <div class="summary-box mt-3 border-info">
+        <div class="summary-label">Observação Médica</div>
+        <div class="summary-value" style="white-space: pre-wrap;">{{ case.doctor_observation }}</div>
+      </div>
+      {% endif %}
     </div>
   </div>
 
