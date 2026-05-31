@@ -25,6 +25,8 @@ class PriorCaseSummary:
     decided_at: str  # formato ISO
     decision: str  # "doctor_denied" | "appointment_denied"
     reason: str  # normalizado: "não informado" se vazio/None
+    decided_by: str = ""  # nome + registro profissional de quem decidiu
+    decided_by_role: str = ""  # "doctor" | "scheduler"
 
 
 @dataclass
@@ -75,6 +77,7 @@ def lookup_prior_case_context(
             Q(status=CaseStatus.DOCTOR_DENIED) | Q(status=CaseStatus.APPT_DENIED),
             created_at__gte=window_start,
         )
+        .select_related("doctor", "scheduler")
         .order_by("-created_at")
     )
 
@@ -97,15 +100,21 @@ def _build_summary(case: Case) -> PriorCaseSummary:
         decision = "doctor_denied"
         decided_at = case.doctor_decided_at
         reason = _normalize_reason(case.doctor_reason)
+        decided_by = case.doctor_display
+        decided_by_role = "doctor"
     elif case.status == CaseStatus.APPT_DENIED:
         decision = "appointment_denied"
         decided_at = case.appointment_decided_at
         reason = _normalize_reason(case.appointment_reason)
+        decided_by = case.scheduler_display
+        decided_by_role = "scheduler"
     else:
         # Fallback — não deve acontecer dado o filtro acima
         decision = "unknown"
         decided_at = case.created_at
         reason = _normalize_reason(None)
+        decided_by = ""
+        decided_by_role = ""
 
     decided_at_str = decided_at.isoformat() if decided_at else ""
 
@@ -114,6 +123,8 @@ def _build_summary(case: Case) -> PriorCaseSummary:
         decided_at=decided_at_str,
         decision=decision,
         reason=reason,
+        decided_by=decided_by,
+        decided_by_role=decided_by_role,
     )
 
 

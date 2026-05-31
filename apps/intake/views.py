@@ -310,6 +310,10 @@ def case_detail(request: HttpRequest, case_id: str) -> HttpResponse:
             prior_case_lookup = {
                 "prior_case_id": payload.get("prior_case_id", ""),
                 "decision": payload.get("decision", ""),
+                "reason": payload.get("reason", ""),
+                "decided_at": payload.get("decided_at", ""),
+                "decided_by": payload.get("decided_by", ""),
+                "decided_by_role": payload.get("decided_by_role", ""),
                 "prior_denial_count_7d": payload.get("prior_denial_count_7d", 0),
             }
             break
