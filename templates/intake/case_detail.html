@@ -225,16 +225,40 @@
 <!-- Ações -->
 <div class="card p-4">
   <h5 class="mb-3">Ações</h5>
-  {% if can_confirm_receipt %}
+
+  {% if lock_locked_by_display %}
+  <div class="alert alert-warning mb-3">
+    🔒 Este resultado está sendo verificado por <strong>{{ lock_locked_by_display }}</strong>.
+    Aguarde até que a reserva expire para acessá-lo.
+  </div>
+  {% endif %}
+
+  <!-- Work lock configuration (lido por work_lock.js) -->
+  {% if lock_token %}
+  <div id="work-lock-config"
+       data-work-lock-config
+       data-renew-url="{% url 'intake:nir_lock_renew' case.case_id %}"
+       data-release-url="{% url 'intake:nir_lock_release' case.case_id %}"
+       data-lock-token="{{ lock_token }}"
+       data-heartbeat-ms="60000"
+       data-grace-ms="240000"
+       style="display:none;"></div>
+
+  <!-- Lock status warning -->
+  <div id="work-lock-warning" class="alert alert-warning mb-3" style="display:none;"></div>
+  {% endif %}
+
+  {% if can_confirm_receipt and lock_token %}
   <p class="text-muted mb-3">Confirme o recebimento do resultado final para concluir o caso.</p>
   <div class="d-flex gap-2">
     <form method="post" action="{% url 'intake:confirm_receipt' case.case_id %}" class="d-inline">
       {% csrf_token %}
+      <input type="hidden" name="lock_token" value="{{ lock_token }}">
       <button type="submit" class="btn btn-hospital" id="btn-confirm">✓ Confirmar Recebimento</button>
     </form>
     <a href="{% url 'intake:my_cases' %}" class="btn btn-outline-secondary">Voltar para lista</a>
   </div>
-  {% else %}
+  {% elif not lock_locked_by_display %}
   <div class="d-flex gap-2">
     <a href="{% url 'intake:my_cases' %}" class="btn btn-hospital-outline">← Voltar para lista</a>
   </div>
@@ -312,6 +336,9 @@
 {% endblock %}
 
 {% block extra_js %}
+{% if lock_token %}
+<script src="{% static 'js/work_lock.js' %}"></script>
+{% endif %}
 <script>
   const confirmBtn = document.getElementById('btn-confirm');
   if (confirmBtn) {
