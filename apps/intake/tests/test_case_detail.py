@@ -718,6 +718,8 @@ class TestCaseDetailScopeGatedResult:
 
     def test_scope_gated_can_confirm_receipt(self, client) -> None:
         """Scope-gated case: POST confirm → transita para CLEANED e redireciona para lista."""
+        from apps.cases.services import claim_case_lock
+
         client, user = _nir_client(client)
         case = Case.objects.create(
             created_by=user,
@@ -729,8 +731,20 @@ class TestCaseDetailScopeGatedResult:
                 "reason_text": "Fora de escopo.",
             },
         )
+        # Acquire lock first
+        result = claim_case_lock(
+            case_id=case.case_id,
+            user=user,
+            expected_status=CaseStatus.WAIT_R1_CLEANUP_THUMBS,
+            context="nir_receipt",
+            role="nir",
+        )
+        assert result.acquired is True
+        assert result.token is not None
+
         response = client.post(
             reverse("intake:confirm_receipt", args=[case.case_id]),
+            {"lock_token": str(result.token)},
             follow=True,
         )
         assert response.status_code == 200
@@ -805,6 +819,8 @@ class TestCaseDetailRegulationGateResult:
 
     def test_invalid_regulation_report_can_confirm_receipt(self, client) -> None:
         """invalid_regulation_report: POST confirm → transita para CLEANED e redireciona para lista."""
+        from apps.cases.services import claim_case_lock
+
         client, user = _nir_client(client)
         case = Case.objects.create(
             created_by=user,
@@ -816,8 +832,20 @@ class TestCaseDetailRegulationGateResult:
                 "reason_text": "O PDF não apresenta os sinais mínimos de relatório de regulação.",
             },
         )
+        # Acquire lock first
+        result = claim_case_lock(
+            case_id=case.case_id,
+            user=user,
+            expected_status=CaseStatus.WAIT_R1_CLEANUP_THUMBS,
+            context="nir_receipt",
+            role="nir",
+        )
+        assert result.acquired is True
+        assert result.token is not None
+
         response = client.post(
             reverse("intake:confirm_receipt", args=[case.case_id]),
+            {"lock_token": str(result.token)},
             follow=True,
         )
         assert response.status_code == 200
@@ -872,14 +900,28 @@ class TestConfirmReceipt:
 
     def test_confirm_receipt_transitions_to_cleaned(self, client) -> None:
         """POST confirm quando WAIT_R1_CLEANUP_THUMBS → transita para CLEANED e redireciona para lista."""
+        from apps.cases.services import claim_case_lock
+
         client, user = _nir_client(client)
         case = Case.objects.create(
             created_by=user,
             agency_record_number="CONFIRM-001",
             status=CaseStatus.WAIT_R1_CLEANUP_THUMBS,
         )
+        # Acquire lock first
+        result = claim_case_lock(
+            case_id=case.case_id,
+            user=user,
+            expected_status=CaseStatus.WAIT_R1_CLEANUP_THUMBS,
+            context="nir_receipt",
+            role="nir",
+        )
+        assert result.acquired is True
+        assert result.token is not None
+
         response = client.post(
             reverse("intake:confirm_receipt", args=[case.case_id]),
+            {"lock_token": str(result.token)},
             follow=True,
         )
         assert response.status_code == 200
@@ -890,14 +932,28 @@ class TestConfirmReceipt:
 
     def test_confirm_receipt_creates_events(self, client) -> None:
         """Confirmar recebimento deve gerar CLEANUP_TRIGGERED e CLEANUP_COMPLETED."""
+        from apps.cases.services import claim_case_lock
+
         client, user = _nir_client(client)
         case = Case.objects.create(
             created_by=user,
             agency_record_number="CONFIRM-EVENTS",
             status=CaseStatus.WAIT_R1_CLEANUP_THUMBS,
         )
+        # Acquire lock first
+        result = claim_case_lock(
+            case_id=case.case_id,
+            user=user,
+            expected_status=CaseStatus.WAIT_R1_CLEANUP_THUMBS,
+            context="nir_receipt",
+            role="nir",
+        )
+        assert result.acquired is True
+        assert result.token is not None
+
         client.post(
             reverse("intake:confirm_receipt", args=[case.case_id]),
+            {"lock_token": str(result.token)},
             follow=True,
         )
         events = CaseEvent.objects.filter(case=case)

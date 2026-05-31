@@ -51,7 +51,16 @@
             <span class="badge bg-info text-dark ms-1">📝 Obs. médica</span>
             {% endif %}
           </div>
-          <div class="col-md-2 text-md-end mt-2 mt-md-0">
+          {% if item.is_locked %}
+          <div class="col-md-1">
+            {% if item.is_locked_by_current_user %}
+            <span class="badge bg-info text-dark">🔑 Você</span>
+            {% else %}
+            <span class="badge bg-warning text-dark" title="Reservado por {{ item.locked_by_display }}">🔒 {{ item.locked_by_display|truncatechars:12 }}</span>
+            {% endif %}
+          </div>
+          {% endif %}
+          <div class="col-md-{% if item.is_locked %}1{% else %}2{% endif %} text-md-end mt-2 mt-md-0">
             <a href="{% url 'intake:case_detail' item.case.case_id %}" class="btn btn-sm btn-hospital-outline">Ver detalhes</a>
           </div>
         </div>
