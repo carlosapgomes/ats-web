@@ -27,13 +27,24 @@ class UserCreateForm(forms.ModelForm):  # type: ignore[type-arg]
 
     class Meta:
         model = User
-        fields = ["username", "email", "password", "roles", "professional_council", "professional_council_number"]
+        fields = [
+            "username",
+            "email",
+            "first_name",
+            "last_name",
+            "password",
+            "roles",
+            "professional_council",
+            "professional_council_number",
+        ]
 
     def __init__(self, *args: Any, **kwargs: Any) -> None:
         super().__init__(*args, **kwargs)
         field_attrs = {"class": "form-control"}
         self.fields["username"].widget.attrs.update(field_attrs)
         self.fields["email"].widget.attrs.update(field_attrs)
+        self.fields["first_name"].widget.attrs.update(field_attrs)
+        self.fields["last_name"].widget.attrs.update(field_attrs)
         self.fields["professional_council"].widget.attrs.update({"class": "form-select"})
         self.fields["professional_council_number"].widget.attrs.update(field_attrs)
 
@@ -76,11 +87,19 @@ class PromptCreateForm(forms.Form):  # type: ignore[type-arg]
 
 
 class UserUpdateForm(forms.ModelForm):  # type: ignore[type-arg]
-    """Formulário para editar usuário (email, papéis e conselho profissional).
+    """Formulário para editar usuário (nome, email, senha, papéis e conselho profissional).
 
     Username é exibido como readonly (não editável).
+    Senha é opcional: só altera se preenchida.
     """
 
+    password = forms.CharField(
+        label="Nova senha",
+        widget=forms.PasswordInput(
+            attrs={"class": "form-control", "placeholder": "Deixe em branco para manter a atual"}
+        ),
+        required=False,
+    )
     roles = forms.ModelMultipleChoiceField(
         label="Papéis",
         queryset=Role.objects.all().order_by("name"),
@@ -90,11 +109,13 @@ class UserUpdateForm(forms.ModelForm):  # type: ignore[type-arg]
 
     class Meta:
         model = User
-        fields = ["email", "roles", "professional_council", "professional_council_number"]
+        fields = ["email", "first_name", "last_name", "roles", "professional_council", "professional_council_number"]
 
     def __init__(self, *args: Any, **kwargs: Any) -> None:
         super().__init__(*args, **kwargs)
         self.fields["email"].widget.attrs.update({"class": "form-control"})
+        self.fields["first_name"].widget.attrs.update({"class": "form-control"})
+        self.fields["last_name"].widget.attrs.update({"class": "form-control"})
         self.fields["professional_council"].widget.attrs.update({"class": "form-select"})
         self.fields["professional_council_number"].widget.attrs.update({"class": "form-control"})
         # Armazena username para exibição readonly
@@ -105,3 +126,13 @@ class UserUpdateForm(forms.ModelForm):  # type: ignore[type-arg]
     def username(self) -> str:
         """Retorna o username do usuário (readonly)."""
         return getattr(self, "_username", "")
+
+    def save(self, commit: bool = True) -> Any:
+        user = super().save(commit=False)
+        password = self.cleaned_data.get("password")
+        if password:
+            user.set_password(password)
+        if commit:
+            user.save()
+            self.save_m2m()
+        return user
