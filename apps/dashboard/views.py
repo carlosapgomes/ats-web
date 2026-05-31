@@ -4,7 +4,7 @@ from datetime import timedelta
 
 from django.contrib.auth.decorators import login_required
 from django.core.paginator import Paginator
-from django.db.models import Avg, DurationField, ExpressionWrapper, F
+from django.db.models import Avg, DurationField, ExpressionWrapper, F, Q
 from django.http import HttpRequest, HttpResponse
 from django.shortcuts import get_object_or_404, render
 from django.utils import timezone
@@ -26,25 +26,23 @@ from apps.intake.views import (
 
 
 def _compute_summary() -> dict[str, int]:
-    """Computa métricas resumidas do dashboard."""
+    """Computa métricas resumidas do dashboard.
+
+    Usa campos de decisão imutáveis (doctor_decision, appointment_status)
+    em vez do status FSM transitório, garantindo que:
+    - Casos negados e já limpos (CLEANED) ainda são contados como negados.
+    - Casos aceitos pelo médico mas negados pelo scheduler são contados
+      como negados, não como aceitos.
+    - Aceitos e Negados são mutuamente exclusivos.
+    """
     today = timezone.now().date()
     today_cases = Case.objects.filter(created_at__date=today)
 
     total_today = today_cases.count()
 
-    accepted = (
-        today_cases.filter(
-            doctor_decision="accept",
-        )
-        .exclude(
-            status__in=[CaseStatus.DOCTOR_DENIED, CaseStatus.FAILED],
-        )
-        .count()
-    )
+    accepted = today_cases.filter(doctor_decision="accept").exclude(appointment_status="denied").count()
 
-    denied = today_cases.filter(
-        status__in=[CaseStatus.DOCTOR_DENIED, CaseStatus.APPT_DENIED],
-    ).count()
+    denied = today_cases.filter(Q(doctor_decision="deny") | Q(appointment_status="denied")).count()
 
     in_progress = total_today - accepted - denied
 

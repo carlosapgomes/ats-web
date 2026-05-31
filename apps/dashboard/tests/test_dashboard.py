@@ -213,22 +213,37 @@ class TestDashboardSummaryCards:
     """Verifica os summary cards (Total Hoje, Aceitos, Negados, Em Andamento)."""
 
     def test_summary_cards_show_correct_counts(self, client) -> None:
-        """Summary cards refletem casos de hoje."""
+        """Summary cards refletem casos de hoje com critérios baseados em decisão."""
         user = _login_as(client, "manager")
 
         # Casos criados hoje
-        _create_case(created_by=user, status=CaseStatus.APPT_CONFIRMED, doctor_decision="accept")
+        _create_case(
+            created_by=user,
+            status=CaseStatus.APPT_CONFIRMED,
+            doctor_decision="accept",
+            appointment_status="confirmed",
+        )
         _create_case(created_by=user, status=CaseStatus.WAIT_DOCTOR)
-        _create_case(created_by=user, status=CaseStatus.DOCTOR_DENIED)
-        _create_case(created_by=user, status=CaseStatus.APPT_DENIED)
+        _create_case(
+            created_by=user,
+            status=CaseStatus.DOCTOR_DENIED,
+            doctor_decision="deny",
+        )
+        _create_case(
+            created_by=user,
+            status=CaseStatus.APPT_DENIED,
+            doctor_decision="accept",
+            appointment_status="denied",
+        )
 
         response = client.get(reverse("dashboard:index"))
         assert response.status_code == 200
         content = response.content.decode()
         # Total Hoje = 4
         assert "4" in content
-        # Aceitos (doctor_decision=accept, not denied/failed) = 1
-        # Negados (DOCTOR_DENIED ou APPT_DENIED) = 2
+        # Aceitos = 1 (APPT_CONFIRMED com doctor_decision=accept, appointment_status=confirmed)
+        # Negados = 2 (DOCTOR_DENIED com doctor_decision=deny + APPT_DENIED com appointment_status=denied)
+        # Em Andamento = 1 (WAIT_DOCTOR)
         assert "Em Andamento" in content or "Aceitos" in content or "Negados" in content
 
     def test_summary_cards_include_today_total(self, client) -> None:
@@ -851,3 +866,201 @@ class TestDashboardSummariesView:
         response = client.get(reverse("dashboard:summaries"))
         assert response.status_code == 302
         assert "/login/" in response.url
+
+
+# ── Dashboard: Summary Counters Regression (fix-dashboard-counters) ─────
+
+
+@pytest.mark.django_db
+class TestDashboardSummaryFixed:
+    """Testes de regressão para os bugs dos contadores do dashboard.
+
+    Testa _compute_summary() diretamente para asserts numéricos precisos.
+    Verifica que:
+    - Negados captura casos com doctor_decision=deny mesmo após CLEANED.
+    - Negados captura casos com appointment_status=denied mesmo após CLEANED.
+    - Aceitos exclui casos com appointment_status=denied.
+    - Aceitos e Negados são mutuamente exclusivos (sem dupla contagem).
+    - Casos scope-gated (sem decisão) permanecem em Em Andamento.
+    - A soma dos contadores é igual ao total.
+    """
+
+    def test_denied_captures_doctor_deny_cleaned(self, client) -> None:
+        """Caso negado pelo médico e já CLEANED conta como Negados."""
+        from apps.dashboard.views import _compute_summary
+
+        user = _login_as(client, "manager")
+        Case.objects.all().delete()
+        _create_case(
+            created_by=user,
+            status=CaseStatus.CLEANED,
+            doctor_decision="deny",
+            agency_record_number="REG-DENY",
+        )
+        result = _compute_summary()
+        assert result["total_today"] == 1
+        assert result["denied"] == 1, (
+            f"Caso CLEANED com doctor_decision=deny deve ser Negados=1, mas denied={result['denied']}"
+        )
+        assert result["accepted"] == 0
+        assert result["in_progress"] == 0
+
+    def test_negados_captures_appt_denied_cleaned(self, client) -> None:
+        """Caso com appointment_status=denied e já CLEANED conta como Negados."""
+        from apps.dashboard.views import _compute_summary
+
+        user = _login_as(client, "manager")
+        Case.objects.all().delete()
+        _create_case(
+            created_by=user,
+            status=CaseStatus.CLEANED,
+            doctor_decision="accept",
+            appointment_status="denied",
+            agency_record_number="REG-APPT-D",
+        )
+        _create_case(
+            created_by=user,
+            status=CaseStatus.WAIT_DOCTOR,
+            agency_record_number="REG-WAIT",
+        )
+        result = _compute_summary()
+        assert result["total_today"] == 2
+        assert result["denied"] == 1, f"accept+appt_denied deve ser Negados=1, mas denied={result['denied']}"
+        assert result["accepted"] == 0, f"accept+appt_denied NAO deve ser Aceitos, mas accepted={result['accepted']}"
+        assert result["in_progress"] == 1
+
+    def test_accepted_excludes_appt_denied(self, client) -> None:
+        """Caso com doctor_decision=accept e appointment_status=denied
+        NÃO conta como Aceitos — conta como Negados."""
+        from apps.dashboard.views import _compute_summary
+
+        user = _login_as(client, "manager")
+        Case.objects.all().delete()
+        _create_case(
+            created_by=user,
+            status=CaseStatus.CLEANED,
+            doctor_decision="accept",
+            appointment_status="denied",
+            agency_record_number="REG-ACC-DEN",
+        )
+        _create_case(
+            created_by=user,
+            status=CaseStatus.CLEANED,
+            doctor_decision="accept",
+            appointment_status="confirmed",
+            agency_record_number="REG-ACC-CONF",
+        )
+        result = _compute_summary()
+        assert result["total_today"] == 2
+        assert result["accepted"] == 1, f"Só o confirmed deve ser Aceitos=1, mas accepted={result['accepted']}"
+        assert result["denied"] == 1, f"appt_denied deve ser Negados=1, mas denied={result['denied']}"
+        assert result["in_progress"] == 0
+
+    def test_no_double_count_appt_denied(self, client) -> None:
+        """Caso accept+denied aparece só em Negados, não duplamente.
+
+        A soma Aceitos + Negados + Em Andamento deve ser igual a Total.
+        """
+        from apps.dashboard.views import _compute_summary
+
+        user = _login_as(client, "manager")
+        Case.objects.all().delete()
+        _create_case(
+            created_by=user,
+            status=CaseStatus.APPT_DENIED,
+            doctor_decision="accept",
+            appointment_status="denied",
+            agency_record_number="REG-NO-DBL",
+        )
+        result = _compute_summary()
+        assert result["total_today"] == 1
+        assert result["denied"] == 1, f"accept+appt_denied deve ser Negados=1, mas denied={result['denied']}"
+        assert result["accepted"] == 0, f"accept+appt_denied NAO deve ser Aceitos, mas accepted={result['accepted']}"
+        assert result["in_progress"] == 0
+        # Integridade: soma deve bater com total
+        assert result["accepted"] + result["denied"] + result["in_progress"] == result["total_today"]
+
+    def test_scope_gated_stays_in_progress(self, client) -> None:
+        """Caso scope-gated (sem doctor_decision) fica em Em Andamento."""
+        from apps.dashboard.views import _compute_summary
+
+        user = _login_as(client, "manager")
+        Case.objects.all().delete()
+        _create_case(
+            created_by=user,
+            status=CaseStatus.WAIT_R1_CLEANUP_THUMBS,
+            suggested_action={"decision": "manual_review_required", "reason_code": "non_eda"},
+            agency_record_number="REG-SCOPE",
+        )
+        result = _compute_summary()
+        assert result["total_today"] == 1
+        assert result["in_progress"] == 1, (
+            f"Scope-gated deve ficar Em Andamento, mas in_progress={result['in_progress']}"
+        )
+        assert result["accepted"] == 0
+        assert result["denied"] == 0
+
+    def test_all_counters_sum_to_total(self, client) -> None:
+        """A soma Aceitos + Negados + Em Andamento = Total Hoje.
+
+        Cria um mix realista de casos e verifica a integridade aritmética.
+        """
+        from apps.dashboard.views import _compute_summary
+
+        user = _login_as(client, "manager")
+        Case.objects.all().delete()
+        # 1 aceito confirmado
+        _create_case(
+            created_by=user,
+            status=CaseStatus.CLEANED,
+            doctor_decision="accept",
+            appointment_status="confirmed",
+            agency_record_number="INT-001",
+        )
+        # 1 aceito imediato (sem appointment_status)
+        _create_case(
+            created_by=user,
+            status=CaseStatus.CLEANED,
+            doctor_decision="accept",
+            doctor_admission_flow="immediate",
+            agency_record_number="INT-002",
+        )
+        # 1 negado pelo médico já CLEANED
+        _create_case(
+            created_by=user,
+            status=CaseStatus.CLEANED,
+            doctor_decision="deny",
+            agency_record_number="INT-003",
+        )
+        # 1 negado pelo scheduler já CLEANED
+        _create_case(
+            created_by=user,
+            status=CaseStatus.CLEANED,
+            doctor_decision="accept",
+            appointment_status="denied",
+            agency_record_number="INT-004",
+        )
+        # 1 aguardando médico
+        _create_case(
+            created_by=user,
+            status=CaseStatus.WAIT_DOCTOR,
+            agency_record_number="INT-005",
+        )
+        # 1 falhou
+        _create_case(
+            created_by=user,
+            status=CaseStatus.FAILED,
+            agency_record_number="INT-006",
+        )
+
+        result = _compute_summary()
+        # Total = 6
+        assert result["total_today"] == 6
+        # Aceitos = 2 (accept+confirmed, accept+immediate)
+        assert result["accepted"] == 2, f"Esperado Aceitos=2, obtido accepted={result['accepted']}"
+        # Negados = 2 (deny, accept+denied)
+        assert result["denied"] == 2, f"Esperado Negados=2, obtido denied={result['denied']}"
+        # Em Andamento = 2 (wait_doctor, failed)
+        assert result["in_progress"] == 2, f"Esperado Em Andamento=2, obtido in_progress={result['in_progress']}"
+        # Integridade
+        assert result["accepted"] + result["denied"] + result["in_progress"] == result["total_today"]
