@@ -7,7 +7,7 @@ Change criado para implementação por LLM com contexto zero.
 ## Slices
 
 - [x] Slice 001 — Captura e persistência da observação médica (`slices/slice-001-captura-persistencia-observacao-medica.md`)
-- [ ] Slice 002 — Visibilidade para NIR, supervisor e admin (`slices/slice-002-visibilidade-nir-supervisor-admin.md`)
+- [x] Slice 002 — Visibilidade para NIR, supervisor e admin (`slices/slice-002-visibilidade-nir-supervisor-admin.md`)
 - [ ] Slice 003 — Visibilidade para agendador (`slices/slice-003-visibilidade-agendador.md`)
 
 ## Definition of Done do Change
@@ -18,9 +18,9 @@ Change criado para implementação por LLM com contexto zero.
 - [ ] Formulário aceita observação vazia.
 - [ ] Formulário rejeita observação acima de 500 caracteres.
 - [ ] Submit médico persiste a observação no caso.
-- [ ] NIR vê badge nos cards quando há observação médica.
-- [ ] NIR vê texto completo no detalhe do caso.
-- [ ] Manager/admin veem texto completo no detalhe do caso via dashboard.
+- [x] NIR vê badge nos cards quando há observação médica.
+- [x] NIR vê texto completo no detalhe do caso.
+- [x] Manager/admin veem texto completo no detalhe do caso via dashboard.
 - [ ] Agendador vê badge na fila quando há observação médica.
 - [ ] Agendador vê texto completo na tela de confirmação/ciência operacional.
 - [ ] Casos sem observação não exibem badge nem card vazio.

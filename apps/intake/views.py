@@ -232,6 +232,7 @@ def _my_cases_context(request: HttpRequest) -> dict[str, object]:
             "diagnosis": c.diagnosis,
             "doctor_decision_display": _get_doctor_decision_display(c),
             "doctor_display": c.doctor_display,
+            "has_doctor_observation": c.has_doctor_observation,
         }
         for c in qs
     ]

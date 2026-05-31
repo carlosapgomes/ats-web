@@ -251,3 +251,34 @@ class TestMyCasesList:
         assert response.status_code == 200
         content = response.content.decode()
         assert "João Souza" in content
+
+    def test_my_cases_shows_doctor_observation_badge_only_for_filled_observation(self, client) -> None:
+        """Card do NIR mostra badge apenas para casos com observação médica preenchida."""
+        client, user = _nir_client(client)
+
+        Case.objects.create(
+            created_by=user,
+            agency_record_number="OBS-FILLED-001",
+            status=CaseStatus.DOCTOR_ACCEPTED,
+            doctor_observation="Observação importante para logística",
+        )
+        Case.objects.create(
+            created_by=user,
+            agency_record_number="OBS-EMPTY-001",
+            status=CaseStatus.DOCTOR_ACCEPTED,
+        )
+        Case.objects.create(
+            created_by=user,
+            agency_record_number="OBS-SPACES-001",
+            status=CaseStatus.DOCTOR_ACCEPTED,
+            doctor_observation="   ",
+        )
+
+        response = client.get(reverse("intake:my_cases"))
+        assert response.status_code == 200
+        content = response.content.decode()
+        assert "OBS-FILLED-001" in content
+        assert "OBS-EMPTY-001" in content
+        assert "OBS-SPACES-001" in content
+        assert content.count("Obs. médica") == 1
+        assert "Observação importante para logística" not in content
