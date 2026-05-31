@@ -64,6 +64,38 @@ class TestSchedulerQueueView:
 
     # ── Content tests ─────────────────────────────────────────────────
 
+    def test_queue_shows_doctor_observation_badge_only_for_filled_pending_cases(self, client) -> None:
+        """WAIT_APPT cards show medical observation badge only when filled."""
+        nir_user = User.objects.create_user(username="nir_obs_pending@test.com", password="testpass123")
+        nir_user.roles.add(self._create_role("nir"))
+
+        Case.objects.create(
+            created_by=nir_user,
+            status=CaseStatus.WAIT_APPT,
+            agency_record_number="OBS-001",
+            doctor_decision="accept",
+            doctor_admission_flow="scheduled",
+            doctor_observation="Preparar sala com suporte X",
+            structured_data={"patient": {"name": "Paciente Com Obs", "age": 61, "gender": "Feminino"}},
+        )
+        Case.objects.create(
+            created_by=nir_user,
+            status=CaseStatus.WAIT_APPT,
+            agency_record_number="OBS-002",
+            doctor_decision="accept",
+            doctor_admission_flow="scheduled",
+            doctor_observation="   ",
+            structured_data={"patient": {"name": "Paciente Sem Obs", "age": 62, "gender": "Masculino"}},
+        )
+
+        self._login_as(client, "scheduler")
+        response = client.get("/scheduler/")
+        assert response.status_code == 200
+        content = response.content.decode()
+        assert "Paciente Com Obs" in content
+        assert "Paciente Sem Obs" in content
+        assert content.count("Obs. médica") == 1
+
     def test_queue_shows_pending_cases(self, client) -> None:
         """Pending (WAIT_APPT) cases appear in the queue."""
         nir_user = User.objects.create_user(username="nir_pend@test.com", password="testpass123")
@@ -117,6 +149,38 @@ class TestSchedulerQueueView:
         content = response.content.decode()
         assert "ACEITAR" in content
         assert "Anestesista + UTI" in content
+
+    def test_queue_shows_immediate_admission_doctor_observation_in_card(self, client) -> None:
+        """Immediate admission cards show badge and full observation in the queue."""
+        nir_user = User.objects.create_user(username="nir_immediate_obs@test.com", password="testpass123")
+        nir_user.roles.add(self._create_role("nir"))
+        observation = "Avisar equipe de plantão e reservar suporte anestésico."
+
+        case = Case.objects.create(
+            created_by=nir_user,
+            status=CaseStatus.WAIT_R1_CLEANUP_THUMBS,
+            agency_record_number="IMM-OBS",
+            doctor_decision="accept",
+            doctor_support_flag="anesthesist",
+            doctor_admission_flow="immediate",
+            doctor_observation=observation,
+            structured_data={"patient": {"name": "Imediata Com Obs", "age": 70, "gender": "Masculino"}},
+        )
+        CaseEvent.objects.create(
+            case=case,
+            actor_type="human",
+            actor=nir_user,
+            event_type="IMMEDIATE_ADMISSION_OPERATIONAL_NOTICE",
+            timestamp=timezone.now(),
+        )
+
+        self._login_as(client, "scheduler")
+        response = client.get("/scheduler/")
+        assert response.status_code == 200
+        content = response.content.decode()
+        assert "Imediata Com Obs" in content
+        assert "Observação médica" in content
+        assert observation in content
 
     def test_queue_shows_immediate_admission_operational_notice(self, client) -> None:
         """Immediate admission appears as operational notice, not scheduling gate."""
@@ -355,6 +419,28 @@ class TestSchedulerConfirmView:
         assert "Maria Silva dos Santos" in content
         assert "2026-0507-001" in content
         assert "ACEITAR" in content
+
+    def test_confirm_shows_doctor_observation_when_filled(self, client) -> None:
+        """Confirm page shows full medical observation when filled."""
+        self._login_as(client, "scheduler")
+        observation = "Preparar sala com suporte X e manter anestesista disponível."
+        case = self._create_waited_case(doctor_observation=observation)
+
+        response = client.get(f"/scheduler/{case.case_id}/")
+        assert response.status_code == 200
+        content = response.content.decode()
+        assert "Observação Médica" in content
+        assert observation in content
+
+    def test_confirm_hides_doctor_observation_when_empty_or_spaces(self, client) -> None:
+        """Confirm page does not render empty observation UI."""
+        self._login_as(client, "scheduler")
+        case = self._create_waited_case(doctor_observation="   ")
+
+        response = client.get(f"/scheduler/{case.case_id}/")
+        assert response.status_code == 200
+        content = response.content.decode()
+        assert "Observação Médica" not in content
 
     def test_confirm_shows_doctor_display(self, client) -> None:
         """Confirm page shows doctor name and CRM."""

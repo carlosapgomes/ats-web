@@ -107,6 +107,8 @@ def _build_case_card(case: Case, wait_minutes: int) -> dict[str, Any]:
         "doctor_display": case.doctor_display,
         "support_flag_display": _get_support_flag_display(case),
         "admission_flow_display": _get_admission_flow_display(case),
+        "has_doctor_observation": case.has_doctor_observation,
+        "doctor_observation": case.doctor_observation,
         "wait_minutes": wait_minutes,
     }
 
