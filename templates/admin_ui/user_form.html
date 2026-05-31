@@ -60,6 +60,28 @@
     </div>
     {% endif %}
 
+    <!-- Primeiro nome e Último nome -->
+    <div class="row mb-3">
+      <div class="col-md-6">
+        <label for="{{ form.first_name.id_for_label }}" class="form-label">Primeiro nome</label>
+        {{ form.first_name }}
+        {% if form.first_name.errors %}
+        <div class="invalid-feedback d-block">
+          {% for error in form.first_name.errors %}{{ error }}{% endfor %}
+        </div>
+        {% endif %}
+      </div>
+      <div class="col-md-6">
+        <label for="{{ form.last_name.id_for_label }}" class="form-label">Último nome</label>
+        {{ form.last_name }}
+        {% if form.last_name.errors %}
+        <div class="invalid-feedback d-block">
+          {% for error in form.last_name.errors %}{{ error }}{% endfor %}
+        </div>
+        {% endif %}
+      </div>
+    </div>
+
     <!-- Email -->
     <div class="mb-3">
       <label for="{{ form.email.id_for_label }}" class="form-label">{{ form.email.label }}</label>
@@ -71,8 +93,7 @@
       {% endif %}
     </div>
 
-    {% if is_create %}
-    <!-- Password (apenas no create) -->
+    <!-- Password (create: required; edit: optional) -->
     <div class="mb-3">
       <label for="{{ form.password.id_for_label }}" class="form-label">{{ form.password.label }}</label>
       {{ form.password }}
@@ -82,7 +103,6 @@
       </div>
       {% endif %}
     </div>
-    {% endif %}
 
     <!-- Papéis (checkboxes inline) -->
     <div class="mb-3">

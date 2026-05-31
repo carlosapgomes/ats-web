@@ -434,6 +434,26 @@ class TestUserCreate:
         assert response.status_code == 200
         assert b"duplicado" in response.content
 
+    def test_create_with_first_last_name(self, client) -> None:
+        """Create persiste first_name e last_name."""
+        _login_as(client, "admin")
+        Role.objects.get_or_create(name="nir")
+        nir_pk = Role.objects.get_or_create(name="nir")[0].pk
+        data = {
+            "username": "nomecompleto",
+            "email": "nomecompleto@test.com",
+            "password": "SenhaForte123!",
+            "roles": [nir_pk],
+            "first_name": "João",
+            "last_name": "Silva",
+        }
+        response = client.post(reverse("admin_ui:user_create"), data)
+        assert response.status_code == 302
+        user = User.objects.get(username="nomecompleto")
+        assert user.first_name == "João"
+        assert user.last_name == "Silva"
+        assert user.display_name == "João Silva"
+
 
 # ── User Update ──────────────────────────────────────────────────────────
 
@@ -503,6 +523,59 @@ class TestUserUpdate:
         response = client.post(reverse("admin_ui:user_update", args=[target.pk]), data)
         assert response.status_code == 302
         assert response.url == reverse("admin_ui:user_list")
+
+    def test_update_first_last_name(self, client) -> None:
+        """Update persiste first_name e last_name."""
+        _login_as(client, "admin")
+        target = _create_user("nameupdate")
+        Role.objects.get_or_create(name="nir")
+        nir_pk = Role.objects.get_or_create(name="nir")[0].pk
+        data = {
+            "email": "nameupdate@test.com",
+            "roles": [nir_pk],
+            "first_name": "Maria",
+            "last_name": "Santos",
+        }
+        response = client.post(reverse("admin_ui:user_update", args=[target.pk]), data)
+        assert response.status_code == 302
+        target.refresh_from_db()
+        assert target.first_name == "Maria"
+        assert target.last_name == "Santos"
+        assert target.display_name == "Maria Santos"
+
+    def test_update_password(self, client) -> None:
+        """Update com password altera a senha do usuário."""
+        _login_as(client, "admin")
+        target = _create_user("passupdate")
+        Role.objects.get_or_create(name="nir")
+        nir_pk = Role.objects.get_or_create(name="nir")[0].pk
+        old_password_hash = target.password
+        data = {
+            "email": "passupdate@test.com",
+            "roles": [nir_pk],
+            "password": "NovaSenha456!",
+        }
+        response = client.post(reverse("admin_ui:user_update", args=[target.pk]), data)
+        assert response.status_code == 302
+        target.refresh_from_db()
+        assert target.password != old_password_hash
+
+    def test_update_empty_password_does_not_change(self, client) -> None:
+        """Update com password vazio não altera a senha."""
+        _login_as(client, "admin")
+        target = _create_user("keepassword")
+        Role.objects.get_or_create(name="nir")
+        nir_pk = Role.objects.get_or_create(name="nir")[0].pk
+        old_password_hash = target.password
+        data = {
+            "email": "keepassword@test.com",
+            "roles": [nir_pk],
+            "password": "",
+        }
+        response = client.post(reverse("admin_ui:user_update", args=[target.pk]), data)
+        assert response.status_code == 302
+        target.refresh_from_db()
+        assert target.password == old_password_hash
 
 
 # ── User Block ───────────────────────────────────────────────────────────
