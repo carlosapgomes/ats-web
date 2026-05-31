@@ -24,6 +24,11 @@
               {% if item.patient_gender %} · {{ item.patient_gender }}{% endif %}
               {% if item.origin_unit %} · 🏥 {{ item.origin_unit }}{% endif %}
             </div>
+            {% if item.created_by_other_nir %}
+            <div class="mt-1">
+              <span class="badge bg-secondary-subtle text-secondary-emphasis">👤 Criado por {{ item.created_by_display }}</span>
+            </div>
+            {% endif %}
           </div>
           <div class="col-md-3">
             <div class="case-meta">📥 {{ item.case.created_at|date:"d/m/Y H:i" }}</div>
