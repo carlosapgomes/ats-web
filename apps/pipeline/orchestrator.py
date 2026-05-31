@@ -193,6 +193,10 @@ def _run_scope_and_llm2(
             payload={
                 "prior_case_id": prior_context.prior_case.prior_case_id,
                 "decision": prior_context.prior_case.decision,
+                "reason": prior_context.prior_case.reason,
+                "decided_at": prior_context.prior_case.decided_at,
+                "decided_by": prior_context.prior_case.decided_by,
+                "decided_by_role": prior_context.prior_case.decided_by_role,
                 "prior_denial_count_7d": prior_context.prior_denial_count_7d,
             },
         )

@@ -715,7 +715,17 @@ class TestDoctorDecisionPriorCaseCard:
         current.save()
 
         # Create prior case with same ARN
-        self._make_prior_denied_case(nir_user, "ARN-001", "Contorno clínico elevado")
+        doctor_user = User.objects.create_user(
+            username="doc_prior1@test.com",
+            password="testpass123",
+            first_name="Dr. Carlos",
+        )
+        doctor_user.professional_council = "CRM"
+        doctor_user.professional_council_number = "99999"
+        doctor_user.save()
+        prior = self._make_prior_denied_case(nir_user, "ARN-001", "Contorno clínico elevado")
+        prior.doctor = doctor_user
+        prior.save()
 
         self._login_as(client, "doctor")
         response = client.get(f"/doctor/{current.case_id}/")
@@ -724,6 +734,7 @@ class TestDoctorDecisionPriorCaseCard:
         assert "Caso Anterior" in content
         assert "Triagem Negada" in content
         assert "Contorno clínico elevado" in content
+        assert "Dr. Carlos — CRM 99999" in content
 
     def test_prior_case_card_hidden_when_no_prior(self, client) -> None:
         """Card não aparece quando não há caso anterior."""

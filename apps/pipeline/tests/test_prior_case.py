@@ -170,6 +170,9 @@ class TestPriorCaseDoctorDenied:
             doctor_reason="Risco cirúrgico elevado",
             created_at=_utc_datetime(2),
         )
+        # Assign doctor to the prior case for decided_by assertion
+        prior.doctor = user
+        prior.save()
 
         result = lookup_prior_case_context(current.case_id, "AR007", now=NOW)
 
@@ -177,6 +180,8 @@ class TestPriorCaseDoctorDenied:
         assert result.prior_case.prior_case_id == str(prior.case_id)
         assert result.prior_case.decision == "doctor_denied"
         assert result.prior_case.reason == "Risco cirúrgico elevado"
+        assert result.prior_case.decided_by_role == "doctor"
+        assert user.display_name in result.prior_case.decided_by
         assert result.prior_denial_count_7d == 1
 
     def test_multiple_doctor_denials_most_recent(self, django_user_model) -> None:
@@ -238,6 +243,9 @@ class TestPriorCaseAppointmentDenied:
             appointment_reason="Paciente não compareceu",
             created_at=_utc_datetime(3),
         )
+        # Assign scheduler to the prior case for decided_by assertion
+        prior.scheduler = user
+        prior.save()
 
         result = lookup_prior_case_context(current.case_id, "AR010", now=NOW)
 
@@ -245,6 +253,8 @@ class TestPriorCaseAppointmentDenied:
         assert result.prior_case.prior_case_id == str(prior.case_id)
         assert result.prior_case.decision == "appointment_denied"
         assert result.prior_case.reason == "Paciente não compareceu"
+        assert result.prior_case.decided_by_role == "scheduler"
+        assert user.display_name in result.prior_case.decided_by
         assert result.prior_denial_count_7d == 1
 
     def test_appointment_denial_reason_empty_normalized(self, django_user_model) -> None:
@@ -361,7 +371,11 @@ class TestPriorCaseContextDefaults:
             decided_at="2025-01-01T00:00:00+00:00",
             decision="doctor_denied",
             reason="Risco",
+            decided_by="Dr. Teste — CRM 12345",
+            decided_by_role="doctor",
         )
         ctx = PriorCaseContext(prior_case=summary, prior_denial_count_7d=1)
         assert ctx.prior_case == summary
+        assert ctx.prior_case.decided_by == "Dr. Teste — CRM 12345"
+        assert ctx.prior_case.decided_by_role == "doctor"
         assert ctx.prior_denial_count_7d == 1

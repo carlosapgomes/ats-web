@@ -1025,6 +1025,10 @@ class TestCaseDetailPriorCaseLookup:
             payload={
                 "prior_case_id": "abc-123",
                 "decision": "doctor_denied",
+                "reason": "Contorno clínico elevado",
+                "decided_at": "2026-05-30T14:00:00+00:00",
+                "decided_by": "Dr. Teste — CRM 12345",
+                "decided_by_role": "doctor",
                 "prior_denial_count_7d": 1,
             },
         )
@@ -1033,6 +1037,9 @@ class TestCaseDetailPriorCaseLookup:
         content = response.content.decode()
         assert "Caso Anterior" in content
         assert "Triagem Negada" in content
+        assert "Contorno clínico elevado" in content
+        assert "Dr. Teste — CRM 12345" in content
+        assert "2026-05-30" in content
 
     def test_prior_case_card_hidden_without_event(self, client) -> None:
         """Card não aparece quando não há evento PRIOR_CASE_LOOKUP."""
