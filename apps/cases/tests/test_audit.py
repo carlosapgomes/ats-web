@@ -56,7 +56,8 @@ class TestAuditTransitions:
 
         event = CaseEvent.objects.filter(case=case, event_type="DOCTOR_ACCEPT").first()
         assert event is not None
-        assert event.payload == {"decision": "accept"}
+        assert event.payload["decision"] == "accept"
+        assert event.payload["has_doctor_observation"] is False
 
     def test_extraction_success_generates_event(self, user) -> None:
         """EXTRACTING → LLM_STRUCT deve gerar CASE_EXTRACTION_OK."""
@@ -71,6 +72,46 @@ class TestAuditTransitions:
         event = CaseEvent.objects.filter(case=case, event_type="CASE_EXTRACTION_OK").first()
         assert event is not None
         assert event.actor == user
+
+    def test_doctor_accept_event_payload_with_observation(self, user, advance_to) -> None:
+        """DOCTOR_ACCEPT event payload must include has_doctor_observation=True."""
+        case = Case.objects.create(created_by=user)
+        advance_to(case, CaseStatus.WAIT_DOCTOR)
+
+        case.doctor_observation = "Paciente com comorbidades."
+        case.doctor_decide(decision="accept", user=user)
+        case.save()
+
+        event = CaseEvent.objects.filter(case=case, event_type="DOCTOR_ACCEPT").first()
+        assert event is not None
+        assert event.payload["decision"] == "accept"
+        assert event.payload["has_doctor_observation"] is True
+
+    def test_doctor_deny_event_payload_with_observation(self, user, advance_to) -> None:
+        """DOCTOR_DENY event payload must include has_doctor_observation=True."""
+        case = Case.objects.create(created_by=user)
+        advance_to(case, CaseStatus.WAIT_DOCTOR)
+
+        case.doctor_observation = "Encaminhar para ambulatório."
+        case.doctor_decide(decision="deny", user=user)
+        case.save()
+
+        event = CaseEvent.objects.filter(case=case, event_type="DOCTOR_DENY").first()
+        assert event is not None
+        assert event.payload["decision"] == "deny"
+        assert event.payload["has_doctor_observation"] is True
+
+    def test_doctor_accept_event_payload_without_observation(self, user, advance_to) -> None:
+        """DOCTOR_ACCEPT event payload must include has_doctor_observation=False when empty."""
+        case = Case.objects.create(created_by=user)
+        advance_to(case, CaseStatus.WAIT_DOCTOR)
+
+        case.doctor_decide(decision="accept", user=user)
+        case.save()
+
+        event = CaseEvent.objects.filter(case=case, event_type="DOCTOR_ACCEPT").first()
+        assert event is not None
+        assert event.payload["has_doctor_observation"] is False
 
 
 class TestAuditOrdering:

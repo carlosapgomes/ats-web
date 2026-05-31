@@ -163,6 +163,10 @@ class Case(models.Model):
         return ""
 
     @property
+    def has_doctor_observation(self) -> bool:
+        return bool(self.doctor_observation.strip())
+
+    @property
     def doctor_display(self) -> str:
         """Exibe o médico responsável com nome e registro profissional.
 
@@ -310,7 +314,7 @@ class Case(models.Model):
         self._record_event(
             f"DOCTOR_{decision.upper()}",
             user=user,
-            payload={"decision": decision},
+            payload={"decision": decision, "has_doctor_observation": self.has_doctor_observation},
         )
         return CaseStatus.DOCTOR_DENIED if decision == "deny" else CaseStatus.DOCTOR_ACCEPTED
 

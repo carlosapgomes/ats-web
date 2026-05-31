@@ -242,6 +242,21 @@ class TestDoctorObservation:
         retrieved = Case.objects.get(pk=case.pk)
         assert retrieved.doctor_observation == "Paciente apresenta risco anestésico elevado. Necessário UTI."
 
+    def test_has_doctor_observation_false_when_empty(self, user) -> None:
+        """has_doctor_observation retorna False quando vazio."""
+        case = Case.objects.create(created_by=user)
+        assert case.has_doctor_observation is False
+
+    def test_has_doctor_observation_false_when_whitespace_only(self, user) -> None:
+        """has_doctor_observation retorna False quando apenas espaços."""
+        case = Case.objects.create(created_by=user, doctor_observation="   ")
+        assert case.has_doctor_observation is False
+
+    def test_has_doctor_observation_true_when_filled(self, user) -> None:
+        """has_doctor_observation retorna True quando preenchido."""
+        case = Case.objects.create(created_by=user, doctor_observation="Risco elevado")
+        assert case.has_doctor_observation is True
+
 
 class TestDoctorDisplay:
     """Testes da property Case.doctor_display."""
