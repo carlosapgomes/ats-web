@@ -9,6 +9,7 @@ from django.http import Http404, HttpRequest, HttpResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.utils import timezone
 
+from apps.accounts.decorators import role_required
 from apps.cases.models import Case, CaseStatus
 
 from .forms import SchedulerDecisionForm
@@ -181,12 +182,14 @@ def _scheduler_queue_context() -> dict[str, Any]:
 
 
 @login_required
+@role_required("scheduler")
 def scheduler_queue(request: HttpRequest) -> HttpResponse:
     """View da fila de agendamento: casos WAIT_APPT e confirmados hoje."""
     return render(request, "scheduler/queue.html", _scheduler_queue_context())
 
 
 @login_required
+@role_required("scheduler")
 def scheduler_queue_partial(request: HttpRequest) -> HttpResponse:
     """HTMX partial for polling the scheduler queue without full refresh."""
     return render(request, "scheduler/_queue_content.html", _scheduler_queue_context())
@@ -196,6 +199,7 @@ def scheduler_queue_partial(request: HttpRequest) -> HttpResponse:
 
 
 @login_required
+@role_required("scheduler")
 def immediate_ack(request: HttpRequest, case_id: str) -> HttpResponse:
     """POST: scheduler acknowledges immediate admission operational notice."""
     if request.method != "POST":
@@ -240,6 +244,7 @@ def _build_confirm_context(case: Case, form: SchedulerDecisionForm) -> dict[str,
 
 
 @login_required
+@role_required("scheduler")
 def scheduler_confirm(request: HttpRequest, case_id: str) -> HttpResponse:
     """GET: Renderiza formulário de confirmação para um caso em WAIT_APPT."""
     case = get_object_or_404(Case.objects.select_related("doctor"), pk=case_id)
@@ -252,6 +257,7 @@ def scheduler_confirm(request: HttpRequest, case_id: str) -> HttpResponse:
 
 
 @login_required
+@role_required("scheduler")
 def scheduler_submit(request: HttpRequest, case_id: str) -> HttpResponse:
     """POST: Valida formulário, persiste decisão e executa transições FSM."""
     if request.method != "POST":
