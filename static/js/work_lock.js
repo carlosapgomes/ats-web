@@ -121,11 +121,11 @@
     function sendRelease() {
         var body = new FormData();
         body.append('lock_token', lockToken);
+        body.append('csrfmiddlewaretoken', getCSRFToken());
 
         /* sendBeacon is preferred; fallback to fetch with keepalive */
         if (navigator.sendBeacon) {
-            var blob = new Blob([body], { type: 'multipart/form-data' });
-            navigator.sendBeacon(releaseUrl, blob);
+            navigator.sendBeacon(releaseUrl, body);
         } else {
             fetch(releaseUrl, {
                 method: 'POST',
