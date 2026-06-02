@@ -32,6 +32,7 @@
         <!-- Work lock configuration (lido por work_lock.js) -->
         <div id="work-lock-config"
              data-work-lock-config
+             data-debug="true"
              data-renew-url="{% url 'doctor:lock_renew' case.case_id %}"
              data-release-url="{% url 'doctor:lock_release' case.case_id %}"
              data-lock-token="{{ lock_token|default:'' }}"

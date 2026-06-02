@@ -2,7 +2,8 @@
  *
  * Monitors human activity on the page and periodically renews the
  * work-leasing lock while the user is actively interacting.
- * On pagehide, attempts an explicit release (best-effort).
+ * On navigation away (link click, pagehide, visibilitychange),
+ * attempts an explicit release (best-effort).
  *
  * Configuration is read from <meta name="work-lock-config"> or a
  * script with id="work-lock-config" containing data attributes:
@@ -30,6 +31,19 @@
     var graceMs     = parseInt(configEl.getAttribute('data-grace-ms'), 10) || 240000;
 
     if (!renewUrl || !releaseUrl || !lockToken) return;
+
+    /* ── Debug logging ────────────────────────────────────────────── */
+
+    var DEBUG = configEl.getAttribute('data-debug') === 'true';
+
+    function log() {
+        if (!DEBUG) return;
+        var args = Array.prototype.slice.call(arguments);
+        args.unshift('[work-lock]');
+        console.log.apply(console, args);
+    }
+
+    log('initialized — renewUrl:', renewUrl, 'token:', lockToken);
 
     /* ── Activity tracking ───────────────────────────────────────── */
 
@@ -116,28 +130,70 @@
             });
     }
 
-    /* ── Release on pagehide (best-effort) ────────────────────────── */
+    /* ── Release lock ─────────────────────────────────────────────── */
+
+    var released = false;
 
     function sendRelease() {
+        if (released) return;
+        released = true;
+
         var body = new FormData();
         body.append('lock_token', lockToken);
+        var csrfToken = getCSRFToken();
 
-        /* fetch with keepalive is preferred: supports X-CSRFToken header.
-         * sendBeacon cannot set headers, so Django rejects with 400 (CSRF). */
+        log('sendRelease — url:', releaseUrl, 'token:', lockToken, 'csrf:', csrfToken ? csrfToken.substring(0, 8) + '...' : 'EMPTY');
+
         fetch(releaseUrl, {
             method: 'POST',
             headers: {
-                'X-CSRFToken': getCSRFToken(),
+                'X-CSRFToken': csrfToken,
             },
             body: body,
             credentials: 'same-origin',
             keepalive: true,
-        }).catch(function () { /* silent — best effort */ });
+        }).then(function (r) {
+            log('release response — status:', r.status, r.statusText);
+            if (!r.ok) {
+                r.text().then(function (t) { log('release body:', t.substring(0, 200)); });
+            }
+        }).catch(function (e) {
+            log('release error:', e);
+        });
     }
 
-    if (typeof window.addEventListener === 'function') {
-        window.addEventListener('pagehide', sendRelease);
-    }
+    /* ── Release triggers ─────────────────────────────────────────── */
+
+    /* 1. Intercept link clicks that navigate away from the lock page.
+     *    This is the most reliable trigger because it fires synchronously
+     *    before the browser initiates navigation. */
+    document.addEventListener('click', function (e) {
+        var link = e.target.closest('a[href]');
+        if (!link) return;
+
+        var href = link.getAttribute('href') || '';
+        /* Skip javascript: links and anchor-only links */
+        if (href.indexOf('javascript:') === 0 || href.charAt(0) === '#') return;
+        /* Skip links that open in new tab */
+        if (link.target === '_blank') return;
+
+        log('link click intercepted — href:', href);
+        sendRelease();
+    }, true);
+
+    /* 2. pagehide — fires when page is being unloaded */
+    window.addEventListener('pagehide', function () {
+        log('pagehide — sending release');
+        sendRelease();
+    });
+
+    /* 3. visibilitychange — fires when tab goes hidden (switch tab, minimize) */
+    document.addEventListener('visibilitychange', function () {
+        if (document.visibilityState === 'hidden') {
+            log('visibilitychange hidden — sending release');
+            sendRelease();
+        }
+    });
 
     /* ── Start periodic heartbeat ─────────────────────────────────── */
 
