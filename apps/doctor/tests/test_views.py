@@ -1785,3 +1785,33 @@ class TestDoctorDecisionLockBehavior:
         assert "Dr. Antigo" not in content
         case_from_db = Case.objects.get(pk=case.case_id)
         assert case_from_db.locked_by is None
+
+    def test_queue_renders_locked_case_with_locked_by_name(self, client) -> None:
+        """Queue renders a locked case with the locked_by display name."""
+        from apps.cases.services import claim_case_lock
+
+        case = self._create_case_in_status(CaseStatus.WAIT_DOCTOR)
+        case.structured_data = {"patient": {"name": "Locked Display", "age": 45, "gender": "Feminino"}}
+        case.save()
+
+        doc_a = User.objects.create_user(username="doc_display@test.com", password="testpass123")
+        doc_a.roles.add(self._create_role("doctor"))
+        doc_a.first_name = "Dra. Display"
+        doc_a.save()
+
+        # Acquire lock
+        claim_case_lock(
+            case_id=case.case_id,
+            user=doc_a,
+            expected_status=CaseStatus.WAIT_DOCTOR,
+            context="doctor_decision",
+            role="doctor",
+        )
+
+        # Login as a different doctor to see the lock display
+        self._login_as(client, "doctor")
+        response = client.get("/doctor/")
+        assert response.status_code == 200
+        content = response.content.decode()
+        assert "Locked Display" in content
+        assert "Dra. Display" in content

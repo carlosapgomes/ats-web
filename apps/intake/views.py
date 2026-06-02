@@ -224,7 +224,11 @@ def _my_cases_context(request: HttpRequest) -> dict[str, object]:
     # Lazily expire stale locks for WAIT_R1_CLEANUP_THUMBS before query
     expire_stale_locks_for_statuses(statuses=[CaseStatus.WAIT_R1_CLEANUP_THUMBS])
 
-    qs = Case.objects.exclude(status="CLEANED").select_related("doctor", "created_by").order_by("-created_at")
+    qs = (
+        Case.objects.exclude(status=CaseStatus.CLEANED)
+        .select_related("doctor", "created_by", "locked_by")
+        .order_by("-created_at")
+    )
 
     status_filter = request.GET.get("status", "")
     if status_filter:
