@@ -94,7 +94,16 @@
         </div>
         <div class="col-lg-4 text-lg-end mt-3 mt-lg-0 d-flex flex-lg-column justify-content-between align-items-lg-end">
           <div class="waiting-time">⏱ Aguardando há {{ c.wait_minutes }} min</div>
+          {% if c.is_locked_by_current_user %}
+          <a href="{% url 'scheduler:confirm' c.case_id %}" class="btn btn-success mt-2">▶ Continuar</a>
+          {% elif c.is_locked %}
+          <button class="btn btn-secondary mt-2" disabled title="Reservado por {{ c.locked_by_display }}">
+            🔒 Reservado
+          </button>
+          <div class="small text-muted mt-1">por {{ c.locked_by_display }}</div>
+          {% else %}
           <a href="{% url 'scheduler:confirm' c.case_id %}" class="btn btn-hospital mt-2">Agendar</a>
+          {% endif %}
         </div>
       </div>
     </div>

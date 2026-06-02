@@ -1,6 +1,6 @@
 """Views do dashboard de monitoramento para manager e admin."""
 
-from datetime import timedelta
+from datetime import date, datetime, time, timedelta
 
 from django.contrib.auth.decorators import login_required
 from django.core.paginator import Paginator
@@ -25,6 +25,26 @@ from apps.intake.views import (
 )
 
 
+def _local_day_bounds(day: date | None = None) -> tuple[datetime, datetime]:
+    """Retorna início e fim do dia local (timezone-aware) para filtros ORM.
+
+    Usa o fuso horário configurado no Django (TIME_ZONE), não a data UTC
+    de timezone.now().date(). Isso evita o bug de fronteira UTC/local
+    onde timezone.now() já está no dia seguinte UTC enquanto o fuso local
+    ainda está no dia anterior.
+
+    Exemplo:
+        timezone.now()  = 2026-06-01 01:00 UTC
+        localdate(Bahia)= 2026-05-31 22:00 BRT
+        day=None        → bounds de 2026-05-31 00:00 até 2026-06-01 00:00 BRT
+    """
+    local_day = day or timezone.localdate()
+    current_tz = timezone.get_current_timezone()
+    start = timezone.make_aware(datetime.combine(local_day, time.min), current_tz)
+    end = start + timedelta(days=1)
+    return start, end
+
+
 def _compute_summary() -> dict[str, int]:
     """Computa métricas resumidas do dashboard.
 
@@ -34,9 +54,12 @@ def _compute_summary() -> dict[str, int]:
     - Casos aceitos pelo médico mas negados pelo scheduler são contados
       como negados, não como aceitos.
     - Aceitos e Negados são mutuamente exclusivos.
+
+    Usa _local_day_bounds() para filtrar casos do dia local em vez de
+    timezone.now().date() que retorna data UTC.
     """
-    today = timezone.now().date()
-    today_cases = Case.objects.filter(created_at__date=today)
+    start, end = _local_day_bounds()
+    today_cases = Case.objects.filter(created_at__gte=start, created_at__lt=end)
 
     total_today = today_cases.count()
 
@@ -64,10 +87,15 @@ def _compute_stage_waiting() -> dict[str, int]:
 
 
 def _compute_admission_flow() -> dict[str, int]:
-    """Fluxo de admissão (agendado vs imediato) para casos aceitos hoje."""
-    today = timezone.now().date()
+    """Fluxo de admissão (agendado vs imediato) para casos aceitos hoje.
+
+    Usa _local_day_bounds() em vez de timezone.now().date() para
+    consistência com _compute_summary() na definição do dia local.
+    """
+    start, end = _local_day_bounds()
     base = Case.objects.filter(
-        created_at__date=today,
+        created_at__gte=start,
+        created_at__lt=end,
         doctor_decision="accept",
     )
     return {

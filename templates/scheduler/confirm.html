@@ -7,6 +7,18 @@
 
 {% block content %}
 
+<!-- Work lock configuration (lido por work_lock.js) -->
+<div id="work-lock-config"
+     data-work-lock-config
+     data-renew-url="{% url 'scheduler:lock_renew' case.case_id %}"
+     data-release-url="{% url 'scheduler:lock_release' case.case_id %}"
+     data-lock-token="{{ lock_token|default:'' }}"
+     data-heartbeat-ms="60000"
+     data-grace-ms="240000">
+</div>
+
+<div id="work-lock-warning" class="alert alert-warning mb-3" style="display:none;"></div>
+
 <div class="row g-4 decision-two-col">
 
   <!-- Left: Case Summary -->
@@ -138,6 +150,15 @@
           <div class="form-text">Preenchido automaticamente pelo sistema.</div>
         </div>
 
+        <!-- Lock error -->
+        {% if lock_error %}
+        <div class="alert alert-danger mt-3">
+          🔒 {{ lock_error }}
+        </div>
+        {% endif %}
+
+        <input type="hidden" name="lock_token" value="{{ lock_token|default:"" }}">
+
         <!-- Submit -->
         <div class="d-flex gap-2">
           <button type="submit" class="btn btn-hospital btn-lg flex-grow-1" id="btn-submit">
@@ -175,4 +196,5 @@
 
 {% block extra_js %}
 <script src="{% static 'js/scheduler_confirm.js' %}"></script>
+<script src="{% static 'js/work_lock.js' %}"></script>
 {% endblock %}

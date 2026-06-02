@@ -29,6 +29,19 @@
       <div class="card p-4 doctor-decision-form-card">
         <h5 class="mb-4">🩺 Formulário de Decisão</h5>
 
+        <!-- Work lock configuration (lido por work_lock.js) -->
+        <div id="work-lock-config"
+             data-work-lock-config
+             data-renew-url="{% url 'doctor:lock_renew' case.case_id %}"
+             data-release-url="{% url 'doctor:lock_release' case.case_id %}"
+             data-lock-token="{{ lock_token|default:'' }}"
+             data-heartbeat-ms="60000"
+             data-grace-ms="240000"
+             style="display:none;"></div>
+
+        <!-- Lock status warning -->
+        <div id="work-lock-warning" class="alert alert-warning mb-3" style="display:none;"></div>
+
         <form id="decision-form" method="post" action="{% url 'doctor:submit' case.case_id %}" novalidate>
           {% csrf_token %}
 
@@ -102,6 +115,15 @@
             {% if form.observation.errors %}<div class="invalid-feedback d-block">{{ form.observation.errors.0 }}</div>{% endif %}
             <div class="form-text">{{ form.observation.help_text }}</div>
           </div>
+
+          {% if lock_error %}
+          <div class="alert alert-danger mb-3">
+            🔒 {{ lock_error }}
+            <a href="{% url 'doctor:queue' %}" class="alert-link">Voltar para fila</a>
+          </div>
+          {% endif %}
+
+          <input type="hidden" name="lock_token" value="{{ lock_token|default:"" }}">
 
           <div class="d-flex gap-2">
             <button type="submit" class="btn btn-hospital btn-lg flex-grow-1" id="btn-submit">Enviar Decisão</button>
@@ -225,4 +247,5 @@
 
 {% block extra_js %}
 <script src="{% static 'js/decision.js' %}"></script>
+<script src="{% static 'js/work_lock.js' %}"></script>
 {% endblock %}

@@ -11,5 +11,7 @@ urlpatterns = [
     path("partials/queue/", views.doctor_queue_partial, name="queue_partial"),
     path("<uuid:case_id>/", views.doctor_decision, name="decision"),
     path("<uuid:case_id>/submit/", views.doctor_submit, name="submit"),
+    path("<uuid:case_id>/lock/renew/", views.doctor_lock_renew, name="lock_renew"),
+    path("<uuid:case_id>/lock/release/", views.doctor_lock_release, name="lock_release"),
     path("<uuid:case_id>/pdf/", views.serve_pdf, name="serve_pdf"),
 ]

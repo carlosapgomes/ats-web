@@ -170,6 +170,11 @@ SUMMARY_CUTOFF_HOURS = os.environ.get("SUMMARY_CUTOFF_HOURS", "7,13,19,1")
 # Timezone for summary window resolution (defaults to project TIME_ZONE)
 SUMMARY_TIMEZONE = os.environ.get("SUMMARY_TIMEZONE", TIME_ZONE)
 
+# Case lock / lease settings
+CASE_LOCK_LEASE_SECONDS = 5 * 60
+CASE_LOCK_HEARTBEAT_SECONDS = 60
+CASE_LOCK_ACTIVITY_GRACE_SECONDS = 4 * 60
+
 # Password validation
 AUTH_PASSWORD_VALIDATORS = [
     {"NAME": "django.contrib.auth.password_validation.UserAttributeSimilarityValidator"},

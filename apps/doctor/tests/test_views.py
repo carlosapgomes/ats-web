@@ -1,5 +1,6 @@
 """Tests for doctor queue view."""
 
+import uuid
 from datetime import timedelta
 from pathlib import Path
 
@@ -914,6 +915,197 @@ class TestDoctorDecisionForm:
         assert form.is_valid()
 
 
+# ── Lock renew/release endpoint tests ────────────────────────────────────
+
+
+@pytest.mark.django_db
+class TestDoctorLockEndpoints:
+    """Tests for POST /doctor/<case_id>/lock/renew/ and /lock/release/."""
+
+    def _create_role(self, name: str):
+        from apps.accounts.models import Role
+
+        role, _ = Role.objects.get_or_create(name=name)
+        return role
+
+    def _login_as(self, client, role_name: str):
+        user = User.objects.create_user(username=f"{role_name}@lockep.test", password="testpass123")
+        user.roles.add(self._create_role(role_name))
+        client.force_login(user)
+        session = client.session
+        session["active_role"] = role_name
+        session.save()
+        return user
+
+    def _create_case_in_status(self, status: str) -> Case:
+        nir_user = User.objects.create_user(
+            username=f"nir_lockep_{(status or 'new').lower()}@test.com", password="testpass123"
+        )
+        nir_user.roles.add(self._create_role("nir"))
+        case = Case.objects.create(created_by=nir_user, status=CaseStatus.NEW)
+        if status != CaseStatus.NEW:
+            case = _advance_case_to(case, status)
+        return case
+
+    def _claim_lock(self, case_id, doctor) -> str:
+        from apps.cases.services import claim_case_lock
+
+        result = claim_case_lock(
+            case_id=case_id,
+            user=doctor,
+            expected_status=CaseStatus.WAIT_DOCTOR,
+            context="doctor_decision",
+            role="doctor",
+        )
+        assert result.acquired is True
+        return str(result.token)
+
+    def test_renew_with_valid_token_returns_json_success(self, client):
+        """POST renew with valid token returns JSON success."""
+        case = self._create_case_in_status(CaseStatus.WAIT_DOCTOR)
+        case.structured_data = {"patient": {"name": "Renew OK", "age": 40, "gender": "M"}}
+        case.save()
+
+        doctor = self._login_as(client, "doctor")
+        token = self._claim_lock(case.case_id, doctor)
+
+        response = client.post(
+            f"/doctor/{case.case_id}/lock/renew/",
+            data={"lock_token": token},
+        )
+        assert response.status_code == 200
+        assert response["Content-Type"] == "application/json"
+        import json
+
+        data = json.loads(response.content)
+        assert data.get("success") is True
+        assert "locked_until" in data
+
+    def test_renew_with_invalid_token_returns_error(self, client):
+        """POST renew with invalid token returns error and does not alter lock."""
+        from apps.cases.services import claim_case_lock
+
+        case = self._create_case_in_status(CaseStatus.WAIT_DOCTOR)
+        case.structured_data = {"patient": {"name": "Renew Bad", "age": 40, "gender": "M"}}
+        case.save()
+
+        doctor = self._login_as(client, "doctor")
+        # First claim to establish lock
+        result = claim_case_lock(
+            case_id=case.case_id,
+            user=doctor,
+            expected_status=CaseStatus.WAIT_DOCTOR,
+            context="doctor_decision",
+            role="doctor",
+        )
+        assert result.acquired is True
+
+        original_locked_until = Case.objects.get(pk=case.case_id).locked_until
+
+        response = client.post(
+            f"/doctor/{case.case_id}/lock/renew/",
+            data={"lock_token": str(uuid.uuid4())},
+        )
+        assert response.status_code == 200
+        assert response["Content-Type"] == "application/json"
+        import json
+
+        data = json.loads(response.content)
+        assert data.get("success") is False
+        assert "error" in data or "detail" in data
+
+        # locked_until unchanged
+        case = Case.objects.get(pk=case.case_id)
+        assert case.locked_until == original_locked_until
+
+    def test_release_with_valid_token_clears_lock(self, client):
+        """POST release with valid token clears lock fields."""
+        case = self._create_case_in_status(CaseStatus.WAIT_DOCTOR)
+        case.structured_data = {"patient": {"name": "Release OK", "age": 40, "gender": "M"}}
+        case.save()
+
+        doctor = self._login_as(client, "doctor")
+        token = self._claim_lock(case.case_id, doctor)
+
+        response = client.post(
+            f"/doctor/{case.case_id}/lock/release/",
+            data={"lock_token": token},
+        )
+        assert response.status_code == 200
+        assert response["Content-Type"] == "application/json"
+        import json
+
+        data = json.loads(response.content)
+        assert data.get("success") is True
+
+        case = Case.objects.get(pk=case.case_id)
+        assert case.locked_by is None
+        assert case.lock_token is None
+
+    def test_release_with_invalid_token_does_not_clear(self, client):
+        """POST release with invalid token does not clear lock."""
+        from apps.cases.services import claim_case_lock
+
+        case = self._create_case_in_status(CaseStatus.WAIT_DOCTOR)
+        case.structured_data = {"patient": {"name": "Release Fail", "age": 40, "gender": "M"}}
+        case.save()
+
+        doctor = self._login_as(client, "doctor")
+        # Claim lock
+        claim_case_lock(
+            case_id=case.case_id,
+            user=doctor,
+            expected_status=CaseStatus.WAIT_DOCTOR,
+            context="doctor_decision",
+            role="doctor",
+        )
+
+        response = client.post(
+            f"/doctor/{case.case_id}/lock/release/",
+            data={"lock_token": str(uuid.uuid4())},
+        )
+        assert response.status_code == 200
+        assert response["Content-Type"] == "application/json"
+        import json
+
+        data = json.loads(response.content)
+        assert data.get("success") is False
+
+        # Lock still intact
+        case = Case.objects.get(pk=case.case_id)
+        assert case.locked_by == doctor
+
+    def test_lock_endpoints_require_doctor_role(self, client):
+        """Lock endpoints return redirect for non-doctor roles."""
+        case = self._create_case_in_status(CaseStatus.WAIT_DOCTOR)
+        case.structured_data = {"patient": {"name": "Role Check", "age": 40, "gender": "M"}}
+        case.save()
+
+        self._login_as(client, "nir")
+
+        response = client.post(f"/doctor/{case.case_id}/lock/renew/")
+        assert response.status_code == 302
+        assert response.url == "/"
+
+        response = client.post(f"/doctor/{case.case_id}/lock/release/")
+        assert response.status_code == 302
+        assert response.url == "/"
+
+    def test_lock_endpoints_reject_get(self, client):
+        """Lock endpoints return 404 for GET requests."""
+        case = self._create_case_in_status(CaseStatus.WAIT_DOCTOR)
+        case.structured_data = {"patient": {"name": "GET Check", "age": 40, "gender": "M"}}
+        case.save()
+
+        self._login_as(client, "doctor")
+
+        response = client.get(f"/doctor/{case.case_id}/lock/renew/")
+        assert response.status_code == 404
+
+        response = client.get(f"/doctor/{case.case_id}/lock/release/")
+        assert response.status_code == 404
+
+
 # ── FSM tests ────────────────────────────────────────────────────────────
 
 
@@ -1011,6 +1203,19 @@ class TestDoctorSubmitView:
             case = _advance_case_to(case, status)
         return case
 
+    def _claim_lock(self, case_id, doctor) -> str:
+        from apps.cases.services import claim_case_lock
+
+        result = claim_case_lock(
+            case_id=case_id,
+            user=doctor,
+            expected_status=CaseStatus.WAIT_DOCTOR,
+            context="doctor_decision",
+            role="doctor",
+        )
+        assert result.acquired is True
+        return str(result.token)
+
     def test_submit_blocks_nir(self, client) -> None:
         """NIR with active_role='nir' cannot POST /doctor/<case_id>/submit/."""
         case = self._create_case_in_status(CaseStatus.WAIT_DOCTOR)
@@ -1037,6 +1242,7 @@ class TestDoctorSubmitView:
         case.save()
 
         doctor = self._login_as(client, "doctor")
+        token = self._claim_lock(case.case_id, doctor)
 
         response = client.post(
             f"/doctor/{case.case_id}/submit/",
@@ -1044,6 +1250,7 @@ class TestDoctorSubmitView:
                 "decision": "accept",
                 "support_flag": "anesthesist",
                 "admission_flow": "scheduled",
+                "lock_token": token,
             },
         )
         assert response.status_code == 302  # redirect after success
@@ -1062,7 +1269,8 @@ class TestDoctorSubmitView:
         case.structured_data = {"patient": {"name": "Immediate", "age": 70, "gender": "Masculino"}}
         case.save()
 
-        self._login_as(client, "doctor")
+        doctor = self._login_as(client, "doctor")
+        token = self._claim_lock(case.case_id, doctor)
 
         response = client.post(
             f"/doctor/{case.case_id}/submit/",
@@ -1070,6 +1278,7 @@ class TestDoctorSubmitView:
                 "decision": "accept",
                 "support_flag": "anesthesist",
                 "admission_flow": "immediate",
+                "lock_token": token,
             },
         )
         assert response.status_code == 302
@@ -1090,7 +1299,8 @@ class TestDoctorSubmitView:
         case.structured_data = {"patient": {"name": "Sched Event", "age": 35, "gender": "Feminino"}}
         case.save()
 
-        self._login_as(client, "doctor")
+        doctor = self._login_as(client, "doctor")
+        token = self._claim_lock(case.case_id, doctor)
 
         client.post(
             f"/doctor/{case.case_id}/submit/",
@@ -1098,6 +1308,7 @@ class TestDoctorSubmitView:
                 "decision": "accept",
                 "support_flag": "none",
                 "admission_flow": "scheduled",
+                "lock_token": token,
             },
         )
 
@@ -1111,12 +1322,14 @@ class TestDoctorSubmitView:
         case.save()
 
         doctor = self._login_as(client, "doctor")
+        token = self._claim_lock(case.case_id, doctor)
 
         response = client.post(
             f"/doctor/{case.case_id}/submit/",
             data={
                 "decision": "deny",
                 "reason": "Contorno clínico não indicado",
+                "lock_token": token,
             },
         )
         assert response.status_code == 302
@@ -1134,13 +1347,15 @@ class TestDoctorSubmitView:
         case.structured_data = {"patient": {"name": "Final Reply", "age": 45, "gender": "Masculino"}}
         case.save()
 
-        self._login_as(client, "doctor")
+        doctor = self._login_as(client, "doctor")
+        token = self._claim_lock(case.case_id, doctor)
 
         client.post(
             f"/doctor/{case.case_id}/submit/",
             data={
                 "decision": "deny",
                 "reason": "Sem indicação cirúrgica",
+                "lock_token": token,
             },
         )
 
@@ -1153,7 +1368,8 @@ class TestDoctorSubmitView:
         case.structured_data = {"patient": {"name": "Event Accept", "age": 40, "gender": "Masculino"}}
         case.save()
 
-        self._login_as(client, "doctor")
+        doctor = self._login_as(client, "doctor")
+        token = self._claim_lock(case.case_id, doctor)
 
         client.post(
             f"/doctor/{case.case_id}/submit/",
@@ -1161,6 +1377,7 @@ class TestDoctorSubmitView:
                 "decision": "accept",
                 "support_flag": "none",
                 "admission_flow": "immediate",
+                "lock_token": token,
             },
         )
 
@@ -1173,13 +1390,15 @@ class TestDoctorSubmitView:
         case.structured_data = {"patient": {"name": "Event Deny", "age": 50, "gender": "Feminino"}}
         case.save()
 
-        self._login_as(client, "doctor")
+        doctor = self._login_as(client, "doctor")
+        token = self._claim_lock(case.case_id, doctor)
 
         client.post(
             f"/doctor/{case.case_id}/submit/",
             data={
                 "decision": "deny",
                 "reason": "Motivo de teste",
+                "lock_token": token,
             },
         )
 
@@ -1219,7 +1438,8 @@ class TestDoctorSubmitView:
         case.structured_data = {"patient": {"name": "Obs Accept", "age": 40, "gender": "Masculino"}}
         case.save()
 
-        self._login_as(client, "doctor")
+        doctor = self._login_as(client, "doctor")
+        token = self._claim_lock(case.case_id, doctor)
 
         response = client.post(
             f"/doctor/{case.case_id}/submit/",
@@ -1228,6 +1448,7 @@ class TestDoctorSubmitView:
                 "support_flag": "anesthesist",
                 "admission_flow": "scheduled",
                 "observation": "Paciente com comorbidades. Necessário leito UTI.",
+                "lock_token": token,
             },
         )
         assert response.status_code == 302
@@ -1241,7 +1462,8 @@ class TestDoctorSubmitView:
         case.structured_data = {"patient": {"name": "Obs Deny", "age": 50, "gender": "Feminino"}}
         case.save()
 
-        self._login_as(client, "doctor")
+        doctor = self._login_as(client, "doctor")
+        token = self._claim_lock(case.case_id, doctor)
 
         response = client.post(
             f"/doctor/{case.case_id}/submit/",
@@ -1249,6 +1471,7 @@ class TestDoctorSubmitView:
                 "decision": "deny",
                 "reason": "Sem indicação cirúrgica",
                 "observation": "Encaminhar para avaliação clínica.",
+                "lock_token": token,
             },
         )
         assert response.status_code == 302
@@ -1262,7 +1485,8 @@ class TestDoctorSubmitView:
         case.structured_data = {"patient": {"name": "No Obs", "age": 35, "gender": "Masculino"}}
         case.save()
 
-        self._login_as(client, "doctor")
+        doctor = self._login_as(client, "doctor")
+        token = self._claim_lock(case.case_id, doctor)
 
         response = client.post(
             f"/doctor/{case.case_id}/submit/",
@@ -1270,6 +1494,7 @@ class TestDoctorSubmitView:
                 "decision": "accept",
                 "support_flag": "none",
                 "admission_flow": "scheduled",
+                "lock_token": token,
             },
         )
         assert response.status_code == 302
@@ -1284,7 +1509,8 @@ class TestDoctorSubmitView:
         case.structured_data = {"patient": {"name": "Long Obs", "age": 45, "gender": "Masculino"}}
         case.save()
 
-        self._login_as(client, "doctor")
+        doctor = self._login_as(client, "doctor")
+        token = self._claim_lock(case.case_id, doctor)
 
         text_501 = "x" * 501
         response = client.post(
@@ -1294,6 +1520,7 @@ class TestDoctorSubmitView:
                 "support_flag": "none",
                 "admission_flow": "scheduled",
                 "observation": text_501,
+                "lock_token": token,
             },
         )
         assert response.status_code == 200  # re-renders form
@@ -1322,3 +1549,269 @@ class TestDoctorSubmitView:
             },
         )
         assert response.status_code == 404
+
+
+# ── Lock behavior tests ──────────────────────────────────────────────────
+
+
+@pytest.mark.django_db
+class TestDoctorDecisionLockBehavior:
+    """Tests for lock acquisition and validation in doctor decision/submit."""
+
+    def _create_role(self, name: str):
+        from apps.accounts.models import Role
+
+        role, _ = Role.objects.get_or_create(name=name)
+        return role
+
+    def _login_as(self, client, role_name: str):
+        user = User.objects.create_user(username=f"{role_name}@lock.test", password="testpass123")
+        user.roles.add(self._create_role(role_name))
+        client.force_login(user)
+        session = client.session
+        session["active_role"] = role_name
+        session.save()
+        return user
+
+    def _create_case_in_status(self, status: str) -> Case:
+        nir_user = User.objects.create_user(
+            username=f"nir_lock_{(status or 'new').lower()}@test.com", password="testpass123"
+        )
+        nir_user.roles.add(self._create_role("nir"))
+        case = Case.objects.create(created_by=nir_user, status=CaseStatus.NEW)
+        if status != CaseStatus.NEW:
+            case = _advance_case_to(case, status)
+        return case
+
+    def test_decision_get_acquires_lock_and_includes_token(self, client) -> None:
+        """GET /doctor/<case_id>/ acquires lock and includes hidden lock_token."""
+        case = self._create_case_in_status(CaseStatus.WAIT_DOCTOR)
+        case.structured_data = {"patient": {"name": "Lock Test", "age": 40, "gender": "Masculino"}}
+        case.save()
+
+        doctor = self._login_as(client, "doctor")
+
+        response = client.get(f"/doctor/{case.case_id}/")
+        assert response.status_code == 200
+
+        content = response.content.decode()
+        assert 'name="lock_token"' in content
+        assert 'type="hidden"' in content
+
+        # Lock should be persisted
+        case_from_db = Case.objects.get(pk=case.case_id)
+        assert case_from_db.locked_by == doctor
+        assert case_from_db.lock_context == "doctor_decision"
+        assert case_from_db.lock_role == "doctor"
+
+    def test_second_doctor_redirected_when_case_locked(self, client) -> None:
+        """Second doctor GET /doctor/<case_id>/ is redirected when case is locked by another."""
+        case = self._create_case_in_status(CaseStatus.WAIT_DOCTOR)
+        case.structured_data = {"patient": {"name": "Locked Case", "age": 50, "gender": "Masculino"}}
+        case.save()
+
+        # First doctor acquires lock
+        self._login_as(client, "doctor")
+        response = client.get(f"/doctor/{case.case_id}/")
+        assert response.status_code == 200
+
+        # Second doctor tries to access - use a different client
+
+        from django.test import Client
+
+        client_b = Client()
+        doc_b = User.objects.create_user(username="doctor_b_locked@test.com", password="testpass123")
+        doc_b.roles.add(self._create_role("doctor"))
+        doc_b.first_name = "Dr. Segundo"
+        doc_b.save()
+        client_b.force_login(doc_b)
+        session = client_b.session
+        session["active_role"] = "doctor"
+        session.save()
+
+        response_b = client_b.get(f"/doctor/{case.case_id}/")
+        assert response_b.status_code == 302  # redirect to queue
+
+    def test_submit_with_valid_lock_succeeds(self, client) -> None:
+        """POST submit with valid lock_token executes and redirects."""
+        from apps.cases.services import claim_case_lock
+
+        case = self._create_case_in_status(CaseStatus.WAIT_DOCTOR)
+        case.structured_data = {"patient": {"name": "Valid Lock", "age": 40, "gender": "Masculino"}}
+        case.save()
+
+        doctor = self._login_as(client, "doctor")
+
+        # Pre-acquire lock
+        result = claim_case_lock(
+            case_id=case.case_id,
+            user=doctor,
+            expected_status=CaseStatus.WAIT_DOCTOR,
+            context="doctor_decision",
+            role="doctor",
+        )
+        assert result.acquired is True
+
+        response = client.post(
+            f"/doctor/{case.case_id}/submit/",
+            data={
+                "decision": "accept",
+                "support_flag": "none",
+                "admission_flow": "scheduled",
+                "lock_token": str(result.token),
+            },
+        )
+        assert response.status_code == 302
+
+        case_from_db = Case.objects.get(pk=case.case_id)
+        assert case_from_db.doctor_decision == "accept"
+        assert case_from_db.status == CaseStatus.WAIT_APPT
+
+    def test_submit_without_token_shows_error(self, client) -> None:
+        """POST submit without lock_token shows error and does not change status."""
+        case = self._create_case_in_status(CaseStatus.WAIT_DOCTOR)
+        case.structured_data = {"patient": {"name": "No Token", "age": 40, "gender": "Masculino"}}
+        case.save()
+
+        self._login_as(client, "doctor")
+
+        response = client.post(
+            f"/doctor/{case.case_id}/submit/",
+            data={
+                "decision": "accept",
+                "support_flag": "none",
+                "admission_flow": "scheduled",
+            },
+        )
+        assert response.status_code == 200  # re-renders form
+        content = response.content.decode()
+        assert "lock" in content.lower() or "token" in content.lower() or "reserva" in content.lower()
+
+        case_from_db = Case.objects.get(pk=case.case_id)
+        assert case_from_db.status == CaseStatus.WAIT_DOCTOR  # unchanged
+
+    def test_submit_with_invalid_token_shows_error(self, client) -> None:
+        """POST submit with wrong lock_token shows error and does not change status."""
+        case = self._create_case_in_status(CaseStatus.WAIT_DOCTOR)
+        case.structured_data = {"patient": {"name": "Bad Token", "age": 40, "gender": "Masculino"}}
+        case.save()
+
+        self._login_as(client, "doctor")
+
+        response = client.post(
+            f"/doctor/{case.case_id}/submit/",
+            data={
+                "decision": "accept",
+                "support_flag": "none",
+                "admission_flow": "scheduled",
+                "lock_token": "00000000-0000-0000-0000-000000000000",
+            },
+        )
+        assert response.status_code == 200  # re-renders form
+        content = response.content.decode()
+        assert "lock" in content.lower() or "token" in content.lower() or "reserva" in content.lower()
+
+        case_from_db = Case.objects.get(pk=case.case_id)
+        assert case_from_db.status == CaseStatus.WAIT_DOCTOR  # unchanged
+
+    def test_queue_shows_case_reserved_by_other(self, client) -> None:
+        """Queue shows when a case is reserved by another doctor."""
+        case = self._create_case_in_status(CaseStatus.WAIT_DOCTOR)
+        case.structured_data = {"patient": {"name": "Reserved Case", "age": 45, "gender": "Feminino"}}
+        case.save()
+
+        from apps.cases.services import claim_case_lock
+
+        doc_a = User.objects.create_user(username="doc_queue_lock@test.com", password="testpass123")
+        doc_a.roles.add(self._create_role("doctor"))
+        doc_a.first_name = "Dra. A"
+        doc_a.save()
+
+        result = claim_case_lock(
+            case_id=case.case_id,
+            user=doc_a,
+            expected_status=CaseStatus.WAIT_DOCTOR,
+            context="doctor_decision",
+            role="doctor",
+        )
+        assert result.acquired is True
+
+        # Login as a different doctor to see the queue
+        doc_b = self._login_as(client, "doctor")
+        doc_b.first_name = "Dr. B"
+        doc_b.save()
+
+        response = client.get("/doctor/")
+        assert response.status_code == 200
+        content = response.content.decode()
+        assert "Reserved Case" in content
+        assert "Dra. A" in content
+        assert "reservado" in content.lower() or "bloqueado" in content.lower() or "desabilitado" in content.lower()
+
+    def test_expired_lock_shows_available_in_queue(self, client) -> None:
+        """Case with expired lock shows as available (not blocked) in doctor queue."""
+        from apps.cases.services import claim_case_lock
+
+        case = self._create_case_in_status(CaseStatus.WAIT_DOCTOR)
+        case.structured_data = {"patient": {"name": "Expired Lock", "age": 50, "gender": "Masculino"}}
+        case.save()
+
+        doc_a = User.objects.create_user(username="doc_expired@test.com", password="testpass123")
+        doc_a.roles.add(self._create_role("doctor"))
+        doc_a.first_name = "Dr. Antigo"
+        doc_a.save()
+
+        # Claim lock and force expiration
+        claim_case_lock(
+            case_id=case.case_id,
+            user=doc_a,
+            expected_status=CaseStatus.WAIT_DOCTOR,
+            context="doctor_decision",
+            role="doctor",
+            lease_seconds=0,
+        )
+        Case.objects.filter(case_id=case.case_id).update(locked_until=timezone.now() - timedelta(seconds=1))
+
+        # Login as a different doctor — queue view calls expire_stale_locks
+        self._login_as(client, "doctor")
+        response = client.get("/doctor/")
+        assert response.status_code == 200
+        content = response.content.decode()
+
+        # The lock has expired and been cleared by expire_stale_locks
+        # Case should show up and NOT be marked as reserved
+        assert "Expired Lock" in content
+        # Should NOT show locked indicators
+        assert "Dr. Antigo" not in content
+        case_from_db = Case.objects.get(pk=case.case_id)
+        assert case_from_db.locked_by is None
+
+    def test_queue_renders_locked_case_with_locked_by_name(self, client) -> None:
+        """Queue renders a locked case with the locked_by display name."""
+        from apps.cases.services import claim_case_lock
+
+        case = self._create_case_in_status(CaseStatus.WAIT_DOCTOR)
+        case.structured_data = {"patient": {"name": "Locked Display", "age": 45, "gender": "Feminino"}}
+        case.save()
+
+        doc_a = User.objects.create_user(username="doc_display@test.com", password="testpass123")
+        doc_a.roles.add(self._create_role("doctor"))
+        doc_a.first_name = "Dra. Display"
+        doc_a.save()
+
+        # Acquire lock
+        claim_case_lock(
+            case_id=case.case_id,
+            user=doc_a,
+            expected_status=CaseStatus.WAIT_DOCTOR,
+            context="doctor_decision",
+            role="doctor",
+        )
+
+        # Login as a different doctor to see the lock display
+        self._login_as(client, "doctor")
+        response = client.get("/doctor/")
+        assert response.status_code == 200
+        content = response.content.decode()
+        assert "Locked Display" in content
+        assert "Dra. Display" in content

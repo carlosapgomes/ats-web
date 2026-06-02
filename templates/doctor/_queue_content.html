@@ -55,7 +55,14 @@
           <div class="waiting-time{% if c.is_urgent %} urgent{% endif %}">
             ⏱ Aguardando há {{ c.wait_minutes }} min{% if c.is_urgent %} — PRIORITÁRIO{% endif %}
           </div>
-          {% if c.is_urgent %}
+          {% if c.is_locked_by_current_user %}
+          <a href="{% url 'doctor:decision' c.case_id %}" class="btn btn-success mt-2">▶ Continuar Avaliação</a>
+          {% elif c.is_locked %}
+          <button class="btn btn-secondary mt-2" disabled title="Reservado por {{ c.locked_by_display }}">
+            🔒 Reservado
+          </button>
+          <div class="small text-muted mt-1">por {{ c.locked_by_display }}</div>
+          {% elif c.is_urgent %}
           <a href="{% url 'doctor:decision' c.case_id %}" class="btn btn-danger mt-2">Avaliar Urgente</a>
           {% else %}
           <a href="{% url 'doctor:decision' c.case_id %}" class="btn btn-hospital mt-2">Avaliar Caso</a>

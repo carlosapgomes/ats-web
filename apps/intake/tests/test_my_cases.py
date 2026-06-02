@@ -49,8 +49,8 @@ def _doctor_client(client):
 class TestMyCasesList:
     """GET /intake/my-cases/ — renderização da lista de casos do NIR."""
 
-    def test_my_cases_shows_only_user_cases(self, client) -> None:
-        """NIR vê apenas os casos que ele mesmo criou."""
+    def test_my_cases_shows_all_operational_cases(self, client) -> None:
+        """NIR vê todos os casos operacionais, incluindo de outros NIR (continuidade de plantão)."""
         client, user = _nir_client(client)
 
         # Caso do NIR logado
@@ -72,7 +72,7 @@ class TestMyCasesList:
         assert response.status_code == 200
         content = response.content.decode()
         assert "NIR-001" in content
-        assert "OTHER-999" not in content
+        assert "OTHER-999" in content
 
     def test_my_cases_excludes_cleaned(self, client) -> None:
         """Casos com status CLEANED não devem aparecer na lista."""
