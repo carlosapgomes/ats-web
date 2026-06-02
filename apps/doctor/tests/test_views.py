@@ -1747,3 +1747,41 @@ class TestDoctorDecisionLockBehavior:
         assert "Reserved Case" in content
         assert "Dra. A" in content
         assert "reservado" in content.lower() or "bloqueado" in content.lower() or "desabilitado" in content.lower()
+
+    def test_expired_lock_shows_available_in_queue(self, client) -> None:
+        """Case with expired lock shows as available (not blocked) in doctor queue."""
+        from apps.cases.services import claim_case_lock
+
+        case = self._create_case_in_status(CaseStatus.WAIT_DOCTOR)
+        case.structured_data = {"patient": {"name": "Expired Lock", "age": 50, "gender": "Masculino"}}
+        case.save()
+
+        doc_a = User.objects.create_user(username="doc_expired@test.com", password="testpass123")
+        doc_a.roles.add(self._create_role("doctor"))
+        doc_a.first_name = "Dr. Antigo"
+        doc_a.save()
+
+        # Claim lock and force expiration
+        claim_case_lock(
+            case_id=case.case_id,
+            user=doc_a,
+            expected_status=CaseStatus.WAIT_DOCTOR,
+            context="doctor_decision",
+            role="doctor",
+            lease_seconds=0,
+        )
+        Case.objects.filter(case_id=case.case_id).update(locked_until=timezone.now() - timedelta(seconds=1))
+
+        # Login as a different doctor — queue view calls expire_stale_locks
+        self._login_as(client, "doctor")
+        response = client.get("/doctor/")
+        assert response.status_code == 200
+        content = response.content.decode()
+
+        # The lock has expired and been cleared by expire_stale_locks
+        # Case should show up and NOT be marked as reserved
+        assert "Expired Lock" in content
+        # Should NOT show locked indicators
+        assert "Dr. Antigo" not in content
+        case_from_db = Case.objects.get(pk=case.case_id)
+        assert case_from_db.locked_by is None

@@ -434,3 +434,49 @@ class TestNirListLockIndicators:
 
         # Should show that it's locked by current user
         assert "LockC" in content or "você" in content or "Voce" in content
+
+
+@pytest.mark.django_db
+class TestNirExpiredLockInList:
+    """Expired NIR locks don't block cases in the list."""
+
+    def test_expired_lock_shows_available_in_nir_list(self, client) -> None:
+        """Case with expired lock shows as available (not locked) in NIR my_cases."""
+        from apps.cases.services import claim_case_lock
+
+        client_a, nir_a = _nir_client(client, "nir-exp-a@test.com")
+        nir_a.first_name = "ExpiredNir"
+        nir_a.save()
+
+        case = _create_wait_receipt_case(created_by=nir_a)
+
+        # Claim lock with immediate expiration
+        claim_case_lock(
+            case_id=case.case_id,
+            user=nir_a,
+            expected_status=CaseStatus.WAIT_R1_CLEANUP_THUMBS,
+            context="nir_receipt",
+            role="nir",
+            lease_seconds=0,
+        )
+        from datetime import timedelta
+
+        from django.utils import timezone
+
+        Case.objects.filter(case_id=case.case_id).update(locked_until=timezone.now() - timedelta(seconds=1))
+
+        # Login as a different NIR — my_cases calls expire_stale_locks
+        client_b, nir_b = _nir_client(client, "nir-exp-b@test.com")
+        nir_b.first_name = "FreshNir"
+        nir_b.save()
+
+        response = client_b.get(reverse("intake:my_cases"))
+        assert response.status_code == 200
+        content = response.content.decode()
+
+        # Case appears in the list and is NOT shown as locked
+        assert case.patient_name in content or "Paciente" in content
+        # The expired lock owner's name should NOT appear as locked_by
+        assert "ExpiredNir" not in content or "Reservado" not in content
+        case_from_db = Case.objects.get(pk=case.case_id)
+        assert case_from_db.locked_by is None

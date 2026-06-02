@@ -1573,3 +1573,76 @@ class TestImmediateAckIdempotent:
         client.post(f"/scheduler/{case.case_id}/immediate-ack/")
         response = client.get("/scheduler/")
         assert "Remove Imm" not in response.content.decode()
+
+
+@pytest.mark.django_db
+class TestSchedulerExpiredLockInQueue:
+    """Tests for expired locks appearing available in scheduler queue."""
+
+    def _create_role(self, name: str):
+        role, _ = Role.objects.get_or_create(name=name)
+        return role
+
+    def _login_as(self, client, role_name: str):
+        user = User.objects.create_user(username=f"{role_name}@expired.test", password="testpass123")
+        user.roles.add(self._create_role(role_name))
+        client.force_login(user)
+        session = client.session
+        session["active_role"] = role_name
+        session.save()
+        return user
+
+    def test_expired_lock_shows_available_in_scheduler_queue(self, client) -> None:
+        """Case with expired lock shows as available in scheduler queue."""
+        from apps.cases.services import claim_case_lock
+
+        nir_user = User.objects.create_user(username="nir_exp_sched@test.com", password="testpass123")
+        nir_user.roles.add(self._create_role("nir"))
+
+        case = Case.objects.create(
+            created_by=nir_user,
+            status=CaseStatus.WAIT_APPT,
+            doctor_decision="accept",
+            doctor_support_flag="anesthesist",
+            doctor_admission_flow="scheduled",
+            structured_data={
+                "patient": {
+                    "name": "Sched Expired Lock",
+                    "age": 55,
+                    "gender": "Masculino",
+                },
+            },
+        )
+        case.save()
+
+        sched_a = User.objects.create_user(username="sched_expired@test.com", password="testpass123")
+        sched_a.roles.add(self._create_role("scheduler"))
+        sched_a.first_name = "Sched. Antigo"
+        sched_a.save()
+
+        # Claim lock and force expiration
+        claim_case_lock(
+            case_id=case.case_id,
+            user=sched_a,
+            expected_status=CaseStatus.WAIT_APPT,
+            context="scheduler_confirm",
+            role="scheduler",
+            lease_seconds=0,
+        )
+        from datetime import timedelta
+
+        from django.utils import timezone
+
+        Case.objects.filter(case_id=case.case_id).update(locked_until=timezone.now() - timedelta(seconds=1))
+
+        # Login as another scheduler — queue calls expire_stale_locks
+        self._login_as(client, "scheduler")
+        response = client.get("/scheduler/")
+        assert response.status_code == 200
+        content = response.content.decode()
+
+        # Case should appear and NOT be locked by the previous owner
+        assert "Sched Expired Lock" in content
+        assert "Sched. Antigo" not in content
+        case_from_db = Case.objects.get(pk=case.case_id)
+        assert case_from_db.locked_by is None
