@@ -100,6 +100,20 @@ class Case(models.Model):
     cleanup_triggered_at = models.DateTimeField(null=True, blank=True)
     cleanup_completed_at = models.DateTimeField(null=True, blank=True)
 
+    # Lock / Lease fields
+    locked_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="cases_locked",
+    )
+    locked_at = models.DateTimeField(null=True, blank=True)
+    locked_until = models.DateTimeField(null=True, blank=True, db_index=True)
+    lock_token = models.UUIDField(null=True, blank=True)
+    lock_context = models.CharField(max_length=40, blank=True)
+    lock_role = models.CharField(max_length=30, blank=True)
+
     # Metadata
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
@@ -108,6 +122,7 @@ class Case(models.Model):
         ordering = ["-created_at"]
         indexes = [
             models.Index(fields=["status"]),
+            models.Index(fields=["status", "locked_until"]),
             models.Index(fields=["agency_record_number", "created_at"]),
         ]
 

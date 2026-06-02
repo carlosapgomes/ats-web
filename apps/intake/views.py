@@ -1,13 +1,27 @@
 """Views do app intake."""
 
+import uuid
+
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
-from django.http import FileResponse, Http404, HttpRequest, HttpResponse, HttpResponseBase
+from django.http import FileResponse, Http404, HttpRequest, HttpResponse, HttpResponseBase, JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.views.decorators.clickjacking import xframe_options_sameorigin
 
 from apps.accounts.decorators import role_required
 from apps.cases.models import Case, CaseStatus
+from apps.cases.services import (
+    assert_case_lock,
+    claim_case_lock,
+    compute_lock_display,
+    expire_stale_locks_for_statuses,
+)
+from apps.cases.services import (
+    release_case_lock as release_lock_service,
+)
+from apps.cases.services import (
+    renew_case_lock as renew_lock_service,
+)
 
 from .forms import CaseUploadForm
 from .services import process_uploaded_files
@@ -199,16 +213,20 @@ def _get_doctor_decision_display(case: Case) -> str:
 
 
 def _my_cases_context(request: HttpRequest) -> dict[str, object]:
-    """Build context for full and HTMX NIR case-list renders."""
+    """Build context for full and HTMX NIR case-list renders.
+
+    All active NIR users see all operational cases (status != CLEANED)
+    for shift continuity, regardless of who created the case.
+    """
     user = request.user
     assert user.is_authenticated
 
+    # Lazily expire stale locks for WAIT_R1_CLEANUP_THUMBS before query
+    expire_stale_locks_for_statuses(statuses=[CaseStatus.WAIT_R1_CLEANUP_THUMBS])
+
     qs = (
-        Case.objects.filter(
-            created_by=user,
-        )
-        .exclude(status="CLEANED")
-        .select_related("doctor")
+        Case.objects.exclude(status=CaseStatus.CLEANED)
+        .select_related("doctor", "created_by", "locked_by")
         .order_by("-created_at")
     )
 
@@ -233,6 +251,20 @@ def _my_cases_context(request: HttpRequest) -> dict[str, object]:
             "doctor_decision_display": _get_doctor_decision_display(c),
             "doctor_display": c.doctor_display,
             "has_doctor_observation": c.has_doctor_observation,
+            "created_by_other_nir": c.created_by_id != user.pk,
+            "created_by_display": c.created_by.get_full_name() or c.created_by.username,
+            # Lock info for WAIT_R1_CLEANUP_THUMBS cases (other statuses: all clear)
+            **(
+                compute_lock_display(c, user=user)
+                if c.status == CaseStatus.WAIT_R1_CLEANUP_THUMBS
+                else {
+                    "is_locked": False,
+                    "is_locked_by_current_user": False,
+                    "locked_by_display": "",
+                    "locked_until": "",
+                    "lock_context": "",
+                }
+            ),
         }
         for c in qs
     ]
@@ -269,12 +301,21 @@ def my_cases_partial(request: HttpRequest) -> HttpResponse:
 @login_required
 @role_required("nir")
 def case_detail(request: HttpRequest, case_id: str) -> HttpResponse:
-    """Detalhes de um caso para o NIR — timeline, stepper e PDF inline."""
+    """Detalhes de um caso para o NIR — timeline, stepper e PDF inline.
+
+    Any active NIR can open any operational case (status != CLEANED)
+    for shift continuity, regardless of who created the case.
+
+    For WAIT_R1_CLEANUP_THUMBS cases, a lock with context 'nir_receipt'
+    is acquired to prevent concurrent receipt confirmation.
+    """
     case = get_object_or_404(
         Case.objects.select_related("created_by", "doctor"),
         case_id=case_id,
-        created_by=request.user,
     )
+    # Block access to CLEANED cases via the operational route
+    if case.status == CaseStatus.CLEANED:
+        raise Http404("Caso concluído não está disponível na fila operacional.")
     events = case.events.all()
 
     current_step_idx = STEP_STATUS_INDEX.get(case.status, 0)
@@ -300,7 +341,32 @@ def case_detail(request: HttpRequest, case_id: str) -> HttpResponse:
             }
         )
 
+    # ── Lock acquisition for WAIT_R1_CLEANUP_THUMBS ──────────────
+    user = request.user
+    lock_token = None
+    lock_error = None
+    lock_locked_by_display = None
     can_confirm = case.status == CaseStatus.WAIT_R1_CLEANUP_THUMBS
+    lock_held = False
+
+    if case.status == CaseStatus.WAIT_R1_CLEANUP_THUMBS:
+        result = claim_case_lock(
+            case_id=case.case_id,
+            user=user,
+            expected_status=CaseStatus.WAIT_R1_CLEANUP_THUMBS,
+            context="nir_receipt",
+            role="nir",
+        )
+        if result.acquired:
+            lock_token = str(result.token)
+            # Re-fetch case with fresh lock data
+            case = Case.objects.get(pk=case.case_id)
+            lock_held = True
+        elif result.locked_by_display:
+            lock_locked_by_display = result.locked_by_display
+            can_confirm = False
+        else:
+            can_confirm = False
 
     # Prior case lookup — extrair informações do evento PRIOR_CASE_LOOKUP
     prior_case_lookup = None
@@ -388,6 +454,10 @@ def case_detail(request: HttpRequest, case_id: str) -> HttpResponse:
             "status_label": STATUS_LABELS.get(case.status, case.get_status_display()),
             "status_css": STATUS_CSS_CLASS.get(case.status, "status-pending"),
             "can_confirm_receipt": can_confirm,
+            "lock_token": lock_token or "",
+            "lock_error": lock_error,
+            "lock_locked_by_display": lock_locked_by_display or "",
+            "lock_held": lock_held,
             "result_info": result_info,
             "patient_name": patient_name,
             "prior_case_lookup": prior_case_lookup,
@@ -399,12 +469,19 @@ def case_detail(request: HttpRequest, case_id: str) -> HttpResponse:
 @role_required("nir")
 @xframe_options_sameorigin
 def serve_pdf(request: HttpRequest, case_id: str) -> HttpResponseBase:
-    """Serve o PDF original do caso para visualização inline no <embed>."""
+    """Serve o PDF original do caso para visualização inline no <embed>.
+
+    Any active NIR can view PDFs of operational cases (status != CLEANED)
+    for shift continuity.
+    """
     case = get_object_or_404(
         Case.objects.select_related("created_by"),
         case_id=case_id,
-        created_by=request.user,
     )
+    if case.status == CaseStatus.CLEANED:
+        raise Http404("PDF de caso concluído não está disponível na fila operacional.")
+    if not case.pdf_file:
+        raise Http404("PDF não encontrado para este caso.")
     if not case.pdf_file:
         raise Http404("PDF não encontrado para este caso.")
 
@@ -417,18 +494,140 @@ def serve_pdf(request: HttpRequest, case_id: str) -> HttpResponseBase:
 @login_required
 @role_required("nir")
 def confirm_receipt(request: HttpRequest, case_id: str) -> HttpResponse:
-    """Confirma recebimento do resultado final e conclui o caso."""
-    case = get_object_or_404(
-        Case,
-        case_id=case_id,
-        created_by=request.user,
+    """Confirma recebimento do resultado final e conclui o caso.
+
+    Qualquer NIR autorizado pode confirmar recebimento de um resultado
+    pendente (WAIT_R1_CLEANUP_THUMBS), desde que possua a reserva (lock)
+    válida com token e contexto 'nir_receipt'.
+
+    Após confirmação, o caso vai para CLEANED e não fica mais acessível
+    pela rota operacional NIR — redireciona para a lista.
+    """
+    if request.method != "POST":
+        return redirect("intake:case_detail", case_id=case_id)
+
+    case = get_object_or_404(Case, case_id=case_id)
+
+    if case.status != CaseStatus.WAIT_R1_CLEANUP_THUMBS:
+        messages.warning(request, "Este caso não está aguardando confirmação de recebimento.")
+        return redirect("intake:case_detail", case_id=case.case_id)
+
+    # Validate lock token
+    raw_token = request.POST.get("lock_token", "")
+    try:
+        token = uuid.UUID(raw_token) if raw_token else None
+    except (ValueError, AttributeError):
+        token = None
+
+    if token is None:
+        messages.warning(
+            request,
+            "Token de reserva não encontrado. Volte para a lista e tente novamente.",
+        )
+        return redirect("intake:case_detail", case_id=case.case_id)
+
+    # Check lock validity before proceeding
+    try:
+        assert_case_lock(
+            case=case,
+            user=request.user,
+            token=token,
+            context="nir_receipt",
+        )
+    except PermissionError as exc:
+        messages.warning(request, str(exc))
+        return redirect("intake:case_detail", case_id=case.case_id)
+
+    # Execute FSM transitions
+    case.cleanup_triggered(user=request.user)
+    case.save()
+    case.cleanup_completed(user=request.user)
+    case.save()
+
+    # Clear lock after completion
+    case.locked_by = None
+    case.locked_at = None
+    case.locked_until = None
+    case.lock_token = None
+    case.lock_context = ""
+    case.lock_role = ""
+    case.save(
+        update_fields=[
+            "locked_by",
+            "locked_at",
+            "locked_until",
+            "lock_token",
+            "lock_context",
+            "lock_role",
+        ]
     )
 
-    if request.method == "POST" and case.status == CaseStatus.WAIT_R1_CLEANUP_THUMBS:
-        case.cleanup_triggered(user=request.user)
-        case.save()
-        case.cleanup_completed(user=request.user)
-        case.save()
-        messages.success(request, "Recebimento confirmado. Caso concluído.")
+    messages.success(request, "Recebimento confirmado. Caso concluído.")
+    return redirect("intake:my_cases")
 
-    return redirect("intake:case_detail", case_id=case.case_id)
+
+@login_required
+@role_required("nir")
+def nir_lock_renew(request: HttpRequest, case_id: uuid.UUID) -> HttpResponse:
+    """POST: Renova a reserva NIR de um caso (heartbeat).
+
+    Requer lock_token no body do POST.
+    Retorna JsonResponse com 'success' e 'locked_until' ou erro.
+    """
+    if request.method != "POST":
+        raise Http404
+
+    raw_token = request.POST.get("lock_token", "")
+    try:
+        token = uuid.UUID(raw_token) if raw_token else None
+    except (ValueError, AttributeError):
+        token = None
+
+    if token is None:
+        return JsonResponse({"success": False, "error": "Token de reserva não fornecido."}, status=200)
+
+    result = renew_lock_service(
+        case_id=case_id,
+        user=request.user,
+        token=token,
+        context="nir_receipt",
+    )
+
+    if result.acquired:
+        return JsonResponse(
+            {
+                "success": True,
+                "locked_until": result.locked_until.isoformat() if result.locked_until else None,
+            }
+        )
+    return JsonResponse({"success": False, "error": result.reason}, status=200)
+
+
+@login_required
+@role_required("nir")
+def nir_lock_release(request: HttpRequest, case_id: uuid.UUID) -> HttpResponse:
+    """POST: Libera a reserva NIR de um caso explicitamente.
+
+    Requer lock_token no body do POST.
+    Retorna JsonResponse com 'success'.
+    """
+    if request.method != "POST":
+        raise Http404
+
+    raw_token = request.POST.get("lock_token", "")
+    try:
+        token = uuid.UUID(raw_token) if raw_token else None
+    except (ValueError, AttributeError):
+        token = None
+
+    if token is None:
+        return JsonResponse({"success": False, "error": "Token de reserva não fornecido."}, status=200)
+
+    released = release_lock_service(
+        case_id=case_id,
+        user=request.user,
+        token=token,
+        context="nir_receipt",
+    )
+
+    return JsonResponse({"success": released})
