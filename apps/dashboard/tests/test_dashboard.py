@@ -1,6 +1,6 @@
 """Testes do dashboard — Slice 1: App dashboard + view + template + case detail admin."""
 
-from datetime import timedelta
+from datetime import datetime, timedelta
 
 import pytest
 from django.contrib.auth import get_user_model
@@ -883,6 +883,7 @@ class TestDashboardSummaryFixed:
     - Aceitos e Negados são mutuamente exclusivos (sem dupla contagem).
     - Casos scope-gated (sem decisão) permanecem em Em Andamento.
     - A soma dos contadores é igual ao total.
+    - Métricas de "hoje" usam o dia local, não a data UTC.
     """
 
     def test_denied_captures_doctor_deny_cleaned(self, client) -> None:
@@ -1064,3 +1065,137 @@ class TestDashboardSummaryFixed:
         assert result["in_progress"] == 2, f"Esperado Em Andamento=2, obtido in_progress={result['in_progress']}"
         # Integridade
         assert result["accepted"] + result["denied"] + result["in_progress"] == result["total_today"]
+
+    # ── Timezone boundary regression tests ────────────────────────────────
+    #
+    # O bug: _compute_summary() e _compute_admission_flow() usavam
+    # timezone.now().date() que retorna a data UTC, não a data local.
+    #
+    # Exemplo:
+    #   timezone.now()  = 2026-06-01 01:00 UTC
+    #   localdate(Bahia)= 2026-05-31 22:00 BRT
+    #   today (bug)     = 2026-06-01  → filtra created_at__date=2026-06-01 UTC
+    #   Caso criado às 2026-05-31 08:00 BRT (UTC 2026-05-31 11:00) NÃO
+    #   seria encontrado, mesmo estando no dia operacional corrente.
+    #
+    # Os testes abaixo reproduzem essa fronteira e verificam a correção.
+
+    def _setup_utc_local_boundary(self) -> tuple[datetime, datetime]:
+        """Helper: retorna (utc_now, local_created) para a fronteira UTC/local."""
+        from datetime import UTC
+
+        utc_now = datetime(2026, 6, 1, 1, 0, 0, tzinfo=UTC)
+        # Em America/Bahia (UTC-3), 01:00 UTC = 22:00 BRT do dia anterior (31/05)
+        local_created = datetime(2026, 5, 31, 8, 0, 0, tzinfo=UTC)
+        return utc_now, local_created
+
+    @pytest.mark.django_db
+    def test_summary_counts_case_in_local_day_ignoring_utc_tomorrow(self, client) -> None:
+        """Caso no dia local (BRT) é contado mesmo que UTC já seja amanhã."""
+        from unittest.mock import patch
+        from zoneinfo import ZoneInfo
+
+        from django.utils import timezone as tz_utils
+
+        from apps.dashboard.views import _compute_summary
+
+        user = _login_as(client, "manager")
+        Case.objects.all().delete()
+
+        utc_now, _ = self._setup_utc_local_boundary()
+
+        # Cria caso às 08:00 BRT (= 11:00 UTC do dia 31/05)
+        when_local = datetime(2026, 5, 31, 8, 0, 0, tzinfo=ZoneInfo("America/Bahia"))
+        _create_case(
+            created_by=user,
+            status=CaseStatus.WAIT_DOCTOR,
+            agency_record_number="TZ-BOUNDARY",
+        )
+        Case.objects.filter(agency_record_number="TZ-BOUNDARY").update(created_at=when_local)
+
+        # Agora simula: timezone.now() em UTC já é 01:00 do dia 01/06
+        with tz_utils.override("America/Bahia"):
+            with patch.object(tz_utils, "now", return_value=utc_now):
+                result = _compute_summary()
+
+        # O caso foi criado às 08:00 BRT de 31/05. O dia local do servidor
+        # (22:00 BRT de 31/05) é 31/05. Portanto deve contar como today.
+        assert result["total_today"] == 1, (
+            f"Caso do dia local deve ser Total=1, mas total_today={result['total_today']}"
+        )
+
+    @pytest.mark.django_db
+    def test_summary_excludes_case_from_previous_local_day(self, client) -> None:
+        """Caso do dia local anterior NÃO é contado em 'hoje'."""
+        from unittest.mock import patch
+        from zoneinfo import ZoneInfo
+
+        from django.utils import timezone as tz_utils
+
+        from apps.dashboard.views import _compute_summary
+
+        user = _login_as(client, "manager")
+        Case.objects.all().delete()
+
+        utc_now, _ = self._setup_utc_local_boundary()
+
+        # Cria caso em 30/05 BRT (véspera do dia local)
+        when_yesterday = datetime(2026, 5, 30, 10, 0, 0, tzinfo=ZoneInfo("America/Bahia"))
+        _create_case(
+            created_by=user,
+            status=CaseStatus.WAIT_DOCTOR,
+            agency_record_number="TZ-YESTERDAY",
+        )
+        Case.objects.filter(agency_record_number="TZ-YESTERDAY").update(created_at=when_yesterday)
+
+        with tz_utils.override("America/Bahia"):
+            with patch.object(tz_utils, "now", return_value=utc_now):
+                result = _compute_summary()
+
+        assert result["total_today"] == 0, (
+            f"Caso do dia anterior não deve ser Total=0, mas total_today={result['total_today']}"
+        )
+
+    @pytest.mark.django_db
+    def test_admission_flow_uses_local_day(self, client) -> None:
+        """_compute_admission_flow() usa dia local, não UTC."""
+        from unittest.mock import patch
+        from zoneinfo import ZoneInfo
+
+        from django.utils import timezone as tz_utils
+
+        from apps.dashboard.views import _compute_admission_flow
+
+        user = _login_as(client, "manager")
+        Case.objects.all().delete()
+
+        utc_now, _ = self._setup_utc_local_boundary()
+
+        # Caso aceito às 08:00 BRT (= 11:00 UTC do dia 31/05) com fluxo scheduled
+        when_local = datetime(2026, 5, 31, 8, 0, 0, tzinfo=ZoneInfo("America/Bahia"))
+        _create_case(
+            created_by=user,
+            status=CaseStatus.APPT_CONFIRMED,
+            doctor_decision="accept",
+            doctor_admission_flow="scheduled",
+            agency_record_number="TZ-FLOW-SCHED",
+        )
+        Case.objects.filter(agency_record_number="TZ-FLOW-SCHED").update(created_at=when_local)
+
+        # Caso aceito às 08:30 BRT com fluxo immediate
+        when_local2 = datetime(2026, 5, 31, 8, 30, 0, tzinfo=ZoneInfo("America/Bahia"))
+        _create_case(
+            created_by=user,
+            status=CaseStatus.DOCTOR_ACCEPTED,
+            doctor_decision="accept",
+            doctor_admission_flow="immediate",
+            agency_record_number="TZ-FLOW-IMM",
+        )
+        Case.objects.filter(agency_record_number="TZ-FLOW-IMM").update(created_at=when_local2)
+
+        with tz_utils.override("America/Bahia"):
+            with patch.object(tz_utils, "now", return_value=utc_now):
+                flow = _compute_admission_flow()
+
+        assert flow["scheduled"] == 1, f"Fluxo scheduled deve ser 1, obtido {flow['scheduled']}"
+        assert flow["immediate"] == 1, f"Fluxo immediate deve ser 1, obtido {flow['immediate']}"
