@@ -121,22 +121,18 @@
     function sendRelease() {
         var body = new FormData();
         body.append('lock_token', lockToken);
-        body.append('csrfmiddlewaretoken', getCSRFToken());
 
-        /* sendBeacon is preferred; fallback to fetch with keepalive */
-        if (navigator.sendBeacon) {
-            navigator.sendBeacon(releaseUrl, body);
-        } else {
-            fetch(releaseUrl, {
-                method: 'POST',
-                headers: {
-                    'X-CSRFToken': getCSRFToken(),
-                },
-                body: body,
-                credentials: 'same-origin',
-                keepalive: true,
-            }).catch(function () { /* silent — best effort */ });
-        }
+        /* fetch with keepalive is preferred: supports X-CSRFToken header.
+         * sendBeacon cannot set headers, so Django rejects with 400 (CSRF). */
+        fetch(releaseUrl, {
+            method: 'POST',
+            headers: {
+                'X-CSRFToken': getCSRFToken(),
+            },
+            body: body,
+            credentials: 'same-origin',
+            keepalive: true,
+        }).catch(function () { /* silent — best effort */ });
     }
 
     if (typeof window.addEventListener === 'function') {
