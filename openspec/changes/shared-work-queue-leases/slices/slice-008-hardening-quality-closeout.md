@@ -1,8 +1,8 @@
-# Slice 007: Hardening, auditoria cruzada e quality gate final
+# Slice 008: Hardening, auditoria cruzada e quality gate final
 
 ## Handoff para implementador LLM com contexto zero
 
-Você está no projeto `/projects/dev/ats-web`. Os slices 001–006 devem estar implementados. Este slice não deve abrir uma frente funcional grande; ele consolida, remove inconsistências e valida o change completo.
+Você está no projeto `/projects/dev/ats-web`. Os slices 001–007 devem estar implementados. Este slice não deve abrir uma frente funcional grande; ele consolida, remove inconsistências e valida o change completo.
 
 Leia:
 
@@ -125,7 +125,7 @@ git status --short
 Criar:
 
 ```text
-/tmp/ats-web-slice-007-shared-work-queue-leases-closeout-report.md
+/tmp/ats-web-slice-008-shared-work-queue-leases-closeout-report.md
 ```
 
 Incluir:
@@ -144,7 +144,7 @@ Incluir:
 Resposta final:
 
 ```text
-REPORT_PATH=/tmp/ats-web-slice-007-shared-work-queue-leases-closeout-report.md
+REPORT_PATH=/tmp/ats-web-slice-008-shared-work-queue-leases-closeout-report.md
 ```
 
 Depois pare. Não iniciar novo change sem confirmação.
@@ -153,6 +153,6 @@ Depois pare. Não iniciar novo change sem confirmação.
 
 ```text
 Read AGENTS.md, PROJECT_CONTEXT.md and all shared-work-queue-leases OpenSpec files and prior reports.
-Implement ONLY Slice 007.
-Do not add new product features. Add/adjust tests and small fixes so audit, expiry, permissions, NIR visibility and counts are consistent across doctor/scheduler/NIR. Run the full quality gate. Update tasks.md, create /tmp/ats-web-slice-007-shared-work-queue-leases-closeout-report.md, commit and push, reply REPORT_PATH and stop.
+Implement ONLY Slice 008.
+Do not add new product features. Add/adjust tests and small fixes so audit, expiry, permissions, NIR visibility and counts are consistent across doctor/scheduler/NIR. Run the full quality gate. Update tasks.md, create /tmp/ats-web-slice-008-shared-work-queue-leases-closeout-report.md, commit and push, reply REPORT_PATH and stop.
 ```
