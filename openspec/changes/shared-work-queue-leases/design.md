@@ -288,7 +288,8 @@ Manter `@login_required`.
 4. **Agendador: lease end-to-end** — aplicar serviço/JS ao agendamento e proteger ciência operacional.
 5. **NIR: casos operacionais compartilhados** — todos NIR veem e acessam todos os casos operacionais (`status != CLEANED`).
 6. **NIR: lease para confirmação de recebimento** — claim/heartbeat/submit protegido no resultado final.
-7. **Hardening e quality gate final** — cobertura cruzada, contadores, auditoria de expiração e documentação final.
+7. **Dashboard: bugfix de timezone em métricas do dia** — corrigir contagens de “hoje” para usar dia local, não data UTC.
+8. **Hardening e quality gate final** — cobertura cruzada, contadores, auditoria de expiração e documentação final.
 
 ## Riscos e mitigação
 

@@ -147,6 +147,7 @@ Se alguma dessas assunções precisar mudar, ajustar o `design.md` antes da impl
 - [ ] Se a aba/navegador for abandonado, o lock expira e outro usuário pode assumir.
 - [ ] `CaseEvent` registra quem estava com o caso quando o lock expirou.
 - [ ] Heartbeats não poluem a timeline com evento a cada minuto.
+- [ ] Métricas do dashboard baseadas em “hoje” usam o dia local configurado no Django, não a data UTC.
 - [ ] Views do scheduler exigem papel ativo `scheduler`.
 - [ ] A solução usa apenas Django/PostgreSQL/Vanilla JS/HTMX já existente.
 - [ ] Testes relevantes implementados via TDD.
