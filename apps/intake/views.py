@@ -6,14 +6,22 @@ from django.contrib import messages
 from django.contrib.auth.decorators import login_required
 from django.http import FileResponse, Http404, HttpRequest, HttpResponse, HttpResponseBase, JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
-from django.utils import timezone
 from django.views.decorators.clickjacking import xframe_options_sameorigin
 
 from apps.accounts.decorators import role_required
 from apps.cases.models import Case, CaseStatus
-from apps.cases.services import assert_case_lock, claim_case_lock, expire_stale_locks_for_statuses
-from apps.cases.services import release_case_lock as release_lock_service
-from apps.cases.services import renew_case_lock as renew_lock_service
+from apps.cases.services import (
+    assert_case_lock,
+    claim_case_lock,
+    compute_lock_display,
+    expire_stale_locks_for_statuses,
+)
+from apps.cases.services import (
+    release_case_lock as release_lock_service,
+)
+from apps.cases.services import (
+    renew_case_lock as renew_lock_service,
+)
 
 from .forms import CaseUploadForm
 from .services import process_uploaded_files
@@ -226,7 +234,6 @@ def _my_cases_context(request: HttpRequest) -> dict[str, object]:
     if search:
         qs = qs.filter(agency_record_number__icontains=search)
 
-    now = timezone.now()
     case_data = [
         {
             "case": c,
@@ -242,28 +249,18 @@ def _my_cases_context(request: HttpRequest) -> dict[str, object]:
             "has_doctor_observation": c.has_doctor_observation,
             "created_by_other_nir": c.created_by_id != user.pk,
             "created_by_display": c.created_by.get_full_name() or c.created_by.username,
-            # Lock info for WAIT_R1_CLEANUP_THUMBS cases
-            "is_locked": bool(
-                c.status == CaseStatus.WAIT_R1_CLEANUP_THUMBS
-                and c.locked_by is not None
-                and c.locked_until is not None
-                and c.locked_until > now
+            # Lock info for WAIT_R1_CLEANUP_THUMBS cases (other statuses: all clear)
+            **(
+                compute_lock_display(c, user=user)
+                if c.status == CaseStatus.WAIT_R1_CLEANUP_THUMBS
+                else {
+                    "is_locked": False,
+                    "is_locked_by_current_user": False,
+                    "locked_by_display": "",
+                    "locked_until": "",
+                    "lock_context": "",
+                }
             ),
-            "is_locked_by_current_user": bool(
-                c.status == CaseStatus.WAIT_R1_CLEANUP_THUMBS
-                and c.locked_by is not None
-                and c.locked_by_id == user.pk
-                and c.locked_until is not None
-                and c.locked_until > now
-            ),
-            "locked_by_display": c.locked_by.display_name
-            if (
-                c.status == CaseStatus.WAIT_R1_CLEANUP_THUMBS
-                and c.locked_by is not None
-                and c.locked_until is not None
-                and c.locked_until > now
-            )
-            else "",
         }
         for c in qs
     ]

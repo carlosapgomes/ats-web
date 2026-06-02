@@ -395,3 +395,22 @@ def expire_stale_locks_for_statuses(
         lock_role="",
     )
     return count
+
+
+def compute_lock_display(case: Case, user: Any = None) -> dict[str, Any]:
+    """Compute lock display info for a case card.
+
+    Returns a dict with is_locked, is_locked_by_current_user,
+    locked_by_display, locked_until, and lock_context.
+
+    If the lock has expired, all fields indicate "not locked".
+    """
+    now = timezone.now()
+    is_locked = case.locked_by is not None and case.locked_until is not None and case.locked_until > now
+    return {
+        "is_locked": is_locked,
+        "is_locked_by_current_user": bool(is_locked and user is not None and case.locked_by_id == user.pk),
+        "locked_by_display": case.locked_by.display_name if is_locked and case.locked_by else "",
+        "locked_until": case.locked_until.isoformat() if is_locked and case.locked_until else "",
+        "lock_context": case.lock_context if is_locked else "",
+    }

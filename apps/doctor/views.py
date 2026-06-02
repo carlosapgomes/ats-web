@@ -14,9 +14,18 @@ from django.views.decorators.clickjacking import xframe_options_sameorigin
 
 from apps.accounts.decorators import role_required
 from apps.cases.models import Case, CaseStatus
-from apps.cases.services import assert_case_lock, claim_case_lock, expire_stale_locks_for_statuses
-from apps.cases.services import release_case_lock as release_lock_service
-from apps.cases.services import renew_case_lock as renew_lock_service
+from apps.cases.services import (
+    assert_case_lock,
+    claim_case_lock,
+    compute_lock_display,
+    expire_stale_locks_for_statuses,
+)
+from apps.cases.services import (
+    release_case_lock as release_lock_service,
+)
+from apps.cases.services import (
+    renew_case_lock as renew_lock_service,
+)
 
 from .forms import DoctorDecisionForm
 from .presenters import DoctorReportPresenter
@@ -155,13 +164,7 @@ def _build_case_card(case: Case, wait_minutes: int, user: Any = None) -> dict[st
     }
 
     # Lock info
-    now = timezone.now()
-    is_locked = case.locked_by is not None and case.locked_until is not None and case.locked_until > now
-    card["is_locked"] = is_locked
-    card["is_locked_by_current_user"] = bool(is_locked and user and case.locked_by_id == user.pk)
-    card["locked_by_display"] = case.locked_by.display_name if is_locked and case.locked_by else ""
-    card["locked_until"] = case.locked_until.isoformat() if is_locked and case.locked_until else ""
-    card["lock_context"] = case.lock_context if is_locked else ""
+    card.update(compute_lock_display(case, user=user))
 
     return card
 
