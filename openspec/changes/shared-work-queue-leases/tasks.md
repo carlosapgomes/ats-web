@@ -41,7 +41,7 @@ Change planejado. Implementar **um slice por vez**, seguindo TDD e aguardando co
 - [x] Cada slice gerou relatório temporário com snippets antes/depois e informou `REPORT_PATH`.
 - [x] Cada slice atualizou este `tasks.md` apenas ao final da implementação.
 - [x] Cada slice teve commit e push, conforme `AGENTS.md`.
-- [ ] Querysets de filas que renderizam `compute_lock_display()` carregam `locked_by` com `select_related` quando aplicável.
+- [x] Querysets de filas que renderizam `compute_lock_display()` carregam `locked_by` com `select_related` quando aplicável.
 
 ## Comandos globais de validação
 
