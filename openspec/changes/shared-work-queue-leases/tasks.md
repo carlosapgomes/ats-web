@@ -14,6 +14,7 @@ Change planejado. Implementar **um slice por vez**, seguindo TDD e aguardando co
 - [x] Slice 006 — NIR: lease para confirmação de recebimento (`slices/slice-006-nir-receipt-lease.md`)
 - [x] Slice 007 — Dashboard: bugfix de timezone em métricas do dia (`slices/slice-007-dashboard-localdate-bugfix.md`)
 - [x] Slice 008 — Hardening, auditoria cruzada e quality gate final (`slices/slice-008-hardening-quality-closeout.md`)
+- [x] Slice 009 — Otimização N+1 em lock display das filas (`slices/slice-009-lock-display-query-optimization.md`)
 
 ## Definition of Done do Change
 
@@ -40,6 +41,7 @@ Change planejado. Implementar **um slice por vez**, seguindo TDD e aguardando co
 - [x] Cada slice gerou relatório temporário com snippets antes/depois e informou `REPORT_PATH`.
 - [x] Cada slice atualizou este `tasks.md` apenas ao final da implementação.
 - [x] Cada slice teve commit e push, conforme `AGENTS.md`.
+- [ ] Querysets de filas que renderizam `compute_lock_display()` carregam `locked_by` com `select_related` quando aplicável.
 
 ## Comandos globais de validação
 

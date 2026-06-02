@@ -480,3 +480,34 @@ class TestNirExpiredLockInList:
         assert "ExpiredNir" not in content or "Reservado" not in content
         case_from_db = Case.objects.get(pk=case.case_id)
         assert case_from_db.locked_by is None
+
+    def test_nir_list_shows_active_lock_with_locked_by_name(self, client) -> None:
+        """NIR list shows active lock with locked_by display name for WAIT_R1_CLEANUP_THUMBS."""
+        from apps.cases.services import claim_case_lock
+
+        client_a, nir_a = _nir_client(client, "nir-show-a@test.com")
+        nir_a.first_name = "DisplayNir"
+        nir_a.save()
+
+        case = _create_wait_receipt_case(created_by=nir_a)
+
+        # Claim lock
+        claim_case_lock(
+            case_id=case.case_id,
+            user=nir_a,
+            expected_status=CaseStatus.WAIT_R1_CLEANUP_THUMBS,
+            context="nir_receipt",
+            role="nir",
+        )
+
+        # Login as a different NIR and check the list shows the lock
+        client_b, nir_b = _nir_client(client, "nir-show-b@test.com")
+        nir_b.first_name = "ViewerNir"
+        nir_b.save()
+
+        response = client_b.get(reverse("intake:my_cases"))
+        assert response.status_code == 200
+        content = response.content.decode()
+
+        # The locked_by display name should appear in the list
+        assert "DisplayNir" in content

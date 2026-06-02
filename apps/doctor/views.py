@@ -179,7 +179,9 @@ def _doctor_queue_context(request: HttpRequest) -> dict[str, Any]:
     # Lazily expire stale locks before querying
     expire_stale_locks_for_statuses(statuses=[CaseStatus.WAIT_DOCTOR])
 
-    pending_cases: QuerySet[Case] = Case.objects.filter(status=CaseStatus.WAIT_DOCTOR).order_by("created_at")
+    pending_cases: QuerySet[Case] = (
+        Case.objects.filter(status=CaseStatus.WAIT_DOCTOR).select_related("locked_by").order_by("created_at")
+    )
 
     today: date = date.today()
 
