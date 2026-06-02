@@ -12,7 +12,7 @@ Change planejado. Implementar **um slice por vez**, seguindo TDD e aguardando co
 - [x] Slice 004 — Agendador: lease end-to-end e ciência operacional segura (`slices/slice-004-scheduler-lease.md`)
 - [x] Slice 005 — NIR: casos operacionais compartilhados (`slices/slice-005-nir-shared-operational-cases.md`)
 - [x] Slice 006 — NIR: lease para confirmação de recebimento (`slices/slice-006-nir-receipt-lease.md`)
-- [ ] Slice 007 — Dashboard: bugfix de timezone em métricas do dia (`slices/slice-007-dashboard-localdate-bugfix.md`)
+- [x] Slice 007 — Dashboard: bugfix de timezone em métricas do dia (`slices/slice-007-dashboard-localdate-bugfix.md`)
 - [ ] Slice 008 — Hardening, auditoria cruzada e quality gate final (`slices/slice-008-hardening-quality-closeout.md`)
 
 ## Definition of Done do Change
@@ -35,7 +35,7 @@ Change planejado. Implementar **um slice por vez**, seguindo TDD e aguardando co
 - [ ] `WORK_LOCK_EXPIRED` registra quem estava com o caso quando expirou.
 - [ ] Heartbeats não criam evento de auditoria repetitivo.
 - [ ] Testes TDD cobrem concorrência crítica por papel.
-- [ ] Dashboard usa dia local para métricas de “hoje” (`_compute_summary` e `_compute_admission_flow`).
+- [x] Dashboard usa dia local para métricas de “hoje” (`_compute_summary` e `_compute_admission_flow`).
 - [ ] Quality gate completo executado: `uv run ruff check . && uv run ruff format --check . && uv run mypy . && uv run pytest`.
 - [ ] Cada slice gerou relatório temporário com snippets antes/depois e informou `REPORT_PATH`.
 - [ ] Cada slice atualizou este `tasks.md` apenas ao final da implementação.
