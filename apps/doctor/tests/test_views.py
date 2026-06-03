@@ -1815,3 +1815,261 @@ class TestDoctorDecisionLockBehavior:
         content = response.content.decode()
         assert "Locked Display" in content
         assert "Dra. Display" in content
+
+
+# ── Lock release on submit tests ──────────────────────────────────────────
+
+
+@pytest.mark.django_db
+class TestDoctorLockReleaseOnSubmit:
+    """RED tests: lock is released after successful submit, preserved on errors."""
+
+    def _create_role(self, name: str):
+        from apps.accounts.models import Role
+
+        role, _ = Role.objects.get_or_create(name=name)
+        return role
+
+    def _login_as(self, client, role_name: str):
+        user = User.objects.create_user(username=f"{role_name}@locksub.test", password="testpass123")
+        user.roles.add(self._create_role(role_name))
+        client.force_login(user)
+        session = client.session
+        session["active_role"] = role_name
+        session.save()
+        return user
+
+    def _create_case_in_status(self, status: str) -> Case:
+        nir_user = User.objects.create_user(
+            username=f"nir_locksub_{(status or 'new').lower()}@test.com", password="testpass123"
+        )
+        nir_user.roles.add(self._create_role("nir"))
+        case = Case.objects.create(created_by=nir_user, status=CaseStatus.NEW)
+        if status != CaseStatus.NEW:
+            case = _advance_case_to(case, status)
+        return case
+
+    def _claim_lock(self, case_id, doctor) -> str:
+        from apps.cases.services import claim_case_lock
+
+        result = claim_case_lock(
+            case_id=case_id,
+            user=doctor,
+            expected_status=CaseStatus.WAIT_DOCTOR,
+            context="doctor_decision",
+            role="doctor",
+        )
+        assert result.acquired is True
+        return str(result.token)
+
+    def test_submit_accept_scheduled_releases_lock_after_success(self, client) -> None:
+        """POST accept/scheduled → lock fields cleared, WORK_LOCK_RELEASED created."""
+        case = self._create_case_in_status(CaseStatus.WAIT_DOCTOR)
+        case.structured_data = {"patient": {"name": "Lock Release", "age": 40, "gender": "M"}}
+        case.save()
+
+        doctor = self._login_as(client, "doctor")
+        token = self._claim_lock(case.case_id, doctor)
+
+        response = client.post(
+            f"/doctor/{case.case_id}/submit/",
+            data={
+                "decision": "accept",
+                "support_flag": "none",
+                "admission_flow": "scheduled",
+                "lock_token": token,
+            },
+        )
+        assert response.status_code == 302
+
+        case = Case.objects.get(pk=case.case_id)
+        assert case.status == CaseStatus.WAIT_APPT
+        assert case.locked_by is None
+        assert case.lock_token is None
+        assert case.locked_until is None
+        assert case.lock_context == ""
+        assert case.lock_role == ""
+
+        # Verify WORK_LOCK_RELEASED event
+        assert CaseEvent.objects.filter(case=case, event_type="WORK_LOCK_RELEASED").exists()
+
+    def test_submit_deny_releases_lock_after_success(self, client) -> None:
+        """POST deny → lock fields cleared, WORK_LOCK_RELEASED created."""
+        case = self._create_case_in_status(CaseStatus.WAIT_DOCTOR)
+        case.structured_data = {"patient": {"name": "Lock Deny", "age": 50, "gender": "F"}}
+        case.save()
+
+        doctor = self._login_as(client, "doctor")
+        token = self._claim_lock(case.case_id, doctor)
+
+        response = client.post(
+            f"/doctor/{case.case_id}/submit/",
+            data={
+                "decision": "deny",
+                "reason": "Contorno clínico não indicado",
+                "lock_token": token,
+            },
+        )
+        assert response.status_code == 302
+
+        case = Case.objects.get(pk=case.case_id)
+        assert case.status == CaseStatus.WAIT_R1_CLEANUP_THUMBS
+        assert case.locked_by is None
+        assert case.lock_token is None
+        assert case.lock_context == ""
+        assert case.lock_role == ""
+
+        # Verify WORK_LOCK_RELEASED event
+        assert CaseEvent.objects.filter(case=case, event_type="WORK_LOCK_RELEASED").exists()
+
+    def test_submit_accept_immediate_releases_lock_after_success(self, client) -> None:
+        """POST accept/immediate → lock fields cleared, WORK_LOCK_RELEASED created."""
+        case = self._create_case_in_status(CaseStatus.WAIT_DOCTOR)
+        case.structured_data = {"patient": {"name": "Lock Immediate", "age": 70, "gender": "M"}}
+        case.save()
+
+        doctor = self._login_as(client, "doctor")
+        token = self._claim_lock(case.case_id, doctor)
+
+        response = client.post(
+            f"/doctor/{case.case_id}/submit/",
+            data={
+                "decision": "accept",
+                "support_flag": "anesthesist",
+                "admission_flow": "immediate",
+                "lock_token": token,
+            },
+        )
+        assert response.status_code == 302
+
+        case = Case.objects.get(pk=case.case_id)
+        assert case.status == CaseStatus.WAIT_R1_CLEANUP_THUMBS
+        assert case.locked_by is None
+        assert case.lock_token is None
+        assert CaseEvent.objects.filter(case=case, event_type="WORK_LOCK_RELEASED").exists()
+
+    def test_submit_invalid_form_preserves_lock(self, client) -> None:
+        """POST invalid → lock preserved, status unchanged."""
+        case = self._create_case_in_status(CaseStatus.WAIT_DOCTOR)
+        case.structured_data = {"patient": {"name": "Lock Preserve", "age": 40, "gender": "M"}}
+        case.save()
+
+        doctor = self._login_as(client, "doctor")
+        token = self._claim_lock(case.case_id, doctor)
+
+        # Submit accept without required support_flag
+        response = client.post(
+            f"/doctor/{case.case_id}/submit/",
+            data={
+                "decision": "accept",
+                "support_flag": "",
+                "admission_flow": "scheduled",
+                "lock_token": token,
+            },
+        )
+        assert response.status_code == 200  # re-renders form
+
+        case = Case.objects.get(pk=case.case_id)
+        assert case.status == CaseStatus.WAIT_DOCTOR  # unchanged
+        assert case.locked_by == doctor
+        assert case.lock_token is not None
+        # No WORK_LOCK_RELEASED should exist for failed submit
+        assert not CaseEvent.objects.filter(case=case, event_type="WORK_LOCK_RELEASED").exists()
+
+    def test_submit_without_token_preserves_lock_and_status(self, client) -> None:
+        """POST without lock_token → status unchanged, lock preserved."""
+        case = self._create_case_in_status(CaseStatus.WAIT_DOCTOR)
+        case.structured_data = {"patient": {"name": "No Token", "age": 40, "gender": "M"}}
+        case.save()
+
+        doctor = self._login_as(client, "doctor")
+        self._claim_lock(case.case_id, doctor)
+
+        # Submit without lock_token (but with valid form data)
+        response = client.post(
+            f"/doctor/{case.case_id}/submit/",
+            data={
+                "decision": "accept",
+                "support_flag": "none",
+                "admission_flow": "scheduled",
+                # no lock_token
+            },
+        )
+        assert response.status_code == 200  # re-renders with error
+
+        case = Case.objects.get(pk=case.case_id)
+        assert case.status == CaseStatus.WAIT_DOCTOR  # unchanged
+        # Lock should still be held by the doctor (assert_case_lock wasn't called for token=None path)
+        assert case.locked_by == doctor
+        assert not CaseEvent.objects.filter(case=case, event_type="WORK_LOCK_RELEASED").exists()
+
+    def test_submit_with_invalid_token_preserves_lock_and_status(self, client) -> None:
+        """POST with invalid lock_token → status unchanged, lock preserved."""
+        case = self._create_case_in_status(CaseStatus.WAIT_DOCTOR)
+        case.structured_data = {"patient": {"name": "Bad Token", "age": 40, "gender": "M"}}
+        case.save()
+
+        doctor = self._login_as(client, "doctor")
+        self._claim_lock(case.case_id, doctor)
+
+        # Submit with wrong token
+        wrong_token = str(uuid.uuid4())
+        response = client.post(
+            f"/doctor/{case.case_id}/submit/",
+            data={
+                "decision": "accept",
+                "support_flag": "none",
+                "admission_flow": "scheduled",
+                "lock_token": wrong_token,
+            },
+        )
+        assert response.status_code == 200  # re-renders with error
+
+        case = Case.objects.get(pk=case.case_id)
+        assert case.status == CaseStatus.WAIT_DOCTOR  # unchanged
+        assert case.locked_by == doctor
+        assert not CaseEvent.objects.filter(case=case, event_type="WORK_LOCK_RELEASED").exists()
+
+    def test_handoff_doctor_to_scheduler_immediate(self, client) -> None:
+        """Handoff imediato: médico aceita scheduled → scheduler abre confirm sem esperar."""
+        # Doctor submits accept/scheduled
+        case = self._create_case_in_status(CaseStatus.WAIT_DOCTOR)
+        case.structured_data = {"patient": {"name": "Handoff D2S", "age": 40, "gender": "M"}}
+        case.save()
+
+        doctor = self._login_as(client, "doctor")
+        token = self._claim_lock(case.case_id, doctor)
+
+        client.post(
+            f"/doctor/{case.case_id}/submit/",
+            data={
+                "decision": "accept",
+                "support_flag": "none",
+                "admission_flow": "scheduled",
+                "lock_token": token,
+            },
+        )
+
+        # Now login as scheduler
+        from apps.accounts.models import Role
+
+        scheduler_user = User.objects.create_user(username="scheduler_handoff@test.com", password="testpass123")
+        role, _ = Role.objects.get_or_create(name="scheduler")
+        scheduler_user.roles.add(role)
+        client.force_login(scheduler_user)
+        session = client.session
+        session["active_role"] = "scheduler"
+        session.save()
+
+        # Scheduler should be able to open confirm page immediately
+        case = Case.objects.get(pk=case.case_id)
+        assert case.status == CaseStatus.WAIT_APPT
+        assert case.locked_by is None  # lock was released by doctor submit
+
+        response = client.get(f"/scheduler/{case.case_id}/")
+        assert response.status_code == 200  # can access immediately
+
+        # Scheduler acquired their own lock
+        case = Case.objects.get(pk=case.case_id)
+        assert case.locked_by == scheduler_user
+        assert case.lock_context == "scheduler_confirm"

@@ -405,6 +405,14 @@ def scheduler_submit(request: HttpRequest, case_id: str) -> HttpResponse:
     case.final_reply_posted(user=request.user)
     case.save()
 
+    # Release lock deterministically after successful business logic
+    release_lock_service(
+        case_id=case.case_id,
+        user=request.user,
+        token=token,
+        context="scheduler_confirm",
+    )
+
     return redirect("scheduler:queue")
 
 
