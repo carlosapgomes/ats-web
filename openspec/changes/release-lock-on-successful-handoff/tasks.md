@@ -10,18 +10,18 @@ Slice 001 concluído.
 
 ## Definition of Done do Change
 
-- [ ] `doctor_submit` libera lock após submit válido e transições FSM concluídas.
-- [ ] `doctor_submit` preserva lock em formulário inválido, token inválido ou token ausente.
-- [ ] Scheduler consegue assumir imediatamente caso aceito pelo médico para agendamento.
-- [ ] `scheduler_submit` libera lock após submit válido e transições FSM concluídas.
-- [ ] `scheduler_submit` preserva lock em formulário inválido, token inválido ou token ausente.
-- [ ] NIR consegue assumir imediatamente caso finalizado pelo scheduler.
-- [ ] Eventos `WORK_LOCK_RELEASED` são registrados apenas em releases explícitos.
-- [ ] Nenhum comportamento de Cancelar/pagehide/heartbeat foi alterado.
-- [ ] Testes relevantes passam.
-- [ ] Quality gate do `AGENTS.md` executado ou limitações registradas no relatório.
-- [ ] Relatório temporário do slice criado e `REPORT_PATH` informado.
-- [ ] Commit e push realizados pelo implementador.
+- [x] `doctor_submit` libera lock após submit válido e transições FSM concluídas.
+- [x] `doctor_submit` preserva lock em formulário inválido, token inválido ou token ausente.
+- [x] Scheduler consegue assumir imediatamente caso aceito pelo médico para agendamento.
+- [x] `scheduler_submit` libera lock após submit válido e transições FSM concluídas.
+- [x] `scheduler_submit` preserva lock em formulário inválido, token inválido ou token ausente.
+- [x] NIR consegue assumir imediatamente caso finalizado pelo scheduler.
+- [x] Eventos `WORK_LOCK_RELEASED` são registrados apenas em releases explícitos.
+- [x] Nenhum comportamento de Cancelar/pagehide/heartbeat foi alterado.
+- [x] Testes relevantes passam.
+- [x] Quality gate do `AGENTS.md` executado ou limitações registradas no relatório.
+- [x] Relatório temporário do slice criado e `REPORT_PATH` informado.
+- [x] Commit e push realizados pelo implementador.
 
 ## Comandos de validação recomendados
 
