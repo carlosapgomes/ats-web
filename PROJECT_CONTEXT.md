@@ -25,7 +25,7 @@ e substituida por filas de trabalho web com formularios.
 
 ## Fluxo Operacional
 
-```
+```text
 [NIR] Upload PDF
   -> Sistema: extrair texto + LLM1 (extracao estruturada) + LLM2 (sugestao)
   -> Sistema: Policy Engine (reconciliation deterministica)
@@ -39,7 +39,7 @@ e substituida por filas de trabalho web com formularios.
 ## Papéis e Permissoes
 
 | Papel | Fila principal | Restricao de rede |
-|-------|---------------|-------------------|
+| ------- | --------------- | ------------------- |
 | `nir` | Upload + meus casos + resultado final | **Intranet only** |
 | `doctor` | Fila medica + decisao | Qualquer lugar |
 | `scheduler` | Fila agendamento + notif. vinda imediata | **Intranet only** |
@@ -69,7 +69,7 @@ com SSL.
 
 ### Estrutura de Apps
 
-```
+```text
 config/          # settings (base/dev/prod), urls, wsgi, asgi
 apps/accounts/   # User, Role, auth views, intranet guard middleware
 apps/cases/      # Case (FSM 17 estados), CaseEvent (auditoria)
@@ -88,7 +88,7 @@ static/          # css/app.css (paleta hospitalar), js/upload.js
 ### Stack resumido
 
 | Camada | Tecnologia | Versao |
-|--------|-----------|--------|
+| -------- | ----------- | -------- |
 | Backend | Python | 3.13+ |
 | Framework | Django | 5.2+ |
 | Estados | django-fsm | latest |
@@ -138,15 +138,18 @@ static/          # css/app.css (paleta hospitalar), js/upload.js
 
 ## State do Sistema
 
-- **Fase atual**: Fase 3 CONCLUÍDA — próxima: a definir
+- **Fase atual**: Fase 3 CONCLUÍDA — débitos técnicos planejados
 - **Changes concluídos**:
   - `openspec/archive/bootstrap-django-ats-core/` (7 slices, Fase 0)
   - `openspec/archive/intake-nir/` (6 slices, Fase 1)
   - `openspec/archive/pipeline-llm/` (7 slices, Fase 2)
   - `openspec/archive/ui-alinhamento-mocks/` (3 slices, Fase 2b)
-- **Change ativo**: `openspec/changes/align-llm-contract-and-doctor-routing/` (7 slices, concluído)
-  - Alinhamento de contratos LLM e roteamento NIR → médico ao legado
-  - Port dos DTOs Pydantic v2, scope gate, presenter 7 blocos, role guard
+  - `openspec/archive/align-llm-contract-and-doctor-routing/` (7 slices)
+  - `openspec/archive/post-schedule-intercurrence/` (5 slices + follow-ups)
+- **Changes ativos**:
+  - `openspec/changes/release-lock-on-successful-handoff/`
+  - `openspec/changes/consolidate-duplicated-test-fixtures/`
+  - `openspec/changes/align-uuid-route-parameter-annotations/`
 - **Apps criados**: `apps/accounts/`, `apps/cases/`, `apps/llm/`, `apps/intake/`, `apps/pipeline/`,
   `apps/doctor/`, `apps/scheduler/`, `apps/dashboard/`, `apps/admin_ui/`
 - **Testes**: 605 passando, quality gate verde
