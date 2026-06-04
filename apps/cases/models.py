@@ -100,6 +100,29 @@ class Case(models.Model):
     cleanup_triggered_at = models.DateTimeField(null=True, blank=True)
     cleanup_completed_at = models.DateTimeField(null=True, blank=True)
 
+    # Post-schedule intercurrence (post_schedule_issue)
+    post_schedule_issue_status = models.CharField(max_length=20, blank=True, default="")
+    post_schedule_issue_reason = models.CharField(max_length=50, blank=True)
+    post_schedule_issue_message = models.TextField(blank=True)
+    post_schedule_issue_opened_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="post_schedule_issues_opened",
+    )
+    post_schedule_issue_opened_at = models.DateTimeField(null=True, blank=True)
+    post_schedule_issue_response_action = models.CharField(max_length=30, blank=True)
+    post_schedule_issue_response_message = models.TextField(blank=True)
+    post_schedule_issue_responded_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="post_schedule_issues_responded",
+    )
+    post_schedule_issue_responded_at = models.DateTimeField(null=True, blank=True)
+
     # Lock / Lease fields
     locked_by = models.ForeignKey(
         settings.AUTH_USER_MODEL,
@@ -371,6 +394,7 @@ class Case(models.Model):
             CaseStatus.APPT_DENIED,
             CaseStatus.FAILED,
             CaseStatus.R1_FINAL_REPLY_POSTED,
+            CaseStatus.WAIT_APPT,
         ],
         target=CaseStatus.WAIT_R1_CLEANUP_THUMBS,
     )
@@ -392,6 +416,10 @@ class Case(models.Model):
     )
     def cleanup_completed(self, user=None):
         self._record_event("CLEANUP_COMPLETED", user=user)
+
+    @transition(field=status, source=CaseStatus.CLEANED, target=CaseStatus.WAIT_APPT)
+    def open_post_schedule_issue(self, user=None):
+        self._record_event("POST_SCHEDULE_ISSUE_OPENED_TRANSITION", user=user)
 
     def _record_event(
         self,

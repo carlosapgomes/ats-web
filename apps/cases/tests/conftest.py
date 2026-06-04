@@ -149,6 +149,21 @@ def advance_to():
                 "final_reply_posted",
                 "cleanup_triggered",
             ],
+            CaseStatus.CLEANED: [
+                "start_processing",
+                "start_extraction",
+                "extraction_complete(success=True)",
+                "llm1_complete(success=True)",
+                "llm2_complete(success=True)",
+                "ready_for_doctor",
+                "doctor_decide(decision='accept')",
+                "ready_for_scheduler",
+                "scheduler_request_posted",
+                "scheduler_decide(appointment_status='confirmed')",
+                "final_reply_posted",
+                "cleanup_triggered",
+                "cleanup_completed",
+            ],
         }
 
         steps = path.get(target, [])  # type: ignore[call-overload]
