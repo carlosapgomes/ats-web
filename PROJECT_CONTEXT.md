@@ -146,13 +146,13 @@ static/          # css/app.css (paleta hospitalar), js/upload.js
   - `openspec/archive/ui-alinhamento-mocks/` (3 slices, Fase 2b)
   - `openspec/archive/align-llm-contract-and-doctor-routing/` (7 slices)
   - `openspec/archive/post-schedule-intercurrence/` (5 slices + follow-ups)
+  - `openspec/archive/consolidate-duplicated-test-fixtures/` (1 slice)
 - **Changes ativos**:
   - `openspec/changes/release-lock-on-successful-handoff/`
-  - `openspec/changes/consolidate-duplicated-test-fixtures/`
   - `openspec/changes/align-uuid-route-parameter-annotations/`
 - **Apps criados**: `apps/accounts/`, `apps/cases/`, `apps/llm/`, `apps/intake/`, `apps/pipeline/`,
   `apps/doctor/`, `apps/scheduler/`, `apps/dashboard/`, `apps/admin_ui/`
-- **Testes**: 605 passando, quality gate verde
+- **Testes**: 1046 passando, quality gate verde
 - **Templates**: base.html com tema hospitalar, login, switch-role, intake (home, my_cases, case_detail),
   doctor (queue, decision)
 - **Documentacao de dominio**: `docs/DOMAIN_ANALYSIS.md`
