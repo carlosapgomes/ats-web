@@ -10,7 +10,7 @@ Slice 001 concluído. Implementar **um slice por vez**, seguindo TDD e aguardand
 - [X] Slice 002 — NIR busca casos encerrados e abre intercorrência (`slices/slice-002-nir-search-open-issue.md`)
 - [X] Slice 003 — Agendador resolve intercorrência (`slices/slice-003-scheduler-resolve-issue.md`)
 - [X] Slice 004 — NIR confirma ciência e encerra ciclo (`slices/slice-004-nir-acknowledge-issue.md`)
-- [ ] Slice 005 — Timeline, badges e hardening (`slices/slice-005-timeline-badges-hardening.md`)
+- [X] Slice 005 — Timeline, badges e hardening (`slices/slice-005-timeline-badges-hardening.md`)
 
 ## Definition of Done do Change
 

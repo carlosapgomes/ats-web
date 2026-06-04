@@ -80,8 +80,10 @@
                 </span>
               </div>
               <div class="col-md-4 text-md-end mt-2 mt-md-0">
-                {% if item.has_active_issue %}
+                {% if item.issue_status == "opened" %}
                   <span class="badge bg-warning text-dark me-2">🔔 Intercorrência em avaliação</span>
+                {% elif item.issue_status == "responded" %}
+                  <span class="badge bg-info text-dark me-2">↻ Intercorrência respondida</span>
                 {% elif item.eligible %}
                   <a href="{% url 'intake:post_schedule_issue_open' item.case.case_id %}" class="btn btn-sm btn-hospital">
                     Registrar intercorrência

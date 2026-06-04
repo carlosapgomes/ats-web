@@ -48,6 +48,11 @@
     </div>
     <div class="col-md-6 text-md-end mt-3 mt-md-0">
       <span class="status-badge {{ status_css }} fs-6">{{ status_label }}</span>
+      {% if case.post_schedule_issue_status == "opened" %}
+      <div class="mt-2"><span class="badge bg-warning text-dark px-3 py-2">⚠️ Intercorrência em avaliação</span></div>
+      {% elif case.post_schedule_issue_status == "responded" %}
+      <div class="mt-2"><span class="badge bg-info text-dark px-3 py-2">↻ Intercorrência respondida</span></div>
+      {% endif %}
       {% if case.appointment_at %}
       <div class="mt-2 text-muted small">Agendado para {{ case.appointment_at|date:"d/m/Y H:i" }}</div>
       {% endif %}
