@@ -692,7 +692,7 @@ def closed_cases_search(request: HttpRequest) -> HttpResponse:
 
 @login_required
 @role_required("nir")
-def post_schedule_issue_open(request: HttpRequest, case_id: str) -> HttpResponse:
+def post_schedule_issue_open(request: HttpRequest, case_id: uuid.UUID) -> HttpResponse:
     """Formulário NIR para abrir intercorrência pós-agendamento.
 
     GET: Exibe formulário com motivo e mensagem.
