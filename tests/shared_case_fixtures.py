@@ -1,6 +1,14 @@
-"""Shared fixtures for cases tests."""
+"""Shared pytest fixtures for cases, users, and FSM advancement across apps.
+
+These fixtures were consolidated from duplicated definitions in
+apps/cases/tests/conftest.py, apps/intake/tests/conftest.py, and
+apps/scheduler/tests/conftest.py.
+"""
 
 from __future__ import annotations
+
+from collections.abc import Callable
+from typing import Any
 
 import pytest
 from django.contrib.auth import get_user_model
@@ -11,27 +19,27 @@ User = get_user_model()
 
 
 @pytest.fixture
-def user(db):
+def user(db: None) -> User:  # type: ignore[valid-type]
     """Cria um usuário ativo para testes."""
     return User.objects.create_user(username="testuser", password="testpass")
 
 
 @pytest.fixture
-def case_factory():
+def case_factory() -> Callable[..., Case]:
     """Retorna uma factory que cria um Case novo dado um user."""
 
-    def _factory(user) -> Case:
-        return Case.objects.create(created_by=user)
+    def _factory(user_param: Any) -> Case:
+        return Case.objects.create(created_by=user_param)
 
     return _factory
 
 
 @pytest.fixture
-def advance_to():
+def advance_to() -> Callable[..., Case]:
     """Retorna função helper que avança um Case até o estado alvo."""
 
-    def _advance(case: Case, target: str) -> Case:
-        path = {
+    def _advance(case: Case, target: CaseStatus) -> Case:
+        path: dict[CaseStatus, list[str]] = {
             CaseStatus.R1_ACK_PROCESSING: ["start_processing"],
             CaseStatus.EXTRACTING: ["start_processing", "start_extraction"],
             CaseStatus.LLM_STRUCT: [
@@ -166,7 +174,7 @@ def advance_to():
             ],
         }
 
-        steps = path.get(target, [])  # type: ignore[call-overload]
+        steps: list[str] = path.get(target, [])
         for step in steps:
             if "(" in step:
                 method_name, args_str = step.split("(", 1)
@@ -176,12 +184,12 @@ def advance_to():
                     for pair in args_str.split(","):
                         k, v = pair.split("=")
                         k = k.strip()
-                        v = v.strip().strip("'")
-                        if v == "True":
-                            v = True
-                        elif v == "False":
-                            v = False
-                        kwargs[k] = v
+                        v_val: str | bool = v.strip().strip("'")
+                        if v_val == "True":
+                            v_val = True
+                        elif v_val == "False":
+                            v_val = False
+                        kwargs[k] = v_val
                     getattr(case, method_name)(**kwargs)
                 else:
                     getattr(case, method_name)()

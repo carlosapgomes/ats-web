@@ -2,12 +2,12 @@
 
 ## Status
 
-Change planejado. Implementar um slice por vez, com TDD quando houver alteração
-observável de comportamento de testes.
+Slice 001 concluído. Quality gate verde (1046 testes passando, ruff limpo, mypy
+sem issues).
 
 ## Slices
 
-- [ ] Slice 001 — Consolidar fixtures comuns de casos e usuários
+- [x] Slice 001 — Consolidar fixtures comuns de casos e usuários
   (`slices/slice-001-shared-case-user-fixtures.md`)
 
 ## Definition of Done
