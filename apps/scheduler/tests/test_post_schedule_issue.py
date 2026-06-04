@@ -584,3 +584,46 @@ class TestPostScheduleIssueRoleGuard:
         response = client.get(f"/scheduler/{case.case_id}/")
         assert response.status_code == 302
         assert response.url == "/"
+
+
+class TestPostScheduleIssueExternalJS:
+    """RED: template carrega JS externo e não contém inline."""
+
+    def test_template_loads_external_js(self, client, case_factory, advance_to) -> None:
+        """GET da tela de intercorrência inclui script externo."""
+        _login_as(client, "scheduler")
+        case = _create_case_with_opened_issue(case_factory, advance_to, None)
+
+        response = client.get(f"/scheduler/{case.case_id}/")
+        assert response.status_code == 200
+        content = response.content.decode()
+
+        # Verifica que o JS externo de toggle é carregado
+        assert (
+            'src="/static/js/post_schedule_issue_form.js"' in content
+            or 'src="{% static &quot;js/post_schedule_issue_form.js&quot;' in content
+            or "js/post_schedule_issue_form.js" in content
+        )
+
+    def test_template_does_not_contain_inline_js(self, client, case_factory, advance_to) -> None:
+        """HTML renderizado não contém o bloco JS inline antigo."""
+        _login_as(client, "scheduler")
+        case = _create_case_with_opened_issue(case_factory, advance_to, None)
+
+        response = client.get(f"/scheduler/{case.case_id}/")
+        assert response.status_code == 200
+        content = response.content.decode()
+
+        # Verifica que o código inline específico NÃO está presente
+        assert "const actionRadios = document.querySelectorAll" not in content
+        assert "toggleSections" not in content
+
+    def test_template_still_loads_work_lock_js(self, client, case_factory, advance_to) -> None:
+        """A tela continua carregando work_lock.js."""
+        _login_as(client, "scheduler")
+        case = _create_case_with_opened_issue(case_factory, advance_to, None)
+
+        response = client.get(f"/scheduler/{case.case_id}/")
+        assert response.status_code == 200
+        content = response.content.decode()
+        assert "work_lock.js" in content

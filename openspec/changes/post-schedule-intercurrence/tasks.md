@@ -35,6 +35,29 @@ Slice 001 concluído. Implementar **um slice por vez**, seguindo TDD e aguardand
 - [X] Cada slice gerou relatório temporário com snippets antes/depois e informou `REPORT_PATH`.
 - [X] Cada slice atualizou este `tasks.md` apenas ao final da implementação.
 - [ ] Cada slice teve commit e push, conforme `AGENTS.md`.
+- [ ] Débitos técnicos observados foram resolvidos, convertidos em novo change
+  ou explicitamente aceitos no fechamento do change.
+
+## Débitos técnicos observados
+
+Estes itens foram identificados durante os slices, mas não devem ser tratados
+automaticamente no slice seguinte. Avaliar no fechamento do change se cada item
+deve virar follow-up, novo change ou débito aceito.
+
+- [ ] `apps/*/tests/conftest.py`: fixtures duplicadas entre apps.
+  - Origem: verificação dos Slices 002/003.
+  - Impacto: manutenção de testes e risco de divergência entre fixtures.
+  - Recomendação: futuro change `refactor(tests): consolidate duplicated fixtures`.
+  - Prioridade: baixa/média.
+- [X] JS inline em `templates/scheduler/confirm_post_schedule_issue.html`.
+  - Origem: Slice 003.
+  - Resolvido: follow-up extraiu inline para `static/js/post_schedule_issue_form.js`.
+  - Prioridade: média.
+- [ ] `case_id: str` em views scheduler que recebem UUID.
+  - Origem: débito pré-existente observado no Slice 003.
+  - Impacto: tipagem menos precisa.
+  - Recomendação: futuro refactor pequeno de type hints.
+  - Prioridade: baixa.
 
 ## Comandos globais de validação
 

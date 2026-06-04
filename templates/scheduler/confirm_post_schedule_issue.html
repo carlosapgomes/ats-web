@@ -235,58 +235,7 @@
   </div>
 </div>
 
-<script>
-(function() {
-  const actionRadios = document.querySelectorAll('input[name="psi_action"]');
-  const sections = {
-    'cancel': document.getElementById('psi-cancel-deny-section'),
-    'deny': document.getElementById('psi-cancel-deny-section'),
-    'reschedule': document.getElementById('psi-reschedule-section'),
-    'maintain': document.getElementById('psi-maintain-section'),
-  };
-
-  function toggleSections(value) {
-    Object.entries(sections).forEach(([action, el]) => {
-      if (el) {
-        el.style.display = (action === value) ? 'block' : 'none';
-      }
-    });
-    // Also show cancel-deny for cancel
-    if (value === 'cancel') {
-      document.getElementById('psi-cancel-deny-section').style.display = 'block';
-    }
-    if (value === 'deny') {
-      document.getElementById('psi-cancel-deny-section').style.display = 'block';
-    }
-    // Reset required attributes
-    document.querySelectorAll('.psi-section input, .psi-section textarea').forEach(field => {
-      field.removeAttribute('required');
-    });
-    // Set required for visible fields
-    const visibleSection = sections[value];
-    if (visibleSection) {
-      visibleSection.querySelectorAll('input, textarea').forEach(field => {
-        if (field.dataset.required !== 'false') {
-          // Don't auto-set required to avoid browser validation conflicts;
-          // server-side validation handles this
-        }
-      });
-    }
-  }
-
-  actionRadios.forEach(radio => {
-    radio.addEventListener('change', function() {
-      toggleSections(this.value);
-    });
-  });
-
-  // Initialize on page load
-  const checked = document.querySelector('input[name="psi_action"]:checked');
-  if (checked) {
-    toggleSections(checked.value);
-  }
-})();
-</script>
+<script src="{% static 'js/post_schedule_issue_form.js' %}"></script>
 
 {% endblock %}
 
