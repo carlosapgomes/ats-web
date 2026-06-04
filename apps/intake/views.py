@@ -12,6 +12,7 @@ from django.views.decorators.clickjacking import xframe_options_sameorigin
 from apps.accounts.decorators import role_required
 from apps.cases.models import Case, CaseStatus
 from apps.cases.services import (
+    acknowledge_post_schedule_issue,
     assert_case_lock,
     claim_case_lock,
     compute_lock_display,
@@ -437,6 +438,40 @@ def case_detail(request: HttpRequest, case_id: str) -> HttpResponse:
     elif case.status == CaseStatus.FAILED:
         result_info = {"type": "failed"}
 
+    # ── Post-schedule intercurrence result info ────────────────────
+    if case.status == CaseStatus.WAIT_R1_CLEANUP_THUMBS and case.post_schedule_issue_status == "responded":
+        issue_action_labels = {
+            "cancel": "Cancelado",
+            "reschedule": "Reagendado",
+            "maintain": "Mantido",
+            "deny": "Solicitação Negada",
+        }
+        issue_reason_labels = {
+            "death": "Paciente faleceu",
+            "clinical_condition": "Paciente sem condição clínica de transporte",
+            "transport_unavailable": "Transporte indisponível pela unidade de origem",
+            "external_regulation": "Exame realizado pela regulação estadual em outro serviço",
+            "reschedule_request": "Solicitação de reagendamento pela unidade de origem",
+            "other": "Outro",
+        }
+        result_info = {
+            "type": "post_schedule_issue_responded",
+            "nir_reason_code": case.post_schedule_issue_reason,
+            "nir_reason_label": issue_reason_labels.get(
+                case.post_schedule_issue_reason, case.post_schedule_issue_reason
+            ),
+            "nir_message": case.post_schedule_issue_message,
+            "response_action": case.post_schedule_issue_response_action,
+            "response_action_label": issue_action_labels.get(
+                case.post_schedule_issue_response_action, case.post_schedule_issue_response_action
+            ),
+            "response_message": case.post_schedule_issue_response_message,
+            "appointment_at": case.appointment_at,
+            "appointment_location": case.appointment_location,
+            "appointment_instructions": case.appointment_instructions,
+            "appointment_status": case.appointment_status,
+        }
+
     # Nome do paciente
     patient_name = ""
     if case.structured_data and isinstance(case.structured_data, dict):
@@ -540,10 +575,13 @@ def confirm_receipt(request: HttpRequest, case_id: str) -> HttpResponse:
         return redirect("intake:case_detail", case_id=case.case_id)
 
     # Execute FSM transitions
-    case.cleanup_triggered(user=request.user)
-    case.save()
-    case.cleanup_completed(user=request.user)
-    case.save()
+    if case.post_schedule_issue_status == "responded":
+        acknowledge_post_schedule_issue(case=case, user=request.user)
+    else:
+        case.cleanup_triggered(user=request.user)
+        case.save()
+        case.cleanup_completed(user=request.user)
+        case.save()
 
     # Clear lock after completion
     case.locked_by = None
