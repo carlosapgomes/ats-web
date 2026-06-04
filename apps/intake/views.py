@@ -111,6 +111,9 @@ EVENT_LABELS: dict[str, str] = {
     "FINAL_REPLY_POSTED": "Resultado final enviado",
     "CLEANUP_TRIGGERED": "Limpeza iniciada",
     "CLEANUP_COMPLETED": "Caso concluído",
+    "POST_SCHEDULE_ISSUE_OPENED": "Intercorrência aberta",
+    "POST_SCHEDULE_ISSUE_RESPONDED": "Intercorrência respondida pelo agendador",
+    "POST_SCHEDULE_ISSUE_ACKNOWLEDGED": "Ciência de intercorrência confirmada",
 }
 
 # Cores do dot da timeline por event_type
@@ -143,6 +146,9 @@ EVENT_DOT_CSS: dict[str, str] = {
     "FINAL_REPLY_POSTED": "system",
     "CLEANUP_TRIGGERED": "system",
     "CLEANUP_COMPLETED": "system",
+    "POST_SCHEDULE_ISSUE_OPENED": "nir",
+    "POST_SCHEDULE_ISSUE_RESPONDED": "scheduler",
+    "POST_SCHEDULE_ISSUE_ACKNOWLEDGED": "nir",
 }
 
 # Etapas do stepper
@@ -715,6 +721,7 @@ def closed_cases_search(request: HttpRequest) -> HttpResponse:
                     "status_css": STATUS_CSS_CLASS.get(c.status, "status-pending"),
                     "patient_name": c.patient_name,
                     "has_active_issue": bool(c.post_schedule_issue_status),
+                    "issue_status": c.post_schedule_issue_status or "",
                 }
             )
 
