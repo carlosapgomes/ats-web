@@ -419,7 +419,15 @@ class Case(models.Model):
 
     @transition(field=status, source=CaseStatus.CLEANED, target=CaseStatus.WAIT_APPT)
     def open_post_schedule_issue(self, user=None):
-        self._record_event("POST_SCHEDULE_ISSUE_OPENED_TRANSITION", user=user)
+        pass
+
+    @transition(
+        field=status,
+        source=CaseStatus.WAIT_R1_CLEANUP_THUMBS,
+        target=CaseStatus.CLEANED,
+    )
+    def post_schedule_issue_acknowledged(self, user=None):
+        self._record_event("POST_SCHEDULE_ISSUE_ACKNOWLEDGED", user=user)
 
     def _record_event(
         self,
