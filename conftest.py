@@ -3,6 +3,11 @@
 import pytest
 from django.contrib.auth import get_user_model
 
+# Shared case/user/factory/advance fixtures from tests/shared_case_fixtures.py
+pytest_plugins = [
+    "tests.shared_case_fixtures",
+]
+
 User = get_user_model()
 
 
