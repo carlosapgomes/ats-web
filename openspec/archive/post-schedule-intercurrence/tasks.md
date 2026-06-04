@@ -2,7 +2,7 @@
 
 ## Status
 
-Slice 001 concluído. Implementar **um slice por vez**, seguindo TDD e aguardando confirmação explícita antes de iniciar o próximo slice.
+Change concluído e arquivado. Todos os slices foram implementados, validados, commitados e enviados para `origin/main`.
 
 ## Slices
 
@@ -34,29 +34,32 @@ Slice 001 concluído. Implementar **um slice por vez**, seguindo TDD e aguardand
 - [X] Quality gate completo executado.
 - [X] Cada slice gerou relatório temporário com snippets antes/depois e informou `REPORT_PATH`.
 - [X] Cada slice atualizou este `tasks.md` apenas ao final da implementação.
-- [ ] Cada slice teve commit e push, conforme `AGENTS.md`.
-- [ ] Débitos técnicos observados foram resolvidos, convertidos em novo change
+- [X] Cada slice teve commit e push, conforme `AGENTS.md`.
+- [X] Débitos técnicos observados foram resolvidos, convertidos em novo change
   ou explicitamente aceitos no fechamento do change.
 
 ## Débitos técnicos observados
 
-Estes itens foram identificados durante os slices, mas não devem ser tratados
-automaticamente no slice seguinte. Avaliar no fechamento do change se cada item
-deve virar follow-up, novo change ou débito aceito.
+Estes itens foram identificados durante os slices e tratados no fechamento do
+change. Itens não resolvidos foram convertidos em changes próprios para não
+bloquear a entrega da feature.
 
 - [ ] `apps/*/tests/conftest.py`: fixtures duplicadas entre apps.
   - Origem: verificação dos Slices 002/003.
   - Impacto: manutenção de testes e risco de divergência entre fixtures.
-  - Recomendação: futuro change `refactor(tests): consolidate duplicated fixtures`.
+  - Encaminhamento: convertido no change
+    `consolidate-duplicated-test-fixtures`.
   - Prioridade: baixa/média.
 - [X] JS inline em `templates/scheduler/confirm_post_schedule_issue.html`.
   - Origem: Slice 003.
-  - Resolvido: follow-up extraiu inline para `static/js/post_schedule_issue_form.js`.
+  - Resolvido: follow-up extraiu inline para
+    `static/js/post_schedule_issue_form.js`.
   - Prioridade: média.
-- [ ] `case_id: str` em views scheduler que recebem UUID.
+- [ ] `case_id: str` em views que recebem UUID.
   - Origem: débito pré-existente observado no Slice 003.
   - Impacto: tipagem menos precisa.
-  - Recomendação: futuro refactor pequeno de type hints.
+  - Encaminhamento: convertido no change
+    `align-uuid-route-parameter-annotations`.
   - Prioridade: baixa.
 
 ## Comandos globais de validação
