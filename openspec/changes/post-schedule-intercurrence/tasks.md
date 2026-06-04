@@ -8,7 +8,7 @@ Slice 001 concluído. Implementar **um slice por vez**, seguindo TDD e aguardand
 
 - [X] Slice 001 — Modelo, FSM e serviços de domínio (`slices/slice-001-domain-fsm-services.md`)
 - [X] Slice 002 — NIR busca casos encerrados e abre intercorrência (`slices/slice-002-nir-search-open-issue.md`)
-- [ ] Slice 003 — Agendador resolve intercorrência (`slices/slice-003-scheduler-resolve-issue.md`)
+- [X] Slice 003 — Agendador resolve intercorrência (`slices/slice-003-scheduler-resolve-issue.md`)
 - [ ] Slice 004 — NIR confirma ciência e encerra ciclo (`slices/slice-004-nir-acknowledge-issue.md`)
 - [ ] Slice 005 — Timeline, badges e hardening (`slices/slice-005-timeline-badges-hardening.md`)
 
@@ -21,16 +21,16 @@ Slice 001 concluído. Implementar **um slice por vez**, seguindo TDD e aguardand
 - [X] Elegibilidade restringe a casos `CLEANED`, aceitos pelo médico, fluxo `scheduled`, agendamento confirmado e sem intercorrência ativa.
 - [X] NIR consegue buscar caso encerrado por ocorrência ou nome do paciente.
 - [X] NIR consegue abrir intercorrência com motivo oficial e mensagem condicional.
-- [ ] Agendador vê intercorrência distinguida de agendamento inicial.
-- [ ] Agendador consegue cancelar, reagendar, manter ou negar solicitação.
-- [ ] Cancelamento marca agendamento atual como cancelado sem criar novo fluxo.
-- [ ] Reagendamento atualiza os campos principais de agendamento.
-- [ ] Manutenção/negação preservam o agendamento confirmado quando aplicável.
+- [X] Agendador vê intercorrência distinguida de agendamento inicial.
+- [X] Agendador consegue cancelar, reagendar, manter ou negar solicitação.
+- [X] Cancelamento marca agendamento atual como cancelado sem criar novo fluxo.
+- [X] Reagendamento atualiza os campos principais de agendamento.
+- [X] Manutenção/negação preservam o agendamento confirmado quando aplicável.
 - [ ] Após resposta do agendador, NIR confirma ciência.
 - [ ] Após ciência, caso retorna a `CLEANED` e deixa de ter intercorrência ativa.
 - [X] Timeline registra abertura, resposta e ciência com payload suficiente.
 - [X] Múltiplos ciclos sequenciais são suportados e auditados.
-- [ ] Locks existentes de agendador/NIR continuam respeitados.
+- [X] Locks existentes de agendador/NIR continuam respeitados.
 - [X] Quality gate completo executado.
 - [X] Cada slice gerou relatório temporário com snippets antes/depois e informou `REPORT_PATH`.
 - [X] Cada slice atualizou este `tasks.md` apenas ao final da implementação.

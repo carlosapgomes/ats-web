@@ -26,7 +26,7 @@ from apps.cases.services import (
     renew_case_lock as renew_lock_service,
 )
 
-from .forms import SchedulerDecisionForm
+from .forms import PostScheduleIssueForm, SchedulerDecisionForm
 
 # ── Helper mappers ───────────────────────────────────────────────────────
 
@@ -113,6 +113,7 @@ def _build_case_card(case: Case, wait_minutes: int, user: Any = None) -> dict[st
 
     If user is provided, lock status is computed relative to the current user.
     """
+    has_psi = case.post_schedule_issue_status == "opened"
     return {
         "case_id": str(case.case_id),
         "patient_name": _get_patient_name(case),
@@ -130,6 +131,10 @@ def _build_case_card(case: Case, wait_minutes: int, user: Any = None) -> dict[st
         "wait_minutes": wait_minutes,
         # Lock fields
         **compute_lock_display(case, user=user),
+        # Post-schedule intercurrence fields
+        "has_post_schedule_issue": has_psi,
+        "post_schedule_issue_reason": case.post_schedule_issue_reason if has_psi else "",
+        "post_schedule_issue_message": case.post_schedule_issue_message if has_psi else "",
     }
 
 
@@ -260,9 +265,12 @@ def immediate_ack(request: HttpRequest, case_id: str) -> HttpResponse:
 # ── Confirm helpers ────────────────────────────────────────────────────────
 
 
-def _build_confirm_context(case: Case, form: SchedulerDecisionForm) -> dict[str, Any]:
+def _build_confirm_context(
+    case: Case,
+    form: SchedulerDecisionForm | PostScheduleIssueForm,
+) -> dict[str, Any]:
     """Build context dict for the confirm template."""
-    return {
+    ctx: dict[str, Any] = {
         "case": case,
         "form": form,
         "patient_name": _get_patient_name(case),
@@ -275,6 +283,16 @@ def _build_confirm_context(case: Case, form: SchedulerDecisionForm) -> dict[str,
         "admission_flow_display": _get_admission_flow_display(case),
         "origin_unit": case.get_origin_unit_display(compact=False),
     }
+    # Include post-schedule issue info if applicable
+    if case.post_schedule_issue_status == "opened":
+        ctx["has_post_schedule_issue"] = True
+        ctx["ps_issue_reason"] = case.post_schedule_issue_reason
+        ctx["ps_issue_message"] = case.post_schedule_issue_message
+        ctx["ps_issue_opened_by"] = (
+            case.post_schedule_issue_opened_by.display_name if case.post_schedule_issue_opened_by else ""
+        )
+        ctx["ps_issue_opened_at"] = case.post_schedule_issue_opened_at
+    return ctx
 
 
 # ── Confirm view ────────────────────────────────────────────────────────────
@@ -287,6 +305,9 @@ def scheduler_confirm(request: HttpRequest, case_id: str) -> HttpResponse:
 
     Acquires a lock on the case before rendering. If the lock cannot be
     acquired (another user has it), redirects to the queue with a warning.
+
+    Se o caso tiver intercorrência pós-agendamento aberta, renderiza o
+    formulário de resolução de intercorrência.
     """
     case = get_object_or_404(Case.objects.select_related("doctor"), pk=case_id)
 
@@ -294,6 +315,9 @@ def scheduler_confirm(request: HttpRequest, case_id: str) -> HttpResponse:
         raise Http404("Caso não está aguardando agendamento.")
 
     user = request.user
+
+    # Detecta se é intercorrência ativa
+    has_psi = case.post_schedule_issue_status == "opened"
 
     # Attempt to claim the lock
     result = claim_case_lock(
@@ -320,10 +344,11 @@ def scheduler_confirm(request: HttpRequest, case_id: str) -> HttpResponse:
 
     # Fresh DB instance
     case = get_object_or_404(Case.objects.select_related("doctor"), pk=case_id)
-    form = SchedulerDecisionForm()
+    form = PostScheduleIssueForm() if has_psi else SchedulerDecisionForm()
     context = _build_confirm_context(case, form)
     context["lock_token"] = str(result.token)
-    return render(request, "scheduler/confirm.html", context)
+    template = "scheduler/confirm_post_schedule_issue.html" if has_psi else "scheduler/confirm.html"
+    return render(request, template, context)
 
 
 @login_required
@@ -333,6 +358,9 @@ def scheduler_submit(request: HttpRequest, case_id: str) -> HttpResponse:
 
     Requires a valid lock_token to proceed. If the lock is invalid or
     expired, re-renders the form with an error message.
+
+    Se o caso tiver intercorrência pós-agendamento aberta, processa a ação
+    do agendador (cancel/reschedule/maintain/deny) via serviço de domínio.
     """
     if request.method != "POST":
         raise Http404
@@ -342,6 +370,9 @@ def scheduler_submit(request: HttpRequest, case_id: str) -> HttpResponse:
     if case.status != CaseStatus.WAIT_APPT:
         raise Http404("Caso não está aguardando agendamento.")
 
+    # Detecta se é intercorrência ativa
+    has_psi = case.post_schedule_issue_status == "opened"
+
     # Validate lock token
     raw_token = request.POST.get("lock_token", "")
     try:
@@ -350,11 +381,13 @@ def scheduler_submit(request: HttpRequest, case_id: str) -> HttpResponse:
         token = None
 
     if token is None:
-        form = SchedulerDecisionForm(request.POST)
+        form_cls = PostScheduleIssueForm if has_psi else SchedulerDecisionForm
+        form = form_cls(request.POST)
         ctx = _build_confirm_context(case, form)
         ctx["lock_error"] = "Sua reserva para este caso expirou ou não é válida. Volte para a fila e tente novamente."
         messages.warning(request, "Token de reserva não encontrado. Volte para a fila.")
-        return render(request, "scheduler/confirm.html", ctx)
+        template = "scheduler/confirm_post_schedule_issue.html" if has_psi else "scheduler/confirm.html"
+        return render(request, template, ctx)
 
     # Check lock validity before proceeding
     try:
@@ -365,45 +398,88 @@ def scheduler_submit(request: HttpRequest, case_id: str) -> HttpResponse:
             context="scheduler_confirm",
         )
     except PermissionError as exc:
-        form = SchedulerDecisionForm(request.POST)
+        form_cls = PostScheduleIssueForm if has_psi else SchedulerDecisionForm
+        form = form_cls(request.POST)
         ctx = _build_confirm_context(case, form)
         ctx["lock_error"] = str(exc)
         messages.warning(request, str(exc))
-        return render(request, "scheduler/confirm.html", ctx)
+        template = "scheduler/confirm_post_schedule_issue.html" if has_psi else "scheduler/confirm.html"
+        return render(request, template, ctx)
 
-    form = SchedulerDecisionForm(request.POST)
+    if has_psi:
+        # ── Fluxo de intercorrência pós-agendamento ──────────────────
+        form = PostScheduleIssueForm(request.POST)
 
-    if not form.is_valid():
-        ctx = _build_confirm_context(case, form)
-        ctx["lock_token"] = raw_token
-        return render(request, "scheduler/confirm.html", ctx)
+        if not form.is_valid():
+            ctx = _build_confirm_context(case, form)
+            ctx["lock_token"] = raw_token
+            return render(request, "scheduler/confirm_post_schedule_issue.html", ctx)
 
-    decision = form.cleaned_data["decision"]
+        psi_action = form.cleaned_data["psi_action"]
+        psi_response_message = form.cleaned_data.get("psi_response_message", "")
 
-    # Persist scheduler decision fields
-    case.scheduler = request.user  # type: ignore[assignment]  # guaranteed by @login_required
-    case.appointment_decided_at = timezone.now()
+        try:
+            # Build kwargs for the domain service
+            kwargs: dict[str, Any] = {
+                "case": case,
+                "user": request.user,
+                "action": psi_action,
+                "response_message": psi_response_message,
+            }
 
-    if decision == "confirm":
-        appt_date: date = form.cleaned_data["appointment_date"]
-        appt_time: time = form.cleaned_data["appointment_time"]
-        case.appointment_status = "confirmed"
-        case.appointment_at = datetime.combine(appt_date, appt_time).replace(tzinfo=timezone.get_current_timezone())
-        case.appointment_instructions = form.cleaned_data.get("notes", "")
+            if psi_action == "reschedule":
+                appt_date: date = form.cleaned_data["psi_appointment_date"]
+                appt_time: time = form.cleaned_data["psi_appointment_time"]
+                dt_naive = datetime.combine(appt_date, appt_time)
+                dt_aware = dt_naive.replace(tzinfo=timezone.get_current_timezone())
+                kwargs["appointment_at"] = dt_aware.isoformat()
+                kwargs["appointment_location"] = form.cleaned_data.get("psi_appointment_location", "")
+                kwargs["appointment_instructions"] = form.cleaned_data.get("psi_appointment_instructions", "")
 
-        # FSM transition: WAIT_APPT → APPT_CONFIRMED
-        case.scheduler_decide(appointment_status="confirmed", user=request.user)
+            from apps.cases.services import respond_post_schedule_issue
+
+            case = respond_post_schedule_issue(**kwargs)
+
+        except ValueError as exc:
+            form.add_error(None, str(exc))
+            ctx = _build_confirm_context(case, form)
+            ctx["lock_token"] = raw_token
+            return render(request, "scheduler/confirm_post_schedule_issue.html", ctx)
     else:
-        case.appointment_status = "denied"
-        case.appointment_reason = form.cleaned_data.get("reason", "")
+        # ── Fluxo normal de agendamento ──────────────────────────────
+        form = SchedulerDecisionForm(request.POST)
 
-        # FSM transition: WAIT_APPT → APPT_DENIED
-        case.scheduler_decide(appointment_status="denied", user=request.user)
+        if not form.is_valid():
+            ctx = _build_confirm_context(case, form)
+            ctx["lock_token"] = raw_token
+            return render(request, "scheduler/confirm.html", ctx)
 
-    # Post final reply → WAIT_R1_CLEANUP_THUMBS (both confirm and deny)
-    case.save()  # persiste decisão do scheduler e seu evento
-    case.final_reply_posted(user=request.user)
-    case.save()
+        decision = form.cleaned_data["decision"]
+
+        # Persist scheduler decision fields
+        case.scheduler = request.user  # type: ignore[assignment]  # guaranteed by @login_required
+        case.appointment_decided_at = timezone.now()
+
+        if decision == "confirm":
+            appt_date = form.cleaned_data["appointment_date"]
+            appt_time = form.cleaned_data["appointment_time"]
+            case.appointment_status = "confirmed"
+            case.appointment_at = datetime.combine(appt_date, appt_time).replace(tzinfo=timezone.get_current_timezone())
+            case.appointment_instructions = form.cleaned_data.get("notes", "")
+
+            # FSM transition: WAIT_APPT → APPT_CONFIRMED
+            case.scheduler_decide(appointment_status="confirmed", user=request.user)
+        else:
+            case.appointment_status = "denied"
+            case.appointment_reason = form.cleaned_data.get("reason", "")
+
+            # FSM transition: WAIT_APPT → APPT_DENIED
+            case.scheduler_decide(appointment_status="denied", user=request.user)
+
+        # Post final reply → WAIT_R1_CLEANUP_THUMBS (both confirm and deny)
+        case.save()  # persiste decisão do scheduler e seu evento
+        case.final_reply_posted(user=request.user)
+        case.save()
 
     # Release lock deterministically after successful business logic
     release_lock_service(
