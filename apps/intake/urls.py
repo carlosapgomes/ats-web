@@ -13,4 +13,7 @@ urlpatterns = [
     path("<uuid:case_id>/confirm/", views.confirm_receipt, name="confirm_receipt"),
     path("<uuid:case_id>/lock/renew/", views.nir_lock_renew, name="nir_lock_renew"),
     path("<uuid:case_id>/lock/release/", views.nir_lock_release, name="nir_lock_release"),
+    # Post-schedule intercurrence
+    path("closed-cases/", views.closed_cases_search, name="closed_cases_search"),
+    path("closed-cases/<uuid:case_id>/issue/", views.post_schedule_issue_open, name="post_schedule_issue_open"),
 ]

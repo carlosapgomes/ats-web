@@ -4,6 +4,7 @@ import uuid
 
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
+from django.db import models
 from django.http import FileResponse, Http404, HttpRequest, HttpResponse, HttpResponseBase, JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.views.decorators.clickjacking import xframe_options_sameorigin
@@ -631,3 +632,137 @@ def nir_lock_release(request: HttpRequest, case_id: uuid.UUID) -> HttpResponse:
     )
 
     return JsonResponse({"success": released})
+
+
+# ── Post-schedule intercurrence views ───────────────────────────────────
+
+
+@login_required
+@role_required("nir")
+def closed_cases_search(request: HttpRequest) -> HttpResponse:
+    """Busca NIR de casos encerrados (CLEANED) para abrir intercorrência.
+
+    Pesquisa por número da ocorrência ou nome do paciente.
+    Mostra elegibilidade e botão de abertura apenas para elegíveis.
+    """
+    from apps.cases.services import (
+        get_post_schedule_issue_ineligibility_reason,
+        is_post_schedule_issue_eligible,
+    )
+
+    query = request.GET.get("q", "").strip()
+    results: list[dict[str, object]] = []
+
+    if query:
+        # Busca: casos CLEANED + casos com intercorrência ativa (qualquer status)
+        qs = (
+            Case.objects.filter(
+                models.Q(status=CaseStatus.CLEANED) | models.Q(post_schedule_issue_status__in=["opened", "responded"])
+            )
+            .filter(
+                models.Q(agency_record_number__icontains=query)
+                | models.Q(structured_data__patient__name__icontains=query)
+            )
+            .order_by("-created_at")[:50]
+        )
+
+        for c in qs:
+            eligible = is_post_schedule_issue_eligible(c)
+            results.append(
+                {
+                    "case": c,
+                    "eligible": eligible,
+                    "ineligibility_reason": ("" if eligible else get_post_schedule_issue_ineligibility_reason(c)),
+                    "status_label": STATUS_LABELS.get(c.status, c.get_status_display()),
+                    "status_css": STATUS_CSS_CLASS.get(c.status, "status-pending"),
+                    "patient_name": c.patient_name,
+                    "has_active_issue": bool(c.post_schedule_issue_status),
+                }
+            )
+
+    return render(
+        request,
+        "intake/closed_cases_search.html",
+        {
+            "query": query,
+            "results": results,
+        },
+    )
+
+
+@login_required
+@role_required("nir")
+def post_schedule_issue_open(request: HttpRequest, case_id: str) -> HttpResponse:
+    """Formulário NIR para abrir intercorrência pós-agendamento.
+
+    GET: Exibe formulário com motivo e mensagem.
+    POST: Valida e abre intercorrência via serviço de domínio.
+    """
+    from apps.cases.services import (
+        get_post_schedule_issue_ineligibility_reason,
+        is_post_schedule_issue_eligible,
+        open_post_schedule_issue,
+    )
+
+    from .forms import PostScheduleIssueForm
+
+    case = get_object_or_404(Case, case_id=case_id)
+
+    # Verificar elegibilidade
+    if not is_post_schedule_issue_eligible(case):
+        reason = get_post_schedule_issue_ineligibility_reason(case)
+        return render(
+            request,
+            "intake/post_schedule_issue_form.html",
+            {
+                "case": case,
+                "eligible": False,
+                "ineligibility_reason": reason,
+                "form": None,
+                "patient_name": case.patient_name,
+            },
+        )
+
+    if request.method == "POST":
+        form = PostScheduleIssueForm(request.POST)
+        if form.is_valid():
+            reason = form.cleaned_data["reason"]
+            message = form.cleaned_data.get("message", "")
+            try:
+                open_post_schedule_issue(
+                    case=case,
+                    user=request.user,
+                    reason=reason,
+                    message=message,
+                )
+                messages.success(
+                    request,
+                    "Intercorrência registrada com sucesso. O caso foi enviado para o agendador.",
+                )
+                return redirect("intake:closed_cases_search")
+            except ValueError as exc:
+                messages.warning(request, str(exc))
+        # Se form inválido, renderiza com erros
+        return render(
+            request,
+            "intake/post_schedule_issue_form.html",
+            {
+                "case": case,
+                "eligible": True,
+                "form": form,
+                "patient_name": case.patient_name,
+            },
+        )
+
+    # GET: exibir formulário vazio
+    form = PostScheduleIssueForm()
+    return render(
+        request,
+        "intake/post_schedule_issue_form.html",
+        {
+            "case": case,
+            "eligible": True,
+            "form": form,
+            "patient_name": case.patient_name,
+        },
+    )

@@ -1,0 +1,121 @@
+{% extends "base.html" %}
+{% load static %}
+
+{% block title %}Buscar Casos Encerrados — {{ app_display_name }}{% endblock %}
+
+{% block subtitle %}Localize casos encerrados para registrar intercorrência{% endblock %}
+
+{% block nav %}
+<nav class="app-nav mt-3" aria-label="Navegação">
+  <ul class="nav nav-pills gap-2">
+    <li class="nav-item">
+      <a class="nav-link" href="{% url 'intake:home' %}">Novo Encaminhamento</a>
+    </li>
+    <li class="nav-item">
+      <a class="nav-link" href="{% url 'intake:my_cases' %}">Meus Casos</a>
+    </li>
+    <li class="nav-item">
+      <a class="nav-link active" href="{% url 'intake:closed_cases_search' %}">Casos Encerrados</a>
+    </li>
+  </ul>
+</nav>
+{% endblock %}
+
+{% block content %}
+
+<!-- Busca -->
+<div class="card p-4 mb-4">
+  <h3 class="mb-3">Buscar Casos Encerrados</h3>
+  <p class="text-muted mb-3">
+    Pesquise por número da ocorrência ou nome do paciente para localizar
+    casos concluídos e registrar intercorrência pós-agendamento.
+  </p>
+
+  <form method="get" class="row g-3 align-items-end">
+    <div class="col-md-8">
+      <label for="search-input" class="form-label">Buscar</label>
+      <input
+        type="text"
+        name="q"
+        id="search-input"
+        class="form-control"
+        placeholder="Número da ocorrência ou nome do paciente"
+        value="{{ query }}"
+      >
+    </div>
+    <div class="col-md-4 d-flex gap-2">
+      <button type="submit" class="btn btn-hospital">Buscar</button>
+      <a href="{% url 'intake:closed_cases_search' %}" class="btn btn-hospital-outline">Limpar</a>
+    </div>
+  </form>
+</div>
+
+<!-- Resultados -->
+<div class="card p-4">
+  {% if query %}
+    <div class="d-flex justify-content-between align-items-center mb-3">
+      <h3 class="mb-0">Resultados</h3>
+      <span class="badge-hospital-primary status-badge">{{ results|length }} caso{{ results|length|pluralize:"s" }}</span>
+    </div>
+
+    {% if results %}
+      <div class="row g-3">
+        {% for item in results %}
+        <div class="col-12">
+          <div class="case-card card p-3">
+            <div class="row align-items-center">
+              <div class="col-md-5">
+                <div class="patient-name">{{ item.patient_name }}</div>
+                <div class="case-meta">
+                  {% if item.case.agency_record_number %}Reg. {{ item.case.agency_record_number }}{% endif %}
+                  {% with origin=item.case.get_origin_unit_display %}{% if origin %} · 🏥 {{ origin }}{% endif %}{% endwith %}
+                </div>
+                <div class="case-meta small text-muted mt-1">
+                  Concluído em {{ item.case.cleanup_completed_at|date:"d/m/Y H:i"|default:item.case.updated_at|date:"d/m/Y H:i" }}
+                </div>
+              </div>
+              <div class="col-md-3">
+                <span class="status-badge {{ item.status_css }}">
+                  {{ item.status_label }}
+                </span>
+              </div>
+              <div class="col-md-4 text-md-end mt-2 mt-md-0">
+                {% if item.has_active_issue %}
+                  <span class="badge bg-warning text-dark me-2">🔔 Intercorrência em avaliação</span>
+                {% elif item.eligible %}
+                  <a href="{% url 'intake:post_schedule_issue_open' item.case.case_id %}" class="btn btn-sm btn-hospital">
+                    Registrar intercorrência
+                  </a>
+                {% else %}
+                  <span class="text-muted small d-block">
+                    {{ item.ineligibility_reason }}
+                  </span>
+                {% endif %}
+              </div>
+            </div>
+          </div>
+        </div>
+        {% endfor %}
+      </div>
+    {% else %}
+      <div class="text-center py-5">
+        <p class="text-muted mb-3 fs-5">Nenhum caso encontrado</p>
+        <p class="text-muted small">
+          Nenhum caso encerrado corresponde à busca "{{ query }}".
+          Tente um número de registro ou nome de paciente diferente.
+        </p>
+        <a href="{% url 'intake:closed_cases_search' %}" class="btn btn-hospital-outline">Nova busca</a>
+      </div>
+    {% endif %}
+  {% else %}
+    <div class="text-center py-5">
+      <p class="text-muted mb-3 fs-5">Faça uma busca</p>
+      <p class="text-muted small">
+        Utilize o campo acima para pesquisar por número da ocorrência
+        ou nome do paciente em casos já concluídos.
+      </p>
+    </div>
+  {% endif %}
+</div>
+
+{% endblock %}

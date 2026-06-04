@@ -1,0 +1,105 @@
+{% extends "base.html" %}
+{% load static %}
+
+{% block title %}Registrar Intercorrência — {{ app_display_name }}{% endblock %}
+
+{% block subtitle %}Registrar intercorrência pós-agendamento{% endblock %}
+
+{% block nav %}
+<nav class="app-nav mt-3" aria-label="Navegação">
+  <ul class="nav nav-pills gap-2">
+    <li class="nav-item">
+      <a class="nav-link" href="{% url 'intake:home' %}">Novo Encaminhamento</a>
+    </li>
+    <li class="nav-item">
+      <a class="nav-link" href="{% url 'intake:my_cases' %}">Meus Casos</a>
+    </li>
+    <li class="nav-item">
+      <a class="nav-link" href="{% url 'intake:closed_cases_search' %}">Casos Encerrados</a>
+    </li>
+  </ul>
+</nav>
+{% endblock %}
+
+{% block content %}
+
+{% if not eligible %}
+
+<!-- Inelegível -->
+<div class="card p-4">
+  <div class="text-center py-4">
+    <div class="mb-3" style="font-size: 3rem;">🚫</div>
+    <h3 class="mb-2">Intercorrência indisponível</h3>
+    <p class="text-muted mb-3">{{ ineligibility_reason }}</p>
+    <div class="mt-3">
+      <p class="small text-muted mb-3">
+        <strong>Paciente:</strong> {{ patient_name }}<br>
+        {% if case.agency_record_number %}
+        <strong>Registro:</strong> {{ case.agency_record_number }}<br>
+        {% endif %}
+        <strong>Status:</strong> {{ case.get_status_display }}
+      </p>
+    </div>
+    <a href="{% url 'intake:closed_cases_search' %}" class="btn btn-hospital-outline">
+      Voltar para busca
+    </a>
+  </div>
+</div>
+
+{% else %}
+
+<!-- Elegível: formulário -->
+<div class="card p-4 mb-4">
+  <h3 class="mb-3">Registrar Intercorrência</h3>
+
+  <div class="alert alert-info mb-4">
+    <strong>Paciente:</strong> {{ patient_name }}<br>
+    {% if case.agency_record_number %}
+    <strong>Registro:</strong> {{ case.agency_record_number }}<br>
+    {% endif %}
+    {% if case.appointment_at %}
+    <strong>Agendamento atual:</strong> {{ case.appointment_at|date:"d/m/Y H:i" }}<br>
+    {% endif %}
+    <strong>Status:</strong> {{ case.get_status_display }}
+  </div>
+
+  <form method="post" novalidate>
+    {% csrf_token %}
+
+    <div class="mb-3">
+      <label for="{{ form.reason.id_for_label }}" class="form-label">{{ form.reason.label }}</label>
+      {{ form.reason }}
+      {% if form.reason.errors %}
+      <div class="text-danger small mt-1">{{ form.reason.errors.0 }}</div>
+      {% endif %}
+    </div>
+
+    <div class="mb-3">
+      <label for="{{ form.message.id_for_label }}" class="form-label">{{ form.message.label }}</label>
+      {{ form.message }}
+      {% if form.message.errors %}
+      <div class="text-danger small mt-1">{{ form.message.errors.0 }}</div>
+      {% endif %}
+      <div class="form-text" id="message-helper">
+        Descreva o motivo da intercorrência. Campo obrigatório para
+        <strong>sem condição clínica</strong>,
+        <strong>transporte indisponível</strong>,
+        <strong>solicitação de reagendamento</strong> e
+        <strong>outro</strong>.
+      </div>
+    </div>
+
+    <div class="d-flex gap-2">
+      <button type="submit" class="btn btn-hospital">
+        Registrar intercorrência
+      </button>
+      <a href="{% url 'intake:closed_cases_search' %}" class="btn btn-hospital-outline">
+        Cancelar
+      </a>
+    </div>
+  </form>
+</div>
+
+{% endif %}
+
+{% endblock %}
