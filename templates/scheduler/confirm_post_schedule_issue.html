@@ -1,0 +1,295 @@
+{% extends "base.html" %}
+{% load static %}
+
+{% block title %}Resolver Intercorrência · {{ app_display_name }}{% endblock %}
+
+{% block subtitle %}Caso {{ case.agency_record_number|default:case.case_id|truncatechars:16 }} · {{ patient_name }}{% endblock %}
+
+{% block content %}
+
+<!-- Work lock configuration (lido por work_lock.js) -->
+<div id="work-lock-config"
+     data-work-lock-config
+     data-renew-url="{% url 'scheduler:lock_renew' case.case_id %}"
+     data-release-url="{% url 'scheduler:lock_release' case.case_id %}"
+     data-lock-token="{{ lock_token|default:'' }}"
+     data-heartbeat-ms="60000"
+     data-grace-ms="240000">
+</div>
+
+<div id="work-lock-warning" class="alert alert-warning mb-3" style="display:none;"></div>
+
+<div class="row g-4 decision-two-col">
+
+  <!-- Left: Case Summary -->
+  <div class="col-lg-5">
+    <div class="card p-4 mb-3">
+      <h5 class="mb-3">📋 Dados do Caso</h5>
+      <table class="table table-sm mb-0">
+        <tr><td class="text-muted" style="width:40%;">Paciente</td><td><strong>{{ patient_name }}</strong></td></tr>
+        <tr><td class="text-muted">Registro</td><td>{{ case.agency_record_number|default:case.case_id|truncatechars:20 }}</td></tr>
+        <tr><td class="text-muted">Idade</td><td>{% if patient_age %}{{ patient_age }} anos{% else %}—{% endif %}</td></tr>
+        <tr><td class="text-muted">Sexo</td><td>{{ patient_gender|default:"—" }}</td></tr>
+        <tr><td class="text-muted">Diagnóstico</td><td>{{ diagnosis|default:"—" }}</td></tr>
+        {% if origin_unit %}<tr><td class="text-muted">🏥 Origem</td><td><strong>{{ origin_unit }}</strong></td></tr>{% endif %}
+        <tr><td class="text-muted">Enviado em</td><td>{{ case.created_at|date:"d/m/Y H:i" }}</td></tr>
+        <tr><td class="text-muted">Aguardando</td><td><span class="waiting-time">⏱ {{ case.created_at|timesince }}</span></td></tr>
+      </table>
+    </div>
+
+    <div class="card p-4">
+      <h5 class="mb-3">🩺 Decisão Médica</h5>
+      <div class="summary-box mb-3">
+        <div class="summary-label">Decisão</div>
+        <div class="summary-value">
+          <span class="status-badge status-accepted">{{ doctor_decision_display|default:"—" }}</span>
+        </div>
+      </div>
+      {% if doctor_display %}
+      <div class="summary-box mb-3">
+        <div class="summary-label">Médico responsável</div>
+        <div class="summary-value">{{ doctor_display }}</div>
+      </div>
+      {% endif %}
+      <div class="summary-box mb-3">
+        <div class="summary-label">Suporte Necessário</div>
+        <div class="summary-value">{{ support_flag_display|default:"—" }}</div>
+      </div>
+      <div class="summary-box">
+        <div class="summary-label">Fluxo</div>
+        <div class="summary-value">{{ admission_flow_display|default:"—" }}</div>
+      </div>
+      {% if case.has_doctor_observation %}
+      <div class="summary-box mt-3 border-info">
+        <div class="summary-label">Observação Médica</div>
+        <div class="summary-value" style="white-space: pre-wrap;">{{ case.doctor_observation }}</div>
+      </div>
+      {% endif %}
+    </div>
+  </div>
+
+  <!-- Right: Intercurrence Resolution Form -->
+  <div class="col-lg-7">
+    <div class="card p-4 border-warning">
+      <h5 class="mb-3 text-warning">⚠️ Intercorrência Pós-Agendamento</h5>
+
+      <div class="alert alert-warning mb-4">
+        <div class="mb-2"><strong>Motivo:</strong> {{ ps_issue_reason|default:"—" }}</div>
+        {% if ps_issue_message %}
+        <div class="mb-2"><strong>Mensagem do NIR:</strong></div>
+        <div class="p-3 bg-light rounded" style="white-space: pre-wrap;">{{ ps_issue_message }}</div>
+        {% endif %}
+        {% if ps_issue_opened_by %}
+        <div class="mt-2 small text-muted">
+          Aberto por {{ ps_issue_opened_by }}{% if ps_issue_opened_at %} em {{ ps_issue_opened_at|date:"d/m/Y H:i" }}{% endif %}
+        </div>
+        {% endif %}
+      </div>
+
+      <form id="psi-form" method="post" action="{% url 'scheduler:submit' case.case_id %}" novalidate>
+        {% csrf_token %}
+
+        <!-- Action selection -->
+        <div class="mb-4">
+          <label class="form-label">Ação do Agendador <span class="text-danger">*</span></label>
+          <div class="psi-action-group">
+            <div class="form-check">
+              <input class="form-check-input" type="radio" name="psi_action" id="psi-cancel" value="cancel" required{% if form.psi_action.value == "cancel" %} checked{% endif %}>
+              <label class="form-check-label d-block" for="psi-cancel">
+                <strong>✕ Cancelar agendamento</strong>
+                <div class="text-muted small">Cancela o agendamento atual. Informe o motivo.</div>
+              </label>
+            </div>
+            <div class="form-check">
+              <input class="form-check-input" type="radio" name="psi_action" id="psi-reschedule" value="reschedule"{% if form.psi_action.value == "reschedule" %} checked{% endif %}>
+              <label class="form-check-label d-block" for="psi-reschedule">
+                <strong>📅 Reagendar</strong>
+                <div class="text-muted small">Altera data, local e instruções do agendamento.</div>
+              </label>
+            </div>
+            <div class="form-check">
+              <input class="form-check-input" type="radio" name="psi_action" id="psi-maintain" value="maintain"{% if form.psi_action.value == "maintain" %} checked{% endif %}>
+              <label class="form-check-label d-block" for="psi-maintain">
+                <strong>✓ Manter agendamento</strong>
+                <div class="text-muted small">Preserva data e local atuais do agendamento.</div>
+              </label>
+            </div>
+            <div class="form-check">
+              <input class="form-check-input" type="radio" name="psi_action" id="psi-deny" value="deny"{% if form.psi_action.value == "deny" %} checked{% endif %}>
+              <label class="form-check-label d-block" for="psi-deny">
+                <strong>🚫 Negar solicitação</strong>
+                <div class="text-muted small">Mantém o agendamento atual. Informe o motivo da negativa.</div>
+              </label>
+            </div>
+          </div>
+          {% if form.psi_action.errors %}
+          <div class="invalid-feedback d-block">{{ form.psi_action.errors.0 }}</div>
+          {% else %}
+          <div class="invalid-feedback" id="psi-action-error">Selecione uma ação.</div>
+          {% endif %}
+        </div>
+
+        <!-- Cancel / Deny: response message -->
+        <div class="psi-section" id="psi-cancel-deny-section" style="display:none;">
+          <div class="mb-3">
+            <label for="psi-response-message" class="form-label">Mensagem / Motivo <span class="text-danger">*</span></label>
+            <textarea class="form-control{% if form.psi_response_message.errors %} is-invalid{% endif %}" id="psi-response-message" name="psi_response_message" rows="3" placeholder="Ex: Paciente faleceu, Sem vagas disponíveis...">{{ form.psi_response_message.value|default:"" }}</textarea>
+            {% if form.psi_response_message.errors %}
+            <div class="invalid-feedback d-block">{{ form.psi_response_message.errors.0 }}</div>
+            {% endif %}
+          </div>
+        </div>
+
+        <!-- Reschedule fields -->
+        <div class="psi-section" id="psi-reschedule-section" style="display:none;">
+          <div class="row g-3 mb-3">
+            <div class="col-sm-6">
+              <label for="psi-date" class="form-label">Nova Data <span class="text-danger">*</span></label>
+              <input type="date" class="form-control{% if form.psi_appointment_date.errors %} is-invalid{% endif %}" id="psi-date" name="psi_appointment_date"{% if form.psi_appointment_date.value %} value="{{ form.psi_appointment_date.value|date:'Y-m-d' }}"{% endif %}>
+              {% if form.psi_appointment_date.errors %}
+              <div class="invalid-feedback d-block">{{ form.psi_appointment_date.errors.0 }}</div>
+              {% else %}
+              <div class="invalid-feedback">Informe a nova data.</div>
+              {% endif %}
+            </div>
+            <div class="col-sm-6">
+              <label for="psi-time" class="form-label">Novo Horário <span class="text-danger">*</span></label>
+              <input type="time" class="form-control{% if form.psi_appointment_time.errors %} is-invalid{% endif %}" id="psi-time" name="psi_appointment_time"{% if form.psi_appointment_time.value %} value="{{ form.psi_appointment_time.value|time:'H:i' }}"{% endif %}>
+              {% if form.psi_appointment_time.errors %}
+              <div class="invalid-feedback d-block">{{ form.psi_appointment_time.errors.0 }}</div>
+              {% else %}
+              <div class="invalid-feedback">Informe o novo horário.</div>
+              {% endif %}
+            </div>
+          </div>
+          <div class="mb-3">
+            <label for="psi-location" class="form-label">Local</label>
+            <input type="text" class="form-control" id="psi-location" name="psi_appointment_location" placeholder="Ex: Hospital Central - Sala 2" value="{{ form.psi_appointment_location.value|default:"" }}">
+          </div>
+          <div class="mb-3">
+            <label for="psi-instructions" class="form-label">Instruções</label>
+            <textarea class="form-control" id="psi-instructions" name="psi_appointment_instructions" rows="2" placeholder="Instruções adicionais para o paciente...">{{ form.psi_appointment_instructions.value|default:"" }}</textarea>
+          </div>
+          <div class="mb-3">
+            <label for="psi-response-message-resched" class="form-label">Mensagem do agendador</label>
+            <textarea class="form-control" id="psi-response-message-resched" name="psi_response_message" rows="2" placeholder="Ex: Reagendado conforme solicitado.">{{ form.psi_response_message.value|default:"" }}</textarea>
+          </div>
+        </div>
+
+        <!-- Maintain: optional message -->
+        <div class="psi-section" id="psi-maintain-section" style="display:none;">
+          <div class="mb-3">
+            <label for="psi-maintain-message" class="form-label">Mensagem do agendador</label>
+            <textarea class="form-control" id="psi-maintain-message" name="psi_response_message" rows="2" placeholder="Ex: Agendamento mantido conforme solicitado.">{{ form.psi_response_message.value|default:"" }}</textarea>
+          </div>
+        </div>
+
+        <!-- Lock error -->
+        {% if lock_error %}
+        <div class="alert alert-danger mt-3">
+          🔒 {{ lock_error }}
+        </div>
+        {% endif %}
+
+        <!-- Non-field errors -->
+        {% if form.non_field_errors %}
+        <div class="alert alert-danger mt-3">
+          {% for error in form.non_field_errors %}
+          <div>{{ error }}</div>
+          {% endfor %}
+        </div>
+        {% endif %}
+
+        <input type="hidden" name="lock_token" value="{{ lock_token|default:"" }}">
+
+        <!-- Submit -->
+        <div class="d-flex gap-2 mt-4">
+          <button type="submit" class="btn btn-hospital btn-lg flex-grow-1" id="btn-submit-psi">
+            Enviar Resposta
+          </button>
+          <a href="{% url 'scheduler:queue' %}" class="btn btn-outline-secondary btn-lg">Cancelar</a>
+        </div>
+
+      </form>
+    </div>
+  </div>
+
+</div>
+
+<!-- Confirmation Modal -->
+<div class="modal fade" id="confirm-modal" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog modal-dialog-centered">
+    <div class="modal-content">
+      <div class="modal-header border-0">
+        <h5 class="modal-title">Confirmar Envio</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Fechar"></button>
+      </div>
+      <div class="modal-body" id="confirm-body">
+        <!-- Filled by JS -->
+      </div>
+      <div class="modal-footer border-0">
+        <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Revisar</button>
+        <button type="button" class="btn btn-hospital" id="btn-confirm-final">Confirmar</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+(function() {
+  const actionRadios = document.querySelectorAll('input[name="psi_action"]');
+  const sections = {
+    'cancel': document.getElementById('psi-cancel-deny-section'),
+    'deny': document.getElementById('psi-cancel-deny-section'),
+    'reschedule': document.getElementById('psi-reschedule-section'),
+    'maintain': document.getElementById('psi-maintain-section'),
+  };
+
+  function toggleSections(value) {
+    Object.entries(sections).forEach(([action, el]) => {
+      if (el) {
+        el.style.display = (action === value) ? 'block' : 'none';
+      }
+    });
+    // Also show cancel-deny for cancel
+    if (value === 'cancel') {
+      document.getElementById('psi-cancel-deny-section').style.display = 'block';
+    }
+    if (value === 'deny') {
+      document.getElementById('psi-cancel-deny-section').style.display = 'block';
+    }
+    // Reset required attributes
+    document.querySelectorAll('.psi-section input, .psi-section textarea').forEach(field => {
+      field.removeAttribute('required');
+    });
+    // Set required for visible fields
+    const visibleSection = sections[value];
+    if (visibleSection) {
+      visibleSection.querySelectorAll('input, textarea').forEach(field => {
+        if (field.dataset.required !== 'false') {
+          // Don't auto-set required to avoid browser validation conflicts;
+          // server-side validation handles this
+        }
+      });
+    }
+  }
+
+  actionRadios.forEach(radio => {
+    radio.addEventListener('change', function() {
+      toggleSections(this.value);
+    });
+  });
+
+  // Initialize on page load
+  const checked = document.querySelector('input[name="psi_action"]:checked');
+  if (checked) {
+    toggleSections(checked.value);
+  }
+})();
+</script>
+
+{% endblock %}
+
+{% block extra_js %}
+<script src="{% static 'js/work_lock.js' %}"></script>
+{% endblock %}

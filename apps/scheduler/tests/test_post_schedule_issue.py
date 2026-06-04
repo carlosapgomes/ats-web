@@ -1,0 +1,586 @@
+"""Testes do Slice 003 — Agendador resolve intercorrência pós-agendamento."""
+
+from __future__ import annotations
+
+import uuid
+from datetime import timedelta
+
+import pytest
+from django.contrib.auth import get_user_model
+from django.utils import timezone
+
+from apps.cases.models import Case, CaseEvent, CaseStatus
+
+User = get_user_model()
+
+pytestmark = pytest.mark.django_db
+
+
+# ── Helpers ──────────────────────────────────────────────────────────────
+
+
+def _create_role(name: str):
+    from apps.accounts.models import Role
+
+    role, _ = Role.objects.get_or_create(name=name)
+    return role
+
+
+def _login_as(client, role_name: str):
+    """Create user with given role, login, and set active_role in session."""
+    user = User.objects.create_user(username=f"{role_name}@psi-sched.test", password="testpass123")
+    user.roles.add(_create_role(role_name))
+    client.force_login(user)
+    session = client.session
+    session["active_role"] = role_name
+    session.save()
+    return user
+
+
+def _create_waited_case(user, **overrides) -> Case:
+    """Create a Case in WAIT_APPT suitable for scheduler."""
+    nir_user = User.objects.create_user(username="nir@psi-sched.test", password="testpass123")
+    nir_user.roles.add(_create_role("nir"))
+    defaults = {
+        "created_by": nir_user,
+        "status": CaseStatus.WAIT_APPT,
+        "doctor_decision": "accept",
+        "doctor_admission_flow": "scheduled",
+        "appointment_status": "",
+        "structured_data": {
+            "patient": {
+                "name": "Paciente Teste",
+                "age": 55,
+                "gender": "Masculino",
+            },
+        },
+    }
+    defaults.update(overrides)
+    case = Case.objects.create(**defaults)
+    case.save()
+    return Case.objects.get(pk=case.pk)
+
+
+def _create_case_with_opened_issue(case_factory, advance_to, user) -> Case:
+    """Cria um Case em WAIT_APPT com intercorrência aberta."""
+    from apps.cases.services import open_post_schedule_issue
+
+    nir_user = User.objects.create_user(username="nir@test-issue.test", password="testpass123")
+    nir_user.roles.add(_create_role("nir"))
+
+    case = advance_to(case_factory(nir_user), CaseStatus.CLEANED)
+    case.doctor_decision = "accept"
+    case.doctor_admission_flow = "scheduled"
+    case.appointment_status = "confirmed"
+    case.agency_record_number = "OCOR-PSI-001"
+    case.appointment_at = timezone.now() + timedelta(days=7)
+    case.appointment_location = "Hospital Central"
+    case.structured_data = {
+        "patient": {"name": "Maria Intercorrência", "age": 50, "sex": "F"},
+        "eda": {"indication_category": "HDA"},
+    }
+    case.save(
+        update_fields=[
+            "doctor_decision",
+            "doctor_admission_flow",
+            "appointment_status",
+            "agency_record_number",
+            "appointment_at",
+            "appointment_location",
+            "structured_data",
+        ]
+    )
+    case = Case.objects.get(pk=case.pk)
+    case = open_post_schedule_issue(
+        case=case,
+        user=nir_user,
+        reason="reschedule_request",
+        message="Unidade solicita reagendamento para próxima semana.",
+    )
+    return Case.objects.get(pk=case.pk)
+
+
+def _claim_lock(case_id, scheduler_user) -> str:
+    """Acquire a scheduler_confirm lock and return token."""
+    from apps.cases.services import claim_case_lock
+
+    result = claim_case_lock(
+        case_id=case_id,
+        user=scheduler_user,
+        expected_status=CaseStatus.WAIT_APPT,
+        context="scheduler_confirm",
+        role="scheduler",
+    )
+    assert result.acquired is True
+    return str(result.token)
+
+
+# ══════════════════════════════════════════════════════════════════════════
+# TESTS DA FILA — intercorrência aparece na fila do agendador
+# ══════════════════════════════════════════════════════════════════════════
+
+
+class TestQueuePostScheduleIssue:
+    """RED 1-3: Intercorrência aparece na fila do agendador com destaque."""
+
+    def test_issue_appears_in_scheduler_queue(self, client, case_factory, advance_to) -> None:
+        """Caso WAIT_APPT com post_schedule_issue_status='opened' aparece na fila."""
+        _login_as(client, "scheduler")
+        _create_case_with_opened_issue(case_factory, advance_to, None)
+
+        response = client.get("/scheduler/")
+        assert response.status_code == 200
+        content = response.content.decode()
+        assert "Maria Intercorrência" in content
+        assert "OCOR-PSI-001" in content
+
+    def test_issue_card_shows_badge(self, client, case_factory, advance_to) -> None:
+        """Card mostra badge 'Intercorrência pós-agendamento'."""
+        _login_as(client, "scheduler")
+        _create_case_with_opened_issue(case_factory, advance_to, None)
+
+        response = client.get("/scheduler/")
+        assert response.status_code == 200
+        content = response.content.decode()
+        assert "Intercorrência pós-agendamento" in content or "Intercorrência" in content
+
+    def test_issue_card_shows_nir_reason(self, client, case_factory, advance_to) -> None:
+        """Card mostra o motivo e mensagem do NIR."""
+        _login_as(client, "scheduler")
+        _create_case_with_opened_issue(case_factory, advance_to, None)
+
+        response = client.get("/scheduler/")
+        assert response.status_code == 200
+        content = response.content.decode()
+        assert "reschedule_request" in content or "reagendamento" in content.lower()
+        assert "Unidade solicita" in content
+
+    def test_normal_case_without_issue_has_no_badge(self, client, case_factory, advance_to) -> None:
+        """Caso WAIT_APPT normal (sem intercorrência) não mostra badge."""
+        _login_as(client, "scheduler")
+        nir_user = User.objects.create_user(username="nir@noissue.test", password="testpass123")
+        nir_user.roles.add(_create_role("nir"))
+        case = advance_to(case_factory(nir_user), CaseStatus.WAIT_APPT)
+        case.doctor_decision = "accept"
+        case.doctor_admission_flow = "scheduled"
+        case.agency_record_number = "NORMAL-001"
+        case.structured_data = {"patient": {"name": "Sem Issue", "age": 40, "sex": "M"}}
+        case.save(
+            update_fields=[
+                "doctor_decision",
+                "doctor_admission_flow",
+                "agency_record_number",
+                "structured_data",
+            ]
+        )
+
+        response = client.get("/scheduler/")
+        assert response.status_code == 200
+        content = response.content.decode()
+        assert "Intercorrência" not in content
+
+
+# ══════════════════════════════════════════════════════════════════════════
+# TESTS DA TELA DE CONFIRMAÇÃO — agendador vê mensagem do NIR
+# ══════════════════════════════════════════════════════════════════════════
+
+
+class TestConfirmPostScheduleIssue:
+    """RED 3-4: GET da tela mostra mensagem do NIR e lock é adquirido."""
+
+    def test_get_shows_nir_message(self, client, case_factory, advance_to) -> None:
+        """GET da tela do agendador mostra mensagem do NIR para caso com issue."""
+        _login_as(client, "scheduler")
+        case = _create_case_with_opened_issue(case_factory, advance_to, None)
+
+        response = client.get(f"/scheduler/{case.case_id}/")
+        assert response.status_code == 200
+        content = response.content.decode()
+        assert "Unidade solicita" in content
+        assert "reschedule_request" in content or "reagendamento" in content.lower()
+
+    def test_lock_is_acquired_on_get(self, client, case_factory, advance_to) -> None:
+        """Lock scheduler_confirm é adquirido na GET como no fluxo normal."""
+        _login_as(client, "scheduler")
+        case = _create_case_with_opened_issue(case_factory, advance_to, None)
+
+        response = client.get(f"/scheduler/{case.case_id}/")
+        assert response.status_code == 200
+
+        case = Case.objects.get(pk=case.case_id)
+        assert case.locked_by is not None
+        assert case.lock_context == "scheduler_confirm"
+        assert case.lock_role == "scheduler"
+        assert case.lock_token is not None
+        assert CaseEvent.objects.filter(case=case, event_type="WORK_LOCK_CLAIMED").exists()
+
+    def test_get_shows_intercurrence_form(self, client, case_factory, advance_to) -> None:
+        """GET renderiza formulário de intercorrência (com ações) ao invés do normal."""
+        _login_as(client, "scheduler")
+        case = _create_case_with_opened_issue(case_factory, advance_to, None)
+
+        response = client.get(f"/scheduler/{case.case_id}/")
+        assert response.status_code == 200
+        content = response.content.decode()
+
+        # Must show the 4 action buttons/fields
+        assert "cancel" in content.lower() or "Cancelar" in content
+        assert "reschedule" in content.lower() or "Reagendar" in content
+        assert "maintain" in content.lower() or "Manter" in content
+        assert "deny" in content.lower() or "Negar" in content
+
+    def test_normal_case_shows_normal_form(self, client, case_factory, advance_to) -> None:
+        """Caso WAIT_APPT sem intercorrência continua mostrando formulário normal."""
+        _login_as(client, "scheduler")
+        nir_user = User.objects.create_user(username="nir@normform.test", password="testpass123")
+        nir_user.roles.add(_create_role("nir"))
+        case = advance_to(case_factory(nir_user), CaseStatus.WAIT_APPT)
+        case.doctor_decision = "accept"
+        case.doctor_admission_flow = "scheduled"
+        case.structured_data = {"patient": {"name": "Normal Form", "age": 30, "sex": "M"}}
+        case.save(update_fields=["doctor_decision", "doctor_admission_flow", "structured_data"])
+
+        response = client.get(f"/scheduler/{case.case_id}/")
+        assert response.status_code == 200
+        content = response.content.decode()
+
+        # Must show the normal confirm/deny form
+        assert "Confirmar Agendamento" in content or "Status do Agendamento" in content
+        # Should show the confirm/deny radio buttons (not intercurrence-specific actions)
+        assert 'value="confirm"' in content
+        assert 'value="deny"' in content
+        # Should NOT show intercurrence-specific action buttons
+        assert 'value="reschedule"' not in content
+        assert 'value="maintain"' not in content
+
+
+# ══════════════════════════════════════════════════════════════════════════
+# TESTS DE SUBMIT — ações do agendador
+# ══════════════════════════════════════════════════════════════════════════
+
+
+class TestSubmitPostScheduleIssue:
+    """RED 1-8: Ações do agendador na intercorrência."""
+
+    def test_cancel_action_works(self, client, case_factory, advance_to) -> None:
+        """POST cancel marca appointment_status='cancelled' e vai para WAIT_R1_CLEANUP_THUMBS."""
+        scheduler_user = _login_as(client, "scheduler")
+        case = _create_case_with_opened_issue(case_factory, advance_to, None)
+        token = _claim_lock(case.case_id, scheduler_user)
+
+        response = client.post(
+            f"/scheduler/{case.case_id}/submit/",
+            {
+                "psi_action": "cancel",
+                "psi_response_message": "Paciente faleceu. Agendamento cancelado.",
+                "lock_token": token,
+            },
+        )
+        assert response.status_code == 302
+        assert response.url == "/scheduler/"
+
+        updated_case = Case.objects.get(pk=case.case_id)
+        assert updated_case.status == CaseStatus.WAIT_R1_CLEANUP_THUMBS
+        assert updated_case.appointment_status == "cancelled"
+        assert updated_case.post_schedule_issue_status == "responded"
+        assert updated_case.post_schedule_issue_response_action == "cancel"
+
+    def test_reschedule_action_works(self, client, case_factory, advance_to) -> None:
+        """POST reschedule com data/local/instruções válidas atualiza agendamento."""
+        scheduler_user = _login_as(client, "scheduler")
+        case = _create_case_with_opened_issue(case_factory, advance_to, None)
+        token = _claim_lock(case.case_id, scheduler_user)
+
+        response = client.post(
+            f"/scheduler/{case.case_id}/submit/",
+            {
+                "psi_action": "reschedule",
+                "psi_response_message": "Reagendado conforme solicitação.",
+                "psi_appointment_date": "2026-07-15",
+                "psi_appointment_time": "10:30",
+                "psi_appointment_location": "Hospital Central - Sala 3",
+                "psi_appointment_instructions": "Trazer exames anteriores.",
+                "lock_token": token,
+            },
+        )
+        assert response.status_code == 302
+        assert response.url == "/scheduler/"
+
+        updated_case = Case.objects.get(pk=case.case_id)
+        assert updated_case.status == CaseStatus.WAIT_R1_CLEANUP_THUMBS
+        assert updated_case.appointment_status == "confirmed"
+        assert updated_case.post_schedule_issue_status == "responded"
+        assert updated_case.post_schedule_issue_response_action == "reschedule"
+        # Check appointment fields were updated
+        assert updated_case.appointment_at is not None
+        assert "Hospital Central - Sala 3" in (updated_case.appointment_location or "")
+        assert "Trazer exames" in (updated_case.appointment_instructions or "")
+
+    def test_maintain_action_works(self, client, case_factory, advance_to) -> None:
+        """POST maintain preserva agendamento confirmado e vai para WAIT_R1_CLEANUP_THUMBS."""
+        scheduler_user = _login_as(client, "scheduler")
+        case = _create_case_with_opened_issue(case_factory, advance_to, None)
+        # Record original appointment
+        original_location = case.appointment_location
+        original_at = case.appointment_at
+        token = _claim_lock(case.case_id, scheduler_user)
+
+        response = client.post(
+            f"/scheduler/{case.case_id}/submit/",
+            {
+                "psi_action": "maintain",
+                "psi_response_message": "Agendamento mantido conforme solicitado.",
+                "lock_token": token,
+            },
+        )
+        assert response.status_code == 302
+        assert response.url == "/scheduler/"
+
+        updated_case = Case.objects.get(pk=case.case_id)
+        assert updated_case.status == CaseStatus.WAIT_R1_CLEANUP_THUMBS
+        assert updated_case.appointment_status == "confirmed"
+        assert updated_case.post_schedule_issue_response_action == "maintain"
+        # Preserved original data
+        assert updated_case.appointment_location == original_location
+        assert updated_case.appointment_at == original_at
+
+    def test_deny_action_works(self, client, case_factory, advance_to) -> None:
+        """POST deny com motivo preserva agendamento e vai para WAIT_R1_CLEANUP_THUMBS."""
+        scheduler_user = _login_as(client, "scheduler")
+        case = _create_case_with_opened_issue(case_factory, advance_to, None)
+        original_location = case.appointment_location
+        token = _claim_lock(case.case_id, scheduler_user)
+
+        response = client.post(
+            f"/scheduler/{case.case_id}/submit/",
+            {
+                "psi_action": "deny",
+                "psi_response_message": "Sem vagas disponíveis para reagendamento neste mês.",
+                "lock_token": token,
+            },
+        )
+        assert response.status_code == 302
+        assert response.url == "/scheduler/"
+
+        updated_case = Case.objects.get(pk=case.case_id)
+        assert updated_case.status == CaseStatus.WAIT_R1_CLEANUP_THUMBS
+        assert updated_case.appointment_status == "confirmed"
+        assert updated_case.post_schedule_issue_response_action == "deny"
+        # Preserved original data
+        assert updated_case.appointment_location == original_location
+
+    def test_deny_without_message_shows_error(self, client, case_factory, advance_to) -> None:
+        """POST deny sem motivo exibe erro e não altera o caso."""
+        scheduler_user = _login_as(client, "scheduler")
+        case = _create_case_with_opened_issue(case_factory, advance_to, None)
+        token = _claim_lock(case.case_id, scheduler_user)
+        original_status = Case.objects.get(pk=case.case_id).status
+
+        response = client.post(
+            f"/scheduler/{case.case_id}/submit/",
+            {
+                "psi_action": "deny",
+                "psi_response_message": "",
+                "lock_token": token,
+            },
+        )
+        assert response.status_code == 200  # re-renders with error
+        content = response.content.decode()
+        assert "obrigatória" in content.lower() or "obrigatório" in content.lower()
+
+        updated_case = Case.objects.get(pk=case.case_id)
+        assert updated_case.status == original_status  # not changed
+
+    def test_reschedule_without_date_shows_error(self, client, case_factory, advance_to) -> None:
+        """POST reschedule sem nova data exibe erro."""
+        scheduler_user = _login_as(client, "scheduler")
+        case = _create_case_with_opened_issue(case_factory, advance_to, None)
+        token = _claim_lock(case.case_id, scheduler_user)
+        original_status = Case.objects.get(pk=case.case_id).status
+
+        response = client.post(
+            f"/scheduler/{case.case_id}/submit/",
+            {
+                "psi_action": "reschedule",
+                "psi_response_message": "Solicitação aceita.",
+                "psi_appointment_date": "",
+                "psi_appointment_time": "",
+                "psi_appointment_location": "",
+                "lock_token": token,
+            },
+        )
+        assert response.status_code == 200
+        content = response.content.decode()
+        assert "data" in content.lower() or "horário" in content.lower()
+
+        updated_case = Case.objects.get(pk=case.case_id)
+        assert updated_case.status == original_status
+
+    def test_submit_without_valid_lock_blocked(self, client, case_factory, advance_to) -> None:
+        """Submit sem lock válido é bloqueado como no fluxo normal."""
+        _login_as(client, "scheduler")
+        case = _create_case_with_opened_issue(case_factory, advance_to, None)
+        original_status = Case.objects.get(pk=case.case_id).status
+
+        response = client.post(
+            f"/scheduler/{case.case_id}/submit/",
+            {
+                "psi_action": "cancel",
+                "psi_response_message": "Cancelado.",
+                "lock_token": "00000000-0000-0000-0000-000000000000",
+            },
+        )
+        assert response.status_code == 200
+        content = response.content.decode()
+        assert "reserva" in content.lower() or "Token" in content
+
+        updated_case = Case.objects.get(pk=case.case_id)
+        assert updated_case.status == original_status
+
+    def test_submit_with_invalid_lock_token_blocked(self, client, case_factory, advance_to) -> None:
+        """Submit com token inválido não altera case."""
+        _login_as(client, "scheduler")
+        case = _create_case_with_opened_issue(case_factory, advance_to, None)
+        original_status = Case.objects.get(pk=case.case_id).status
+
+        response = client.post(
+            f"/scheduler/{case.case_id}/submit/",
+            {
+                "psi_action": "cancel",
+                "psi_response_message": "Cancelado.",
+                "lock_token": str(uuid.uuid4()),
+            },
+        )
+        assert response.status_code == 200
+        content = response.content.decode()
+        assert "reserva" in content.lower() or "inválido" in content.lower()
+
+        updated_case = Case.objects.get(pk=case.case_id)
+        assert updated_case.status == original_status
+
+    def test_normal_flow_preserved(self, client, case_factory, advance_to) -> None:
+        """Fluxo normal de WAIT_APPT sem intercorrência continua confirmando/negando."""
+        scheduler_user = _login_as(client, "scheduler")
+        nir_user = User.objects.create_user(username="nir@normflow.test", password="testpass123")
+        nir_user.roles.add(_create_role("nir"))
+        case = advance_to(case_factory(nir_user), CaseStatus.WAIT_APPT)
+        case.doctor_decision = "accept"
+        case.doctor_admission_flow = "scheduled"
+        case.structured_data = {"patient": {"name": "Normal Flow", "age": 30, "sex": "M"}}
+        case.save(update_fields=["doctor_decision", "doctor_admission_flow", "structured_data"])
+
+        token = _claim_lock(case.case_id, scheduler_user)
+
+        response = client.post(
+            f"/scheduler/{case.case_id}/submit/",
+            {
+                "decision": "confirm",
+                "appointment_date": "2026-06-15",
+                "appointment_time": "14:30",
+                "notes": "Normal confirmation.",
+                "reason": "",
+                "lock_token": token,
+            },
+        )
+        assert response.status_code == 302
+        assert response.url == "/scheduler/"
+
+        updated_case = Case.objects.get(pk=case.case_id)
+        assert updated_case.status == CaseStatus.WAIT_R1_CLEANUP_THUMBS
+        assert updated_case.appointment_status == "confirmed"
+
+
+# ══════════════════════════════════════════════════════════════════════════
+# TESTS DE EVENTOS — auditoria
+# ══════════════════════════════════════════════════════════════════════════
+
+
+class TestPostScheduleIssueEvents:
+    """Evento POST_SCHEDULE_ISSUE_RESPONDED registrado."""
+
+    def test_respond_creates_event(self, client, case_factory, advance_to) -> None:
+        """Ação do agendador registra POST_SCHEDULE_ISSUE_RESPONDED com payload."""
+        scheduler_user = _login_as(client, "scheduler")
+        case = _create_case_with_opened_issue(case_factory, advance_to, None)
+        token = _claim_lock(case.case_id, scheduler_user)
+
+        client.post(
+            f"/scheduler/{case.case_id}/submit/",
+            {
+                "psi_action": "cancel",
+                "psi_response_message": "Cancelado por óbito.",
+                "lock_token": token,
+            },
+        )
+
+        event = CaseEvent.objects.filter(
+            case=case,
+            event_type="POST_SCHEDULE_ISSUE_RESPONDED",
+        ).first()
+        assert event is not None
+        assert event.payload.get("action") == "cancel"
+        assert event.payload.get("response_message") == "Cancelado por óbito."
+
+    def test_reschedule_creates_event(self, client, case_factory, advance_to) -> None:
+        """Reschedule registra evento POST_SCHEDULE_ISSUE_RESPONDED."""
+        scheduler_user = _login_as(client, "scheduler")
+        case = _create_case_with_opened_issue(case_factory, advance_to, None)
+        token = _claim_lock(case.case_id, scheduler_user)
+
+        client.post(
+            f"/scheduler/{case.case_id}/submit/",
+            {
+                "psi_action": "reschedule",
+                "psi_response_message": "Reagendado.",
+                "psi_appointment_date": "2026-07-20",
+                "psi_appointment_time": "09:00",
+                "psi_appointment_location": "Sala 2",
+                "lock_token": token,
+            },
+        )
+
+        event = CaseEvent.objects.filter(
+            case=case,
+            event_type="POST_SCHEDULE_ISSUE_RESPONDED",
+        ).first()
+        assert event is not None
+        assert event.payload.get("action") == "reschedule"
+
+
+# ══════════════════════════════════════════════════════════════════════════
+# TESTS DE ROLE GUARD
+# ══════════════════════════════════════════════════════════════════════════
+
+
+class TestPostScheduleIssueRoleGuard:
+    """Submit de intercorrência respeita role_guard 'scheduler'."""
+
+    def test_submit_blocks_nir(self, client, case_factory, advance_to) -> None:
+        """NIR não pode POST submit de intercorrência."""
+        _login_as(client, "nir")
+        case = _create_case_with_opened_issue(case_factory, advance_to, None)
+        response = client.post(
+            f"/scheduler/{case.case_id}/submit/",
+            {"psi_action": "cancel", "psi_response_message": "X"},
+        )
+        assert response.status_code == 302
+        assert response.url == "/"
+
+    def test_submit_blocks_doctor(self, client, case_factory, advance_to) -> None:
+        """Doctor não pode POST submit de intercorrência."""
+        _login_as(client, "doctor")
+        case = _create_case_with_opened_issue(case_factory, advance_to, None)
+        response = client.post(
+            f"/scheduler/{case.case_id}/submit/",
+            {"psi_action": "cancel", "psi_response_message": "X"},
+        )
+        assert response.status_code == 302
+        assert response.url == "/"
+
+    def test_confirm_blocks_nir(self, client, case_factory, advance_to) -> None:
+        """NIR não pode acessar confirm de intercorrência."""
+        _login_as(client, "nir")
+        case = _create_case_with_opened_issue(case_factory, advance_to, None)
+        response = client.get(f"/scheduler/{case.case_id}/")
+        assert response.status_code == 302
+        assert response.url == "/"
