@@ -16,6 +16,11 @@ def user(db):
     return User.objects.create_user(username="testuser", password="testpass")
 
 
+# NOTE: case_factory e advance_to duplicam apps/cases/tests/conftest.py.
+# Ambas as implementações são equivalentes (4 linhas de diferença em 194).
+# Refatoração futura: extrair para um conftest.py compartilhado.
+
+
 @pytest.fixture
 def case_factory():
     """Retorna uma factory que cria um Case novo dado um user."""
