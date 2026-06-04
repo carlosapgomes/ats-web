@@ -379,6 +379,38 @@ class TestAcknowledgePostScheduleIssue:
         with pytest.raises(ValueError, match="respondida"):
             acknowledge_post_schedule_issue(case=case, user=user)
 
+    def test_ciencia_nao_cria_cleanup_triggered(self, user, case_factory, advance_to) -> None:
+        """acknowledge não cria CLEANUP_TRIGGERED (setup via advance_to gera, mas
+        acknowledge não deve criar novos)."""
+        from apps.cases.services import acknowledge_post_schedule_issue
+
+        case = self._open_and_respond(case_factory, advance_to, user)
+        # Conta eventos CLEANUP_TRIGGERED antes do acknowledge
+        before = CaseEvent.objects.filter(case=case, event_type="CLEANUP_TRIGGERED").count()
+        case = acknowledge_post_schedule_issue(case=case, user=user)
+        after = CaseEvent.objects.filter(case=case, event_type="CLEANUP_TRIGGERED").count()
+        assert after == before, "CLEANUP_TRIGGERED não deve ser criado no acknowledge"
+
+    def test_ciencia_nao_cria_cleanup_completed(self, user, case_factory, advance_to) -> None:
+        """acknowledge não cria CLEANUP_COMPLETED."""
+        from apps.cases.services import acknowledge_post_schedule_issue
+
+        case = self._open_and_respond(case_factory, advance_to, user)
+        before = CaseEvent.objects.filter(case=case, event_type="CLEANUP_COMPLETED").count()
+        case = acknowledge_post_schedule_issue(case=case, user=user)
+        after = CaseEvent.objects.filter(case=case, event_type="CLEANUP_COMPLETED").count()
+        assert after == before, "CLEANUP_COMPLETED não deve ser criado no acknowledge"
+
+    def test_ciencia_cria_exatamente_um_acknowledged(self, user, case_factory, advance_to) -> None:
+        """acknowledge cria exatamente um POST_SCHEDULE_ISSUE_ACKNOWLEDGED."""
+        from apps.cases.services import acknowledge_post_schedule_issue
+
+        case = self._open_and_respond(case_factory, advance_to, user)
+        before = CaseEvent.objects.filter(case=case, event_type="POST_SCHEDULE_ISSUE_ACKNOWLEDGED").count()
+        case = acknowledge_post_schedule_issue(case=case, user=user)
+        after = CaseEvent.objects.filter(case=case, event_type="POST_SCHEDULE_ISSUE_ACKNOWLEDGED").count()
+        assert after - before == 1, "deve criar exatamente 1 POST_SCHEDULE_ISSUE_ACKNOWLEDGED"
+
 
 # ── Ciclos múltiplos ────────────────────────────────────────────────────
 

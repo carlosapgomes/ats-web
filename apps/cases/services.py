@@ -631,6 +631,10 @@ def acknowledge_post_schedule_issue(
 ) -> Case:
     """Acknowledge a responded post-schedule intercurrence and close the cycle.
 
+    Uses a direct FSM transition WAIT_R1_CLEANUP_THUMBS → CLEANED without
+    passing through CLEANUP_RUNNING, since there is no real cleanup to perform.
+    The POST_SCHEDULE_ISSUE_ACKNOWLEDGED event is created by the FSM transition.
+
     Args:
         case: The case with a responded issue.
         user: The NIR user acknowledging.
@@ -658,20 +662,9 @@ def acknowledge_post_schedule_issue(
         case.post_schedule_issue_responded_by = None
         case.post_schedule_issue_responded_at = None
 
-        # FSM transition WAIT_R1_CLEANUP_THUMBS → CLEANUP_RUNNING → CLEANED
-        case.cleanup_triggered(user=user)
+        # FSM transition WAIT_R1_CLEANUP_THUMBS → CLEANED (direct, no cleanup)
+        case.post_schedule_issue_acknowledged(user=user)
         case.save()
-        case = Case.objects.get(pk=case.pk)
-        case.cleanup_completed(user=user)
-        case.save()
-
-        # Record the audit event
-        _record_event(
-            case,
-            "POST_SCHEDULE_ISSUE_ACKNOWLEDGED",
-            user,
-            {},
-        )
 
     return Case.objects.get(pk=case.pk)
 
