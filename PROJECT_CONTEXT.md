@@ -148,8 +148,8 @@ static/          # css/app.css (paleta hospitalar), js/upload.js
   - `openspec/archive/post-schedule-intercurrence/` (5 slices + follow-ups)
   - `openspec/archive/consolidate-duplicated-test-fixtures/` (1 slice)
   - `openspec/archive/align-uuid-route-parameter-annotations/` (1 slice)
-- **Changes ativos**:
-  - `openspec/changes/release-lock-on-successful-handoff/`
+  - `openspec/archive/release-lock-on-successful-handoff/` (1 slice)
+- **Changes ativos**: nenhum
 - **Apps criados**: `apps/accounts/`, `apps/cases/`, `apps/llm/`, `apps/intake/`, `apps/pipeline/`,
   `apps/doctor/`, `apps/scheduler/`, `apps/dashboard/`, `apps/admin_ui/`
 - **Testes**: 1046 passando, quality gate verde

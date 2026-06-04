@@ -2,7 +2,7 @@
 
 ## Status
 
-Slice 001 concluído.
+Change concluído e arquivado. Slice 001 implementado, verificado, commitado e enviado para `origin/main`.
 
 ## Slices
 
