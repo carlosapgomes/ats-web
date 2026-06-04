@@ -71,7 +71,7 @@ Este slice não muda `work_lock.js` nem o link Cancelar. O objetivo é somente c
 
 ### D4: Ordem recomendada
 
-#### Médico
+#### Fluxo médico
 
 Em `doctor_submit`, após todas as transições/saves da decisão médica e antes do `return redirect("doctor:queue")`:
 
@@ -84,7 +84,7 @@ release_lock_service(
 )
 ```
 
-#### Scheduler
+#### Fluxo scheduler
 
 Em `scheduler_submit`, após `case.final_reply_posted(...)` e `case.save()`, antes do `return redirect("scheduler:queue")`:
 
@@ -99,7 +99,7 @@ release_lock_service(
 
 ## Testes esperados
 
-### Médico
+### Testes médico
 
 - Submit `accept + scheduled` com token válido:
   - status final esperado: `WAIT_APPT`;
@@ -118,7 +118,7 @@ release_lock_service(
 - Integração handoff:
   - após aceite `scheduled`, scheduler abre `scheduler_confirm` imediatamente e adquire lock `scheduler_confirm`.
 
-### Scheduler
+### Testes scheduler
 
 - Submit `confirm` com token válido:
   - status final esperado: `WAIT_R1_CLEANUP_THUMBS`;
@@ -140,7 +140,7 @@ release_lock_service(
 ## Riscos
 
 | Risco | Mitigação |
-|---|---|
+| --- | --- |
 | Limpar lock antes de persistir decisão | Chamar release apenas ao final do fluxo bem-sucedido |
 | Perder lock em formulário inválido | Testar preservação do lock em erro de validação |
 | Duplicar regra de limpeza manual | Reutilizar `release_case_lock(...)` |
