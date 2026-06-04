@@ -170,6 +170,81 @@
       <span class="badge bg-danger fs-6 px-3 py-2">✗ Falha no Processamento</span>
     </div>
     <p class="mb-0 text-muted">Ocorreu uma falha durante o processamento deste caso.</p>
+  {% elif result_info.type == "post_schedule_issue_responded" %}
+    <div class="d-flex align-items-center gap-3 mb-3">
+      <span class="badge bg-info fs-6 px-3 py-2">↻ Intercorrência Pós-Agendamento</span>
+    </div>
+
+    <!-- NIR original reason and message -->
+    <div class="card bg-light p-3 mb-3">
+      <div class="row g-3">
+        <div class="col-md-6">
+          <p class="mb-1 text-muted small">Motivo informado pelo NIR</p>
+          <p class="mb-0 fw-medium">{{ result_info.nir_reason_label }}</p>
+        </div>
+        {% if result_info.nir_message %}
+        <div class="col-md-6">
+          <p class="mb-1 text-muted small">Mensagem do NIR</p>
+          <p class="mb-0">{{ result_info.nir_message }}</p>
+        </div>
+        {% endif %}
+      </div>
+    </div>
+
+    <!-- Scheduler response -->
+    <div class="mb-3">
+      {% if result_info.response_action == "cancel" %}
+        <div class="d-flex align-items-center gap-3 mb-2">
+          <span class="badge bg-warning text-dark fs-6 px-3 py-2">✗ Agendamento Cancelado</span>
+        </div>
+        <p class="mb-1"><strong>Cancelado</strong></p>
+      {% elif result_info.response_action == "reschedule" %}
+        <div class="d-flex align-items-center gap-3 mb-2">
+          <span class="badge bg-success fs-6 px-3 py-2">↻ Reagendado</span>
+        </div>
+        <p class="mb-1"><strong>Reagendado</strong></p>
+      {% elif result_info.response_action == "maintain" %}
+        <div class="d-flex align-items-center gap-3 mb-2">
+          <span class="badge bg-success fs-6 px-3 py-2">✓ Agendamento Mantido</span>
+        </div>
+        <p class="mb-1"><strong>Mantido</strong></p>
+      {% elif result_info.response_action == "deny" %}
+        <div class="d-flex align-items-center gap-3 mb-2">
+          <span class="badge bg-secondary fs-6 px-3 py-2">✗ Solicitação Negada</span>
+        </div>
+        <p class="mb-1"><strong>Negação da solicitação</strong></p>
+      {% endif %}
+    </div>
+
+    {% if result_info.response_message %}
+    <div class="mb-3">
+      <p class="mb-1 text-muted small">Resposta do agendador</p>
+      <p class="mb-0">{{ result_info.response_message }}</p>
+    </div>
+    {% endif %}
+
+    {% if result_info.response_action == "reschedule" %}
+    <div class="row g-3">
+      {% if result_info.appointment_at %}
+      <div class="col-md-6">
+        <p class="mb-1 text-muted small">Nova Data/Hora</p>
+        <p class="mb-0 fw-medium">{{ result_info.appointment_at|date:"d/m/Y H:i" }}</p>
+      </div>
+      {% endif %}
+      {% if result_info.appointment_location %}
+      <div class="col-md-6">
+        <p class="mb-1 text-muted small">Novo Local</p>
+        <p class="mb-0 fw-medium">{{ result_info.appointment_location }}</p>
+      </div>
+      {% endif %}
+      {% if result_info.appointment_instructions %}
+      <div class="col-12">
+        <p class="mb-1 text-muted small">Instruções</p>
+        <p class="mb-0 fw-medium">{{ result_info.appointment_instructions }}</p>
+      </div>
+      {% endif %}
+    </div>
+    {% endif %}
   {% endif %}
 </div>
 {% endif %}
