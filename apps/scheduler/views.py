@@ -231,7 +231,7 @@ def scheduler_queue_partial(request: HttpRequest) -> HttpResponse:
 
 @login_required
 @role_required("scheduler")
-def immediate_ack(request: HttpRequest, case_id: str) -> HttpResponse:
+def immediate_ack(request: HttpRequest, case_id: uuid.UUID) -> HttpResponse:
     """POST: scheduler acknowledges immediate admission operational notice.
 
     Uses select_for_update inside a transaction to guarantee idempotency
@@ -300,7 +300,7 @@ def _build_confirm_context(
 
 @login_required
 @role_required("scheduler")
-def scheduler_confirm(request: HttpRequest, case_id: str) -> HttpResponse:
+def scheduler_confirm(request: HttpRequest, case_id: uuid.UUID) -> HttpResponse:
     """GET: Renderiza formulário de confirmação para um caso em WAIT_APPT.
 
     Acquires a lock on the case before rendering. If the lock cannot be
@@ -353,7 +353,7 @@ def scheduler_confirm(request: HttpRequest, case_id: str) -> HttpResponse:
 
 @login_required
 @role_required("scheduler")
-def scheduler_submit(request: HttpRequest, case_id: str) -> HttpResponse:
+def scheduler_submit(request: HttpRequest, case_id: uuid.UUID) -> HttpResponse:
     """POST: Valida formulário, persiste decisão e executa transições FSM.
 
     Requires a valid lock_token to proceed. If the lock is invalid or

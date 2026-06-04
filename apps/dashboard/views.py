@@ -1,5 +1,6 @@
 """Views do dashboard de monitoramento para manager e admin."""
 
+import uuid
 from datetime import date, datetime, time, timedelta
 
 from django.contrib.auth.decorators import login_required
@@ -270,7 +271,7 @@ def dashboard_index(request: HttpRequest) -> HttpResponse:
 
 @login_required
 @role_required("manager", "admin")
-def dashboard_case_detail(request: HttpRequest, case_id: str) -> HttpResponse:
+def dashboard_case_detail(request: HttpRequest, case_id: uuid.UUID) -> HttpResponse:
     """Detalhe de qualquer caso (admin) — sem botão 'Confirmar Recebimento'."""
     case = get_object_or_404(
         Case.objects.select_related("created_by"),

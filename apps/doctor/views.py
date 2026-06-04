@@ -289,7 +289,7 @@ def _build_decision_context(case: Case, form: DoctorDecisionForm) -> dict[str, A
 
 @login_required
 @role_required("doctor")
-def doctor_decision(request: HttpRequest, case_id: str) -> HttpResponse:
+def doctor_decision(request: HttpRequest, case_id: uuid.UUID) -> HttpResponse:
     """GET: Renderiza formulário de decisão para um caso em WAIT_DOCTOR.
 
     Acquires a lock on the case before rendering. If the lock cannot be
@@ -335,7 +335,7 @@ def doctor_decision(request: HttpRequest, case_id: str) -> HttpResponse:
 
 @login_required
 @role_required("doctor")
-def doctor_submit(request: HttpRequest, case_id: str) -> HttpResponse:
+def doctor_submit(request: HttpRequest, case_id: uuid.UUID) -> HttpResponse:
     """POST: Valida formulário, persiste decisão e executa transições FSM.
 
     Requires a valid lock_token to proceed. If the lock is invalid or
@@ -439,7 +439,7 @@ def doctor_submit(request: HttpRequest, case_id: str) -> HttpResponse:
 @login_required
 @role_required("doctor")
 @xframe_options_sameorigin
-def serve_pdf(request: HttpRequest, case_id: str) -> HttpResponseBase:
+def serve_pdf(request: HttpRequest, case_id: uuid.UUID) -> HttpResponseBase:
     """Serve o PDF original do caso para visualização inline no <embed>."""
     case = get_object_or_404(Case, pk=case_id)
     if not case.pdf_file:

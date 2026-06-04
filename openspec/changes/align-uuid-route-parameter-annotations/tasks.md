@@ -6,7 +6,7 @@ Change planejado. Implementar um slice enxuto.
 
 ## Slices
 
-- [ ] Slice 001 — Ajustar type hints de views com converters UUID
+- [x] Slice 001 — Ajustar type hints de views com converters UUID
   (`slices/slice-001-align-view-uuid-annotations.md`)
 
 ## Definition of Done

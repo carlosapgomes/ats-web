@@ -308,7 +308,7 @@ def my_cases_partial(request: HttpRequest) -> HttpResponse:
 
 @login_required
 @role_required("nir")
-def case_detail(request: HttpRequest, case_id: str) -> HttpResponse:
+def case_detail(request: HttpRequest, case_id: uuid.UUID) -> HttpResponse:
     """Detalhes de um caso para o NIR — timeline, stepper e PDF inline.
 
     Any active NIR can open any operational case (status != CLEANED)
@@ -510,7 +510,7 @@ def case_detail(request: HttpRequest, case_id: str) -> HttpResponse:
 @login_required
 @role_required("nir")
 @xframe_options_sameorigin
-def serve_pdf(request: HttpRequest, case_id: str) -> HttpResponseBase:
+def serve_pdf(request: HttpRequest, case_id: uuid.UUID) -> HttpResponseBase:
     """Serve o PDF original do caso para visualização inline no <embed>.
 
     Any active NIR can view PDFs of operational cases (status != CLEANED)
@@ -535,7 +535,7 @@ def serve_pdf(request: HttpRequest, case_id: str) -> HttpResponseBase:
 
 @login_required
 @role_required("nir")
-def confirm_receipt(request: HttpRequest, case_id: str) -> HttpResponse:
+def confirm_receipt(request: HttpRequest, case_id: uuid.UUID) -> HttpResponse:
     """Confirma recebimento do resultado final e conclui o caso.
 
     Qualquer NIR autorizado pode confirmar recebimento de um resultado
