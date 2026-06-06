@@ -5,6 +5,7 @@ from django.contrib.auth import get_user_model
 from django.urls import reverse
 
 User = get_user_model()
+HOME_URL = reverse("intake:home")
 
 
 @pytest.mark.django_db
@@ -121,3 +122,22 @@ class TestRoleRequiredDecorator:
         response = client.get(reverse("intake:home"))
         assert response.status_code == 302
         assert response.url == "/"
+
+    def test_intake_home_has_closed_cases_link(self, client) -> None:
+        """Home NIR renderiza link para Casos Encerrados no nav."""
+        from apps.accounts.models import Role
+
+        user = User.objects.create_user(username="nir-home@test.com", password="testpass123")
+        role, _ = Role.objects.get_or_create(name="nir")
+        user.roles.add(role)
+        client.force_login(user)
+
+        session = client.session
+        session["active_role"] = "nir"
+        session.save()
+
+        response = client.get(HOME_URL)
+        assert response.status_code == 200
+        content = response.content.decode()
+        assert "Casos Encerrados" in content
+        assert reverse("intake:closed_cases_search") in content

@@ -9,6 +9,7 @@ from django.urls import reverse
 from apps.cases.models import Case, CaseStatus
 
 User = get_user_model()
+PAGE_URL = reverse("intake:my_cases")
 
 
 # ── Helpers ──────────────────────────────────────────────────────────────
@@ -201,6 +202,27 @@ class TestMyCasesList:
         response = client.get(reverse("intake:my_cases"))
         # role_required redireciona para /
         assert response.status_code == 302
+
+    def test_my_cases_has_closed_cases_link(self, client) -> None:
+        """Página 'Meus Casos' renderiza link para Casos Encerrados."""
+        client, _ = _nir_client(client)
+        response = client.get(PAGE_URL)
+        assert response.status_code == 200
+        content = response.content.decode()
+        assert "Casos Encerrados" in content
+        assert reverse("intake:closed_cases_search") in content
+
+    def test_my_cases_status_filter_excludes_cleaned(self, client) -> None:
+        """O select de status de my_cases não inclui 'Concluído' (CLEANED)."""
+        client, _ = _nir_client(client)
+        response = client.get(PAGE_URL)
+        assert response.status_code == 200
+        content = response.content.decode()
+        # 'Concluído' é o label de CLEANED — não deve aparecer no select
+        assert "Concluído" not in content
+        # 'Todos os status' e outros labels operacionais devem aparecer
+        assert "Aguardando médico" in content
+        assert "Aceito pelo médico" in content
 
     def test_my_cases_shows_doctor_with_crm(self, client) -> None:
         """Card do NIR mostra nome do médico e CRM quando preenchido."""

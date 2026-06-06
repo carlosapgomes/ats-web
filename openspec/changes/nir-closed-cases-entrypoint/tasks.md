@@ -6,7 +6,7 @@ Change planejado. Implementar apenas o Slice 001.
 
 ## Slices
 
-- [ ] Slice 001 — Expor entrada de Casos Encerrados e corrigir filtro
+- [X] Slice 001 — Expor entrada de Casos Encerrados e corrigir filtro
   operacional (`slices/slice-001-closed-cases-entrypoint.md`)
 
 ## Definition of Done
