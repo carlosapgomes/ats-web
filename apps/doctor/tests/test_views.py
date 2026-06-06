@@ -52,7 +52,10 @@ class TestDoctorQueueView:
         response = client.get("/doctor/")
         assert response.status_code == 200
         content = response.content.decode()
-        assert 'hx-get="/doctor/partials/queue/"' in content
+        assert (
+            'hx-get="/doctor/partials/queue/?tab=pending"' in content
+            or 'hx-get="/doctor/partials/queue/?tab="' in content
+        )
         assert 'hx-trigger="every 20s"' in content
 
     def test_queue_partial_renders_without_layout(self, client) -> None:
@@ -129,7 +132,7 @@ class TestDoctorQueueView:
         assert "João Pereira Gomes" in content
 
     def test_queue_shows_decided_today(self, client) -> None:
-        """Cases decided by the doctor today appear in 'Decididos Hoje'."""
+        """Cases decided by the doctor today appear in 'Decididos Hoje' tab."""
         doctor_user = User.objects.create_user(username="doctor@test.com", password="testpass123")
         doctor_user.roles.add(self._create_role("doctor"))
 
@@ -141,6 +144,7 @@ class TestDoctorQueueView:
             status=CaseStatus.DOCTOR_ACCEPTED,
             doctor=doctor_user,
             doctor_decision="accept",
+            doctor_decided_at=timezone.now(),
             suggested_action={
                 "support_recommendation": "none",
                 "suggestion": "accept",
@@ -156,20 +160,12 @@ class TestDoctorQueueView:
         case.agency_record_number = "2026-0428-001"
         case.save()
 
-        CaseEvent.objects.create(
-            case=case,
-            actor_type="doctor",
-            actor=doctor_user,
-            event_type="DOCTOR_ACCEPT",
-            timestamp=timezone.now(),
-        )
-
         client.force_login(doctor_user)
         session = client.session
         session["active_role"] = "doctor"
         session.save()
 
-        response = client.get("/doctor/")
+        response = client.get("/doctor/?tab=decided")
         assert response.status_code == 200
         content = response.content.decode()
         assert "Maria Silva dos Santos" in content
@@ -386,6 +382,269 @@ class TestDoctorQueueView:
         assert response.status_code == 200
         content = response.content.decode()
         assert f"/doctor/{case.case_id}/" in content
+
+    # ── Decided Today tab tests ────────────────────────────────────────
+
+    def test_queue_nav_has_functional_decided_tab_and_no_history(self, client) -> None:
+        """R1: Nav has functional Decididos Hoje link and no Histórico."""
+        self._login_as(client, "doctor")
+        response = client.get("/doctor/")
+        assert response.status_code == 200
+        content = response.content.decode()
+        # Must have a functional link to ?tab=decided
+        assert "?tab=decided" in content or "tab=decided" in content
+        # Must NOT contain Histórico
+        assert "Histórico" not in content
+
+    def test_decided_today_tab_uses_doctor_decided_at_not_status(self, client) -> None:
+        """R2: Decided today query uses doctor_decided_at, not status.
+
+        A case decided today by the doctor that has moved to WAIT_APPT
+        (not DOCTOR_ACCEPTED/DOCTOR_DENIED) must appear in ?tab=decided.
+        """
+        doctor_user = User.objects.create_user(username="doc_decided_at@test.com", password="testpass123")
+        doctor_user.roles.add(self._create_role("doctor"))
+
+        nir_user = User.objects.create_user(username="nir_decided_at@test.com", password="testpass123")
+        nir_user.roles.add(self._create_role("nir"))
+
+        # Create a case that was decided today but has advanced to WAIT_APPT
+        case = Case.objects.create(
+            created_by=nir_user,
+            status=CaseStatus.WAIT_APPT,
+            doctor=doctor_user,
+            doctor_decision="accept",
+            doctor_decided_at=timezone.now(),
+            structured_data={"patient": {"name": "Advance Case", "age": 50, "gender": "M"}},
+            suggested_action={"support_recommendation": "none", "suggestion": "accept"},
+        )
+        case.agency_record_number = "2026-0606-ADV"
+        case.save()
+
+        client.force_login(doctor_user)
+        session = client.session
+        session["active_role"] = "doctor"
+        session.save()
+
+        response = client.get("/doctor/?tab=decided")
+        assert response.status_code == 200
+        content = response.content.decode()
+        assert "Advance Case" in content
+
+    def test_decided_today_tab_excludes_other_doctor_cases(self, client) -> None:
+        """R2: Cases decided by another doctor do not appear."""
+        doctor_a = User.objects.create_user(username="doc_a_exclude@test.com", password="testpass123")
+        doctor_a.roles.add(self._create_role("doctor"))
+
+        doctor_b = User.objects.create_user(username="doc_b_exclude@test.com", password="testpass123")
+        doctor_b.roles.add(self._create_role("doctor"))
+
+        nir_user = User.objects.create_user(username="nir_exclude@test.com", password="testpass123")
+        nir_user.roles.add(self._create_role("nir"))
+
+        # Case decided by doctor_a (should NOT appear for doctor_b)
+        case_a = Case.objects.create(
+            created_by=nir_user,
+            status=CaseStatus.WAIT_APPT,
+            doctor=doctor_a,
+            doctor_decision="accept",
+            doctor_decided_at=timezone.now(),
+            structured_data={"patient": {"name": "Doc A Case", "age": 40, "gender": "M"}},
+        )
+        case_a.save()
+
+        # Case decided by doctor_b (should appear for doctor_b)
+        case_b = Case.objects.create(
+            created_by=nir_user,
+            status=CaseStatus.WAIT_APPT,
+            doctor=doctor_b,
+            doctor_decision="accept",
+            doctor_decided_at=timezone.now(),
+            structured_data={"patient": {"name": "Doc B Case", "age": 45, "gender": "F"}},
+        )
+        case_b.save()
+
+        # Login as doctor_b
+        client.force_login(doctor_b)
+        session = client.session
+        session["active_role"] = "doctor"
+        session.save()
+
+        response = client.get("/doctor/?tab=decided")
+        assert response.status_code == 200
+        content = response.content.decode()
+        assert "Doc B Case" in content
+        assert "Doc A Case" not in content
+
+    def test_pending_tab_does_not_render_decided_list(self, client) -> None:
+        """R3: GET /doctor/?tab=pending does not render decided list."""
+        doctor_user = User.objects.create_user(username="doc_pending@test.com", password="testpass123")
+        doctor_user.roles.add(self._create_role("doctor"))
+
+        nir_user = User.objects.create_user(username="nir_pending@test.com", password="testpass123")
+        nir_user.roles.add(self._create_role("nir"))
+
+        # Create a decided case for the doctor
+        case = Case.objects.create(
+            created_by=nir_user,
+            status=CaseStatus.WAIT_APPT,
+            doctor=doctor_user,
+            doctor_decision="accept",
+            doctor_decided_at=timezone.now(),
+            structured_data={"patient": {"name": "Decided Case", "age": 50, "gender": "M"}},
+        )
+        case.save()
+
+        # Also create a pending case
+        pending = Case.objects.create(
+            created_by=nir_user,
+            status=CaseStatus.WAIT_DOCTOR,
+            structured_data={"patient": {"name": "Pending Case", "age": 30, "gender": "F"}},
+        )
+        pending.save()
+
+        client.force_login(doctor_user)
+        session = client.session
+        session["active_role"] = "doctor"
+        session.save()
+
+        response = client.get("/doctor/?tab=pending")
+        assert response.status_code == 200
+        content = response.content.decode()
+        assert "Pending Case" in content
+        assert "Decided Case" not in content
+
+    def test_decided_tab_has_detail_link(self, client) -> None:
+        """R4-R5: Each decided item has a link to doctor:decided_detail."""
+        doctor_user = User.objects.create_user(username="doc_detail_link@test.com", password="testpass123")
+        doctor_user.roles.add(self._create_role("doctor"))
+
+        nir_user = User.objects.create_user(username="nir_detail_link@test.com", password="testpass123")
+        nir_user.roles.add(self._create_role("nir"))
+
+        case = Case.objects.create(
+            created_by=nir_user,
+            status=CaseStatus.WAIT_APPT,
+            doctor=doctor_user,
+            doctor_decision="accept",
+            doctor_decided_at=timezone.now(),
+            structured_data={"patient": {"name": "Detail Link", "age": 40, "gender": "M"}},
+        )
+        case.save()
+
+        client.force_login(doctor_user)
+        session = client.session
+        session["active_role"] = "doctor"
+        session.save()
+
+        response = client.get("/doctor/?tab=decided")
+        assert response.status_code == 200
+        content = response.content.decode()
+        # Must contain a link to the decided detail page
+        assert f"/doctor/decided/{case.case_id}/" in content
+
+    def test_doctor_decided_detail_renders_read_only_case_detail(self, client) -> None:
+        """R5: GET /doctor/decided/<case_id>/ renders read-only case detail."""
+        doctor_user = User.objects.create_user(username="doc_detail@test.com", password="testpass123")
+        doctor_user.roles.add(self._create_role("doctor"))
+
+        nir_user = User.objects.create_user(username="nir_detail@test.com", password="testpass123")
+        nir_user.roles.add(self._create_role("nir"))
+
+        case = Case.objects.create(
+            created_by=nir_user,
+            status=CaseStatus.WAIT_APPT,
+            doctor=doctor_user,
+            doctor_decision="accept",
+            doctor_decided_at=timezone.now(),
+            structured_data={"patient": {"name": "Detail Case", "age": 60, "gender": "F"}},
+            agency_record_number="2026-0606-DTL",
+        )
+        case.save()
+
+        client.force_login(doctor_user)
+        session = client.session
+        session["active_role"] = "doctor"
+        session.save()
+
+        response = client.get(f"/doctor/decided/{case.case_id}/")
+        assert response.status_code == 200
+        content = response.content.decode()
+        # Should show case data
+        assert "Detail Case" in content
+        assert "2026-0606-DTL" in content
+        # Should have back label
+        assert "Voltar aos decididos hoje" in content
+        # Should NOT show confirm receipt button
+        assert "Confirmar Recebimento" not in content
+
+    def test_doctor_decided_detail_404_for_other_doctor_case(self, client) -> None:
+        """R5: Doctor cannot access details of another doctor's case."""
+        doctor_a = User.objects.create_user(username="doc_a_detail404@test.com", password="testpass123")
+        doctor_a.roles.add(self._create_role("doctor"))
+
+        doctor_b = User.objects.create_user(username="doc_b_detail404@test.com", password="testpass123")
+        doctor_b.roles.add(self._create_role("doctor"))
+
+        nir_user = User.objects.create_user(username="nir_detail404@test.com", password="testpass123")
+        nir_user.roles.add(self._create_role("nir"))
+
+        case = Case.objects.create(
+            created_by=nir_user,
+            status=CaseStatus.WAIT_APPT,
+            doctor=doctor_a,
+            doctor_decision="accept",
+            doctor_decided_at=timezone.now(),
+            structured_data={"patient": {"name": "Doc A Only", "age": 50, "gender": "M"}},
+        )
+        case.save()
+
+        # Login as doctor_b
+        client.force_login(doctor_b)
+        session = client.session
+        session["active_role"] = "doctor"
+        session.save()
+
+        response = client.get(f"/doctor/decided/{case.case_id}/")
+        assert response.status_code == 404
+
+    def test_queue_partial_preserves_decided_tab(self, client) -> None:
+        """R3: HTMX partial for ?tab=decided returns only decided content."""
+        doctor_user = User.objects.create_user(username="doc_partial@test.com", password="testpass123")
+        doctor_user.roles.add(self._create_role("doctor"))
+
+        nir_user = User.objects.create_user(username="nir_partial@test.com", password="testpass123")
+        nir_user.roles.add(self._create_role("nir"))
+
+        # Create a decided case
+        decided = Case.objects.create(
+            created_by=nir_user,
+            status=CaseStatus.WAIT_APPT,
+            doctor=doctor_user,
+            doctor_decision="accept",
+            doctor_decided_at=timezone.now(),
+            structured_data={"patient": {"name": "Partial Decided", "age": 40, "gender": "M"}},
+        )
+        decided.save()
+
+        # Create a pending case (should NOT appear in decided tab)
+        pending = Case.objects.create(
+            created_by=nir_user,
+            status=CaseStatus.WAIT_DOCTOR,
+            structured_data={"patient": {"name": "Partial Pending", "age": 30, "gender": "F"}},
+        )
+        pending.save()
+
+        client.force_login(doctor_user)
+        session = client.session
+        session["active_role"] = "doctor"
+        session.save()
+
+        response = client.get("/doctor/partials/queue/?tab=decided")
+        assert response.status_code == 200
+        content = response.content.decode()
+        assert "Partial Decided" in content
+        assert "Partial Pending" not in content
 
 
 # ── Helpers for decision view tests ────────────────────────────────────

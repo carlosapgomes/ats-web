@@ -1,7 +1,7 @@
 """Views for the doctor app."""
 
 import uuid
-from datetime import date
+from datetime import date, datetime, time, timedelta
 from typing import Any
 
 from django.contrib import messages
@@ -9,6 +9,7 @@ from django.contrib.auth.decorators import login_required
 from django.db.models import QuerySet
 from django.http import FileResponse, Http404, HttpRequest, HttpResponse, HttpResponseBase, JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
+from django.urls import reverse
 from django.utils import timezone
 from django.views.decorators.clickjacking import xframe_options_sameorigin
 
@@ -26,9 +27,28 @@ from apps.cases.services import (
 from apps.cases.services import (
     renew_case_lock as renew_lock_service,
 )
+from apps.intake.views import (
+    ADMISSION_FLOW_MAP,
+    EVENT_DOT_CSS,
+    EVENT_LABELS,
+    STATUS_CSS_CLASS,
+    STATUS_LABELS,
+    STEP_STATUS_INDEX,
+    STEPS,
+    SUPPORT_FLAG_MAP,
+)
 
 from .forms import DoctorDecisionForm
 from .presenters import DoctorReportPresenter
+
+
+def _local_day_bounds(day: date | None = None) -> tuple[datetime, datetime]:
+    """Retorna início e fim do dia local (timezone-aware) para filtros ORM."""
+    local_day = day or timezone.localdate()
+    current_tz = timezone.get_current_timezone()
+    start = timezone.make_aware(datetime.combine(local_day, time.min), current_tz)
+    end = start + timedelta(days=1)
+    return start, end
 
 
 def _map_prior_decision_to_denial_type(decision: str) -> str:
@@ -159,6 +179,7 @@ def _build_case_card(case: Case, wait_minutes: int, user: Any = None) -> dict[st
         "summary_text": case.summary_text or "",
         "doctor_decision": case.doctor_decision or "",
         "doctor_decision_display": _get_doctor_decision_display(case),
+        "doctor_decided_at": case.doctor_decided_at,
         "wait_minutes": wait_minutes,
         "is_urgent": wait_minutes <= 15,
     }
@@ -175,27 +196,24 @@ def _build_case_card(case: Case, wait_minutes: int, user: Any = None) -> dict[st
 @login_required
 @role_required("doctor")
 def _doctor_queue_context(request: HttpRequest) -> dict[str, Any]:
-    """Build context for full and HTMX doctor queue renders."""
+    """Build context for full and HTMX doctor queue renders.
+
+    Supports ?tab=pending (default) and ?tab=decided.
+    """
     # Lazily expire stale locks before querying
     expire_stale_locks_for_statuses(statuses=[CaseStatus.WAIT_DOCTOR])
 
-    pending_cases: QuerySet[Case] = (
-        Case.objects.filter(status=CaseStatus.WAIT_DOCTOR).select_related("locked_by").order_by("created_at")
-    )
-
-    today: date = date.today()
+    active_tab = request.GET.get("tab", "pending")
 
     doctor_user = request.user
     assert doctor_user.is_authenticated  # guaranteed by @login_required
 
-    decided_qs: QuerySet[Case] = Case.objects.filter(
-        status__in=DOCTOR_DECISION_STATUSES,
-        doctor=doctor_user,
-        events__event_type__startswith="DOCTOR_",
-        events__timestamp__date=today,
-    ).distinct()
-
     now = timezone.now()
+
+    # ── Pending cases ──────────────────────────────────────────────
+    pending_cases: QuerySet[Case] = (
+        Case.objects.filter(status=CaseStatus.WAIT_DOCTOR).select_related("locked_by").order_by("created_at")
+    )
 
     pending_cards: list[dict[str, Any]] = []
     for case in pending_cases:
@@ -206,14 +224,25 @@ def _doctor_queue_context(request: HttpRequest) -> dict[str, Any]:
     total_wait = sum(c["wait_minutes"] for c in pending_cards)
     avg_wait = int(total_wait / len(pending_cards)) if pending_cards else 0
 
+    # ── Decided today cases ───────────────────────────────────────
+    start, end = _local_day_bounds()
+    decided_qs: QuerySet[Case] = Case.objects.filter(
+        doctor=doctor_user,
+        doctor_decision__in=["accept", "deny"],
+        doctor_decided_at__gte=start,
+        doctor_decided_at__lt=end,
+    ).order_by("-doctor_decided_at")
+
     decided_cards: list[dict[str, Any]] = []
     for case in decided_qs:
         decided_cards.append(_build_case_card(case, 0))
 
     return {
-        "pending_cases": pending_cards,
-        "decided_today": decided_cards,
+        "active_tab": active_tab,
+        "pending_cases": pending_cards if active_tab == "pending" else [],
+        "decided_today": decided_cards if active_tab == "decided" else [],
         "pending_count": len(pending_cards),
+        "decided_count": len(decided_cards),
         "avg_wait_minutes": avg_wait,
     }
 
@@ -221,14 +250,29 @@ def _doctor_queue_context(request: HttpRequest) -> dict[str, Any]:
 @login_required
 @role_required("doctor")
 def doctor_queue(request: HttpRequest) -> HttpResponse:
-    """View da fila médica: casos pendentes e decididos hoje."""
-    return render(request, "doctor/queue.html", _doctor_queue_context(request))
+    """View da fila médica: Pendentes (?tab=pending) ou Decididos Hoje (?tab=decided)."""
+    ctx = _doctor_queue_context(request)
+    # Always compute both counts for the nav badges; only materialize active tab list
+    start, end = _local_day_bounds()
+    doctor_user = request.user
+    assert doctor_user.is_authenticated
+    decided_count = Case.objects.filter(
+        doctor=doctor_user,
+        doctor_decision__in=["accept", "deny"],
+        doctor_decided_at__gte=start,
+        doctor_decided_at__lt=end,
+    ).count()
+    ctx["decided_count"] = decided_count
+    return render(request, "doctor/queue.html", ctx)
 
 
 @login_required
 @role_required("doctor")
 def doctor_queue_partial(request: HttpRequest) -> HttpResponse:
-    """HTMX partial for polling the doctor queue without full refresh."""
+    """HTMX partial for polling the doctor queue without full refresh.
+
+    Respects ?tab=pending (default) or ?tab=decided.
+    """
     return render(request, "doctor/_queue_content.html", _doctor_queue_context(request))
 
 
@@ -448,6 +492,142 @@ def serve_pdf(request: HttpRequest, case_id: uuid.UUID) -> HttpResponseBase:
     return FileResponse(
         case.pdf_file.open("rb"),
         content_type="application/pdf",
+    )
+
+
+@login_required
+@role_required("doctor")
+def doctor_decided_detail(request: HttpRequest, case_id: uuid.UUID) -> HttpResponse:
+    """Detalhe read-only para médico de caso que ele decidiu.
+
+    Usa o mesmo template de case_detail do dashboard/supervisor,
+    parametrizado sem botões operacionais.
+    """
+    doctor_user = request.user
+    assert doctor_user.is_authenticated
+
+    case = get_object_or_404(
+        Case.objects.select_related("created_by"),
+        case_id=case_id,
+        doctor=doctor_user,
+        doctor_decision__in=["accept", "deny"],
+    )
+
+    events = case.events.all()
+
+    current_step_idx = STEP_STATUS_INDEX.get(case.status, 0)
+    steps = list(STEPS)
+    terminal_without_scheduling = case.status in (
+        CaseStatus.WAIT_R1_CLEANUP_THUMBS,
+        CaseStatus.CLEANED,
+    ) and (case.doctor_decision == "deny" or case.doctor_admission_flow == "immediate")
+    if terminal_without_scheduling:
+        steps = [step for step in STEPS if step["label"] != "Agendamento"]
+        current_step_idx = len(steps) - 1
+
+    enriched_events = []
+    for e in events:
+        enriched_events.append(
+            {
+                "event": e,
+                "label": EVENT_LABELS.get(e.event_type, e.event_type),
+                "dot_css": EVENT_DOT_CSS.get(e.event_type, "system"),
+            }
+        )
+
+    # Build result_info similar to dashboard
+    result_info = None
+    is_doctor_denied_final = (
+        case.status
+        in (
+            CaseStatus.WAIT_R1_CLEANUP_THUMBS,
+            CaseStatus.CLEANED,
+        )
+        and case.doctor_decision == "deny"
+    )
+    is_immediate_final = (
+        case.status
+        in (
+            CaseStatus.WAIT_R1_CLEANUP_THUMBS,
+            CaseStatus.CLEANED,
+        )
+        and case.doctor_admission_flow == "immediate"
+    )
+
+    is_scope_gated = (
+        case.suggested_action
+        and isinstance(case.suggested_action, dict)
+        and case.suggested_action.get("decision") == "manual_review_required"
+    )
+    if is_scope_gated:
+        reason_code = case.suggested_action.get("reason_code", "") if isinstance(case.suggested_action, dict) else ""
+        reason_text = case.suggested_action.get("reason_text", "") if isinstance(case.suggested_action, dict) else ""
+        result_info = {
+            "type": "manual_review_required",
+            "reason_code": reason_code,
+            "reason_text": reason_text,
+        }
+    elif is_doctor_denied_final or case.status == CaseStatus.DOCTOR_DENIED:
+        result_info = {
+            "type": "doctor_denied",
+            "reason": case.doctor_reason,
+            "doctor_display": case.doctor_display,
+        }
+    elif is_immediate_final:
+        result_info = {
+            "type": "accepted_immediate",
+            "support": SUPPORT_FLAG_MAP.get(case.doctor_support_flag, case.doctor_support_flag),
+            "flow": ADMISSION_FLOW_MAP.get(case.doctor_admission_flow, case.doctor_admission_flow),
+            "doctor_display": case.doctor_display,
+        }
+    elif case.status in (CaseStatus.WAIT_R1_CLEANUP_THUMBS, CaseStatus.CLEANED, CaseStatus.APPT_CONFIRMED):
+        result_info = {
+            "type": "accepted_scheduled",
+            "appointment_at": case.appointment_at,
+            "support": SUPPORT_FLAG_MAP.get(case.doctor_support_flag, case.doctor_support_flag),
+            "flow": ADMISSION_FLOW_MAP.get(case.doctor_admission_flow, case.doctor_admission_flow),
+            "instructions": case.appointment_instructions or "",
+            "doctor_display": case.doctor_display,
+        }
+    elif case.status == CaseStatus.APPT_DENIED or (
+        case.status in (CaseStatus.WAIT_R1_CLEANUP_THUMBS, CaseStatus.CLEANED) and case.appointment_status == "denied"
+    ):
+        result_info = {
+            "type": "appt_denied",
+            "reason": case.appointment_reason,
+            "doctor_display": case.doctor_display,
+            "scheduler_display": case.scheduler_display,
+        }
+    elif case.status == CaseStatus.FAILED:
+        result_info = {"type": "failed"}
+
+    patient_name = ""
+    if case.structured_data and isinstance(case.structured_data, dict):
+        patient = case.structured_data.get("patient", {})
+        if isinstance(patient, dict):
+            patient_name = patient.get("name", "")
+
+    origin_unit = case.get_origin_unit_display(compact=False)
+
+    return render(
+        request,
+        "intake/case_detail.html",
+        {
+            "case": case,
+            "events": enriched_events,
+            "steps": steps,
+            "current_step_idx": current_step_idx,
+            "status_label": STATUS_LABELS.get(case.status, case.get_status_display()),
+            "status_css": STATUS_CSS_CLASS.get(case.status, "status-pending"),
+            "can_confirm_receipt": False,
+            "result_info": result_info,
+            "patient_name": patient_name,
+            "origin_unit": origin_unit,
+            "show_intake_nav": False,
+            "back_url": reverse("doctor:queue") + "?tab=decided",
+            "back_label": "← Voltar aos decididos hoje",
+            "pdf_url": reverse("doctor:serve_pdf", args=[case.case_id]),
+        },
     )
 
 
