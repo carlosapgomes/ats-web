@@ -14,6 +14,9 @@
     <li class="nav-item">
       <a class="nav-link active" href="{% url 'intake:my_cases' %}">Meus Casos</a>
     </li>
+    <li class="nav-item">
+      <a class="nav-link" href="{% url 'intake:closed_cases_search' %}">Casos Encerrados</a>
+    </li>
   </ul>
 </nav>
 {% endblock %}
@@ -32,9 +35,9 @@
       <label for="status-select" class="form-label">Filtrar por status</label>
       <select name="status" id="status-select" class="form-select">
         <option value="">Todos os status</option>
-        {% for key, label in status_labels.items %}
+        {% for key, label in status_labels.items %}{% if key != "CLEANED" %}
         <option value="{{ key }}" {% if status_filter == key %}selected{% endif %}>{{ label }}</option>
-        {% endfor %}
+        {% endif %}{% endfor %}
       </select>
     </div>
 
