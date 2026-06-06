@@ -8,10 +8,14 @@
 <nav class="app-nav mt-3" aria-label="Navegação">
   <ul class="nav nav-pills gap-2">
     <li class="nav-item">
-      <span class="nav-link active notif-badge" data-count="{{ total_notice_count }}" style="position:relative;">Pendentes</span>
+      <a class="nav-link {% if active_tab == 'pending' %}active{% endif %} notif-badge"
+         data-count="{{ total_notice_count }}" style="position:relative;"
+         href="{% url 'scheduler:queue' %}?tab=pending">Pendentes</a>
     </li>
-    <li class="nav-item"><span class="nav-link">Confirmados Hoje</span></li>
-    <li class="nav-item"><span class="nav-link">Histórico</span></li>
+    <li class="nav-item">
+      <a class="nav-link {% if active_tab == 'processed' %}active{% endif %}"
+         href="{% url 'scheduler:queue' %}?tab=processed">Processados Hoje</a>
+    </li>
   </ul>
 </nav>
 {% endblock %}
@@ -19,7 +23,7 @@
 {% block content %}
 <div
   id="scheduler-queue-content"
-  hx-get="{% url 'scheduler:queue_partial' %}"
+  hx-get="{% url 'scheduler:queue_partial' %}?tab={{ active_tab }}"
   hx-trigger="every 20s"
   hx-swap="innerHTML"
 >

@@ -1,14 +1,15 @@
 """Views for the scheduler app."""
 
 import uuid
-from datetime import date, datetime, time
+from datetime import date, datetime, time, timedelta
 from typing import Any
 
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
 from django.db.models import QuerySet
-from django.http import Http404, HttpRequest, HttpResponse, JsonResponse
+from django.http import FileResponse, Http404, HttpRequest, HttpResponse, HttpResponseBase, JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
+from django.urls import reverse
 from django.utils import timezone
 
 from apps.accounts.decorators import role_required
@@ -145,20 +146,46 @@ def _build_case_card(case: Case, wait_minutes: int, user: Any = None) -> dict[st
 # ── View ──────────────────────────────────────────────────────────────────
 
 
-def _scheduler_queue_context(user: Any = None) -> dict[str, Any]:
+def _local_day_bounds(day: date | None = None) -> tuple[datetime, datetime]:
+    """Retorna início e fim do dia local (timezone-aware) para filtros ORM.
+
+    Usa o fuso horário configurado no Django (TIME_ZONE), não a data UTC
+    de timezone.now().date().
+    """
+    local_day = day or timezone.localdate()
+    current_tz = timezone.get_current_timezone()
+    start = timezone.make_aware(datetime.combine(local_day, time.min), current_tz)
+    end = start + timedelta(days=1)
+    return start, end
+
+
+def _scheduler_queue_context(user: Any = None, tab: str = "pending") -> dict[str, Any]:
     """Build context for full and HTMX scheduler queue renders.
 
     Accepts an optional user to compute lock status relative to the
-    current user for each case card.
+    current user for each case card. The `tab` parameter controls which
+    content is rendered (pending or processed).
     """
     # Lazily expire stale locks before querying
     expire_stale_locks_for_statuses(statuses=[CaseStatus.WAIT_APPT])
 
+    now = timezone.now()
+
+    # ── Pending cases (always computed for badges) ──────────────────────
     pending_cases: QuerySet[Case] = (
         Case.objects.filter(status=CaseStatus.WAIT_APPT).select_related("doctor", "locked_by").order_by("created_at")
     )
 
-    today: date = date.today()
+    pending_cards: list[dict[str, Any]] = []
+    for case in pending_cases:
+        delta = now - case.created_at
+        wait_minutes = int(delta.total_seconds() // 60)
+        pending_cards.append(_build_case_card(case, wait_minutes, user=user))
+
+    pending_count = len(pending_cards)
+
+    # ── Immediate notices (always computed for badges) ──────────────────
+    today: date = timezone.localdate()
 
     immediate_notice_qs: QuerySet[Case] = (
         Case.objects.filter(
@@ -173,61 +200,230 @@ def _scheduler_queue_context(user: Any = None) -> dict[str, Any]:
         .order_by("-doctor_decided_at", "-created_at")
     )
 
-    confirmed_qs: QuerySet[Case] = (
-        Case.objects.filter(
-            status__in=[CaseStatus.APPT_CONFIRMED, CaseStatus.APPT_DENIED],
-            events__event_type__startswith="APPT_",
-            events__timestamp__date=today,
-        )
-        .select_related("doctor")
-        .distinct()
-    )
-
-    now = timezone.now()
-
-    pending_cards: list[dict[str, Any]] = []
-    for case in pending_cases:
-        delta = now - case.created_at
-        wait_minutes = int(delta.total_seconds() // 60)
-        pending_cards.append(_build_case_card(case, wait_minutes, user=user))
-
     immediate_notice_cards: list[dict[str, Any]] = []
     for case in immediate_notice_qs:
         delta = now - (case.doctor_decided_at or case.created_at)
         wait_minutes = int(delta.total_seconds() // 60)
         immediate_notice_cards.append(_build_case_card(case, wait_minutes))
 
-    pending_count = len(pending_cards)
     immediate_notice_count = len(immediate_notice_cards)
 
-    confirmed_cards: list[dict[str, Any]] = []
-    for case in confirmed_qs:
-        confirmed_cards.append(_build_case_card(case, 0))
+    # ── Processados hoje ────────────────────────────────────────────────
+    start, end = _local_day_bounds()
+    processed_qs: QuerySet[Case] = (
+        Case.objects.filter(
+            scheduler=user,
+            appointment_status__in=["confirmed", "denied"],
+            appointment_decided_at__gte=start,
+            appointment_decided_at__lt=end,
+        )
+        .select_related("doctor")
+        .order_by("-appointment_decided_at")
+    )
+
+    processed_today: list[dict[str, Any]] = []
+    for case in processed_qs:
+        processed_today.append(_build_processed_card(case))
+
+    processed_today_count = len(processed_today)
 
     context: dict[str, Any] = {
+        "active_tab": tab,
         "pending_cases": pending_cards,
-        "confirmed_today": confirmed_cards,
-        "pending_count": pending_count,
         "immediate_notice_cases": immediate_notice_cards,
+        "processed_today": processed_today,
+        "pending_count": pending_count,
         "immediate_notice_count": immediate_notice_count,
+        "processed_today_count": processed_today_count,
         "total_notice_count": pending_count + immediate_notice_count,
     }
 
     return context
 
 
+def _build_processed_card(case: Case) -> dict[str, Any]:
+    """Build a dict with display data for a processed case card."""
+    return {
+        "case_id": str(case.case_id),
+        "patient_name": _get_patient_name(case),
+        "patient_age": _get_patient_age(case),
+        "patient_gender": _get_patient_gender(case),
+        "agency_record_number": case.agency_record_number or "",
+        "origin_unit": case.get_origin_unit_display(compact=True),
+        "diagnosis": _get_diagnosis(case),
+        "doctor_display": case.doctor_display,
+        "support_flag_display": _get_support_flag_display(case),
+        "admission_flow_display": _get_admission_flow_display(case),
+        "appointment_status": case.appointment_status,
+        "appointment_status_label": "Confirmado" if case.appointment_status == "confirmed" else "Recusado",
+        "appointment_decided_at": case.appointment_decided_at,
+        "appointment_at": case.appointment_at,
+        "appointment_reason": case.appointment_reason or "",
+    }
+
+
 @login_required
 @role_required("scheduler")
 def scheduler_queue(request: HttpRequest) -> HttpResponse:
-    """View da fila de agendamento: casos WAIT_APPT e confirmados hoje."""
-    return render(request, "scheduler/queue.html", _scheduler_queue_context(user=request.user))
+    """View da fila de agendamento: pendentes e processados hoje."""
+    tab = request.GET.get("tab", "pending")
+    return render(request, "scheduler/queue.html", _scheduler_queue_context(user=request.user, tab=tab))
 
 
 @login_required
 @role_required("scheduler")
 def scheduler_queue_partial(request: HttpRequest) -> HttpResponse:
     """HTMX partial for polling the scheduler queue without full refresh."""
-    return render(request, "scheduler/_queue_content.html", _scheduler_queue_context(user=request.user))
+    tab = request.GET.get("tab", "pending")
+    return render(request, "scheduler/_queue_content.html", _scheduler_queue_context(user=request.user, tab=tab))
+
+
+@login_required
+@role_required("scheduler")
+def scheduler_processed_detail(request: HttpRequest, case_id: uuid.UUID) -> HttpResponse:
+    """Read-only detail of a case processed by the logged-in scheduler.
+
+    Uses the same template as supervisor/admin dashboard case detail.
+    """
+    from apps.intake.views import (
+        ADMISSION_FLOW_MAP,
+        EVENT_DOT_CSS,
+        EVENT_LABELS,
+        STATUS_CSS_CLASS,
+        STATUS_LABELS,
+        STEP_STATUS_INDEX,
+        STEPS,
+        SUPPORT_FLAG_MAP,
+    )
+
+    case = get_object_or_404(
+        Case.objects.select_related("created_by"),
+        case_id=case_id,
+        scheduler=request.user,
+        appointment_status__in=["confirmed", "denied"],
+    )
+
+    events = case.events.all()
+
+    current_step_idx = STEP_STATUS_INDEX.get(case.status, 0)
+    steps = STEPS
+    terminal_without_scheduling = case.status in (
+        CaseStatus.WAIT_R1_CLEANUP_THUMBS,
+        CaseStatus.CLEANED,
+    ) and (case.doctor_decision == "deny" or case.doctor_admission_flow == "immediate")
+    is_doctor_denied_final = terminal_without_scheduling and case.doctor_decision == "deny"
+    is_immediate_final = terminal_without_scheduling and case.doctor_admission_flow == "immediate"
+    if terminal_without_scheduling:
+        steps = [step for step in STEPS if step["label"] != "Agendamento"]
+        current_step_idx = len(steps) - 1
+
+    enriched_events = []
+    for e in events:
+        enriched_events.append(
+            {
+                "event": e,
+                "label": EVENT_LABELS.get(e.event_type, e.event_type),
+                "dot_css": EVENT_DOT_CSS.get(e.event_type, "system"),
+            }
+        )
+
+    result_info = None
+    terminal_with_result = case.status in (
+        CaseStatus.WAIT_R1_CLEANUP_THUMBS,
+        CaseStatus.CLEANED,
+    )
+    # Scope-gated manual review takes priority for WAIT_R1_CLEANUP_THUMBS
+    is_scope_gated = (
+        case.suggested_action
+        and isinstance(case.suggested_action, dict)
+        and case.suggested_action.get("decision") == "manual_review_required"
+    )
+    if is_scope_gated:
+        reason_code = case.suggested_action.get("reason_code", "") if isinstance(case.suggested_action, dict) else ""
+        reason_text = case.suggested_action.get("reason_text", "") if isinstance(case.suggested_action, dict) else ""
+        result_info = {
+            "type": "manual_review_required",
+            "reason_code": reason_code,
+            "reason_text": reason_text,
+        }
+    elif is_doctor_denied_final or case.status == CaseStatus.DOCTOR_DENIED:
+        result_info = {
+            "type": "doctor_denied",
+            "reason": case.doctor_reason,
+            "doctor_display": case.doctor_display,
+        }
+    elif is_immediate_final:
+        result_info = {
+            "type": "accepted_immediate",
+            "support": SUPPORT_FLAG_MAP.get(case.doctor_support_flag, case.doctor_support_flag),
+            "flow": ADMISSION_FLOW_MAP.get(case.doctor_admission_flow, case.doctor_admission_flow),
+            "doctor_display": case.doctor_display,
+        }
+    elif case.status == CaseStatus.APPT_DENIED or (terminal_with_result and case.appointment_status == "denied"):
+        result_info = {
+            "type": "appt_denied",
+            "reason": case.appointment_reason,
+            "doctor_display": case.doctor_display,
+            "scheduler_display": case.scheduler_display,
+        }
+    elif case.status == CaseStatus.APPT_CONFIRMED or terminal_with_result:
+        result_info = {
+            "type": "accepted_scheduled",
+            "appointment_at": case.appointment_at,
+            "support": SUPPORT_FLAG_MAP.get(case.doctor_support_flag, case.doctor_support_flag),
+            "flow": ADMISSION_FLOW_MAP.get(case.doctor_admission_flow, case.doctor_admission_flow),
+            "instructions": case.appointment_instructions or "",
+            "doctor_display": case.doctor_display,
+        }
+    elif case.status == CaseStatus.FAILED:
+        result_info = {"type": "failed"}
+
+    patient_name = ""
+    if case.structured_data and isinstance(case.structured_data, dict):
+        patient = case.structured_data.get("patient", {})
+        if isinstance(patient, dict):
+            patient_name = patient.get("name", "")
+
+    origin_unit = case.get_origin_unit_display(compact=False)
+
+    return render(
+        request,
+        "intake/case_detail.html",
+        {
+            "case": case,
+            "events": enriched_events,
+            "steps": steps,
+            "current_step_idx": current_step_idx,
+            "status_label": STATUS_LABELS.get(case.status, case.get_status_display()),
+            "status_css": STATUS_CSS_CLASS.get(case.status, "status-pending"),
+            "can_confirm_receipt": False,
+            "result_info": result_info,
+            "patient_name": patient_name,
+            "origin_unit": origin_unit,
+            "show_intake_nav": False,
+            "back_url": reverse("scheduler:queue") + "?tab=processed",
+            "back_label": "← Voltar aos processados hoje",
+            "pdf_url": reverse("scheduler:processed_pdf", args=[case.case_id]),
+        },
+    )
+
+
+@login_required
+@role_required("scheduler")
+def scheduler_processed_pdf(request: HttpRequest, case_id: uuid.UUID) -> HttpResponseBase:
+    """Serve PDF for a case processed by the logged-in scheduler."""
+    case = get_object_or_404(
+        Case,
+        case_id=case_id,
+        scheduler=request.user,
+        appointment_status__in=["confirmed", "denied"],
+    )
+    if not case.pdf_file:
+        raise Http404("PDF não encontrado para este caso.")
+    return FileResponse(
+        case.pdf_file.open("rb"),
+        content_type="application/pdf",
+    )
 
 
 # ── Immediate admission acknowledgement ────────────────────────────────────
