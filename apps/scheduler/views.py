@@ -18,6 +18,7 @@ from apps.cases.services import (
     claim_case_lock,
     compute_lock_display,
     expire_stale_locks_for_statuses,
+    get_post_schedule_issue_reason_label,
 )
 from apps.cases.services import (
     release_case_lock as release_lock_service,
@@ -134,6 +135,9 @@ def _build_case_card(case: Case, wait_minutes: int, user: Any = None) -> dict[st
         # Post-schedule intercurrence fields
         "has_post_schedule_issue": has_psi,
         "post_schedule_issue_reason": case.post_schedule_issue_reason if has_psi else "",
+        "post_schedule_issue_reason_label": get_post_schedule_issue_reason_label(case.post_schedule_issue_reason)
+        if has_psi
+        else "",
         "post_schedule_issue_message": case.post_schedule_issue_message if has_psi else "",
     }
 
@@ -287,6 +291,7 @@ def _build_confirm_context(
     if case.post_schedule_issue_status == "opened":
         ctx["has_post_schedule_issue"] = True
         ctx["ps_issue_reason"] = case.post_schedule_issue_reason
+        ctx["ps_issue_reason_label"] = get_post_schedule_issue_reason_label(case.post_schedule_issue_reason)
         ctx["ps_issue_message"] = case.post_schedule_issue_message
         ctx["ps_issue_opened_by"] = (
             case.post_schedule_issue_opened_by.display_name if case.post_schedule_issue_opened_by else ""

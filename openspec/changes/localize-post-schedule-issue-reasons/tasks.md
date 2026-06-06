@@ -2,23 +2,23 @@
 
 ## Status
 
-Change planejado. Implementar apenas o Slice 001.
+Change em andamento. Slice 001 concluído e validado.
 
 ## Slices
 
-- [ ] Slice 001 — Exibir labels em português para motivos de intercorrência
+- [X] Slice 001 — Exibir labels em português para motivos de intercorrência
   (`slices/slice-001-localize-reason-labels.md`)
 
 ## Definition of Done
 
-- [ ] Fonte única de labels de motivos criada ou consolidada.
-- [ ] Scheduler queue exibe labels em português, não códigos crus.
-- [ ] Scheduler confirm exibe labels em português, não códigos crus.
-- [ ] Detalhe NIR continua exibindo labels em português.
-- [ ] Testes cobrem regressão para `death` e pelo menos um outro motivo.
-- [ ] Quality gate relevante executado.
-- [ ] Relatório temporário gerado com `REPORT_PATH`.
-- [ ] Commit e push realizados.
+- [X] Fonte única de labels de motivos criada ou consolidada.
+- [X] Scheduler queue exibe labels em português, não códigos crus.
+- [X] Scheduler confirm exibe labels em português, não códigos crus.
+- [X] Detalhe NIR continua exibindo labels em português.
+- [X] Testes cobrem regressão para `death` e pelo menos um outro motivo.
+- [X] Quality gate relevante executado.
+- [X] Relatório temporário gerado com `REPORT_PATH`.
+- [X] Commit e push realizados.
 
 ## Validação recomendada
 
