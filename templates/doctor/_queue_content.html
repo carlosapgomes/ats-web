@@ -1,3 +1,4 @@
+{% if active_tab == 'pending' %}
 <!-- Alert / Priority Banner -->
 {% if pending_count > 0 %}
 <div class="alert alert-warning d-flex align-items-center gap-2 mb-4" role="alert">
@@ -75,36 +76,61 @@
 </div>
 {% endif %}
 
-<!-- Recently Decided -->
+{% elif active_tab == 'decided' %}
+<!-- Decided Today Tab -->
 {% if decided_today %}
-<div class="card p-4 mt-4">
-  <h5 class="mb-3">Decididos Hoje</h5>
-  <div class="row g-2">
-    {% for c in decided_today %}
-    <div class="col-md-6">
-      <div class="border rounded-3 p-3 d-flex justify-content-between align-items-center">
-        <div>
-          <strong>{{ c.patient_name }}</strong>
-          <div class="text-muted small">
-            {% if c.agency_record_number %}Reg. {{ c.agency_record_number }} · {% endif %}
-            {% if c.patient_age %}{{ c.patient_age }} anos{% endif %}
+<div class="row g-3">
+  {% for c in decided_today %}
+  <div class="col-12">
+    <div class="case-card card p-3">
+      <div class="row">
+        <div class="col-lg-8">
+          <div class="d-flex align-items-start gap-3">
+            <div>
+              <div class="patient-name">{{ c.patient_name }}</div>
+              <div class="case-meta mb-2">
+                {% if c.agency_record_number %}Reg. {{ c.agency_record_number }} · {% endif %}
+                {% if c.patient_age %}{{ c.patient_age }} anos · {% endif %}
+                {{ c.patient_gender }}
+              </div>
+              <div class="summary-box mb-2">
+                <div class="row">
+                  <div class="col-sm-6 mb-2">
+                    <div class="summary-label">Decisão</div>
+                    <div class="summary-value">
+                      {% if c.doctor_decision == "accept" %}
+                      <span class="status-badge status-accepted">ACEITAR</span>
+                      {% else %}
+                      <span class="status-badge status-denied">NEGAR</span>
+                      {% endif %}
+                    </div>
+                  </div>
+                  <div class="col-sm-3 mb-2">
+                    <div class="summary-label">Suporte/Fluxo</div>
+                    <div class="summary-value">{{ c.suggested_support }} · {{ c.suggested_flow }}</div>
+                  </div>
+                  <div class="col-sm-3 mb-2">
+                    <div class="summary-label">Horário</div>
+                    <div class="summary-value small">{{ c.doctor_decided_at|date:"H:i"|default:"—" }}</div>
+                  </div>
+                </div>
+              </div>
+            </div>
           </div>
         </div>
-        <div class="text-end">
-          {% if c.doctor_decision == "accept" %}
-          <span class="status-badge status-accepted">ACEITAR</span>
-          {% else %}
-          <span class="status-badge status-denied">NEGAR</span>
-          {% endif %}
-          <div class="text-muted small mt-1">
-            {{ c.suggested_flow }} · {{ c.suggested_support }}
-          </div>
+        <div class="col-lg-4 text-lg-end mt-3 mt-lg-0 d-flex flex-lg-column justify-content-between align-items-lg-end">
+          <a href="{% url 'doctor:decided_detail' c.case_id %}" class="btn btn-outline-primary mt-2">Ver detalhes</a>
         </div>
       </div>
     </div>
-    {% endfor %}
   </div>
+  {% endfor %}
 </div>
+{% else %}
+<div class="alert alert-info d-flex align-items-center gap-2 mb-4" role="alert">
+  Nenhum caso decidido hoje.
+</div>
+{% endif %}
 {% endif %}
 
 <p class="text-muted small mt-3 mb-0">Atualizado automaticamente.</p>
