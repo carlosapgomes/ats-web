@@ -6,9 +6,11 @@ from datetime import date, datetime, time, timedelta
 from django.contrib.auth.decorators import login_required
 from django.core.paginator import Paginator
 from django.db.models import Avg, DurationField, ExpressionWrapper, F, Q
-from django.http import HttpRequest, HttpResponse
+from django.http import FileResponse, Http404, HttpRequest, HttpResponse, HttpResponseBase
 from django.shortcuts import get_object_or_404, render
+from django.urls import reverse
 from django.utils import timezone
+from django.views.decorators.clickjacking import xframe_options_sameorigin
 
 from apps.accounts.decorators import role_required
 from apps.cases.models import Case, CaseStatus, SupervisorSummary
@@ -271,6 +273,26 @@ def dashboard_index(request: HttpRequest) -> HttpResponse:
 
 @login_required
 @role_required("manager", "admin")
+@xframe_options_sameorigin
+def dashboard_case_pdf(request: HttpRequest, case_id: uuid.UUID) -> HttpResponseBase:
+    """Serve o PDF do caso para manager/admin (dashboard gerencial).
+
+    Diferente da rota NIR (intake:serve_pdf), esta rota:
+    - Aceita casos em qualquer status, incluindo CLEANED.
+    - É restrita a manager/admin.
+    - Retorna 404 quando não há pdf_file.
+    """
+    case = get_object_or_404(Case, case_id=case_id)
+    if not case.pdf_file:
+        raise Http404("PDF não encontrado para este caso.")
+    return FileResponse(
+        case.pdf_file.open("rb"),
+        content_type="application/pdf",
+    )
+
+
+@login_required
+@role_required("manager", "admin")
 def dashboard_case_detail(request: HttpRequest, case_id: uuid.UUID) -> HttpResponse:
     """Detalhe de qualquer caso (admin) — sem botão 'Confirmar Recebimento'."""
     case = get_object_or_404(
@@ -374,6 +396,11 @@ def dashboard_case_detail(request: HttpRequest, case_id: uuid.UUID) -> HttpRespo
             "result_info": result_info,
             "patient_name": patient_name,
             "origin_unit": origin_unit,
+            # Parametrização para template compartilhado
+            "show_intake_nav": False,
+            "back_url": reverse("dashboard:index"),
+            "back_label": "← Voltar ao dashboard",
+            "pdf_url": reverse("dashboard:case_pdf", args=[case.case_id]),
         },
     )
 

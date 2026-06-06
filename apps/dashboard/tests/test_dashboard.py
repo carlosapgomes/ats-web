@@ -4,6 +4,7 @@ from datetime import datetime, timedelta
 
 import pytest
 from django.contrib.auth import get_user_model
+from django.core.files.base import ContentFile
 from django.urls import reverse
 from django.utils import timezone
 
@@ -682,6 +683,193 @@ class TestDashboardCaseDetailAdmin:
 
 
 # ── Home Redirect Tests ─────────────────────────────────────────────────
+
+
+@pytest.mark.django_db
+# ── Dashboard: Case Detail Navigation & PDF (Slice 001) ──────────────────
+
+
+@pytest.mark.django_db
+class TestDashboardCaseDetailNavPdf:
+    """Testes de navegação e PDF no detalhe do dashboard."""
+
+    def _create_case_with_pdf(self, *, created_by, **kwargs):
+        """Cria caso com pdf_file real para testes de PDF."""
+        case = _create_case(created_by=created_by, **kwargs)
+        case.pdf_file.save(
+            "test.pdf",
+            ContentFile(b"%PDF-1.4 fake pdf for testing"),
+            save=True,
+        )
+        return case
+
+    # ── NIR nav ausente no dashboard ───────────────────────────────────
+
+    def test_case_detail_hides_nir_nav_for_manager(self, client) -> None:
+        """Manager não vê 'Novo Encaminhamento' nem 'Meus Casos' no detalhe dashboard."""
+        user = _login_as(client, "manager")
+        case = _create_case(created_by=user, status=CaseStatus.NEW)
+        response = client.get(reverse("dashboard:case_detail", args=[case.case_id]))
+        assert response.status_code == 200
+        content = response.content.decode()
+        assert "Novo Encaminhamento" not in content
+        assert "Meus Casos" not in content
+
+    def test_case_detail_hides_nir_nav_for_admin(self, client) -> None:
+        """Admin não vê 'Novo Encaminhamento' nem 'Meus Casos' no detalhe dashboard."""
+        user = _login_as(client, "admin")
+        case = _create_case(created_by=user, status=CaseStatus.NEW)
+        response = client.get(reverse("dashboard:case_detail", args=[case.case_id]))
+        assert response.status_code == 200
+        content = response.content.decode()
+        assert "Novo Encaminhamento" not in content
+        assert "Meus Casos" not in content
+
+    # ── Back to dashboard ─────────────────────────────────────────────
+
+    def test_case_detail_shows_back_to_dashboard(self, client) -> None:
+        """Detalhe dashboard mostra 'Voltar ao dashboard', não 'Voltar para lista'."""
+        user = _login_as(client, "manager")
+        case = _create_case(created_by=user, status=CaseStatus.NEW)
+        response = client.get(reverse("dashboard:case_detail", args=[case.case_id]))
+        assert response.status_code == 200
+        content = response.content.decode()
+        assert "Voltar ao dashboard" in content
+        assert reverse("dashboard:index") in content
+
+    def test_case_detail_does_not_show_back_to_my_cases(self, client) -> None:
+        """Detalhe dashboard NÃO tem link para intake:my_cases."""
+        user = _login_as(client, "manager")
+        case = _create_case(created_by=user, status=CaseStatus.NEW)
+        response = client.get(reverse("dashboard:case_detail", args=[case.case_id]))
+        assert response.status_code == 200
+        content = response.content.decode()
+        assert reverse("intake:my_cases") not in content
+
+    # ── PDF URL no template ───────────────────────────────────────────
+
+    def test_case_detail_uses_dashboard_pdf_url(self, client) -> None:
+        """Detalhe dashboard usa dashboard:case_pdf, não intake:serve_pdf."""
+        user = _login_as(client, "manager")
+        case = self._create_case_with_pdf(created_by=user, status=CaseStatus.NEW)
+        response = client.get(reverse("dashboard:case_detail", args=[case.case_id]))
+        assert response.status_code == 200
+        content = response.content.decode()
+        pdf_url = reverse("dashboard:case_pdf", args=[case.case_id])
+        assert pdf_url in content
+        assert reverse("intake:serve_pdf", args=[case.case_id]) not in content
+
+    def test_case_detail_shows_pdf_embed_and_link(self, client) -> None:
+        """Detalhe dashboard com pdf_file mostra embed e link 'Abrir em nova aba'."""
+        user = _login_as(client, "admin")
+        case = self._create_case_with_pdf(created_by=user, status=CaseStatus.NEW)
+        response = client.get(reverse("dashboard:case_detail", args=[case.case_id]))
+        assert response.status_code == 200
+        content = response.content.decode()
+        assert "embed" in content
+        assert "Abrir em nova aba" in content
+
+    # ── Endpoint dashboard:case_pdf ───────────────────────────────────
+
+    def test_case_pdf_accessible_for_manager(self, client) -> None:
+        """Manager consegue GET em dashboard:case_pdf para caso com PDF."""
+        user = _login_as(client, "manager")
+        case = self._create_case_with_pdf(created_by=user, status=CaseStatus.NEW)
+        response = client.get(reverse("dashboard:case_pdf", args=[case.case_id]))
+        assert response.status_code == 200
+        assert response.get("Content-Type") == "application/pdf"
+
+    def test_case_pdf_accessible_for_admin(self, client) -> None:
+        """Admin consegue GET em dashboard:case_pdf para caso com PDF."""
+        user = _login_as(client, "admin")
+        case = self._create_case_with_pdf(created_by=user, status=CaseStatus.NEW)
+        response = client.get(reverse("dashboard:case_pdf", args=[case.case_id]))
+        assert response.status_code == 200
+        assert response.get("Content-Type") == "application/pdf"
+
+    def test_case_pdf_blocked_for_nir(self, client) -> None:
+        """NIR não consegue acessar dashboard:case_pdf."""
+        client_nir, nir_user = _nir_client_setup(client)
+        from apps.accounts.models import Role as RoleModel
+
+        role, _ = RoleModel.objects.get_or_create(name="nir")
+        nir_user.roles.add(role)
+        client_nir.force_login(nir_user)
+        session = client_nir.session
+        session["active_role"] = "nir"
+        session.save()
+
+        another = User.objects.create_user(username="other@pdf.test", password="pass123")
+        case = self._create_case_with_pdf(created_by=another, status=CaseStatus.NEW)
+        response = client_nir.get(reverse("dashboard:case_pdf", args=[case.case_id]))
+        assert response.status_code == 302
+
+    def test_case_pdf_blocked_for_doctor(self, client) -> None:
+        """Doctor não consegue acessar dashboard:case_pdf."""
+        from apps.accounts.models import Role as RoleModel
+
+        user = User.objects.create_user(username="doc@pdf.test", password="pass123")
+        role, _ = RoleModel.objects.get_or_create(name="doctor")
+        user.roles.add(role)
+        client.force_login(user)
+        session = client.session
+        session["active_role"] = "doctor"
+        session.save()
+
+        another = User.objects.create_user(username="other2@pdf.test", password="pass123")
+        case = self._create_case_with_pdf(created_by=another, status=CaseStatus.NEW)
+        response = client.get(reverse("dashboard:case_pdf", args=[case.case_id]))
+        assert response.status_code == 302
+
+    def test_case_pdf_blocked_for_scheduler(self, client) -> None:
+        """Scheduler não consegue acessar dashboard:case_pdf."""
+        from apps.accounts.models import Role as RoleModel
+
+        user = User.objects.create_user(username="sched@pdf.test", password="pass123")
+        role, _ = RoleModel.objects.get_or_create(name="scheduler")
+        user.roles.add(role)
+        client.force_login(user)
+        session = client.session
+        session["active_role"] = "scheduler"
+        session.save()
+
+        another = User.objects.create_user(username="other3@pdf.test", password="pass123")
+        case = self._create_case_with_pdf(created_by=another, status=CaseStatus.NEW)
+        response = client.get(reverse("dashboard:case_pdf", args=[case.case_id]))
+        assert response.status_code == 302
+
+    def test_case_pdf_404_for_no_pdf(self, client) -> None:
+        """dashboard:case_pdf retorna 404 para caso sem PDF."""
+        user = _login_as(client, "manager")
+        case = _create_case(created_by=user, status=CaseStatus.NEW)
+        response = client.get(reverse("dashboard:case_pdf", args=[case.case_id]))
+        assert response.status_code == 404
+
+    def test_case_pdf_blocked_without_login(self, client) -> None:
+        """dashboard:case_pdf sem autenticação → redirect para login."""
+        user = User.objects.create_user(username="anon@pdf.test", password="pass123")
+        case = self._create_case_with_pdf(created_by=user, status=CaseStatus.NEW)
+        response = client.get(reverse("dashboard:case_pdf", args=[case.case_id]))
+        assert response.status_code == 302
+        assert "/login/" in response.url
+
+    def test_case_pdf_accessible_for_cleaned_case(self, client) -> None:
+        """dashboard:case_pdf permite acesso a casos CLEANED (ao contrário da rota NIR)."""
+        user = _login_as(client, "manager")
+        case = self._create_case_with_pdf(
+            created_by=user,
+            status=CaseStatus.CLEANED,
+            agency_record_number="CLEANED-PDF",
+        )
+        response = client.get(reverse("dashboard:case_pdf", args=[case.case_id]))
+        assert response.status_code == 200
+        assert response.get("Content-Type") == "application/pdf"
+
+
+def _nir_client_setup(client):
+    """Helper para criar cliente NIR para testes de regressão."""
+    user = User.objects.create_user(username="nir.regression@test.com", password="testpass123")
+    return client, user
 
 
 @pytest.mark.django_db
