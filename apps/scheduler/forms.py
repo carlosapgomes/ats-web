@@ -85,7 +85,24 @@ class PostScheduleIssueForm(forms.Form):
     def clean(self) -> dict[str, Any]:
         cleaned: dict[str, Any] = super().clean() or {}
         action: str = str(cleaned.get("psi_action", ""))
-        response_message: str = str(cleaned.get("psi_response_message", ""))
+
+        # Fix: template has three <textarea name="psi_response_message"> (one per
+        # section). Browsers send all values; Django uses the last one (empty
+        # maintain section), silently discarding what the user typed in the
+        # visible cancel/deny section. We recover the first non-empty value here
+        # as defense-in-depth (the primary fix is client-side JS).
+        raw_messages: list[str] = (
+            self.data.getlist("psi_response_message")
+            if hasattr(self.data, "getlist")
+            else [str(self.data.get("psi_response_message", ""))]
+        )
+        response_message: str = ""
+        for msg in raw_messages:
+            if msg.strip():
+                response_message = msg
+                break
+        cleaned["psi_response_message"] = response_message
+
         appt_date = cleaned.get("psi_appointment_date")
         appt_time = cleaned.get("psi_appointment_time")
 
