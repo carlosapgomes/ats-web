@@ -708,6 +708,75 @@ class TestPostScheduleIssueRoleGuard:
         assert response.url == "/"
 
 
+class TestPostScheduleIssueFormDuplicateFields:
+    """RED: formulário lida com múltiplos psi_response_message (browser envia 3 valores)."""
+
+    def test_clean_picks_first_non_empty_from_multiple_values(self) -> None:
+        """Quando browser envia 3 psi_response_message (um por seção),
+        o clean() deve usar o primeiro valor não-vazio, não o último (Django default)."""
+        from django.http import QueryDict
+
+        from apps.scheduler.forms import PostScheduleIssueForm
+
+        # Simula o que o browser envia: cancel/deny preenchido, reschedule vazio, maintain vazio
+        qd = QueryDict(mutable=True)
+        qd.setlist("psi_action", ["cancel"])
+        qd.setlist("psi_response_message", ["Paciente faleceu.", "", ""])
+
+        form = PostScheduleIssueForm(qd)
+        assert form.is_valid(), f"Form should be valid but got errors: {form.errors}"
+        assert form.cleaned_data["psi_response_message"] == "Paciente faleceu.", (
+            f"Expected 'Paciente faleceu.' but got '{form.cleaned_data['psi_response_message']}'"
+        )
+
+    def test_clean_uses_first_non_empty_when_first_is_empty(self) -> None:
+        """Se 1º valor é vazio (ex: usuário preencheu reschedule section),
+        o clean() deve usar o primeiro valor não-vazio encontrado."""
+        from django.http import QueryDict
+
+        from apps.scheduler.forms import PostScheduleIssueForm
+
+        # Simula usuário que selecionou reschedule e preencheu o campo lá
+        qd = QueryDict(mutable=True)
+        qd.setlist("psi_action", ["reschedule"])
+        qd.setlist("psi_response_message", ["", "Reagendado conforme solicitado.", ""])
+        qd.setlist("psi_appointment_date", ["2026-07-15"])
+        qd.setlist("psi_appointment_time", ["10:30"])
+
+        form = PostScheduleIssueForm(qd)
+        assert form.is_valid(), f"Form should be valid but got errors: {form.errors}"
+        assert form.cleaned_data["psi_response_message"] == "Reagendado conforme solicitado."
+
+    def test_clean_fails_when_all_messages_empty_and_action_requires_message(self) -> None:
+        """Se todos os valores de psi_response_message são vazios e a ação exige
+        mensagem (cancel/deny), o formulário deve ser inválido."""
+        from django.http import QueryDict
+
+        from apps.scheduler.forms import PostScheduleIssueForm
+
+        qd = QueryDict(mutable=True)
+        qd.setlist("psi_action", ["deny"])
+        qd.setlist("psi_response_message", ["", "", ""])
+
+        form = PostScheduleIssueForm(qd)
+        assert not form.is_valid()
+        assert "psi_response_message" in form.errors
+        assert "obrigatória" in str(form.errors["psi_response_message"]).lower()
+
+    def test_clean_passes_when_all_empty_but_action_optional(self) -> None:
+        """Para ação 'maintain', mensagem é opcional. Todos vazios deve ser válido."""
+        from django.http import QueryDict
+
+        from apps.scheduler.forms import PostScheduleIssueForm
+
+        qd = QueryDict(mutable=True)
+        qd.setlist("psi_action", ["maintain"])
+        qd.setlist("psi_response_message", ["", "", ""])
+
+        form = PostScheduleIssueForm(qd)
+        assert form.is_valid(), f"Form should be valid but got errors: {form.errors}"
+
+
 class TestPostScheduleIssueExternalJS:
     """RED: template carrega JS externo e não contém inline."""
 
@@ -749,3 +818,20 @@ class TestPostScheduleIssueExternalJS:
         assert response.status_code == 200
         content = response.content.decode()
         assert "work_lock.js" in content
+
+    def test_js_file_contains_submit_handler_to_disable_hidden_fields(self) -> None:
+        """O JS externo contém o handler de submit que desabilita textareas ocultos
+        para evitar que múltiplos valores de psi_response_message sejam enviados."""
+        from pathlib import Path
+
+        js_path = Path("static/js/post_schedule_issue_form.js")
+        content = js_path.read_text()
+
+        # Verifica o handler de submit
+        assert "addEventListener('submit'" in content
+        # Verifica que desabilita textareas ocultos
+        assert "textarea.disabled = true" in content
+        # Verifica que busca a seção pai para checar visibilidade
+        assert "closest('.psi-section')" in content
+        # Verifica que checa display:none
+        assert "style.display === 'none'" in content

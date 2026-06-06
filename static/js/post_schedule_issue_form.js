@@ -37,4 +37,24 @@
   if (checked) {
     toggleSections(checked.value);
   }
+
+  // ── Fix: disable hidden psi_response_message fields before submit ──
+  // The template has three <textarea name="psi_response_message"> (one per section).
+  // When the form is submitted, the browser sends ALL of them. Django uses the
+  // LAST value, which is always the empty "maintain" section field, overwriting
+  // whatever the user typed in the visible section.
+  // Solution: disable hidden textareas so they are excluded from the POST data.
+  var psiForm = document.getElementById('psi-form');
+  if (psiForm) {
+    psiForm.addEventListener('submit', function () {
+      var allMessages = document.querySelectorAll('textarea[name="psi_response_message"]');
+      for (var j = 0; j < allMessages.length; j++) {
+        var textarea = allMessages[j];
+        var section = textarea.closest('.psi-section');
+        if (section && section.style.display === 'none') {
+          textarea.disabled = true;
+        }
+      }
+    });
+  }
 })();
