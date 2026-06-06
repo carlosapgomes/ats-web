@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import uuid
 from datetime import timedelta
+from typing import Any
 
 import pytest
 from django.contrib.auth import get_user_model
@@ -100,6 +101,48 @@ def _create_case_with_opened_issue(case_factory, advance_to, user) -> Case:
     return Case.objects.get(pk=case.pk)
 
 
+def _create_case_with_opened_issue_reason(case_factory, advance_to, reason: str, message: str = "") -> tuple[Case, Any]:  # noqa: ANN401  # User from get_user_model()
+    """Cria Case em WAIT_APPT com intercorrência de motivo específico.
+
+    Retorna (case, nir_user) para reuso nos testes.
+    """
+    from apps.cases.services import open_post_schedule_issue
+
+    nir_user = User.objects.create_user(username=f"nir-{reason}@test-issue.test", password="testpass123")
+    nir_user.roles.add(_create_role("nir"))
+
+    case = advance_to(case_factory(nir_user), CaseStatus.CLEANED)
+    case.doctor_decision = "accept"
+    case.doctor_admission_flow = "scheduled"
+    case.appointment_status = "confirmed"
+    case.agency_record_number = f"OCOR-{reason[:8].upper()}"
+    case.appointment_at = timezone.now() + timedelta(days=7)
+    case.appointment_location = "Hospital Central"
+    case.structured_data = {
+        "patient": {"name": f"Paciente {reason}", "age": 45, "sex": "F"},
+        "eda": {"indication_category": "HDA"},
+    }
+    case.save(
+        update_fields=[
+            "doctor_decision",
+            "doctor_admission_flow",
+            "appointment_status",
+            "agency_record_number",
+            "appointment_at",
+            "appointment_location",
+            "structured_data",
+        ]
+    )
+    case = Case.objects.get(pk=case.pk)
+    case = open_post_schedule_issue(
+        case=case,
+        user=nir_user,
+        reason=reason,
+        message=message,
+    )
+    return Case.objects.get(pk=case.pk), nir_user
+
+
 def _claim_lock(case_id, scheduler_user) -> str:
     """Acquire a scheduler_confirm lock and return token."""
     from apps.cases.services import claim_case_lock
@@ -154,6 +197,46 @@ class TestQueuePostScheduleIssue:
         content = response.content.decode()
         assert "reschedule_request" in content or "reagendamento" in content.lower()
         assert "Unidade solicita" in content
+
+    def test_issue_card_shows_portuguese_reason_label_death(self, client, case_factory, advance_to) -> None:
+        """Card com motivo 'death' mostra 'Paciente faleceu' em português."""
+        _login_as(client, "scheduler")
+        _create_case_with_opened_issue_reason(case_factory, advance_to, "death")
+
+        response = client.get("/scheduler/")
+        assert response.status_code == 200
+        content = response.content.decode()
+        assert "Paciente faleceu" in content
+
+    def test_issue_card_does_not_show_raw_code_death(self, client, case_factory, advance_to) -> None:
+        """Card NÃO mostra o código cru 'death' como motivo visível."""
+        _login_as(client, "scheduler")
+        _create_case_with_opened_issue_reason(case_factory, advance_to, "death")
+
+        response = client.get("/scheduler/")
+        assert response.status_code == 200
+        content = response.content.decode()
+        # O código 'death' não deve aparecer como texto de motivo visível;
+        # pode aparecer em atributos técnicos (name, value, data-*), mas não
+        # como texto de display do motivo.
+        motivo_death = content.count("Motivo (death)")
+        assert motivo_death == 0, f"Encontrado 'Motivo (death)' {motivo_death} vez(es) no HTML"
+
+    def test_issue_card_shows_reschedule_request_label_and_message(self, client, case_factory, advance_to) -> None:
+        """Card com 'reschedule_request' mostra label em português e mensagem do NIR."""
+        _login_as(client, "scheduler")
+        _create_case_with_opened_issue_reason(
+            case_factory,
+            advance_to,
+            "reschedule_request",
+            message="Paciente precisa de nova data por conflito de horário.",
+        )
+
+        response = client.get("/scheduler/")
+        assert response.status_code == 200
+        content = response.content.decode()
+        assert "Solicitação de reagendamento pela unidade de origem" in content
+        assert "Paciente precisa de nova data" in content
 
     def test_normal_case_without_issue_has_no_badge(self, client, case_factory, advance_to) -> None:
         """Caso WAIT_APPT normal (sem intercorrência) não mostra badge."""
@@ -252,6 +335,45 @@ class TestConfirmPostScheduleIssue:
         # Should NOT show intercurrence-specific action buttons
         assert 'value="reschedule"' not in content
         assert 'value="maintain"' not in content
+
+    def test_confirm_shows_portuguese_reason_label_death(self, client, case_factory, advance_to) -> None:
+        """Tela de confirmação com motivo 'death' mostra 'Paciente faleceu'."""
+        _login_as(client, "scheduler")
+        case, _ = _create_case_with_opened_issue_reason(case_factory, advance_to, "death")
+
+        response = client.get(f"/scheduler/{case.case_id}/")
+        assert response.status_code == 200
+        content = response.content.decode()
+        assert "Paciente faleceu" in content
+
+    def test_confirm_does_not_show_raw_code_death(self, client, case_factory, advance_to) -> None:
+        """Tela de confirmação NÃO mostra 'Motivo: death' como texto visível."""
+        _login_as(client, "scheduler")
+        case, _ = _create_case_with_opened_issue_reason(case_factory, advance_to, "death")
+
+        response = client.get(f"/scheduler/{case.case_id}/")
+        assert response.status_code == 200
+        content = response.content.decode()
+        # A seção de motivo deve conter a label em português, não o código cru
+        assert "Paciente faleceu" in content
+        # O texto 'Motivo: death' NÃO deve aparecer (antes mostrava o código cru)
+        assert "Motivo: death" not in content
+
+    def test_confirm_shows_reschedule_request_label_and_message(self, client, case_factory, advance_to) -> None:
+        """Tela de confirmação com 'reschedule_request' mostra label em português e mensagem."""
+        _login_as(client, "scheduler")
+        case, _ = _create_case_with_opened_issue_reason(
+            case_factory,
+            advance_to,
+            "reschedule_request",
+            message="Reagendar para próxima semana.",
+        )
+
+        response = client.get(f"/scheduler/{case.case_id}/")
+        assert response.status_code == 200
+        content = response.content.decode()
+        assert "Solicitação de reagendamento pela unidade de origem" in content
+        assert "Reagendar para próxima semana." in content
 
 
 # ══════════════════════════════════════════════════════════════════════════

@@ -17,6 +17,7 @@ from apps.cases.services import (
     claim_case_lock,
     compute_lock_display,
     expire_stale_locks_for_statuses,
+    get_post_schedule_issue_reason_label,
 )
 from apps.cases.services import (
     release_case_lock as release_lock_service,
@@ -452,20 +453,10 @@ def case_detail(request: HttpRequest, case_id: uuid.UUID) -> HttpResponse:
             "maintain": "Mantido",
             "deny": "Solicitação Negada",
         }
-        issue_reason_labels = {
-            "death": "Paciente faleceu",
-            "clinical_condition": "Paciente sem condição clínica de transporte",
-            "transport_unavailable": "Transporte indisponível pela unidade de origem",
-            "external_regulation": "Exame realizado pela regulação estadual em outro serviço",
-            "reschedule_request": "Solicitação de reagendamento pela unidade de origem",
-            "other": "Outro",
-        }
         result_info = {
             "type": "post_schedule_issue_responded",
             "nir_reason_code": case.post_schedule_issue_reason,
-            "nir_reason_label": issue_reason_labels.get(
-                case.post_schedule_issue_reason, case.post_schedule_issue_reason
-            ),
+            "nir_reason_label": get_post_schedule_issue_reason_label(case.post_schedule_issue_reason),
             "nir_message": case.post_schedule_issue_message,
             "response_action": case.post_schedule_issue_response_action,
             "response_action_label": issue_action_labels.get(
