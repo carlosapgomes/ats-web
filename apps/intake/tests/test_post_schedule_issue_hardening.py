@@ -434,3 +434,75 @@ class TestSearchClearMessages:
         content = response.content.decode()
         assert "Intercorrência respondida" in content
         assert "Registrar intercorrência" not in content
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# EVENT_LABELS completeness — todo event_type do código tem label pt-BR
+# ═══════════════════════════════════════════════════════════════════════════
+
+
+class TestEventLabelsCompleteness:
+    """Todo event_type usado em _record_event() tem label em EVENT_LABELS."""
+
+    def test_all_event_types_have_portuguese_labels(self) -> None:
+        """Coleta todos os event types do código (exclui tests) e verifica
+        que cada um tem label em EVENT_LABELS."""
+        import re
+        from pathlib import Path
+
+        from apps.intake.views import EVENT_LABELS
+
+        apps_dir = Path("apps")
+        event_types: set[str] = set()
+
+        for py_file in apps_dir.rglob("*.py"):
+            if "test" in str(py_file).lower() or "migration" in str(py_file).lower():
+                continue
+            try:
+                source = py_file.read_text()
+            except Exception:
+                continue
+
+            # 1) Literal strings: _record_event(..., "EVENT_TYPE", ...)
+            #    DOTALL pq chamadas em services.py usam múltiplas linhas
+            for match in re.finditer(
+                r'_record_event\(.*?["\']([A-Z][A-Z_0-9]+)["\']',
+                source,
+                re.DOTALL,
+            ):
+                event_types.add(match.group(1))
+
+            # 2) f-string prefix: _record_event(f"PREFIX_{var}"
+            for match in re.finditer(r'_record_event\(\s*f["\']([A-Z][A-Z_]+)_', source):
+                prefix = match.group(1)
+                # Known expansions from models.py:
+                #   f"LLM1_{success}" → LLM1_OK, LLM1_FAILED
+                #   f"LLM2_{success}" → LLM2_OK, LLM2_FAILED
+                #   f"DOCTOR_{decision}" → DOCTOR_ACCEPT, DOCTOR_DENY
+                #   f"APPT_{appointment_status}" → APPT_CONFIRMED, APPT_DENIED
+                known: dict[str, list[str]] = {
+                    "LLM1": ["LLM1_OK", "LLM1_FAILED"],
+                    "LLM2": ["LLM2_OK", "LLM2_FAILED"],
+                    "DOCTOR": ["DOCTOR_ACCEPT", "DOCTOR_DENY"],
+                    "APPT": ["APPT_CONFIRMED", "APPT_DENIED"],
+                }
+                for candidate in known.get(prefix, []):
+                    event_types.add(candidate)
+
+            # 3) CaseEvent.objects.create(event_type="..." (signals.py)
+            for match in re.finditer(
+                r'CaseEvent\.objects\.create\([^)]*event_type=["\']([A-Z][A-Z_0-9]+)["\']',
+                source,
+            ):
+                event_types.add(match.group(1))
+
+        # Sanity: at least some known event types must be found
+        assert "CASE_CREATED" in event_types, "Sanity: CASE_CREATED not found (signals.py)"
+        assert "WORK_LOCK_CLAIMED" in event_types, "Sanity: WORK_LOCK_CLAIMED not found"
+        assert "DOCTOR_ACCEPT" in event_types, "Sanity: DOCTOR_ACCEPT not found"
+
+        missing = sorted(et for et in event_types if et not in EVENT_LABELS)
+        assert missing == [], (
+            f"Event types sem label em EVENT_LABELS: {missing}. "
+            f"Adicione a tradução em apps/intake/views.py:EVENT_LABELS"
+        )

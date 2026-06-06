@@ -101,7 +101,9 @@ EVENT_LABELS: dict[str, str] = {
     "CASE_EXTRACTION_OK": "Extração de dados concluída",
     "CASE_EXTRACTION_FAILED": "Falha na extração de dados",
     "LLM1_OK": "Análise IA (estrutura) concluída",
+    "LLM1_FAILED": "Falha na análise IA (estrutura)",
     "LLM2_OK": "Análise IA (sugestão) concluída",
+    "LLM2_FAILED": "Falha na análise IA (sugestão)",
     "CASE_READY_FOR_DOCTOR": "Caso enviado para avaliação médica",
     "DOCTOR_ACCEPT": "Aceito pelo médico",
     "DOCTOR_DENY": "Recusado pelo médico",
@@ -115,6 +117,21 @@ EVENT_LABELS: dict[str, str] = {
     "POST_SCHEDULE_ISSUE_OPENED": "Intercorrência aberta",
     "POST_SCHEDULE_ISSUE_RESPONDED": "Intercorrência respondida pelo agendador",
     "POST_SCHEDULE_ISSUE_ACKNOWLEDGED": "Ciência de intercorrência confirmada",
+    # ── Scope gate ───────────────────────────────────────────
+    "SCOPE_GATE_BYPASS": "Fora do escopo — revisão manual necessária",
+    # ── Pipeline / sistema ────────────────────────────────────
+    "EDA_SCOPE_GATED_MANUAL_REVIEW": "Encaminhado para revisão manual",
+    "EDA_PREOP_POLICY_DECISION": "Política pré-operatória avaliada",
+    "PIPELINE_FAILED": "Falha no processamento",
+    "PRIOR_CASE_LOOKUP": "Casos anteriores consultados",
+    "REGULATION_REPORT_GATE_FAILED": "Laudo de regulação inválido",
+    # ── Work locks ────────────────────────────────────────────
+    "WORK_LOCK_CLAIMED": "Caso reservado",
+    "WORK_LOCK_RELEASED": "Reserva liberada",
+    "WORK_LOCK_EXPIRED": "Reserva expirada",
+    # ── Vinda imediata ────────────────────────────────────────
+    "IMMEDIATE_ADMISSION_OPERATIONAL_NOTICE": "Aviso de vinda imediata",
+    "SCHEDULER_IMMEDIATE_ACK": "Ciência de vinda imediata",
 }
 
 # Cores do dot da timeline por event_type
@@ -136,7 +153,9 @@ EVENT_DOT_CSS: dict[str, str] = {
     "CASE_EXTRACTION_OK": "system",
     "CASE_EXTRACTION_FAILED": "system",
     "LLM1_OK": "system",
+    "LLM1_FAILED": "system",
     "LLM2_OK": "system",
+    "LLM2_FAILED": "system",
     "CASE_READY_FOR_DOCTOR": "system",
     "DOCTOR_ACCEPT": "doctor",
     "DOCTOR_DENY": "doctor",
@@ -150,6 +169,21 @@ EVENT_DOT_CSS: dict[str, str] = {
     "POST_SCHEDULE_ISSUE_OPENED": "nir",
     "POST_SCHEDULE_ISSUE_RESPONDED": "scheduler",
     "POST_SCHEDULE_ISSUE_ACKNOWLEDGED": "nir",
+    # ── Scope gate ───────────────────────────────────────────
+    "SCOPE_GATE_BYPASS": "system",
+    # ── Pipeline / sistema ────────────────────────────────────
+    "EDA_SCOPE_GATED_MANUAL_REVIEW": "system",
+    "EDA_PREOP_POLICY_DECISION": "system",
+    "PIPELINE_FAILED": "system",
+    "PRIOR_CASE_LOOKUP": "system",
+    "REGULATION_REPORT_GATE_FAILED": "system",
+    # ── Work locks ────────────────────────────────────────────
+    "WORK_LOCK_CLAIMED": "system",
+    "WORK_LOCK_RELEASED": "system",
+    "WORK_LOCK_EXPIRED": "system",
+    # ── Vinda imediata ────────────────────────────────────────
+    "IMMEDIATE_ADMISSION_OPERATIONAL_NOTICE": "system",
+    "SCHEDULER_IMMEDIATE_ACK": "scheduler",
 }
 
 # Etapas do stepper
