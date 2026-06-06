@@ -250,6 +250,22 @@ class TestPostScheduleIssueForm:
         assert case.post_schedule_issue_status == "opened"
         assert case.post_schedule_issue_reason == "death"
 
+    def test_post_reason_em_branco_mostra_erro(self, client, case_factory, advance_to) -> None:
+        """POST com motivo em branco mostra erro de validação."""
+        client, user = _nir_client(client)
+        case = _build_cleaned_confirmed(case_factory, advance_to, user)
+
+        response = client.post(
+            self._issue_url(case.case_id),
+            {"reason": "", "message": ""},
+        )
+        assert response.status_code == 200  # mesma página com erro
+        content = response.content.decode()
+        assert "Selecione um motivo" in content
+
+        case = self._fresh(case)
+        assert case.status == CaseStatus.CLEANED  # não mudou
+
     def test_post_clinical_condition_mensagem_vazia_mostra_erro(self, client, case_factory, advance_to) -> None:
         """POST com motivo clinical_condition e mensagem vazia mostra erro."""
         client, user = _nir_client(client)
