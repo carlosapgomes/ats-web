@@ -430,6 +430,25 @@ POST_SCHEDULE_ISSUE_SCHEDULER_ACTIONS: tuple[str, ...] = (
 )
 
 
+# Labels em português para exibição na UI
+POST_SCHEDULE_ISSUE_REASON_LABELS: dict[str, str] = {
+    "death": "Paciente faleceu",
+    "clinical_condition": "Paciente sem condição clínica de transporte",
+    "transport_unavailable": "Transporte indisponível pela unidade de origem",
+    "external_regulation": "Exame realizado pela regulação estadual em outro serviço",
+    "reschedule_request": "Solicitação de reagendamento pela unidade de origem",
+    "other": "Outro",
+}
+
+
+def get_post_schedule_issue_reason_label(reason: str) -> str:
+    """Retorna label em português para um motivo de intercorrência.
+
+    Se o motivo não for reconhecido, retorna o próprio código como fallback.
+    """
+    return POST_SCHEDULE_ISSUE_REASON_LABELS.get(reason, reason)
+
+
 # ── Post-schedule intercurrence services ────────────────────────────────
 
 
