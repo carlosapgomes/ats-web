@@ -2,6 +2,7 @@
 
 import uuid
 from datetime import date, timedelta
+from typing import Any
 
 import pytest
 from django.contrib.auth import get_user_model
@@ -50,7 +51,7 @@ class TestSchedulerQueueView:
         response = client.get("/scheduler/")
         assert response.status_code == 200
         content = response.content.decode()
-        assert 'hx-get="/scheduler/partials/queue/"' in content
+        assert 'hx-get="/scheduler/partials/queue/?tab=pending"' in content
         assert 'hx-trigger="every 20s"' in content
 
     def test_queue_partial_renders_without_layout(self, client) -> None:
@@ -1878,3 +1879,197 @@ class TestSchedulerLockReleaseOnSubmit:
         case = Case.objects.get(pk=case.case_id)
         assert case.locked_by == nir_user
         assert case.lock_context == "nir_receipt"
+
+
+@pytest.mark.django_db
+class TestSchedulerProcessedTodayTab:
+    """Tests for the Processados Hoje tab in scheduler queue."""
+
+    def _create_role(self, name: str):
+        role, _ = Role.objects.get_or_create(name=name)
+        return role
+
+    def _login_as(self, client, role_name: str) -> Any:
+        user = User.objects.create_user(username=f"{role_name}@proctab.test", password="testpass123")
+        user.roles.add(self._create_role(role_name))
+        client.force_login(user)
+        session = client.session
+        session["active_role"] = role_name
+        session.save()
+        return user
+
+    def _create_case(self, scheduler_user: Any = None, **overrides: Any) -> Case:
+        nir_user = User.objects.create_user(username="nir_proctab@test.com", password="testpass123")
+        nir_user.roles.add(self._create_role("nir"))
+        defaults: dict[str, Any] = {
+            "created_by": nir_user,
+            "status": CaseStatus.WAIT_R1_CLEANUP_THUMBS,
+            "doctor_decision": "accept",
+            "doctor_support_flag": "anesthesist",
+            "doctor_admission_flow": "scheduled",
+            "scheduler": scheduler_user or nir_user,
+            "appointment_status": "confirmed",
+            "appointment_decided_at": timezone.now(),
+            "structured_data": {
+                "patient": {
+                    "name": "Paciente Processado",
+                    "age": 45,
+                    "gender": "Masculino",
+                },
+            },
+        }
+        defaults.update(overrides)
+        case = Case.objects.create(**defaults)
+        case.save()
+        return case
+
+    # ── Navigation tests ────────────────────────────────────────────────
+
+    def test_queue_nav_has_functional_processed_tab_and_no_history(self, client) -> None:
+        """GET /scheduler/ contains Processados Hoje link, no Histórico nor Confirmados Hoje."""
+        self._login_as(client, "scheduler")
+        response = client.get("/scheduler/")
+        assert response.status_code == 200
+        content = response.content.decode()
+        assert "?tab=processed" in content
+        assert "Processados Hoje" in content
+        assert "Histórico" not in content
+        assert "Confirmados Hoje" not in content
+
+    # ── Query tests ────────────────────────────────────────────────────
+
+    def test_processed_today_tab_uses_appointment_decided_at_not_status(self, client) -> None:
+        """Processados Hoje uses appointment_decided_at, not FSM status."""
+        scheduler_user = self._login_as(client, "scheduler")
+        self._create_case(
+            scheduler_user=scheduler_user,
+            appointment_status="confirmed",
+            appointment_decided_at=timezone.now(),
+            status=CaseStatus.CLEANED,
+            agency_record_number="DECIDED-001",
+        )
+        response = client.get("/scheduler/?tab=processed")
+        assert response.status_code == 200
+        content = response.content.decode()
+        assert "DECIDED-001" in content or "Paciente Processado" in content
+
+    def test_processed_today_tab_includes_denied_cases(self, client) -> None:
+        """Denied cases appear in Processados Hoje."""
+        scheduler_user = self._login_as(client, "scheduler")
+        self._create_case(
+            scheduler_user=scheduler_user,
+            appointment_status="denied",
+            appointment_decided_at=timezone.now(),
+            appointment_reason="Vaga indisponível",
+            agency_record_number="DENIED-001",
+        )
+        response = client.get("/scheduler/?tab=processed")
+        assert response.status_code == 200
+        content = response.content.decode()
+        assert "DENIED-001" in content
+
+    def test_processed_today_tab_excludes_other_scheduler_cases(self, client) -> None:
+        """Cases processed by another scheduler do not appear."""
+        self._login_as(client, "scheduler")
+        other_scheduler = User.objects.create_user(username="other_sched_proc@test.com", password="testpass123")
+        other_scheduler.roles.add(self._create_role("scheduler"))
+        self._create_case(
+            scheduler_user=other_scheduler,
+            appointment_status="confirmed",
+            appointment_decided_at=timezone.now(),
+            agency_record_number="OTHER-SCHED",
+        )
+        response = client.get("/scheduler/?tab=processed")
+        assert response.status_code == 200
+        content = response.content.decode()
+        assert "OTHER-SCHED" not in content
+
+    def test_pending_tab_does_not_render_processed_list(self, client) -> None:
+        """GET /scheduler/?tab=pending does not show processed list."""
+        scheduler_user = self._login_as(client, "scheduler")
+        self._create_case(
+            scheduler_user=scheduler_user,
+            appointment_status="confirmed",
+            appointment_decided_at=timezone.now(),
+            agency_record_number="PEND-NO-SHOW",
+        )
+        response = client.get("/scheduler/?tab=pending")
+        assert response.status_code == 200
+        content = response.content.decode()
+        assert "PEND-NO-SHOW" not in content
+
+    def test_processed_tab_has_detail_link(self, client) -> None:
+        """Processados Hoje item contains link to processed_detail."""
+        scheduler_user = self._login_as(client, "scheduler")
+        case = self._create_case(
+            scheduler_user=scheduler_user,
+            appointment_status="confirmed",
+            appointment_decided_at=timezone.now(),
+            agency_record_number="DETAIL-LINK",
+        )
+        response = client.get("/scheduler/?tab=processed")
+        assert response.status_code == 200
+        content = response.content.decode()
+        assert f"processed/{case.case_id}/" in content
+        assert "Ver detalhes" in content
+
+    # ── Detail view tests ──────────────────────────────────────────────
+
+    def test_scheduler_processed_detail_renders_read_only_case_detail(self, client) -> None:
+        """Scheduler can view read-only detail of own processed case."""
+        scheduler_user = self._login_as(client, "scheduler")
+        case = self._create_case(
+            scheduler_user=scheduler_user,
+            appointment_status="confirmed",
+            appointment_decided_at=timezone.now(),
+            agency_record_number="DETAIL-001",
+        )
+        response = client.get(f"/scheduler/processed/{case.case_id}/")
+        assert response.status_code == 200
+        content = response.content.decode()
+        assert "DETAIL-001" in content or case.agency_record_number in content
+        assert "Voltar aos processados hoje" in content
+        assert "btn-hospital-outline" in content or "btn-outline-secondary" in content
+
+    def test_scheduler_processed_detail_404_for_other_scheduler_case(self, client) -> None:
+        """Scheduler A gets 404 for case processed by scheduler B."""
+        self._login_as(client, "scheduler")
+        other_scheduler = User.objects.create_user(username="other_sched_detail@test.com", password="testpass123")
+        other_scheduler.roles.add(self._create_role("scheduler"))
+        case = self._create_case(
+            scheduler_user=other_scheduler,
+            appointment_status="confirmed",
+            appointment_decided_at=timezone.now(),
+            agency_record_number="OTHER-DETAIL",
+        )
+        response = client.get(f"/scheduler/processed/{case.case_id}/")
+        assert response.status_code == 404
+
+    def test_scheduler_processed_pdf_404_for_other_scheduler_case(self, client) -> None:
+        """Scheduler A gets 404 for PDF of case processed by scheduler B."""
+        self._login_as(client, "scheduler")
+        other_scheduler = User.objects.create_user(username="other_sched_pdf@test.com", password="testpass123")
+        other_scheduler.roles.add(self._create_role("scheduler"))
+        case = self._create_case(
+            scheduler_user=other_scheduler,
+            appointment_status="confirmed",
+            appointment_decided_at=timezone.now(),
+            agency_record_number="OTHER-PDF",
+        )
+        response = client.get(f"/scheduler/processed/{case.case_id}/pdf/")
+        assert response.status_code == 404
+
+    def test_queue_partial_preserves_processed_tab(self, client) -> None:
+        """HTMX partial for tab=processed returns processed content, not pending."""
+        scheduler_user = self._login_as(client, "scheduler")
+        self._create_case(
+            scheduler_user=scheduler_user,
+            appointment_status="confirmed",
+            appointment_decided_at=timezone.now(),
+            agency_record_number="PARTIAL-PROC",
+        )
+        response = client.get("/scheduler/partials/queue/?tab=processed")
+        assert response.status_code == 200
+        content = response.content.decode()
+        assert "PARTIAL-PROC" in content
+        assert "Atualizado automaticamente" in content

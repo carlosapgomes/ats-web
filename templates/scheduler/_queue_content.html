@@ -1,32 +1,137 @@
 <!-- Alert / Count -->
-{% if total_notice_count > 0 %}
-<div class="alert alert-info d-flex align-items-center gap-2 mb-4" role="alert">
-  <span class="pulse-dot"></span>
-  <strong>
-    {{ pending_count }} solicitação{% if pending_count != 1 %}ções{% endif %} aguardando confirmação
-    {% if immediate_notice_count %} · {{ immediate_notice_count }} vinda{% if immediate_notice_count != 1 %}s{% endif %} imediata{% if immediate_notice_count != 1 %}s{% endif %} para ciência operacional{% endif %}.
-  </strong>
-</div>
-{% else %}
-<div class="alert alert-info d-flex align-items-center gap-2 mb-4" role="alert">
-  Nenhuma solicitação aguardando confirmação no momento.
-</div>
-{% endif %}
+{% if active_tab == "pending" %}
+  {% if total_notice_count > 0 %}
+  <div class="alert alert-info d-flex align-items-center gap-2 mb-4" role="alert">
+    <span class="pulse-dot"></span>
+    <strong>
+      {{ pending_count }} solicitação{% if pending_count != 1 %}ções{% endif %} aguardando confirmação
+      {% if immediate_notice_count %} · {{ immediate_notice_count }} vinda{% if immediate_notice_count != 1 %}s{% endif %} imediata{% if immediate_notice_count != 1 %}s{% endif %} para ciência operacional{% endif %}.
+    </strong>
+  </div>
+  {% else %}
+  <div class="alert alert-info d-flex align-items-center gap-2 mb-4" role="alert">
+    Nenhuma solicitação aguardando confirmação no momento.
+  </div>
+  {% endif %}
 
-{% if immediate_notice_cases %}
-<div class="card p-4 mb-4 border-warning">
-  <h5 class="mb-3">⚡ Vinda imediata autorizada — ciência operacional</h5>
-  <p class="text-muted mb-3">Não abrir agendamento para estes casos. Comunicação apenas para ciência operacional.</p>
+  {% if immediate_notice_cases %}
+  <div class="card p-4 mb-4 border-warning">
+    <h5 class="mb-3">⚡ Vinda imediata autorizada — ciência operacional</h5>
+    <p class="text-muted mb-3">Não abrir agendamento para estes casos. Comunicação apenas para ciência operacional.</p>
+    <div class="row g-3">
+      {% for c in immediate_notice_cases %}
+      <div class="col-12">
+        <div class="case-card card p-3 bg-warning bg-opacity-10">
+          <div class="row">
+            <div class="col-lg-8">
+              <div class="patient-name mb-1">{{ c.patient_name }}</div>
+              {% if c.has_doctor_observation %}
+              <span class="badge bg-info text-dark mb-2">📝 Obs. médica</span>
+              {% endif %}
+              <div class="case-meta mb-2">
+                {% if c.agency_record_number %}Reg. {{ c.agency_record_number }} · {% endif %}
+                {% if c.patient_age %}{{ c.patient_age }} anos · {% endif %}
+                {{ c.patient_gender }}
+                {% if c.origin_unit %} · 🏥 {{ c.origin_unit }}{% endif %}
+              </div>
+              <div class="summary-box mb-2">
+                <div class="row">
+                  <div class="col-sm-5 mb-2"><div class="summary-label">Diagnóstico</div><div class="summary-value">{{ c.diagnosis|default:"—" }}</div></div>
+                  <div class="col-sm-3 mb-2"><div class="summary-label">Suporte</div><div class="summary-value">{{ c.support_flag_display }}</div></div>
+                  <div class="col-sm-4 mb-2"><div class="summary-label">Fluxo</div><div class="summary-value"><strong>{{ c.admission_flow_display }}</strong></div></div>
+                </div>
+                {% if c.doctor_display %}
+                <div class="row mt-1">
+                  <div class="col-sm-12"><div class="summary-label">Médico</div><div class="summary-value">{{ c.doctor_display }}</div></div>
+                </div>
+                {% endif %}
+              </div>
+              {% if c.has_doctor_observation %}
+              <div class="alert alert-info py-2 px-3 mt-2 mb-0 small">
+                <strong>📝 Observação médica:</strong> {{ c.doctor_observation }}
+              </div>
+              {% endif %}
+            </div>
+            <div class="col-lg-4 text-lg-end mt-3 mt-lg-0 d-flex flex-lg-column justify-content-between align-items-lg-end">
+              <div><span class="badge bg-warning text-dark mb-2">Não agendar</span><div class="waiting-time">Registrado há {{ c.wait_minutes }} min</div></div>
+              <form method="post" action="{% url 'scheduler:immediate_ack' c.case_id %}" class="mt-2">
+                {% csrf_token %}
+                <button type="submit" class="btn btn-hospital">Confirmar ciência</button>
+              </form>
+            </div>
+          </div>
+        </div>
+      </div>
+      {% endfor %}
+    </div>
+  </div>
+  {% endif %}
+
+  {% if pending_cases %}
   <div class="row g-3">
-    {% for c in immediate_notice_cases %}
+    {% for c in pending_cases %}
     <div class="col-12">
-      <div class="case-card card p-3 bg-warning bg-opacity-10">
+      <div class="case-card card p-3">
         <div class="row">
           <div class="col-lg-8">
             <div class="patient-name mb-1">{{ c.patient_name }}</div>
             {% if c.has_doctor_observation %}
             <span class="badge bg-info text-dark mb-2">📝 Obs. médica</span>
             {% endif %}
+            {% if c.has_post_schedule_issue %}
+            <span class="badge bg-warning text-dark mb-2">⚠️ Intercorrência pós-agendamento</span>
+            {% endif %}
+            {% if c.has_post_schedule_issue %}
+            <div class="alert alert-warning py-2 px-3 mt-1 mb-2 small">
+              <strong>Motivo:</strong> {{ c.post_schedule_issue_reason_label }}
+              {% if c.post_schedule_issue_message %}
+              <br><strong>Mensagem do NIR:</strong> {{ c.post_schedule_issue_message }}
+              {% endif %}
+            </div>
+            {% endif %}
+            <div class="case-meta mb-2">{% if c.agency_record_number %}Reg. {{ c.agency_record_number }} · {% endif %}{% if c.patient_age %}{{ c.patient_age }} anos · {% endif %}{{ c.patient_gender }}{% if c.origin_unit %} · 🏥 {{ c.origin_unit }}{% endif %}</div>
+            <div class="summary-box mb-2">
+              <div class="row">
+                <div class="col-sm-4 mb-2"><div class="summary-label">Diagnóstico</div><div class="summary-value">{{ c.diagnosis|default:"—" }}</div></div>
+                <div class="col-sm-3 mb-2"><div class="summary-label">Decisão Médica</div><div class="summary-value"><span class="status-badge status-accepted">{{ c.doctor_decision_display }}</span></div></div>
+                <div class="col-sm-2 mb-2"><div class="summary-label">Suporte</div><div class="summary-value">{{ c.support_flag_display }}</div></div>
+                <div class="col-sm-3 mb-2"><div class="summary-label">Fluxo</div><div class="summary-value">{{ c.admission_flow_display }}</div></div>
+              </div>
+              {% if c.doctor_display %}
+              <div class="row mt-1">
+                <div class="col-sm-12"><div class="summary-label">Médico</div><div class="summary-value">{{ c.doctor_display }}</div></div>
+              </div>
+              {% endif %}
+            </div>
+          </div>
+          <div class="col-lg-4 text-lg-end mt-3 mt-lg-0 d-flex flex-lg-column justify-content-between align-items-lg-end">
+            <div class="waiting-time">⏱ Aguardando há {{ c.wait_minutes }} min</div>
+            {% if c.is_locked_by_current_user %}
+            <a href="{% url 'scheduler:confirm' c.case_id %}" class="btn btn-success mt-2">▶ Continuar</a>
+            {% elif c.is_locked %}
+            <button class="btn btn-secondary mt-2" disabled title="Reservado por {{ c.locked_by_display }}">
+              🔒 Reservado
+            </button>
+            <div class="small text-muted mt-1">por {{ c.locked_by_display }}</div>
+            {% else %}
+            <a href="{% url 'scheduler:confirm' c.case_id %}" class="btn btn-hospital mt-2">Agendar</a>
+            {% endif %}
+          </div>
+        </div>
+      </div>
+    </div>
+    {% endfor %}
+  </div>
+  {% endif %}
+{% elif active_tab == "processed" %}
+  {% if processed_today %}
+  <div class="row g-3">
+    {% for c in processed_today %}
+    <div class="col-12">
+      <div class="case-card card p-3">
+        <div class="row">
+          <div class="col-lg-8">
+            <div class="patient-name mb-1">{{ c.patient_name }}</div>
             <div class="case-meta mb-2">
               {% if c.agency_record_number %}Reg. {{ c.agency_record_number }} · {% endif %}
               {% if c.patient_age %}{{ c.patient_age }} anos · {% endif %}
@@ -35,9 +140,9 @@
             </div>
             <div class="summary-box mb-2">
               <div class="row">
-                <div class="col-sm-5 mb-2"><div class="summary-label">Diagnóstico</div><div class="summary-value">{{ c.diagnosis|default:"—" }}</div></div>
+                <div class="col-sm-4 mb-2"><div class="summary-label">Diagnóstico</div><div class="summary-value">{{ c.diagnosis|default:"—" }}</div></div>
                 <div class="col-sm-3 mb-2"><div class="summary-label">Suporte</div><div class="summary-value">{{ c.support_flag_display }}</div></div>
-                <div class="col-sm-4 mb-2"><div class="summary-label">Fluxo</div><div class="summary-value"><strong>{{ c.admission_flow_display }}</strong></div></div>
+                <div class="col-sm-3 mb-2"><div class="summary-label">Fluxo</div><div class="summary-value">{{ c.admission_flow_display }}</div></div>
               </div>
               {% if c.doctor_display %}
               <div class="row mt-1">
@@ -45,98 +150,31 @@
               </div>
               {% endif %}
             </div>
-            {% if c.has_doctor_observation %}
-            <div class="alert alert-info py-2 px-3 mt-2 mb-0 small">
-              <strong>📝 Observação médica:</strong> {{ c.doctor_observation }}
-            </div>
+            {% if c.appointment_status == "confirmed" and c.appointment_at %}
+            <div class="small text-muted mt-1">📅 Agendado para {{ c.appointment_at|date:"d/m/Y H:i" }}</div>
+            {% elif c.appointment_status == "denied" and c.appointment_reason %}
+            <div class="small text-muted mt-1">Motivo: {{ c.appointment_reason }}</div>
             {% endif %}
           </div>
           <div class="col-lg-4 text-lg-end mt-3 mt-lg-0 d-flex flex-lg-column justify-content-between align-items-lg-end">
-            <div><span class="badge bg-warning text-dark mb-2">Não agendar</span><div class="waiting-time">Registrado há {{ c.wait_minutes }} min</div></div>
-            <form method="post" action="{% url 'scheduler:immediate_ack' c.case_id %}" class="mt-2">
-              {% csrf_token %}
-              <button type="submit" class="btn btn-hospital">Confirmar ciência</button>
-            </form>
+            <div>
+              <span class="badge {% if c.appointment_status == 'confirmed' %}bg-success{% else %}bg-secondary{% endif %} mb-2">
+                {{ c.appointment_status_label }}
+              </span>
+              <div class="waiting-time">Processado {{ c.appointment_decided_at|timesince }} atrás</div>
+            </div>
+            <a href="{% url 'scheduler:processed_detail' c.case_id %}" class="btn btn-hospital-outline mt-2">Ver detalhes</a>
           </div>
         </div>
       </div>
     </div>
     {% endfor %}
   </div>
-</div>
-{% endif %}
-
-{% if pending_cases %}
-<div class="row g-3">
-  {% for c in pending_cases %}
-  <div class="col-12">
-    <div class="case-card card p-3">
-      <div class="row">
-        <div class="col-lg-8">
-          <div class="patient-name mb-1">{{ c.patient_name }}</div>
-          {% if c.has_doctor_observation %}
-          <span class="badge bg-info text-dark mb-2">📝 Obs. médica</span>
-          {% endif %}
-          {% if c.has_post_schedule_issue %}
-          <span class="badge bg-warning text-dark mb-2">⚠️ Intercorrência pós-agendamento</span>
-          {% endif %}
-          {% if c.has_post_schedule_issue %}
-          <div class="alert alert-warning py-2 px-3 mt-1 mb-2 small">
-            <strong>Motivo:</strong> {{ c.post_schedule_issue_reason_label }}
-            {% if c.post_schedule_issue_message %}
-            <br><strong>Mensagem do NIR:</strong> {{ c.post_schedule_issue_message }}
-            {% endif %}
-          </div>
-          {% endif %}
-          <div class="case-meta mb-2">{% if c.agency_record_number %}Reg. {{ c.agency_record_number }} · {% endif %}{% if c.patient_age %}{{ c.patient_age }} anos · {% endif %}{{ c.patient_gender }}{% if c.origin_unit %} · 🏥 {{ c.origin_unit }}{% endif %}</div>
-          <div class="summary-box mb-2">
-            <div class="row">
-              <div class="col-sm-4 mb-2"><div class="summary-label">Diagnóstico</div><div class="summary-value">{{ c.diagnosis|default:"—" }}</div></div>
-              <div class="col-sm-3 mb-2"><div class="summary-label">Decisão Médica</div><div class="summary-value"><span class="status-badge status-accepted">{{ c.doctor_decision_display }}</span></div></div>
-              <div class="col-sm-2 mb-2"><div class="summary-label">Suporte</div><div class="summary-value">{{ c.support_flag_display }}</div></div>
-              <div class="col-sm-3 mb-2"><div class="summary-label">Fluxo</div><div class="summary-value">{{ c.admission_flow_display }}</div></div>
-            </div>
-            {% if c.doctor_display %}
-            <div class="row mt-1">
-              <div class="col-sm-12"><div class="summary-label">Médico</div><div class="summary-value">{{ c.doctor_display }}</div></div>
-            </div>
-            {% endif %}
-          </div>
-        </div>
-        <div class="col-lg-4 text-lg-end mt-3 mt-lg-0 d-flex flex-lg-column justify-content-between align-items-lg-end">
-          <div class="waiting-time">⏱ Aguardando há {{ c.wait_minutes }} min</div>
-          {% if c.is_locked_by_current_user %}
-          <a href="{% url 'scheduler:confirm' c.case_id %}" class="btn btn-success mt-2">▶ Continuar</a>
-          {% elif c.is_locked %}
-          <button class="btn btn-secondary mt-2" disabled title="Reservado por {{ c.locked_by_display }}">
-            🔒 Reservado
-          </button>
-          <div class="small text-muted mt-1">por {{ c.locked_by_display }}</div>
-          {% else %}
-          <a href="{% url 'scheduler:confirm' c.case_id %}" class="btn btn-hospital mt-2">Agendar</a>
-          {% endif %}
-        </div>
-      </div>
-    </div>
+  {% else %}
+  <div class="alert alert-info d-flex align-items-center gap-2 mb-4" role="alert">
+    Nenhum caso processado hoje.
   </div>
-  {% endfor %}
-</div>
-{% endif %}
-
-{% if confirmed_today %}
-<div class="card p-4 mt-4">
-  <h5 class="mb-3">Confirmados Hoje</h5>
-  <div class="table-responsive">
-    <table class="table table-sm align-middle mb-0">
-      <thead class="table-light"><tr><th>Paciente</th><th class="hide-mobile">Registro</th><th>Data Agendada</th><th class="hide-mobile">Suporte</th><th>Status</th></tr></thead>
-      <tbody>
-        {% for c in confirmed_today %}
-        <tr><td>{{ c.patient_name }}</td><td class="hide-mobile">{{ c.agency_record_number|default:"—" }}</td><td>—</td><td class="hide-mobile">{{ c.support_flag_display|default:"—" }}</td><td><span class="status-badge">—</span></td></tr>
-        {% endfor %}
-      </tbody>
-    </table>
-  </div>
-</div>
+  {% endif %}
 {% endif %}
 
 <p class="text-muted small mt-3 mb-0">Atualizado automaticamente.</p>
