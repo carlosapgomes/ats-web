@@ -7,6 +7,7 @@ from django.contrib.auth.decorators import login_required
 from django.db import models
 from django.http import FileResponse, Http404, HttpRequest, HttpResponse, HttpResponseBase, JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
+from django.urls import reverse
 from django.views.decorators.clickjacking import xframe_options_sameorigin
 
 from apps.accounts.decorators import role_required
@@ -528,6 +529,11 @@ def case_detail(request: HttpRequest, case_id: uuid.UUID) -> HttpResponse:
             "result_info": result_info,
             "patient_name": patient_name,
             "prior_case_lookup": prior_case_lookup,
+            # Parametrização para template compartilhado
+            "show_intake_nav": True,
+            "back_url": reverse("intake:my_cases"),
+            "back_label": "← Voltar para lista",
+            "pdf_url": reverse("intake:serve_pdf", args=[case.case_id]),
         },
     )
 
