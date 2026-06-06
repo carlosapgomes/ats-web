@@ -26,6 +26,7 @@ class CaseUploadForm(forms.Form):
 
 
 REASON_CHOICES = [
+    ("", "---"),
     ("death", "Paciente faleceu"),
     ("clinical_condition", "Paciente sem condição clínica de transporte"),
     ("transport_unavailable", "Transporte indisponível pela unidade de origem"),
@@ -44,6 +45,7 @@ class PostScheduleIssueForm(forms.Form):
     reason = forms.ChoiceField(
         choices=REASON_CHOICES,
         label="Motivo",
+        required=False,
         widget=forms.Select(attrs={"class": "form-select"}),
     )
     message = forms.CharField(
@@ -65,10 +67,11 @@ class PostScheduleIssueForm(forms.Form):
         reason = cleaned_data.get("reason")
         message = cleaned_data.get("message", "")
 
-        if reason:
-            if reason not in POST_SCHEDULE_ISSUE_REASONS:
-                self.add_error("reason", f"Motivo inválido: {reason}")
-            elif reason not in POST_SCHEDULE_ISSUE_REASONS_MESSAGE_OPTIONAL and not (message or "").strip():
-                self.add_error("message", "Mensagem é obrigatória para o motivo selecionado.")
+        if not reason:
+            self.add_error("reason", "Selecione um motivo para a intercorrência.")
+        elif reason not in POST_SCHEDULE_ISSUE_REASONS:
+            self.add_error("reason", f"Motivo inválido: {reason}")
+        elif reason not in POST_SCHEDULE_ISSUE_REASONS_MESSAGE_OPTIONAL and not (message or "").strip():
+            self.add_error("message", "Mensagem é obrigatória para o motivo selecionado.")
 
         return cleaned_data
