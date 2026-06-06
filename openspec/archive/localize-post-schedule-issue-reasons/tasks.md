@@ -2,7 +2,7 @@
 
 ## Status
 
-Change em andamento. Slice 001 concluído e validado.
+Concluída. Slice 001 implementado, validado e merged em main (`93067b1`).
 
 ## Slices
 
