@@ -7,10 +7,10 @@
 
 ## Definition of Done do change
 
-- [ ] Relatório médico não exibe “Sem exame”/“não realizado” como exame rastreado recente.
-- [ ] Exame válido com data mostra data mesmo quando `is_most_recent=false`.
-- [ ] Exame válido mais recente mostra data e destaque de mais recente.
-- [ ] Data inválida ou ausente não quebra o presenter.
+- [x] Relatório médico não exibe “Sem exame”/“não realizado” como exame rastreado recente.
+- [x] Exame válido com data mostra data mesmo quando `is_most_recent=false`.
+- [x] Exame válido mais recente mostra data e destaque de mais recente.
+- [x] Data inválida ou ausente não quebra o presenter.
 - [x] Prompt renderizado do LLM1 orienta a não incluir ausência de exame em `tracked_exams`.
 - [x] `LLM1_DEFAULT_USER_PROMPT` contém a regra para deploy greenfield.
 - [x] Seed default de `llm1_user` permanece alinhado ao default atualizado.
@@ -22,5 +22,5 @@
   - [x] `uv run ruff format --check .`
   - [x] `uv run mypy .`
   - [x] `uv run pytest`
-- [ ] Relatórios dos slices gerados em markdown temporário.
-- [ ] Commit e push realizados após cada slice implementado.
+- [x] Relatórios dos slices gerados em markdown temporário.
+- [x] Commit e push realizados após cada slice implementado.
