@@ -2,6 +2,7 @@
 
 import uuid
 from datetime import date, datetime, time, timedelta
+from typing import Any
 
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
@@ -202,8 +203,82 @@ def _compute_result(case: Case) -> tuple[str, str]:
     return (f"⏳ {step_label}", "bg-secondary")
 
 
-def _enrich_case(case: Case) -> dict[str, object]:
+# ── Attention filter constants ─────────────────────────────────────────
+
+ATTENTION_PROCESSING_STUCK_AFTER = timedelta(minutes=30)
+ATTENTION_WAITING_STUCK_AFTER = timedelta(hours=48)
+
+ATTENTION_PROCESSING_STATUSES: tuple[str, ...] = (
+    CaseStatus.NEW,
+    CaseStatus.R1_ACK_PROCESSING,
+    CaseStatus.EXTRACTING,
+    CaseStatus.LLM_STRUCT,
+    CaseStatus.LLM_SUGGEST,
+    CaseStatus.R2_POST_WIDGET,
+    CaseStatus.DOCTOR_ACCEPTED,
+    CaseStatus.DOCTOR_DENIED,
+    CaseStatus.R3_POST_REQUEST,
+    CaseStatus.APPT_CONFIRMED,
+    CaseStatus.APPT_DENIED,
+    CaseStatus.R1_FINAL_REPLY_POSTED,
+    CaseStatus.CLEANUP_RUNNING,
+)
+
+ATTENTION_WAITING_STATUSES: tuple[str, ...] = (
+    CaseStatus.WAIT_DOCTOR,
+    CaseStatus.WAIT_APPT,
+    CaseStatus.WAIT_R1_CLEANUP_THUMBS,
+)
+
+
+def _attention_q(now: datetime) -> Q:
+    """Retorna Q object com os critérios de atenção para filtrar casos suspeitos."""
+    processing_cutoff = now - ATTENTION_PROCESSING_STUCK_AFTER
+    waiting_cutoff = now - ATTENTION_WAITING_STUCK_AFTER
+    return (
+        Q(status=CaseStatus.FAILED)
+        | Q(locked_by__isnull=False, locked_until__isnull=False, locked_until__lte=now)
+        | Q(status__in=ATTENTION_PROCESSING_STATUSES, updated_at__lte=processing_cutoff)
+        | Q(status__in=ATTENTION_WAITING_STATUSES, updated_at__lte=waiting_cutoff)
+    )
+
+
+def _get_attention_reason(case: Case, *, now: datetime | None = None) -> str:
+    """Retorna motivo compacto de atenção para exibição no card do dashboard.
+
+    Retorna string vazia se o caso não necessita atenção.
+    """
+    if now is None:
+        now = timezone.now()
+
+    # Falha sempre é motivo de atenção
+    if case.status == CaseStatus.FAILED:
+        return "Falha no processamento"
+
+    # Lock expirado
+    if case.locked_by_id is not None and case.locked_until is not None and case.locked_until <= now:
+        return "Lock expirado"
+
+    # Processamento parado há mais de 30 min
+    if case.status in ATTENTION_PROCESSING_STATUSES:
+        cutoff = now - ATTENTION_PROCESSING_STUCK_AFTER
+        if case.updated_at <= cutoff:
+            return "Processamento parado há mais de 30 min"
+
+    # Espera humana há mais de 48h
+    if case.status in ATTENTION_WAITING_STATUSES:
+        cutoff = now - ATTENTION_WAITING_STUCK_AFTER
+        if case.updated_at <= cutoff:
+            return "Aguardando ação humana há mais de 48 h"
+
+    return ""
+
+
+def _enrich_case(case: Case, *, now: datetime | None = None, attention_filter: bool = False) -> dict[str, Any]:
     """Enriquece um Case com dados de apresentação para cards do dashboard."""
+    if now is None:
+        now = timezone.now()
+
     patient_name = ""
     if case.structured_data and isinstance(case.structured_data, dict):
         patient = case.structured_data.get("patient", {})
@@ -211,6 +286,8 @@ def _enrich_case(case: Case) -> dict[str, object]:
             patient_name = patient.get("name", "")
 
     result_label, result_css = _compute_result(case)
+
+    attention_reason = _get_attention_reason(case, now=now) if attention_filter else ""
 
     return {
         "case": case,
@@ -220,6 +297,7 @@ def _enrich_case(case: Case) -> dict[str, object]:
         "result_label": result_label,
         "result_css": result_css,
         "origin_unit": case.get_origin_unit_display(compact=True),
+        "attention_reason": attention_reason,
     }
 
 
@@ -232,8 +310,17 @@ def dashboard_index(request: HttpRequest) -> HttpResponse:
     admission_flow = _compute_admission_flow()
     avg_times = _compute_average_times()
 
+    now = timezone.now()
+
+    # Filtro de atenção
+    attention_filter: bool = request.GET.get("attention") == "1"
+
     # Tabela de casos — todos, sem filtro de usuario
     cases_qs = Case.objects.select_related("created_by").order_by("-created_at")
+
+    # Filtro de atenção (exclui CLEANED, aplica critérios de atenção)
+    if attention_filter:
+        cases_qs = cases_qs.exclude(status=CaseStatus.CLEANED).filter(_attention_q(now))
 
     # Filtros
     status_filter = request.GET.get("status", "")
@@ -247,12 +334,21 @@ def dashboard_index(request: HttpRequest) -> HttpResponse:
     if date_to:
         cases_qs = cases_qs.filter(created_at__date__lte=date_to)
 
+    # Contador de atenção (total de casos suspeitos, sem paginação)
+    attention_count: int | None = None
+    if attention_filter:
+        # Já filtrado, usa count do paginator
+        attention_count = cases_qs.count()
+    else:
+        # Calcula separadamente sem afetar a query principal
+        attention_count = Case.objects.exclude(status=CaseStatus.CLEANED).filter(_attention_q(now)).count()
+
     # Paginação
     paginator = Paginator(cases_qs, 20)
     page_number = request.GET.get("page", 1)
     page_obj = paginator.get_page(page_number)
 
-    enriched_cases = [_enrich_case(c) for c in page_obj]
+    enriched_cases = [_enrich_case(c, now=now, attention_filter=attention_filter) for c in page_obj]
 
     # Último resumo para o card no dashboard
     latest_summary = SupervisorSummary.objects.order_by("-window_end").first()
@@ -273,6 +369,8 @@ def dashboard_index(request: HttpRequest) -> HttpResponse:
             "status_choices": CaseStatus.choices,
             "STATUS_LABELS": STATUS_LABELS,
             "latest_summary": latest_summary,
+            "attention_filter": attention_filter,
+            "attention_count": attention_count,
         },
     )
 
