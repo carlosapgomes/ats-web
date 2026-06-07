@@ -609,8 +609,9 @@ class TestLlm1CausticIngestionPrompt:
             agency_record_number="12345",
             clean_text="Texto clinico.",
         )
-        assert "negativa" in prompt.lower() or "negar" in prompt.lower() or "motivo" in prompt.lower(), (
-            "Renderizado deve proibir transformar o tempo em motivo automático de negativa"
+        normalized = prompt.lower().replace("não", "nao").replace("automático", "automatico")
+        assert "nao transforme esse tempo em motivo automatico de negativa" in normalized, (
+            "Renderizado deve conter a instrução exata: 'Nao transforme esse tempo em motivo automatico de negativa'"
         )
 
 
