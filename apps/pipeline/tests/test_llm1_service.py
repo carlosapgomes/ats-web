@@ -17,6 +17,7 @@ from apps.pipeline.llm1_service import (
     Llm1Result,
     Llm1Service,
     Llm1ValidationError,
+    _render_user_prompt,
 )
 
 # ── Test helpers ────────────────────────────────────────────────────────────
@@ -494,6 +495,45 @@ class TestLlm1PromptContainsLegacyInstructions:
 
         user_prompt = client.calls[0]["user_prompt"]
         assert "Paciente relata dor epigástrica há 3 meses." in user_prompt
+
+
+# ── Tracked-exam hardening ────────────────────────────────────────────────
+
+
+class TestLlm1PromptTrackedExamHardening:
+    """R1/R2: Prompt renderizado deve proibir ausência e pedir data para todos tracked_exams."""
+
+    def test_render_user_prompt_prohibits_absent_exam_entries_in_tracked_exams(self) -> None:
+        prompt = _render_user_prompt(
+            template="Template base",
+            case_id="case-teh-001",
+            agency_record_number="12345",
+            clean_text="Texto clinico.",
+        )
+        assert "tracked_exams" in prompt
+        assert "inclua apenas exames efetivamente realizados" in prompt or "apenas exames realizados" in prompt
+        assert "Sem Exame" in prompt or "sem exame" in prompt
+        assert "não realizado" in prompt or "nao realizado" in prompt
+        assert "não consta" in prompt or "nao consta" in prompt
+        assert "não inclua" in prompt or "Nao inclua" in prompt or "nao inclua" in prompt
+
+    def test_render_user_prompt_requires_datetime_for_all_tracked_exams_when_available(self) -> None:
+        prompt = _render_user_prompt(
+            template="Template base",
+            case_id="case-teh-002",
+            agency_record_number="12345",
+            clean_text="Texto clinico.",
+        )
+        assert "exam_datetime_iso" in prompt
+        assert "todo exame" in prompt
+        assert "não apenas para o exame mais recente" in prompt or "nao apenas para o exame mais recente" in prompt
+
+    def test_default_user_prompt_prohibits_absent_exam_entries_and_requires_all_dates(self) -> None:
+        up = LLM1_DEFAULT_USER_PROMPT
+        assert "Sem Exame" in up or "sem exame" in up
+        assert "não realizado" in up or "nao realizado" in up
+        assert "exam_datetime_iso" in up
+        assert "realizados" in up
 
 
 # ── Fallback / default LLM1 prompts ─────────────────────────────────────────
