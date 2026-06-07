@@ -11,6 +11,38 @@ from datetime import UTC, datetime
 from typing import Any
 
 
+def _format_exam_datetime(value: Any) -> str:
+    """Parse exam_datetime_iso and return formatted date string, or empty string if invalid.
+
+    Accepts ISO formats:
+    - ``2025-12-01`` (date only)       -> ``01/12/2025``
+    - ``2025-12-01T10:00:00``          -> ``01/12/2025 10:00``
+    - ``2025-12-01T10:00:00Z``         -> ``01/12/2025 10:00``
+    - ``2025-12-01T10:00:00-03:00``    -> ``01/12/2025 10:00``
+
+    Returns empty string if value is None, empty, or unparseable.
+    Never raises ValueError.
+    """
+    if not isinstance(value, str) or not value.strip():
+        return ""
+
+    iso_str = value.strip()
+    if iso_str.endswith("Z"):
+        iso_str = f"{iso_str[:-1]}+00:00"
+
+    try:
+        parsed = datetime.fromisoformat(iso_str)
+    except (ValueError, TypeError):
+        return ""
+
+    # Check if the source had a time component (contains 'T' or ' ' after date)
+    has_time = "T" in value.strip()
+
+    if has_time:
+        return parsed.strftime("%d/%m/%Y %H:%M")
+    return parsed.strftime("%d/%m/%Y")
+
+
 def _extract_nested(payload: dict[str, Any], *keys: str) -> Any:
     """Return nested dictionary value by key path, or None when missing."""
     current: Any = payload
@@ -488,8 +520,9 @@ class DoctorReportPresenter:
 
             line = f"{label_str}: {value_str}"
             if is_most_recent is True:
-                if isinstance(exam_datetime, str) and exam_datetime.strip():
-                    line += " (mais recente)"
+                formatted_date = _format_exam_datetime(exam_datetime)
+                if formatted_date:
+                    line += f" (mais recente em {formatted_date})"
                 else:
                     line += " (recência indeterminada (sem data no laudo))"
             lines.append(line)
