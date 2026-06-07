@@ -7,12 +7,11 @@ TDD obrigatório: testes falham antes da implementação.
 from __future__ import annotations
 
 import uuid
+from datetime import timedelta
 
 import pytest
 from django.contrib.auth import get_user_model
 from django.utils import timezone
-
-from datetime import timedelta
 
 from apps.cases.models import Case, CaseEvent, CaseStatus
 
