@@ -97,6 +97,9 @@ LLM1_DEFAULT_USER_PROMPT = (
     "determinada por data/hora ou posicao textual, com desempate pela ultima "
     "ocorrencia. Registrar had_transfusion como binario (yes/no); ausencia de "
     "evidencia de transfusao deve ser tratada como 'no'. "
+    "Se houver ingestao de substancia caustica/corrosiva, soda caustica, "
+    "produto corrosivo ou acido em contexto de ingestao, mencione o evento "
+    "no resumo e inclua o tempo desde a ingestao quando disponivel. "
     "Em tracked_exams, inclua apenas exames efetivamente realizados; "
     "nao inclua entradas com 'Sem Exame', 'nao realizado', 'nao consta', "
     "'ausente' ou equivalentes. "
@@ -298,6 +301,12 @@ def _render_user_prompt(
         "ausencia de evidencia de transfusao deve ser tratada como 'no'. "
         "Se had_transfusion=yes, informar total_units (inteiro) "
         "e hemocomponent quando disponivel.\n"
+        "Se o relatorio mencionar ingestao de substancia caustica/corrosiva, "
+        "soda caustica, produto corrosivo ou acido em contexto de ingestao, "
+        "mencione esse evento no summary.one_liner ou summary.bullet_points e "
+        "inclua o tempo desde a ingestao quando o texto informar "
+        '(por exemplo, "ha 3 semanas" ou "em 12/05/2026"). '
+        "Nao transforme esse tempo em motivo automatico de negativa.\n"
         f"Texto clinico do relatorio:\n{clean_text}"
     )
 

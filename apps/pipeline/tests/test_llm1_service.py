@@ -556,6 +556,64 @@ class TestLlm1PromptTrackedExamHardening:
         assert "quando disponivel" in up.lower()
 
 
+# ── Caustic/corrosive ingestion in prompts ────────────────────────────────────
+
+
+class TestLlm1CausticIngestionPrompt:
+    """Slice 002: LLM1 prompts must mention caustic/corrosive ingestion and time."""
+
+    def test_default_user_prompt_mentions_caustic_ingestion(self) -> None:
+        """LLM1_DEFAULT_USER_PROMPT deve mencionar ingestão cáustica/corrosiva."""
+        up = LLM1_DEFAULT_USER_PROMPT
+        # Must mention caustic or corrosive substance
+        has_caustica = "cáustica" in up or "caustica" in up
+        has_corrosiva = "corrosiva" in up or "corrosivo" in up
+        assert has_caustica or has_corrosiva, "LLM1_DEFAULT_USER_PROMPT must mention caustic/corrosive ingestion"
+
+    def test_default_user_prompt_mentions_time_since_ingestion(self) -> None:
+        """LLM1_DEFAULT_USER_PROMPT deve mencionar tempo desde a ingestão."""
+        up = LLM1_DEFAULT_USER_PROMPT
+        assert "tempo desde" in up.lower() or "tempo" in up.lower(), (
+            "LLM1_DEFAULT_USER_PROMPT must mention time since ingestion"
+        )
+
+    def test_render_user_prompt_mentions_caustic_ingestion(self) -> None:
+        """_render_user_prompt() deve conter instrução sobre ingestão cáustica."""
+        prompt = _render_user_prompt(
+            template="Template base",
+            case_id="case-caust-001",
+            agency_record_number="12345",
+            clean_text="Texto clinico.",
+        )
+        has_caustica = "cáustica" in prompt.lower() or "caustica" in prompt.lower()
+        has_corrosiva = "corrosiva" in prompt.lower() or "corrosivo" in prompt.lower()
+        assert has_caustica or has_corrosiva, "Renderizado deve mencionar ingestão cáustica/corrosiva"
+
+    def test_render_user_prompt_mentions_time_when_available(self) -> None:
+        """_render_user_prompt() deve instruir incluir tempo quando disponível."""
+        prompt = _render_user_prompt(
+            template="Template base",
+            case_id="case-caust-002",
+            agency_record_number="12345",
+            clean_text="Texto clinico.",
+        )
+        assert "tempo desde" in prompt.lower() or "tempo" in prompt.lower(), (
+            "Renderizado deve instruir incluir tempo desde a ingestão"
+        )
+
+    def test_render_user_prompt_forbids_auto_denial_from_time(self) -> None:
+        """_render_user_prompt() deve proibir transformar tempo em negativa automática."""
+        prompt = _render_user_prompt(
+            template="Template base",
+            case_id="case-caust-003",
+            agency_record_number="12345",
+            clean_text="Texto clinico.",
+        )
+        assert "negativa" in prompt.lower() or "negar" in prompt.lower() or "motivo" in prompt.lower(), (
+            "Renderizado deve proibir transformar o tempo em motivo automático de negativa"
+        )
+
+
 # ── Fallback / default LLM1 prompts ─────────────────────────────────────────
 
 

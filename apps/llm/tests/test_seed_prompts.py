@@ -88,3 +88,12 @@ class TestSeedPromptsCanonicalNames:
         assert "data do exame" in pt.content.lower() or "data dos exames" in pt.content.lower()
         assert "resumo" in pt.content.lower() or "summary" in pt.content.lower()
         assert "quando disponivel" in pt.content.lower()
+
+    def test_llm1_user_seed_mentions_caustic_ingestion(self) -> None:
+        """Slice 002: seed do LLM1_USER deve conter instrução de ingestão cáustica."""
+        call_command("seed_prompts")
+        pt = PromptTemplate.get_active("llm1_user")
+        assert pt is not None
+        has_caustica = "cáustica" in pt.content.lower() or "caustica" in pt.content.lower()
+        has_corrosiva = "corrosiva" in pt.content.lower() or "corrosivo" in pt.content.lower()
+        assert has_caustica or has_corrosiva, "Seed do llm1_user deve mencionar ingestão cáustica/corrosiva"
