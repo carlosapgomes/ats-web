@@ -8,7 +8,7 @@ from django.core.files.base import ContentFile
 from django.urls import reverse
 from django.utils import timezone
 
-from apps.cases.models import Case, CaseStatus, SupervisorSummary
+from apps.cases.models import Case, CaseEvent, CaseStatus, SupervisorSummary
 
 User = get_user_model()
 
@@ -1387,3 +1387,145 @@ class TestDashboardSummaryFixed:
 
         assert flow["scheduled"] == 1, f"Fluxo scheduled deve ser 1, obtido {flow['scheduled']}"
         assert flow["immediate"] == 1, f"Fluxo immediate deve ser 1, obtido {flow['immediate']}"
+
+
+# ── Dashboard: Administrative Closure (Slice 001) ────────────────────────
+
+
+@pytest.mark.django_db
+class TestDashboardAdministrativeClosure:
+    """Testes de encerramento administrativo no dashboard."""
+
+    def _create_operational_case(self, user, status=CaseStatus.WAIT_DOCTOR, **kwargs):
+        """Cria caso operacional não CLEANED."""
+        return _create_case(created_by=user, status=status, **kwargs)
+
+    # ── Form visibility ───────────────────────────────────────────────
+
+    def test_dashboard_detail_shows_administrative_close_form_for_manager_on_operational_case(self, client) -> None:
+        """Manager vê formulário de encerramento para caso não CLEANED."""
+        user = _login_as(client, "manager")
+        case = self._create_operational_case(user, status=CaseStatus.WAIT_DOCTOR)
+        response = client.get(reverse("dashboard:case_detail", args=[case.case_id]))
+        assert response.status_code == 200
+        content = response.content.decode()
+        assert "Encerrar administrativamente" in content
+        assert reverse("dashboard:administrative_close", args=[case.case_id]) in content
+
+    def test_dashboard_detail_shows_administrative_close_form_for_admin_on_operational_case(self, client) -> None:
+        """Admin vê formulário de encerramento para caso não CLEANED."""
+        user = _login_as(client, "admin")
+        case = self._create_operational_case(user, status=CaseStatus.LLM_SUGGEST)
+        response = client.get(reverse("dashboard:case_detail", args=[case.case_id]))
+        assert response.status_code == 200
+        content = response.content.decode()
+        assert "Encerrar administrativamente" in content
+
+    def test_dashboard_detail_hides_administrative_close_form_for_cleaned_case(self, client) -> None:
+        """Caso CLEANED não mostra form de encerramento."""
+        user = _login_as(client, "manager")
+        case = _create_case(created_by=user, status=CaseStatus.CLEANED, agency_record_number="CLN-001")
+        response = client.get(reverse("dashboard:case_detail", args=[case.case_id]))
+        assert response.status_code == 200
+        content = response.content.decode()
+        assert "Encerrar administrativamente" not in content
+
+    def test_dashboard_detail_hides_administrative_close_for_nir(self, client) -> None:
+        """NIR não vê form de encerramento."""
+        _login_as(client, "nir")
+        nir_user = User.objects.create_user(username="nir@adminclose.test", password="testpass123")
+        from apps.accounts.models import Role as RoleModel
+
+        role, _ = RoleModel.objects.get_or_create(name="nir")
+        nir_user.roles.add(role)
+        case = _create_case(created_by=nir_user, status=CaseStatus.WAIT_DOCTOR, agency_record_number="NIR-CLOSE")
+        # NIR não tem acesso ao dashboard detail
+        response = client.get(reverse("dashboard:case_detail", args=[case.case_id]))
+        assert response.status_code == 302
+
+    # ── POST route ────────────────────────────────────────────────────
+
+    def test_dashboard_administrative_close_post_requires_manager_or_admin(self, client) -> None:
+        """Usuário sem manager/admin não consegue postar."""
+        from apps.accounts.models import Role as RoleModel
+
+        # Testar doctor
+        doc_user = User.objects.create_user(username="doc@close.test", password="testpass123")
+        role, _ = RoleModel.objects.get_or_create(name="doctor")
+        doc_user.roles.add(role)
+        client.force_login(doc_user)
+        session = client.session
+        session["active_role"] = "doctor"
+        session.save()
+
+        case = _create_case(created_by=doc_user, status=CaseStatus.WAIT_DOCTOR, agency_record_number="DOC-CLOSE")
+        response = client.post(
+            reverse("dashboard:administrative_close", args=[case.case_id]),
+            {"reason_code": "system_bug", "reason_text": "Bug"},
+        )
+        assert response.status_code == 302  # redirect por falta de permissão
+        fresh_case = Case.objects.get(pk=case.pk)
+        assert fresh_case.status != CaseStatus.CLEANED
+
+    def test_dashboard_administrative_close_post_requires_reason(self, client) -> None:
+        """POST sem reason_text não altera status."""
+        user = _login_as(client, "manager")
+        case = self._create_operational_case(user, status=CaseStatus.WAIT_DOCTOR, agency_record_number="NO-REASON")
+        response = client.post(
+            reverse("dashboard:administrative_close", args=[case.case_id]),
+            {"reason_code": "system_bug", "reason_text": ""},
+        )
+        assert response.status_code == 302
+        fresh_case = Case.objects.get(pk=case.pk)
+        assert fresh_case.status != CaseStatus.CLEANED
+        assert not CaseEvent.objects.filter(
+            case=case,
+            event_type="CASE_ADMINISTRATIVELY_CLOSED",
+        ).exists()
+
+    def test_dashboard_administrative_close_post_success_redirects_and_closes_case(self, client) -> None:
+        """POST válido redireciona, muda status e cria evento."""
+        user = _login_as(client, "manager")
+        case = self._create_operational_case(user, status=CaseStatus.WAIT_DOCTOR, agency_record_number="SUCCESS-CLOSE")
+        response = client.post(
+            reverse("dashboard:administrative_close", args=[case.case_id]),
+            {"reason_code": "system_bug", "reason_text": "Bug corrigido manualmente"},
+        )
+        assert response.status_code == 302
+        assert response.url == reverse("dashboard:case_detail", args=[case.case_id])
+
+        fresh_case = Case.objects.get(pk=case.pk)
+        assert fresh_case.status == CaseStatus.CLEANED
+
+        events = CaseEvent.objects.filter(
+            case=case,
+            event_type="CASE_ADMINISTRATIVELY_CLOSED",
+        )
+        assert events.count() == 1
+        event = events.first()
+        assert event is not None
+        assert event.payload.get("reason_code") == "system_bug"
+        assert event.payload.get("reason_text") == "Bug corrigido manualmente"
+
+    # ── Timeline label ────────────────────────────────────────────────
+
+    def test_timeline_shows_administrative_closure_label(self, client) -> None:
+        """Timeline do dashboard detail mostra label 'Encerrado administrativamente'."""
+        user = _login_as(client, "manager")
+        case = self._create_operational_case(user, status=CaseStatus.WAIT_DOCTOR, agency_record_number="TIMELINE-CLOSE")
+
+        # Fecha administrativamente
+        from apps.cases.services import administratively_close_case
+
+        administratively_close_case(
+            case=case,
+            user=user,
+            reason_code="system_bug",
+            reason_text="Bug",
+            active_role="manager",
+        )
+
+        response = client.get(reverse("dashboard:case_detail", args=[case.case_id]))
+        assert response.status_code == 200
+        content = response.content.decode()
+        assert "Encerrado administrativamente" in content

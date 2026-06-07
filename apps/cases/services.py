@@ -705,3 +705,127 @@ def compute_lock_display(case: Case, user: Any = None) -> dict[str, Any]:
         "locked_until": case.locked_until.isoformat() if is_locked and case.locked_until else "",
         "lock_context": case.lock_context if is_locked else "",
     }
+
+
+# ── Administrative Closure ───────────────────────────────────────────────
+
+
+ADMINISTRATIVE_CLOSURE_REASONS: dict[str, str] = {
+    "processing_error": "Erro de processamento",
+    "llm_failure": "Falha do LLM",
+    "system_bug": "Bug do sistema",
+    "stuck_lock": "Reserva/lock travado",
+    "duplicate_reprocess": "Duplicado/reapresentação manual",
+    "other": "Outro",
+}
+
+ADMINISTRATIVE_CLOSURE_REASON_CHOICES: list[tuple[str, str]] = [
+    (k, v) for k, v in ADMINISTRATIVE_CLOSURE_REASONS.items()
+]
+
+
+def administratively_close_case(
+    *,
+    case: Case,
+    user: Any,
+    reason_code: str,
+    reason_text: str,
+    active_role: str,
+) -> Case:
+    """Encerra um caso administrativamente.
+
+    Transição excepcional para CLEANED, disponível apenas para manager/admin.
+    Registra evento CASE_ADMINISTRATIVELY_CLOSED com payload auditável.
+    Limpa lock operacional e intercorrência pós-agendamento, se houver.
+
+    Args:
+        case: O caso a ser encerrado (não pode ser CLEANED).
+        user: Usuário que está encerrando.
+        reason_code: Código do motivo (chave em ADMINISTRATIVE_CLOSURE_REASONS).
+        reason_text: Texto descritivo do motivo (obrigatório, não vazio).
+        active_role: Papel ativo do usuário no momento.
+
+    Returns:
+        O caso recarregado, agora em CLEANED.
+
+    Raises:
+        ValueError: Se validações falharem.
+    """
+    if not reason_text.strip():
+        raise ValueError("Motivo obrigatório: forneça uma descrição do encerramento.")
+
+    if not reason_code:
+        raise ValueError("Código de motivo obrigatório.")
+
+    if reason_code not in ADMINISTRATIVE_CLOSURE_REASONS:
+        raise ValueError(
+            f"Código de motivo inválido: '{reason_code}'. "
+            f"Códigos válidos: {', '.join(ADMINISTRATIVE_CLOSURE_REASONS.keys())}"
+        )
+
+    with transaction.atomic():
+        case = Case.objects.select_for_update().get(pk=case.pk)
+
+        if case.status == CaseStatus.CLEANED:
+            raise ValueError("Caso já está encerrado (CLEANED).")
+
+        previous_status = str(case.status)
+
+        # Snapshot de lock
+        had_lock = case.locked_by is not None
+        previous_lock: dict[str, object] = {}
+        if had_lock:
+            previous_lock = {
+                "locked_by_id": str(case.locked_by_id) if case.locked_by_id else None,
+                "locked_by_display": case.locked_by.display_name if case.locked_by else "",
+                "locked_at": case.locked_at.isoformat() if case.locked_at else None,
+                "locked_until": case.locked_until.isoformat() if case.locked_until else None,
+                "lock_token": str(case.lock_token) if case.lock_token else None,
+                "lock_context": case.lock_context,
+                "lock_role": case.lock_role,
+            }
+
+        # Snapshot de intercorrência pós-agendamento
+        post_schedule_issue_snapshot = {
+            "status": case.post_schedule_issue_status,
+            "reason": case.post_schedule_issue_reason,
+            "message": case.post_schedule_issue_message,
+        }
+
+        # Monta payload do evento
+        payload: dict[str, object] = {
+            "previous_status": previous_status,
+            "reason_code": reason_code,
+            "reason_text": reason_text.strip(),
+            "active_role": active_role,
+            "had_lock": had_lock,
+            "previous_lock": previous_lock,
+            "post_schedule_issue_status": case.post_schedule_issue_status,
+        }
+
+        # Limpa lock
+        case.locked_by = None
+        case.locked_at = None
+        case.locked_until = None
+        case.lock_token = None
+        case.lock_context = ""
+        case.lock_role = ""
+
+        # Limpa intercorrência pós-agendamento
+        if case.post_schedule_issue_status:
+            payload["post_schedule_issue_snapshot"] = post_schedule_issue_snapshot
+            case.post_schedule_issue_status = ""
+            case.post_schedule_issue_reason = ""
+            case.post_schedule_issue_message = ""
+            case.post_schedule_issue_opened_by = None
+            case.post_schedule_issue_opened_at = None
+            case.post_schedule_issue_response_action = ""
+            case.post_schedule_issue_response_message = ""
+            case.post_schedule_issue_responded_by = None
+            case.post_schedule_issue_responded_at = None
+
+        # FSM transition CLEANED
+        case.administratively_close(user=user, payload=payload)
+        case.save()
+
+    return Case.objects.get(pk=case.pk)

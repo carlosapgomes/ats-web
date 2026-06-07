@@ -133,6 +133,8 @@ EVENT_LABELS: dict[str, str] = {
     # ── Vinda imediata ────────────────────────────────────────
     "IMMEDIATE_ADMISSION_OPERATIONAL_NOTICE": "Aviso de vinda imediata",
     "SCHEDULER_IMMEDIATE_ACK": "Ciência de vinda imediata",
+    # ── Encerramento administrativo ────────────────────────────
+    "CASE_ADMINISTRATIVELY_CLOSED": "Encerrado administrativamente",
 }
 
 # Cores do dot da timeline por event_type
@@ -185,6 +187,8 @@ EVENT_DOT_CSS: dict[str, str] = {
     # ── Vinda imediata ────────────────────────────────────────
     "IMMEDIATE_ADMISSION_OPERATIONAL_NOTICE": "system",
     "SCHEDULER_IMMEDIATE_ACK": "scheduler",
+    # ── Encerramento administrativo ────────────────────────────
+    "CASE_ADMINISTRATIVELY_CLOSED": "system",
 }
 
 # Etapas do stepper

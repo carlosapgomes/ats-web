@@ -3,17 +3,23 @@
 import uuid
 from datetime import date, datetime, time, timedelta
 
+from django.contrib import messages
 from django.contrib.auth.decorators import login_required
 from django.core.paginator import Paginator
 from django.db.models import Avg, DurationField, ExpressionWrapper, F, Q
 from django.http import FileResponse, Http404, HttpRequest, HttpResponse, HttpResponseBase
-from django.shortcuts import get_object_or_404, render
+from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
 from django.utils import timezone
 from django.views.decorators.clickjacking import xframe_options_sameorigin
+from django.views.decorators.http import require_POST
 
 from apps.accounts.decorators import role_required
 from apps.cases.models import Case, CaseStatus, SupervisorSummary
+from apps.cases.services import (
+    ADMINISTRATIVE_CLOSURE_REASON_CHOICES,
+    administratively_close_case,
+)
 
 # Reaproveita mapeamentos definidos no intake para consistência visual
 from apps.intake.views import (
@@ -273,6 +279,38 @@ def dashboard_index(request: HttpRequest) -> HttpResponse:
 
 @login_required
 @role_required("manager", "admin")
+@require_POST
+def dashboard_administrative_close(request: HttpRequest, case_id: uuid.UUID) -> HttpResponse:
+    """POST: Encerra um caso administrativamente.
+
+    Apenas manager/admin podem encerrar. Exige reason_code e reason_text.
+    """
+    case = get_object_or_404(Case, case_id=case_id)
+
+    reason_code = request.POST.get("reason_code", "")
+    reason_text = request.POST.get("reason_text", "")
+    active_role = request.session.get("active_role", "")
+
+    try:
+        administratively_close_case(
+            case=case,
+            user=request.user,
+            reason_code=reason_code,
+            reason_text=reason_text,
+            active_role=active_role,
+        )
+        messages.success(
+            request,
+            "Caso encerrado administrativamente. O caso foi removido das filas operacionais e permanece na auditoria.",
+        )
+    except ValueError as exc:
+        messages.error(request, str(exc))
+
+    return redirect("dashboard:case_detail", case_id=case.case_id)
+
+
+@login_required
+@role_required("manager", "admin")
 @xframe_options_sameorigin
 def dashboard_case_pdf(request: HttpRequest, case_id: uuid.UUID) -> HttpResponseBase:
     """Serve o PDF do caso para manager/admin (dashboard gerencial).
@@ -396,6 +434,9 @@ def dashboard_case_detail(request: HttpRequest, case_id: uuid.UUID) -> HttpRespo
             "result_info": result_info,
             "patient_name": patient_name,
             "origin_unit": origin_unit,
+            "can_administratively_close": case.status != CaseStatus.CLEANED,
+            "administrative_close_url": reverse("dashboard:administrative_close", args=[case.case_id]),
+            "administrative_close_reason_choices": ADMINISTRATIVE_CLOSURE_REASON_CHOICES,
             # Parametrização para template compartilhado
             "show_intake_nav": False,
             "back_url": reverse("dashboard:index"),
