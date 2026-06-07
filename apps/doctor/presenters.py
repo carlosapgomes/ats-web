@@ -114,6 +114,47 @@ def _is_yes_precheck(value: Any) -> bool:
     return isinstance(value, str) and value.strip().lower() == "yes"
 
 
+def _is_absent_exam_result(value: Any) -> bool:
+    """Return True when result_value indicates absence of exam.
+
+    Normalizes the value (lowercase, strip, remove accents) and compares
+    against a conservative list of absence indicators.
+    """
+    if not isinstance(value, str) or not value.strip():
+        return False
+
+    normalized = value.strip().lower()
+    # Remove acentos portugueses
+    normalized = (
+        normalized.replace("\u00e1", "a")  # á
+        .replace("\u00e0", "a")  # à
+        .replace("\u00e3", "a")  # ã
+        .replace("\u00e2", "a")  # â
+        .replace("\u00e9", "e")  # é
+        .replace("\u00ea", "e")  # ê
+        .replace("\u00ed", "i")  # í
+        .replace("\u00f3", "o")  # ó
+        .replace("\u00f4", "o")  # ô
+        .replace("\u00f5", "o")  # õ
+        .replace("\u00fa", "u")  # ú
+        .replace("\u00e7", "c")  # ç
+    )
+    # Compact spaces
+    normalized = " ".join(normalized.split())
+
+    absence_values = {
+        "sem exame",
+        "sem exames",
+        "nao realizado",
+        "nao realizada",
+        "nao consta",
+        "ausente",
+        "sem laudo",
+        "sem resultado",
+    }
+    return normalized in absence_values
+
+
 @dataclass
 class DoctorReportPresenter:
     """Presenter that generates a 7-block medical report for the doctor decision screen.
@@ -508,8 +549,12 @@ class DoctorReportPresenter:
             if not isinstance(exam, dict):
                 continue
 
-            exam_label = exam.get("exam_label")
             result_value = exam.get("result_value")
+            # Skip exams whose result indicates absence
+            if _is_absent_exam_result(result_value):
+                continue
+
+            exam_label = exam.get("exam_label")
             is_most_recent = exam.get("is_most_recent")
             exam_datetime = exam.get("exam_datetime_iso")
 
@@ -519,12 +564,18 @@ class DoctorReportPresenter:
             )
 
             line = f"{label_str}: {value_str}"
-            if is_most_recent is True:
-                formatted_date = _format_exam_datetime(exam_datetime)
-                if formatted_date:
-                    line += f" (mais recente em {formatted_date})"
-                else:
-                    line += " (recência indeterminada (sem data no laudo))"
+
+            # Always show date when available, regardless of is_most_recent
+            formatted_date = _format_exam_datetime(exam_datetime)
+            if formatted_date:
+                line += f" (data: {formatted_date}"
+                if is_most_recent is True:
+                    line += "; mais recente"
+                line += ")"
+            elif is_most_recent is True:
+                # Recent but no valid date — use fallback
+                line += " (recência indeterminada (sem data no laudo))"
+
             lines.append(line)
         return lines
 
