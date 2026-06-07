@@ -101,7 +101,9 @@ LLM1_DEFAULT_USER_PROMPT = (
     "nao inclua entradas com 'Sem Exame', 'nao realizado', 'nao consta', "
     "'ausente' ou equivalentes. "
     "Para todo exame em tracked_exams, preencha exam_datetime_iso quando "
-    "houver data/hora associada.\n\n"
+    "houver data/hora associada. Ao mencionar exames no resumo "
+    "(summary.one_liner ou summary.bullet_points), inclua a data do exame "
+    "quando disponivel.\n\n"
     f"{LLM1_REQUIRED_SCHEMA_INSTRUCTIONS}"
 )
 
@@ -287,6 +289,11 @@ def _render_user_prompt(
         "de pre-check quando aplicavel.\n"
         "Para todo exame incluido em tracked_exams, preencha exam_datetime_iso quando "
         "houver data/hora associada no laudo, nao apenas para o exame mais recente.\n"
+        "Ao mencionar exames no summary.one_liner ou summary.bullet_points, sempre "
+        "inclua a data do exame quando ela estiver disponivel no laudo ou em "
+        "exam_datetime_iso. Nunca escreva apenas 'exames mais recentes' se a data "
+        "estiver disponivel; escreva 'exames mais recentes de DD/MM/AAAA' ou "
+        "equivalente.\n"
         "Para had_transfusion: resposta estritamente binaria (yes/no); "
         "ausencia de evidencia de transfusao deve ser tratada como 'no'. "
         "Se had_transfusion=yes, informar total_units (inteiro) "

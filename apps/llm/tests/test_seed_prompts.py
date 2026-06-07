@@ -85,3 +85,6 @@ class TestSeedPromptsCanonicalNames:
         assert pt is not None
         assert "sem exame" in pt.content.lower() or "Sem Exame" in pt.content
         assert "exam_datetime_iso" in pt.content
+        assert "data do exame" in pt.content.lower() or "data dos exames" in pt.content.lower()
+        assert "resumo" in pt.content.lower() or "summary" in pt.content.lower()
+        assert "quando disponivel" in pt.content.lower()
