@@ -523,3 +523,120 @@ class TestDoctorReportPresenter:
         assert "## Suporte recomendado" in text
         assert "## ASA estimado" in text
         assert "## Motivo objetivo" in text
+
+    # ── Tracked exam date formatting ───────────────────────────────────────
+
+    def test_tracked_exam_recent_with_datetime_shows_date_and_time(self):
+        """Recent tracked exam with datetime shows formatted date and time."""
+        presenter = DoctorReportPresenter(
+            structured_data={
+                "tracked_exams": [
+                    {
+                        "exam_label": "Hb",
+                        "result_value": "10.0 g/dL",
+                        "is_most_recent": True,
+                        "exam_datetime_iso": "2025-12-01T10:00:00",
+                    },
+                ],
+            },
+            summary_text="",
+            suggested_action={},
+        )
+        report = presenter.build_report()
+        tracked = report["context"]["tracked_exam_lines"]
+        assert len(tracked) == 1
+        line = tracked[0]
+        assert "Hb" in line
+        assert "10.0 g/dL" in line
+        assert "mais recente" in line
+        assert "01/12/2025" in line
+        assert "10:00" in line
+
+    def test_tracked_exam_recent_with_date_only_shows_date(self):
+        """Recent tracked exam with date-only ISO shows date without time."""
+        presenter = DoctorReportPresenter(
+            structured_data={
+                "tracked_exams": [
+                    {
+                        "exam_label": "Hb",
+                        "result_value": "10.0 g/dL",
+                        "is_most_recent": True,
+                        "exam_datetime_iso": "2025-12-01",
+                    },
+                ],
+            },
+            summary_text="",
+            suggested_action={},
+        )
+        report = presenter.build_report()
+        tracked = report["context"]["tracked_exam_lines"]
+        assert len(tracked) == 1
+        line = tracked[0]
+        assert "01/12/2025" in line
+        assert "00:00" not in line
+
+    def test_tracked_exam_recent_without_datetime_keeps_no_date_fallback(self):
+        """Recent tracked exam without exam_datetime_iso uses fallback."""
+        presenter = DoctorReportPresenter(
+            structured_data={
+                "tracked_exams": [
+                    {
+                        "exam_label": "Hb",
+                        "result_value": "10.0 g/dL",
+                        "is_most_recent": True,
+                    },
+                ],
+            },
+            summary_text="",
+            suggested_action={},
+        )
+        report = presenter.build_report()
+        tracked = report["context"]["tracked_exam_lines"]
+        assert len(tracked) == 1
+        line = tracked[0]
+        assert "sem data" in line
+
+    def test_tracked_exam_recent_with_invalid_datetime_does_not_crash_and_uses_fallback(self):
+        """Invalid exam_datetime_iso does not crash and falls back."""
+        presenter = DoctorReportPresenter(
+            structured_data={
+                "tracked_exams": [
+                    {
+                        "exam_label": "Hb",
+                        "result_value": "10.0 g/dL",
+                        "is_most_recent": True,
+                        "exam_datetime_iso": "data inválida",
+                    },
+                ],
+            },
+            summary_text="",
+            suggested_action={},
+        )
+        report = presenter.build_report()  # should not raise
+        tracked = report["context"]["tracked_exam_lines"]
+        assert len(tracked) == 1
+        line = tracked[0]
+        assert "sem data" in line
+
+    def test_tracked_exam_not_recent_does_not_show_recent_date_marker(self):
+        """Non-recent exam does not get recent/date marker even with datetime."""
+        presenter = DoctorReportPresenter(
+            structured_data={
+                "tracked_exams": [
+                    {
+                        "exam_label": "Hb",
+                        "result_value": "10.0 g/dL",
+                        "is_most_recent": False,
+                        "exam_datetime_iso": "2025-12-01T10:00:00",
+                    },
+                ],
+            },
+            summary_text="",
+            suggested_action={},
+        )
+        report = presenter.build_report()
+        tracked = report["context"]["tracked_exam_lines"]
+        assert len(tracked) == 1
+        line = tracked[0]
+        assert "mais recente" not in line
+        assert "01/12/2025" not in line
