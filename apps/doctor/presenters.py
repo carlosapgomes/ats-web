@@ -6,6 +6,7 @@ into a standalone Django presenter for the doctor decision screen.
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import Any
@@ -114,6 +115,110 @@ def _is_yes_precheck(value: Any) -> bool:
     return isinstance(value, str) and value.strip().lower() == "yes"
 
 
+# ── Caustic ingestion detection helpers ─────────────────────────────────
+
+
+_CAUSTIC_KEYWORDS: set[str] = {
+    "cáustic",
+    "corrosiv",
+    "soda cáustica",
+    "ácido",
+}
+
+_INGESTION_VERBS: set[str] = {
+    "ingeriu",
+    "ingestão",
+    "ingestão de",
+    "ingerir",
+    "ingerido",
+}
+
+_CAUSTIC_NEGATION_PATTERNS: list[re.Pattern[str]] = [
+    re.compile(r"nega\s+ingestão\s+de\s+(cáustic|corrosiv|soda\s+cáustica|ácido)", re.IGNORECASE),
+    re.compile(r"sem\s+ingestão\s+de\s+(corrosiv|cáustic)", re.IGNORECASE),
+    re.compile(r"não\s+ingeriu\s+(soda\s+cáustica|cáustic|corrosiv)", re.IGNORECASE),
+    re.compile(r"nega\s+(ter\s+)?ingerid[oa]\s+(produto\s+)?(cáustic|corrosiv|soda\s+cáustica|ácido)", re.IGNORECASE),
+]
+
+_CAUSTIC_TIME_PATTERNS: list[re.Pattern[str]] = [
+    re.compile(
+        r"há\s+(cerca\s+de\s+|aproximadamente\s+)?[\w\s]+?(semanas?|dias?|meses?|anos?|minutos?|horas?)", re.IGNORECASE
+    ),
+    re.compile(r"em\s+\d{1,2}[/-]\d{1,2}[/-]\d{2,4}", re.IGNORECASE),
+    re.compile(
+        r"há\s+(cerca\s+de\s+|aproximadamente\s+)?[\w\s]+?(semanas?|dias?|meses?|anos?|minutos?|horas?)\s+atrás",
+        re.IGNORECASE,
+    ),
+]
+
+
+def _detect_caustic_ingestion(text: str) -> list[str]:
+    """Detect caustic/corrosive ingestion in source_text and return alert lines.
+
+    Returns a list with:
+    - Empty list when no ingestion detected or negation is explicit.
+    - One or two lines with the alert header and time info when positive.
+    """
+    if not isinstance(text, str) or not text.strip():
+        return []
+
+    # Check for explicit negation first
+    for pattern in _CAUSTIC_NEGATION_PATTERNS:
+        if pattern.search(text):
+            return []
+
+    # Detect caustic/corrosive ingestion
+    if not _has_caustic_keyword_near_ingestion(text):
+        return []
+
+    # Extract time expression
+    time_text = _extract_time_from_text(text)
+
+    lines: list[str] = ["⚠️ ingestão cáustica/corrosiva relatada: sim"]
+    if time_text:
+        lines.append(f"tempo desde a ingestão: {time_text}")
+    else:
+        lines.append("tempo desde a ingestão: não informado no relatório")
+
+    return lines
+
+
+def _has_caustic_keyword_near_ingestion(text: str) -> bool:
+    """Return True if text contains caustic/corrosive keyword near an ingestion verb."""
+    text_lower = text.lower()
+
+    # Check for keyword + ingestion verb proximity
+    for keyword in _CAUSTIC_KEYWORDS:
+        keyword_lower = keyword.lower()
+        if keyword_lower not in text_lower:
+            continue
+
+        # Check if there's an ingestion verb near the keyword (within ~80 chars)
+        for verb in _INGESTION_VERBS:
+            verb_lower = verb.lower()
+            for match in re.finditer(re.escape(verb_lower), text_lower):
+                start = max(0, match.start() - 20)
+                end = min(len(text_lower), match.end() + 80)
+                window = text_lower[start:end]
+                if keyword_lower in window:
+                    return True
+
+    # Standalone "soda cáustica" always implies ingestion
+    if "soda cáustica" in text_lower:
+        return True
+
+    return False
+
+
+def _extract_time_from_text(text: str) -> str:
+    """Extract the first time expression from text, or empty string."""
+    for pattern in _CAUSTIC_TIME_PATTERNS:
+        match = pattern.search(text)
+        if match:
+            return match.group(0).strip()
+    return ""
+
+
 def _is_absent_exam_result(value: Any) -> bool:
     """Return True when result_value indicates absence of exam.
 
@@ -167,6 +272,7 @@ class DoctorReportPresenter:
     summary_text: str = ""
     suggested_action: dict[str, Any] = field(default_factory=dict)
     recent_denial_context: dict[str, Any] | None = None
+    source_text: str = ""
 
     # ── Public API ───────────────────────────────────────────────────────
 
@@ -186,6 +292,17 @@ class DoctorReportPresenter:
             "recent_denial": self._build_recent_denial(),
         }
 
+    # ── Clinical alert lines ────────────────────────────────────────────
+
+    def _build_clinical_alert_lines(self) -> list[str]:
+        """Detect caustic/corrosive ingestion in source_text and return alert lines.
+
+        Returns a list with:
+        - Empty list when no ingestion detected or negation is explicit.
+        - One or two lines with the alert header and time info when positive.
+        """
+        return _detect_caustic_ingestion(self.source_text)
+
     def build_text_report(self) -> str:
         """Render the report as a markdown-like text block for audit/testing."""
         report = self.build_report()
@@ -202,6 +319,9 @@ class DoctorReportPresenter:
         lines.extend(context["tracked_exam_lines"])
         if context["pediatric"]:
             lines.append(context["pediatric"])
+        if context.get("clinical_alert_lines"):
+            for alert_line in context["clinical_alert_lines"]:
+                lines.append(alert_line)
         lines.append("")
 
         # Blocks
@@ -454,6 +574,7 @@ class DoctorReportPresenter:
             "transfusion_lines": self._build_transfusion_lines(),
             "tracked_exam_lines": self._build_tracked_exam_lines(),
             "pediatric": "paciente pediátrico: sim" if self._is_pediatric() else "",
+            "clinical_alert_lines": self._build_clinical_alert_lines(),
         }
 
     def _resolve_canonical_procedure_name(self) -> str:

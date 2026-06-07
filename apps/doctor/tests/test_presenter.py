@@ -778,3 +778,151 @@ class TestDoctorReportPresenter:
         line = tracked[0]
         assert "Hb" in line
         assert "12.0 g/dL" in line
+
+
+# ── Caustic ingestion detection ──────────────────────────────────────────────
+
+
+class TestCausticIngestionDetection:
+    """Tests for caustic/corrosive ingestion detection in the presenter."""
+
+    def test_alert_detects_soda_caustica_with_relative_time(self):
+        """Detect soda cáustica ingestion with 'há 3 semanas' time expression."""
+        presenter = DoctorReportPresenter(
+            structured_data={},
+            summary_text="",
+            suggested_action={},
+            source_text="Paciente ingeriu soda cáustica há 3 semanas.",
+        )
+        report = presenter.build_report()
+        alert_lines = report["context"]["clinical_alert_lines"]
+        assert len(alert_lines) >= 1
+        assert any("ingestão cáustica/corrosiva" in line for line in alert_lines)
+        assert any("há 3 semanas" in line for line in alert_lines)
+
+    def test_alert_detects_corrosive_substance_with_approximate_time(self):
+        """Detect substância corrosiva ingestion with 'há cerca de 10 dias'."""
+        presenter = DoctorReportPresenter(
+            structured_data={},
+            summary_text="",
+            suggested_action={},
+            source_text="História de ingestão de substância corrosiva há cerca de 10 dias.",
+        )
+        report = presenter.build_report()
+        alert_lines = report["context"]["clinical_alert_lines"]
+        assert len(alert_lines) >= 1
+        assert any("ingestão cáustica/corrosiva" in line for line in alert_lines)
+        assert any("há cerca de 10 dias" in line for line in alert_lines)
+
+    def test_alert_detects_acid_ingestion_with_date(self):
+        """Detect ácido ingestion with 'em 12/05/2026' date."""
+        presenter = DoctorReportPresenter(
+            structured_data={},
+            summary_text="",
+            suggested_action={},
+            source_text="Relata ingestão de ácido em 12/05/2026.",
+        )
+        report = presenter.build_report()
+        alert_lines = report["context"]["clinical_alert_lines"]
+        assert len(alert_lines) >= 1
+        assert any("ingestão cáustica/corrosiva" in line for line in alert_lines)
+        assert any("em 12/05/2026" in line for line in alert_lines)
+
+    def test_alert_without_time_uses_fallback(self):
+        """When caustic ingestion detected but no time, shows fallback."""
+        presenter = DoctorReportPresenter(
+            structured_data={},
+            summary_text="",
+            suggested_action={},
+            source_text="Paciente ingeriu produto corrosivo.",
+        )
+        report = presenter.build_report()
+        alert_lines = report["context"]["clinical_alert_lines"]
+        assert len(alert_lines) >= 1
+        assert any("ingestão cáustica/corrosiva" in line for line in alert_lines)
+        assert any("não informado no relatório" in line for line in alert_lines)
+
+    def test_alert_absent_when_no_event(self):
+        """No alert when text has no caustic/corrosive ingestion mention."""
+        presenter = DoctorReportPresenter(
+            structured_data={},
+            summary_text="",
+            suggested_action={},
+            source_text="Paciente com HDA. Hb 8.5. Sem comorbidades relevantes.",
+        )
+        report = presenter.build_report()
+        alert_lines = report["context"]["clinical_alert_lines"]
+        assert alert_lines == []
+
+    def test_alert_ignores_explicit_negation(self):
+        """Explicit negation of caustic ingestion does not trigger alert."""
+        presenter = DoctorReportPresenter(
+            structured_data={},
+            summary_text="",
+            suggested_action={},
+            source_text="Paciente nega ingestão de cáustico.",
+        )
+        report = presenter.build_report()
+        alert_lines = report["context"]["clinical_alert_lines"]
+        assert alert_lines == []
+
+    def test_alert_ignores_sem_ingestao_negation(self):
+        """'Sem ingestão de corrosivos' does not trigger alert."""
+        presenter = DoctorReportPresenter(
+            structured_data={},
+            summary_text="",
+            suggested_action={},
+            source_text="Sem ingestão de corrosivos.",
+        )
+        report = presenter.build_report()
+        alert_lines = report["context"]["clinical_alert_lines"]
+        assert alert_lines == []
+
+    def test_alert_ignores_nao_ingeriu_negation(self):
+        """'Não ingeriu soda cáustica' does not trigger alert."""
+        presenter = DoctorReportPresenter(
+            structured_data={},
+            summary_text="",
+            suggested_action={},
+            source_text="Não ingeriu soda cáustica.",
+        )
+        report = presenter.build_report()
+        alert_lines = report["context"]["clinical_alert_lines"]
+        assert alert_lines == []
+
+    def test_alert_shows_corrosive_acid_time_fallback(self):
+        """Corrosive acid ingestion without explicit time shows fallback."""
+        presenter = DoctorReportPresenter(
+            structured_data={},
+            summary_text="",
+            suggested_action={},
+            source_text="História de ingestão de ácido.",
+        )
+        report = presenter.build_report()
+        alert_lines = report["context"]["clinical_alert_lines"]
+        assert len(alert_lines) >= 1
+        assert any("ingestão cáustica/corrosiva" in line for line in alert_lines)
+        assert any("não informado no relatório" in line for line in alert_lines)
+
+    def test_source_text_default_empty_maintains_compatibility(self):
+        """Presenter without source_text still works (default empty str)."""
+        presenter = DoctorReportPresenter(
+            structured_data={},
+            summary_text="",
+            suggested_action={},
+        )
+        report = presenter.build_report()
+        alert_lines = report["context"]["clinical_alert_lines"]
+        assert alert_lines == []
+
+    def test_text_report_includes_clinical_alert_lines(self):
+        """build_text_report includes clinical alert lines when present."""
+        presenter = DoctorReportPresenter(
+            structured_data={},
+            summary_text="",
+            suggested_action={},
+            source_text="Paciente ingeriu soda cáustica há 3 semanas.",
+        )
+        text = presenter.build_text_report()
+        assert "ingestão cáustica/corrosiva" in text
+        assert "há 3 semanas" in text

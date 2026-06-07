@@ -307,6 +307,7 @@ def _build_decision_context(case: Case, form: DoctorDecisionForm) -> dict[str, A
         summary_text=case.summary_text or "",
         suggested_action=case.suggested_action or {},
         recent_denial_context=recent_denial_ctx,
+        source_text=case.extracted_text or "",
     )
     report = presenter.build_report()
 

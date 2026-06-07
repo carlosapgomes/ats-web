@@ -160,6 +160,9 @@
       {% for line in report.context.transfusion_lines %}<div>{{ line }}</div>{% endfor %}
       {% for line in report.context.tracked_exam_lines %}<div>{{ line }}</div>{% endfor %}
       {% if report.context.pediatric %}<div>{{ report.context.pediatric }}</div>{% endif %}
+      {% for line in report.context.clinical_alert_lines %}
+      <div class="alert alert-warning py-1 px-2 mb-1 small">{{ line }}</div>
+      {% endfor %}
     </div>
 
     <div class="doctor-report-grid">
