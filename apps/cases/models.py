@@ -429,6 +429,37 @@ class Case(models.Model):
     def post_schedule_issue_acknowledged(self, user=None):
         self._record_event("POST_SCHEDULE_ISSUE_ACKNOWLEDGED", user=user)
 
+    @transition(
+        field=status,
+        source=[
+            CaseStatus.NEW,
+            CaseStatus.R1_ACK_PROCESSING,
+            CaseStatus.EXTRACTING,
+            CaseStatus.LLM_STRUCT,
+            CaseStatus.LLM_SUGGEST,
+            CaseStatus.R2_POST_WIDGET,
+            CaseStatus.WAIT_DOCTOR,
+            CaseStatus.DOCTOR_ACCEPTED,
+            CaseStatus.DOCTOR_DENIED,
+            CaseStatus.R3_POST_REQUEST,
+            CaseStatus.WAIT_APPT,
+            CaseStatus.APPT_CONFIRMED,
+            CaseStatus.APPT_DENIED,
+            CaseStatus.FAILED,
+            CaseStatus.R1_FINAL_REPLY_POSTED,
+            CaseStatus.WAIT_R1_CLEANUP_THUMBS,
+            CaseStatus.CLEANUP_RUNNING,
+        ],
+        target=CaseStatus.CLEANED,
+    )
+    def administratively_close(self, *, user=None, payload=None):
+        """Transição excepcional para encerramento administrativo.
+
+        Disponível de qualquer estado não CLEANED. Move o caso para CLEANED
+        sem passar pelos eventos normais de cleanup.
+        """
+        self._record_event("CASE_ADMINISTRATIVELY_CLOSED", user=user, payload=payload or {})
+
     def _record_event(
         self,
         event_type: str,
