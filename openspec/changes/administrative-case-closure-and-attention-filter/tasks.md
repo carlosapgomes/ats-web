@@ -3,7 +3,7 @@
 ## Slices verticais
 
 - [x] Slice 001 — Encerramento administrativo auditável no detalhe do dashboard (`slices/slice-001-administrative-closure.md`)
-- [ ] Slice 002 — Filtro `Atenção necessária` na listagem inicial do dashboard (`slices/slice-002-attention-filter.md`)
+- [ ] Slice 002 — Filtro `Atenção necessária` na listagem inicial do dashboard (`slices/slice-002-attention-filter.md`)  ✅ DONE
 
 ## Definition of Done do change
 

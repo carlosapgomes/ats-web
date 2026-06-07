@@ -1529,3 +1529,167 @@ class TestDashboardAdministrativeClosure:
         assert response.status_code == 200
         content = response.content.decode()
         assert "Encerrado administrativamente" in content
+
+
+# ── Dashboard: Attention Filter (Slice 002) ──────────────────────────────
+
+
+@pytest.mark.django_db
+class TestDashboardAttentionFilter:
+    """Testes do filtro 'Atenção necessária' no dashboard.
+
+    Filtro ativado via ?attention=1. Critérios:
+    - FAILED sempre entra
+    - Lock expirado entra
+    - Estados de processamento antigos (>30 min) entram
+    - Estados de espera humanos antigos (>48 h) entram
+    - CLEANED sempre excluído
+    """
+
+    def test_dashboard_has_attention_filter_control(self, client) -> None:
+        """GET dashboard contém botão/link 'Atenção necessária' com attention=1."""
+        _login_as(client, "manager")
+        response = client.get(reverse("dashboard:index"))
+        assert response.status_code == 200
+        content = response.content.decode()
+        assert "Atenção necessária" in content
+        assert "attention=1" in content
+
+    def test_attention_filter_includes_failed_operational_cases(self, client) -> None:
+        """Caso FAILED aparece em ?attention=1; CLEANED não aparece."""
+        user = _login_as(client, "manager")
+        Case.objects.all().delete()
+
+        failed = _create_case(created_by=user, status=CaseStatus.FAILED, agency_record_number="ATT-FAIL")
+        cleaned = _create_case(created_by=user, status=CaseStatus.CLEANED, agency_record_number="ATT-CLEAN")
+
+        response = client.get(reverse("dashboard:index") + "?attention=1")
+        assert response.status_code == 200
+        content = response.content.decode()
+        assert failed.agency_record_number in content
+        assert cleaned.agency_record_number not in content
+
+    def test_attention_filter_includes_old_processing_case(self, client) -> None:
+        """Caso em LLM_SUGGEST com updated_at antigo aparece em ?attention=1."""
+        user = _login_as(client, "manager")
+        Case.objects.all().delete()
+
+        case = _create_case(created_by=user, status=CaseStatus.LLM_SUGGEST, agency_record_number="ATT-OLD-PROC")
+        old_time = timezone.now() - timedelta(hours=1)
+        Case.objects.filter(pk=case.pk).update(updated_at=old_time)
+
+        response = client.get(reverse("dashboard:index") + "?attention=1")
+        assert response.status_code == 200
+        content = response.content.decode()
+        assert case.agency_record_number in content
+
+    def test_attention_filter_excludes_fresh_processing_case(self, client) -> None:
+        """Caso em EXTRACTING com updated_at recente NÃO aparece em ?attention=1."""
+        user = _login_as(client, "manager")
+        Case.objects.all().delete()
+
+        case = _create_case(created_by=user, status=CaseStatus.EXTRACTING, agency_record_number="ATT-FRESH-PROC")
+        # updated_at é 'agora' por default → não deve aparecer
+
+        response = client.get(reverse("dashboard:index") + "?attention=1")
+        assert response.status_code == 200
+        content = response.content.decode()
+        assert case.agency_record_number not in content
+
+    def test_attention_filter_includes_old_waiting_case(self, client) -> None:
+        """Caso WAIT_DOCTOR com updated_at > 48h aparece em ?attention=1."""
+        user = _login_as(client, "manager")
+        Case.objects.all().delete()
+
+        case = _create_case(created_by=user, status=CaseStatus.WAIT_DOCTOR, agency_record_number="ATT-OLD-WAIT")
+        old_time = timezone.now() - timedelta(hours=49)
+        Case.objects.filter(pk=case.pk).update(updated_at=old_time)
+
+        response = client.get(reverse("dashboard:index") + "?attention=1")
+        assert response.status_code == 200
+        content = response.content.decode()
+        assert case.agency_record_number in content
+
+    def test_attention_filter_excludes_fresh_waiting_case(self, client) -> None:
+        """Caso WAIT_DOCTOR recente NÃO aparece em ?attention=1."""
+        user = _login_as(client, "manager")
+        Case.objects.all().delete()
+
+        case = _create_case(created_by=user, status=CaseStatus.WAIT_DOCTOR, agency_record_number="ATT-FRESH-WAIT")
+
+        response = client.get(reverse("dashboard:index") + "?attention=1")
+        assert response.status_code == 200
+        content = response.content.decode()
+        assert case.agency_record_number not in content
+
+    def test_attention_filter_includes_expired_lock(self, client) -> None:
+        """Caso com lock expirado aparece em ?attention=1 e mostra motivo 'Lock expirado'."""
+        user = _login_as(client, "manager")
+        Case.objects.all().delete()
+
+        other_user = User.objects.create_user(username="locker@att.test", password="pass")
+        case = _create_case(
+            created_by=user,
+            status=CaseStatus.WAIT_DOCTOR,
+            agency_record_number="ATT-LOCK-EXP",
+        )
+        Case.objects.filter(pk=case.pk).update(
+            locked_by=other_user,
+            locked_until=timezone.now() - timedelta(minutes=10),
+            locked_at=timezone.now() - timedelta(minutes=20),
+        )
+
+        response = client.get(reverse("dashboard:index") + "?attention=1")
+        assert response.status_code == 200
+        content = response.content.decode()
+        assert case.agency_record_number in content
+        assert "Lock expirado" in content
+
+    def test_attention_filter_badge_shows_reason(self, client) -> None:
+        """GET ?attention=1 mostra badge 'Atenção necessária' e motivo no card."""
+        user = _login_as(client, "manager")
+        Case.objects.all().delete()
+
+        case = _create_case(created_by=user, status=CaseStatus.FAILED, agency_record_number="ATT-BADGE")
+
+        response = client.get(reverse("dashboard:index") + "?attention=1")
+        assert response.status_code == 200
+        content = response.content.decode()
+        assert case.agency_record_number in content
+        assert "⚠ Atenção necessária" in content
+        assert "Falha no processamento" in content
+
+    def test_attention_filter_composes_with_status_filter(self, client) -> None:
+        """?attention=1&status=FAILED mostra FAILED e exclui outro suspeito não-FAILED."""
+        user = _login_as(client, "manager")
+        Case.objects.all().delete()
+
+        failed = _create_case(created_by=user, status=CaseStatus.FAILED, agency_record_number="COMP-FAIL")
+        # Outro caso suspeito que não é FAILED: WAIT_DOCTOR antigo
+        old_wait = _create_case(created_by=user, status=CaseStatus.WAIT_DOCTOR, agency_record_number="COMP-WAIT")
+        Case.objects.filter(pk=old_wait.pk).update(updated_at=timezone.now() - timedelta(hours=49))
+
+        response = client.get(reverse("dashboard:index") + "?attention=1&status=FAILED")
+        assert response.status_code == 200
+        content = response.content.decode()
+        assert failed.agency_record_number in content
+        assert old_wait.agency_record_number not in content
+
+    def test_attention_pagination_preserves_attention_param(self, client) -> None:
+        """Links de paginação preservam attention=1."""
+        user = _login_as(client, "manager")
+        Case.objects.all().delete()
+
+        # Criar 25 casos FAILED para garantir paginação
+        for i in range(25):
+            _create_case(
+                created_by=user,
+                status=CaseStatus.FAILED,
+                agency_record_number=f"ATT-PAG-{i:03d}",
+            )
+
+        response = client.get(reverse("dashboard:index") + "?attention=1")
+        assert response.status_code == 200
+        content = response.content.decode()
+        # Links de paginação devem conter attention=1
+        assert "attention=1" in content

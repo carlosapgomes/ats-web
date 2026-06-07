@@ -143,6 +143,9 @@
   <div class="d-flex justify-content-between align-items-center mb-3 flex-wrap gap-2">
     <h5 class="mb-0">Todos os Casos</h5>
     <div class="admin-filters d-flex gap-2 align-items-center flex-wrap">
+      <a href="{% url 'dashboard:index' %}?attention=1" class="btn btn-sm {% if attention_filter %}btn-warning{% else %}btn-outline-warning{% endif %}">
+        ⚠ Atenção necessária{% if attention_count is not None %} ({{ attention_count }}){% endif %}
+      </a>
       <form method="get" class="d-flex gap-2 align-items-center flex-wrap">
         <select name="status" class="form-select form-select-sm" style="width:auto;">
           <option value="">Todos os status</option>
@@ -189,6 +192,10 @@
           </div>
           <div class="col-8 col-lg-3">
             <span class="badge {{ item.result_css }}">{{ item.result_label }}</span>
+            {% if item.attention_reason %}
+            <span class="badge bg-warning text-dark">⚠ Atenção necessária</span>
+            <small class="text-muted d-block">{{ item.attention_reason }}</small>
+            {% endif %}
           </div>
           <div class="col-4 col-lg-1">
             <small class="text-muted text-nowrap">{{ item.case.created_at|date:"d/m/Y H:i" }}</small>
@@ -218,7 +225,7 @@
     <ul class="pagination pagination-sm justify-content-center mb-0">
       {% if page_obj.has_previous %}
       <li class="page-item">
-        <a class="page-link" href="?page={{ page_obj.previous_page_number }}{% if status_filter %}&status={{ status_filter }}{% endif %}{% if date_from %}&date_from={{ date_from }}{% endif %}{% if date_to %}&date_to={{ date_to }}{% endif %}">Anterior</a>
+        <a class="page-link" href="?page={{ page_obj.previous_page_number }}{% if status_filter %}&status={{ status_filter }}{% endif %}{% if date_from %}&date_from={{ date_from }}{% endif %}{% if date_to %}&date_to={{ date_to }}{% endif %}{% if attention_filter %}&attention=1{% endif %}">Anterior</a>
       </li>
       {% else %}
       <li class="page-item disabled"><span class="page-link">Anterior</span></li>
@@ -229,14 +236,14 @@
         <li class="page-item active"><span class="page-link">{{ i }}</span></li>
         {% else %}
         <li class="page-item">
-          <a class="page-link" href="?page={{ i }}{% if status_filter %}&status={{ status_filter }}{% endif %}{% if date_from %}&date_from={{ date_from }}{% endif %}{% if date_to %}&date_to={{ date_to }}{% endif %}">{{ i }}</a>
+          <a class="page-link" href="?page={{ i }}{% if status_filter %}&status={{ status_filter }}{% endif %}{% if date_from %}&date_from={{ date_from }}{% endif %}{% if date_to %}&date_to={{ date_to }}{% endif %}{% if attention_filter %}&attention=1{% endif %}">{{ i }}</a>
         </li>
         {% endif %}
       {% endfor %}
 
       {% if page_obj.has_next %}
       <li class="page-item">
-        <a class="page-link" href="?page={{ page_obj.next_page_number }}{% if status_filter %}&status={{ status_filter }}{% endif %}{% if date_from %}&date_from={{ date_from }}{% endif %}{% if date_to %}&date_to={{ date_to }}{% endif %}">Próxima</a>
+        <a class="page-link" href="?page={{ page_obj.next_page_number }}{% if status_filter %}&status={{ status_filter }}{% endif %}{% if date_from %}&date_from={{ date_from }}{% endif %}{% if date_to %}&date_to={{ date_to }}{% endif %}{% if attention_filter %}&attention=1{% endif %}">Próxima</a>
       </li>
       {% else %}
       <li class="page-item disabled"><span class="page-link">Próxima</span></li>
