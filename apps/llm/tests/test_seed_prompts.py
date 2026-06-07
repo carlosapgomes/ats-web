@@ -6,6 +6,7 @@ import pytest
 from django.core.management import call_command
 
 from apps.llm.models import PromptTemplate
+from apps.pipeline.llm1_service import LLM1_DEFAULT_USER_PROMPT
 
 
 @pytest.mark.django_db
@@ -71,3 +72,16 @@ class TestSeedPromptsCanonicalNames:
         assert "NUNCA use estes nomes/aliases" in pt.content
         assert "age_years" in pt.content
         assert "triage_summary" in pt.content
+
+    def test_llm1_user_seed_uses_updated_default_prompt_for_tracked_exam_hardening(self) -> None:
+        """LLM1_USER seed usa LLM1_DEFAULT_USER_PROMPT atualizado com regras de hardening."""
+        # Prova que DEFAULT_CONTENTS["llm1_user"] é LLM1_DEFAULT_USER_PROMPT
+        from apps.llm.management.commands.seed_prompts import DEFAULT_CONTENTS
+
+        assert DEFAULT_CONTENTS.get("llm1_user") is LLM1_DEFAULT_USER_PROMPT
+        # Prove que o conteúdo semeado tem as regras de hardening
+        call_command("seed_prompts")
+        pt = PromptTemplate.get_active("llm1_user")
+        assert pt is not None
+        assert "sem exame" in pt.content.lower() or "Sem Exame" in pt.content
+        assert "exam_datetime_iso" in pt.content
