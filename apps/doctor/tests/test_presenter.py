@@ -926,3 +926,96 @@ class TestCausticIngestionDetection:
         text = presenter.build_text_report()
         assert "ingestão cáustica/corrosiva" in text
         assert "há 3 semanas" in text
+
+    # ── Hardening: unaccented variants ────────────────────────────────
+
+    def test_alert_detects_unaccented_soda_caustica_with_time(self):
+        """Detect unaccented 'soda caustica' with 'ha 3 semanas'."""
+        presenter = DoctorReportPresenter(
+            structured_data={},
+            summary_text="",
+            suggested_action={},
+            source_text="Paciente ingeriu soda caustica ha 3 semanas.",
+        )
+        report = presenter.build_report()
+        alert_lines = report["context"]["clinical_alert_lines"]
+        assert len(alert_lines) >= 1
+        assert any("ingestão cáustica/corrosiva" in line for line in alert_lines)
+        # Time is extracted from original text as literal
+        assert any("ha 3 semanas" in line for line in alert_lines)
+
+    def test_alert_detects_unaccented_ingestao_corrosiva_with_time(self):
+        """Detect unaccented 'ingestao' and 'corrosiva' with 'ha cerca de 10 dias'."""
+        presenter = DoctorReportPresenter(
+            structured_data={},
+            summary_text="",
+            suggested_action={},
+            source_text="Historia de ingestao de substancia corrosiva ha cerca de 10 dias.",
+        )
+        report = presenter.build_report()
+        alert_lines = report["context"]["clinical_alert_lines"]
+        assert len(alert_lines) >= 1
+        assert any("ingestão cáustica/corrosiva" in line for line in alert_lines)
+        assert any("ha cerca de 10 dias" in line for line in alert_lines)
+
+    def test_alert_detects_unaccented_acid_ingestion_with_date(self):
+        """Detect unaccented 'acido' ingestion with 'em 12/05/2026'."""
+        presenter = DoctorReportPresenter(
+            structured_data={},
+            summary_text="",
+            suggested_action={},
+            source_text="Relata ingestao de acido em 12/05/2026.",
+        )
+        report = presenter.build_report()
+        alert_lines = report["context"]["clinical_alert_lines"]
+        assert len(alert_lines) >= 1
+        assert any("ingestão cáustica/corrosiva" in line for line in alert_lines)
+        assert any("em 12/05/2026" in line for line in alert_lines)
+
+    def test_alert_ignores_unaccented_negation(self):
+        """Unaccented negation 'nega ingestao de caustico' does not trigger."""
+        presenter = DoctorReportPresenter(
+            structured_data={},
+            summary_text="",
+            suggested_action={},
+            source_text="Paciente nega ingestao de caustico.",
+        )
+        report = presenter.build_report()
+        alert_lines = report["context"]["clinical_alert_lines"]
+        assert alert_lines == []
+
+    def test_alert_ignores_unaccented_nao_ingeriu_soda_caustica(self):
+        """Unaccented 'Nao ingeriu soda caustica' does not trigger."""
+        presenter = DoctorReportPresenter(
+            structured_data={},
+            summary_text="",
+            suggested_action={},
+            source_text="Nao ingeriu soda caustica.",
+        )
+        report = presenter.build_report()
+        alert_lines = report["context"]["clinical_alert_lines"]
+        assert alert_lines == []
+
+    def test_alert_ignores_soda_caustica_contact_without_ingestion(self):
+        """Contact with soda cáustica without ingestion does not trigger."""
+        presenter = DoctorReportPresenter(
+            structured_data={},
+            summary_text="",
+            suggested_action={},
+            source_text="Contato com soda cáustica, sem ingestão.",
+        )
+        report = presenter.build_report()
+        alert_lines = report["context"]["clinical_alert_lines"]
+        assert alert_lines == []
+
+    def test_alert_ignores_soda_caustica_burn_without_ingestion(self):
+        """Burn by soda caustica without ingestion does not trigger."""
+        presenter = DoctorReportPresenter(
+            structured_data={},
+            summary_text="",
+            suggested_action={},
+            source_text="Queimadura por soda caustica em membro superior.",
+        )
+        report = presenter.build_report()
+        alert_lines = report["context"]["clinical_alert_lines"]
+        assert alert_lines == []
