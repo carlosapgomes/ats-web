@@ -535,6 +535,26 @@ class TestLlm1PromptTrackedExamHardening:
         assert "exam_datetime_iso" in up
         assert "realizados" in up
 
+    def test_render_user_prompt_requires_exam_dates_in_summary_when_available(self) -> None:
+        prompt = _render_user_prompt(
+            template="Template base",
+            case_id="case-teh-003",
+            agency_record_number="12345",
+            clean_text="Texto clinico.",
+        )
+        assert "summary.one_liner" in prompt
+        assert "summary.bullet_points" in prompt
+        assert "data do exame" in prompt.lower() or "data dos exames" in prompt.lower()
+        assert "exam_datetime_iso" in prompt
+        assert "exames mais recentes" in prompt
+        assert "DD/MM/AAAA" in prompt
+
+    def test_default_user_prompt_mentions_exam_dates_for_narrative_summary(self) -> None:
+        up = LLM1_DEFAULT_USER_PROMPT
+        assert "data do exame" in up.lower() or "data dos exames" in up.lower()
+        assert "resumo" in up.lower() or "summary" in up.lower()
+        assert "quando disponivel" in up.lower()
+
 
 # ── Fallback / default LLM1 prompts ─────────────────────────────────────────
 
