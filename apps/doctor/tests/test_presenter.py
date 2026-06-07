@@ -618,8 +618,8 @@ class TestDoctorReportPresenter:
         line = tracked[0]
         assert "sem data" in line
 
-    def test_tracked_exam_not_recent_does_not_show_recent_date_marker(self):
-        """Non-recent exam does not get recent/date marker even with datetime."""
+    def test_tracked_exam_not_recent_shows_date_without_recent_marker(self):
+        """Non-recent exam with datetime shows date but no 'mais recente' marker."""
         presenter = DoctorReportPresenter(
             structured_data={
                 "tracked_exams": [
@@ -639,4 +639,142 @@ class TestDoctorReportPresenter:
         assert len(tracked) == 1
         line = tracked[0]
         assert "mais recente" not in line
-        assert "01/12/2025" not in line
+        assert "01/12/2025" in line
+        assert "10:00" in line
+
+    # ── Absent exam filtering ────────────────────────────────────────────
+
+    def test_tracked_exam_absent_result_is_not_rendered(self):
+        """Tracked exam with 'Sem exame' result is not rendered."""
+        presenter = DoctorReportPresenter(
+            structured_data={
+                "tracked_exams": [
+                    {
+                        "exam_label": "ECG",
+                        "result_value": "Sem exame",
+                        "is_most_recent": True,
+                        "exam_datetime_iso": "2026-06-06T07:00:00",
+                    },
+                    {
+                        "exam_label": "Hb",
+                        "result_value": "12.5 g/dL",
+                        "is_most_recent": True,
+                        "exam_datetime_iso": "2026-06-06T07:00:00",
+                    },
+                ],
+            },
+            summary_text="",
+            suggested_action={},
+        )
+        report = presenter.build_report()
+        tracked = report["context"]["tracked_exam_lines"]
+        # Only Hb should appear
+        assert len(tracked) == 1
+        line = tracked[0]
+        assert "Hb" in line
+        assert "12.5 g/dL" in line
+        assert "ECG" not in line
+        assert "Sem exame" not in line
+
+    def test_tracked_exam_absent_result_variants_are_not_rendered(self):
+        """Various absence result values are filtered out."""
+        variants = [
+            "Não realizado",
+            "Nao realizado",
+            "Não consta",
+            "Nao consta",
+            "Ausente",
+            "Sem laudo",
+            "Sem resultado",
+        ]
+        for variant in variants:
+            presenter = DoctorReportPresenter(
+                structured_data={
+                    "tracked_exams": [
+                        {
+                            "exam_label": "ECG",
+                            "result_value": variant,
+                            "is_most_recent": False,
+                        },
+                    ],
+                },
+                summary_text="",
+                suggested_action={},
+            )
+            report = presenter.build_report()
+            tracked = report["context"]["tracked_exam_lines"]
+            assert len(tracked) == 0, f"Variant '{variant}' should be filtered out, got: {tracked}"
+
+    def test_tracked_exam_valid_not_recent_shows_date_without_recent_marker(self):
+        """Valid non-recent exam with datetime shows date but no recent marker."""
+        presenter = DoctorReportPresenter(
+            structured_data={
+                "tracked_exams": [
+                    {
+                        "exam_label": "LAB externo",
+                        "result_value": "HB 12,1; HT 38,3",
+                        "exam_datetime_iso": "2026-05-28T08:30:00",
+                        "is_most_recent": False,
+                    },
+                ],
+            },
+            summary_text="",
+            suggested_action={},
+        )
+        report = presenter.build_report()
+        tracked = report["context"]["tracked_exam_lines"]
+        assert len(tracked) == 1
+        line = tracked[0]
+        assert "LAB externo" in line
+        assert "HB 12,1" in line
+        assert "28/05/2026" in line
+        assert "08:30" in line
+        assert "mais recente" not in line
+
+    def test_tracked_exam_valid_recent_shows_date_and_recent_marker(self):
+        """Valid recent exam with datetime shows date and recent marker."""
+        presenter = DoctorReportPresenter(
+            structured_data={
+                "tracked_exams": [
+                    {
+                        "exam_label": "LAB interno",
+                        "result_value": "HB 12,9; HT 34,1",
+                        "exam_datetime_iso": "2026-06-01T00:00:00",
+                        "is_most_recent": True,
+                    },
+                ],
+            },
+            summary_text="",
+            suggested_action={},
+        )
+        report = presenter.build_report()
+        tracked = report["context"]["tracked_exam_lines"]
+        assert len(tracked) == 1
+        line = tracked[0]
+        assert "LAB interno" in line
+        assert "HB 12,9" in line
+        assert "01/06/2026" in line
+        assert "mais recente" in line
+
+    def test_tracked_exam_valid_invalid_datetime_keeps_exam_without_crashing(self):
+        """Valid exam with invalid datetime keeps exam value and does not crash."""
+        presenter = DoctorReportPresenter(
+            structured_data={
+                "tracked_exams": [
+                    {
+                        "exam_label": "Hb",
+                        "result_value": "12.0 g/dL",
+                        "exam_datetime_iso": "data inválida",
+                        "is_most_recent": True,
+                    },
+                ],
+            },
+            summary_text="",
+            suggested_action={},
+        )
+        report = presenter.build_report()  # should not raise
+        tracked = report["context"]["tracked_exam_lines"]
+        assert len(tracked) == 1
+        line = tracked[0]
+        assert "Hb" in line
+        assert "12.0 g/dL" in line
