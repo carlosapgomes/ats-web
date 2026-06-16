@@ -64,10 +64,21 @@ docker compose -f docker-compose.yml -f docker-compose.dev.yml down
 O diretório do projeto é montado como volume no container (`.` → `/app`), então
 edições no host refletem imediatamente no servidor (auto-reload).
 
+A porta do PostgreSQL no host é configurável por `POSTGRES_HOST_PORT`
+(default: `5432` em desenvolvimento). Exemplo para evitar conflito com outro
+PostgreSQL local:
+
+```bash
+POSTGRES_HOST_PORT=15432 docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d
+```
+
+A URL interna dos containers continua usando `db:5432`; apenas a porta publicada
+no host muda.
+
 ### Ambiente de Testes
 
 ```bash
-# Subir banco de teste (porta 5433, dados efêmeros)
+# Subir banco de teste (porta ${POSTGRES_TEST_HOST_PORT:-5433}, dados efêmeros)
 docker compose -f docker-compose.yml -f docker-compose.test.yml up -d
 
 # Rodar testes (no host, com uv)
@@ -82,6 +93,7 @@ docker compose -f docker-compose.yml -f docker-compose.test.yml down -v
 ```bash
 # Subir todos os serviços (db + web + worker)
 # Requer: DJANGO_SECRET_KEY, POSTGRES_PASSWORD no .env ou env vars
+# PostgreSQL fica ligado ao host ${POSTGRES_HOST_BIND:-127.0.0.1}:${POSTGRES_HOST_PORT:-15432}
 docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d
 
 # Rodar migrations
@@ -240,7 +252,7 @@ uv run ruff check . && uv run ruff format --check . && uv run mypy . && uv run p
 
 ```
 ┌─────────────────┐  ┌─────────────────┐  ┌─────────────────┐  ┌─────────────────┐
-│   web (:8000)    │  │    worker       │  │  pdf_worker     │  │   db (:5432)    │
+│   web (:8000)    │  │    worker       │  │  pdf_worker     │  │ db (host var)   │
 │─────────────────│  │─────────────────│  │─────────────────│  │─────────────────│
 │ Dev:  runserver │  │ django-q2 LLM   │  │ django-q2 PDF   │  │ PostgreSQL 17   │
 │ Prod: gunicorn  │  │ qcluster        │  │ qcluster        │  │ + unaccent      │
