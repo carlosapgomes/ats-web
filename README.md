@@ -93,6 +93,7 @@ docker compose -f docker-compose.yml -f docker-compose.test.yml down -v
 ```bash
 # Subir todos os serviços (db + web + worker)
 # Requer: DJANGO_SECRET_KEY, POSTGRES_PASSWORD no .env ou env vars
+# Web fica ligada ao host ${WEB_HOST_BIND:-127.0.0.1}:${WEB_HOST_PORT:-8000}
 # PostgreSQL fica ligado ao host ${POSTGRES_HOST_BIND:-127.0.0.1}:${POSTGRES_HOST_PORT:-15432}
 docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d
 
