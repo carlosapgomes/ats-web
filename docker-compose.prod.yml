@@ -1,4 +1,4 @@
-# Production: gunicorn + worker, no exposed DB port
+# Production: gunicorn + worker, PostgreSQL bound to localhost by default
 # Usage: docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d
 
 name: ats-web-prod
@@ -8,7 +8,8 @@ services:
     environment:
       POSTGRES_DB: ats_web
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD}
-    # no ports — accessible only via internal compose network
+    ports:
+      - "${POSTGRES_HOST_BIND:-127.0.0.1}:${POSTGRES_HOST_PORT:-15432}:5432"
     volumes:
       - pgdata_prod:/var/lib/postgresql/data
 
