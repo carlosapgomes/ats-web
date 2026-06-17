@@ -84,7 +84,24 @@
 {% if result_info %}
 <div class="card p-4 mb-4">
   <h5 class="mb-3">📋 Resultado Final</h5>
-  {% if result_info.type == "manual_review_required" %}
+  {% if result_info.type == "administratively_closed" %}
+    <div class="d-flex align-items-center gap-3 mb-3">
+      <span class="badge bg-secondary fs-6 px-3 py-2">🔒 Encerrado administrativamente</span>
+    </div>
+    <p class="mb-3">Caso removido das filas operacionais por intervenção administrativa. Este encerramento não representa confirmação de agendamento.</p>
+    {% if result_info.reason_text %}
+    <div class="mb-3">
+      <p class="mb-1 text-muted small">Motivo</p>
+      <p class="mb-0 fw-medium">{{ result_info.reason_text }}</p>
+    </div>
+    {% endif %}
+    {% if result_info.previous_status %}
+    <div class="mb-3">
+      <p class="mb-1 text-muted small">Status anterior</p>
+      <p class="mb-0 fw-medium">{{ result_info.previous_status }}</p>
+    </div>
+    {% endif %}
+  {% elif result_info.type == "manual_review_required" %}
     <div class="d-flex align-items-center gap-3 mb-3">
       <span class="badge bg-warning text-dark fs-6 px-3 py-2">⚠ Revisão Manual Obrigatória</span>
     </div>

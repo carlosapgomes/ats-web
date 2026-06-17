@@ -1530,6 +1530,166 @@ class TestDashboardAdministrativeClosure:
         content = response.content.decode()
         assert "Encerrado administrativamente" in content
 
+    # ── Dashboard case detail: outcome semantics for admin-closed ────────────
+
+    def test_administrative_closed_detail_shows_admin_outcome_not_confirmed(self, client) -> None:
+        """Caso aceito+confirmado encerrado administrative mostra 'Encerrado administrativamente', não 'Agendamento Confirmado'."""
+        from apps.cases.services import administratively_close_case
+
+        user = _login_as(client, "manager")
+        case = _create_case(
+            created_by=user,
+            status=CaseStatus.APPT_CONFIRMED,
+            doctor_decision="accept",
+            appointment_status="confirmed",
+            doctor_admission_flow="scheduled",
+            agency_record_number="ADMIN-CLOSE-DETAIL",
+        )
+
+        # Encerra administrativamente
+        administratively_close_case(
+            case=case,
+            user=user,
+            reason_code="system_bug",
+            reason_text="Bug corrigido",
+            active_role="manager",
+        )
+
+        response = client.get(reverse("dashboard:case_detail", args=[case.case_id]))
+        assert response.status_code == 200
+        content = response.content.decode()
+
+        # Deve mostrar encerramento administrativo
+        assert "Encerrado administrativamente" in content
+
+        # NÃO deve mostrar agendamento confirmado no card de resultado
+        assert "Agendamento Confirmado" not in content
+
+        # Deve mostrar motivo
+        assert "Bug corrigido" in content
+
+    # ── Summary: admin-closed separated from in_progress ───────────────────
+
+    def test_summary_separates_administrative_closed_from_in_progress(self, client) -> None:
+        """_compute_summary() retorna administratively_closed separado de in_progress para cenário 11/1/0/4/6."""
+        from apps.cases.services import administratively_close_case
+        from apps.dashboard.views import _compute_summary
+
+        user = _login_as(client, "manager")
+        Case.objects.all().delete()
+
+        # 1 aceito confirmado (não encerrado admin)
+        _create_case(
+            created_by=user,
+            status=CaseStatus.CLEANED,
+            doctor_decision="accept",
+            appointment_status="confirmed",
+            agency_record_number="ADM-ACC-001",
+        )
+
+        # 10 em processamento — desses, 4 serão encerrados administrativamente
+        processing_cases = []
+        for i in range(6):
+            c = _create_case(
+                created_by=user,
+                status=CaseStatus.WAIT_DOCTOR,
+                agency_record_number=f"ADM-PROC-{i:02d}",
+            )
+            processing_cases.append(c)
+
+        # 4 serão encerrados administrativamente
+        for i in range(4):
+            c = _create_case(
+                created_by=user,
+                status=CaseStatus.WAIT_DOCTOR,
+                agency_record_number=f"ADM-ADMIN-CLOSE-{i:02d}",
+            )
+            administratively_close_case(
+                case=c,
+                user=user,
+                reason_code="system_bug",
+                reason_text="Bug",
+                active_role="manager",
+            )
+
+        result = _compute_summary()
+        assert result["total_today"] == 11, f"Total deve ser 11, obtido {result['total_today']}"
+        assert result["accepted"] == 1, f"Aceitos deve ser 1, obtido {result['accepted']}"
+        assert result["denied"] == 0, f"Negados deve ser 0, obtido {result['denied']}"
+        assert result["administratively_closed"] == 4, (
+            f"Encerrados admin. deve ser 4, obtido {result['administratively_closed']}"
+        )
+        assert result["in_progress"] == 6, f"Em Andamento deve ser 6, obtido {result['in_progress']}"
+        # Integridade: soma deve bater
+        total = result["accepted"] + result["denied"] + result["administratively_closed"] + result["in_progress"]
+        assert total == result["total_today"], (
+            f"Soma dos contadores ({total}) deve igualar total_today ({result['total_today']})"
+        )
+
+    def test_administrative_closed_confirmed_case_counts_only_as_admin_closed(self, client) -> None:
+        """Caso aceito+confirmado encerrado admin conta como admin_closed, não como accepted."""
+        from apps.cases.services import administratively_close_case
+        from apps.dashboard.views import _compute_summary
+
+        user = _login_as(client, "manager")
+        Case.objects.all().delete()
+
+        # Caso aceito+confirmado
+        case = _create_case(
+            created_by=user,
+            status=CaseStatus.APPT_CONFIRMED,
+            doctor_decision="accept",
+            appointment_status="confirmed",
+            doctor_admission_flow="scheduled",
+            agency_record_number="ADM-CONF-CLOSE",
+        )
+
+        # Encerra administrativamente
+        administratively_close_case(
+            case=case,
+            user=user,
+            reason_code="system_bug",
+            reason_text="Bug",
+            active_role="manager",
+        )
+
+        result = _compute_summary()
+        assert result["total_today"] == 1
+        assert result["accepted"] == 0, f"Aceitos deve ser 0 (caso encerrado admin), obtido {result['accepted']}"
+        assert result["administratively_closed"] == 1, (
+            f"Admin_closed deve ser 1, obtido {result['administratively_closed']}"
+        )
+        assert result["in_progress"] == 0
+
+    # ── Dashboard list badge ──────────────────────────────────────────────
+
+    def test_dashboard_list_result_badge_shows_administrative_closed(self, client) -> None:
+        """Caso encerrado admin mostra badge 'Encerrado administrativamente' na listagem do dashboard."""
+        from apps.cases.services import administratively_close_case
+
+        user = _login_as(client, "manager")
+        case = _create_case(
+            created_by=user,
+            status=CaseStatus.APPT_CONFIRMED,
+            doctor_decision="accept",
+            appointment_status="confirmed",
+            agency_record_number="ADM-LIST-BADGE",
+        )
+
+        # Encerra administrativamente
+        administratively_close_case(
+            case=case,
+            user=user,
+            reason_code="system_bug",
+            reason_text="Bug",
+            active_role="manager",
+        )
+
+        response = client.get(reverse("dashboard:index"))
+        assert response.status_code == 200
+        content = response.content.decode()
+        assert "Encerrado administrativamente" in content
+
 
 # ── Dashboard: Attention Filter (Slice 002) ──────────────────────────────
 
