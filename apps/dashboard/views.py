@@ -73,10 +73,6 @@ def _compute_summary() -> dict[str, int]:
 
     total_today = today_cases.count()
 
-    accepted = today_cases.filter(doctor_decision="accept").exclude(appointment_status="denied").count()
-
-    denied = today_cases.filter(Q(doctor_decision="deny") | Q(appointment_status="denied")).count()
-
     # Casos administrativamente encerrados (via CASE_ADMINISTRATIVELY_CLOSED)
     admin_closed_ids = set(
         CaseEvent.objects.filter(
