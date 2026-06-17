@@ -31,8 +31,13 @@ SECURE_CONTENT_TYPE_NOSNIFF = True
 SECURE_SSL_REDIRECT = False  # SSL terminates at Cloudflare Tunnel
 X_FRAME_OPTIONS = "DENY"
 
-# Static files — WhiteNoise serves them from staticfiles/
+# Storage
+# - default: usado por FileField/ImageField para uploads em MEDIA_ROOT.
+# - staticfiles: usado pelo WhiteNoise para servir arquivos estáticos coletados.
 STORAGES = {
+    "default": {
+        "BACKEND": "django.core.files.storage.FileSystemStorage",
+    },
     "staticfiles": {
         "BACKEND": "whitenoise.storage.CompressedManifestStaticFilesStorage",
     },
