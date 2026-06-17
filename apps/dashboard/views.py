@@ -16,7 +16,7 @@ from django.views.decorators.clickjacking import xframe_options_sameorigin
 from django.views.decorators.http import require_POST
 
 from apps.accounts.decorators import role_required
-from apps.cases.models import Case, CaseStatus, SupervisorSummary
+from apps.cases.models import Case, CaseEvent, CaseStatus, SupervisorSummary
 from apps.cases.services import (
     ADMINISTRATIVE_CLOSURE_REASON_CHOICES,
     administratively_close_case,
@@ -77,12 +77,37 @@ def _compute_summary() -> dict[str, int]:
 
     denied = today_cases.filter(Q(doctor_decision="deny") | Q(appointment_status="denied")).count()
 
-    in_progress = total_today - accepted - denied
+    # Casos administrativamente encerrados (via CASE_ADMINISTRATIVELY_CLOSED)
+    admin_closed_ids = set(
+        CaseEvent.objects.filter(
+            event_type="CASE_ADMINISTRATIVELY_CLOSED",
+            case__in=today_cases,
+        )
+        .values_list("case_id", flat=True)
+        .distinct()
+    )
+    admin_closed_count = len(admin_closed_ids)
+
+    # Excluir admin-closed de accepted e denied
+    accepted = (
+        today_cases.filter(doctor_decision="accept")
+        .exclude(appointment_status="denied")
+        .exclude(pk__in=admin_closed_ids)
+        .count()
+    )
+    denied = (
+        today_cases.filter(Q(doctor_decision="deny") | Q(appointment_status="denied"))
+        .exclude(pk__in=admin_closed_ids)
+        .count()
+    )
+
+    in_progress = total_today - accepted - denied - admin_closed_count
 
     return {
         "total_today": total_today,
         "accepted": accepted,
         "denied": denied,
+        "administratively_closed": admin_closed_count,
         "in_progress": in_progress,
     }
 
@@ -163,8 +188,29 @@ def _compute_average_times() -> dict[str, str]:
     }
 
 
+def _has_admin_close_event(case: Case) -> bool:
+    """Verifica se o caso tem evento de encerramento administrativo."""
+    return case.events.filter(event_type="CASE_ADMINISTRATIVELY_CLOSED").exists()
+
+
 def _compute_result(case: Case) -> tuple[str, str]:
-    """Computa label e classe CSS (Bootstrap badge) do resultado final."""
+    """Computa label e classe CSS (Bootstrap badge) do resultado final.
+
+    Prioridade:
+    1. Encerramento administrativo (tem precedência sobre todos)
+    2. Scope-gated manual review
+    3. Doctor denied
+    4. Appointment denied
+    5. Accepted scheduled confirmed
+    6. Immediate admission
+    7. Failed
+    8. Awaiting scheduler
+    9. In progress step
+    """
+    # Administrative closure has top priority
+    if _has_admin_close_event(case):
+        return ("🔒 Encerrado administrativamente", "bg-secondary")
+
     # Scope-gated manual review
     if (
         case.suggested_action
@@ -459,7 +505,26 @@ def dashboard_case_detail(request: HttpRequest, case_id: uuid.UUID) -> HttpRespo
             }
         )
 
-    result_info = None
+    result_info: dict[str, object] | None = None
+
+    # Administrative closure has top priority (before any other result)
+    if _has_admin_close_event(case):
+        # Busca o evento administrativo para extrair payload
+        admin_event = case.events.filter(event_type="CASE_ADMINISTRATIVELY_CLOSED").first()
+        reason_text = ""
+        reason_code = ""
+        previous_status = ""
+        if admin_event and admin_event.payload:
+            reason_text = admin_event.payload.get("reason_text", "")
+            reason_code = admin_event.payload.get("reason_code", "")
+            previous_status = admin_event.payload.get("previous_status", "")
+        result_info = {
+            "type": "administratively_closed",
+            "reason_text": reason_text,
+            "reason_code": reason_code,
+            "previous_status": previous_status,
+        }
+
     terminal_with_result = case.status in (
         CaseStatus.WAIT_R1_CLEANUP_THUMBS,
         CaseStatus.CLEANED,
@@ -470,7 +535,7 @@ def dashboard_case_detail(request: HttpRequest, case_id: uuid.UUID) -> HttpRespo
         and isinstance(case.suggested_action, dict)
         and case.suggested_action.get("decision") == "manual_review_required"
     )
-    if is_scope_gated:
+    if result_info is None and is_scope_gated:
         reason_code = case.suggested_action.get("reason_code", "") if isinstance(case.suggested_action, dict) else ""
         reason_text = case.suggested_action.get("reason_text", "") if isinstance(case.suggested_action, dict) else ""
         result_info = {
@@ -478,27 +543,29 @@ def dashboard_case_detail(request: HttpRequest, case_id: uuid.UUID) -> HttpRespo
             "reason_code": reason_code,
             "reason_text": reason_text,
         }
-    elif is_doctor_denied_final or case.status == CaseStatus.DOCTOR_DENIED:
+    elif result_info is None and (is_doctor_denied_final or case.status == CaseStatus.DOCTOR_DENIED):
         result_info = {
             "type": "doctor_denied",
             "reason": case.doctor_reason,
             "doctor_display": case.doctor_display,
         }
-    elif is_immediate_final:
+    elif result_info is None and is_immediate_final:
         result_info = {
             "type": "accepted_immediate",
             "support": SUPPORT_FLAG_MAP.get(case.doctor_support_flag, case.doctor_support_flag),
             "flow": ADMISSION_FLOW_MAP.get(case.doctor_admission_flow, case.doctor_admission_flow),
             "doctor_display": case.doctor_display,
         }
-    elif case.status == CaseStatus.APPT_DENIED or (terminal_with_result and case.appointment_status == "denied"):
+    elif result_info is None and (
+        case.status == CaseStatus.APPT_DENIED or (terminal_with_result and case.appointment_status == "denied")
+    ):
         result_info = {
             "type": "appt_denied",
             "reason": case.appointment_reason,
             "doctor_display": case.doctor_display,
             "scheduler_display": case.scheduler_display,
         }
-    elif case.status == CaseStatus.APPT_CONFIRMED or terminal_with_result:
+    elif result_info is None and (case.status == CaseStatus.APPT_CONFIRMED or terminal_with_result):
         result_info = {
             "type": "accepted_scheduled",
             "appointment_at": case.appointment_at,
@@ -507,7 +574,7 @@ def dashboard_case_detail(request: HttpRequest, case_id: uuid.UUID) -> HttpRespo
             "instructions": case.appointment_instructions or "",
             "doctor_display": case.doctor_display,
         }
-    elif case.status == CaseStatus.FAILED:
+    elif result_info is None and case.status == CaseStatus.FAILED:
         result_info = {"type": "failed"}
 
     patient_name = ""
