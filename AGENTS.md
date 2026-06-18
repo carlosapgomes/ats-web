@@ -129,7 +129,7 @@ uv run ruff check . && uv run ruff format --check . && uv run mypy . && uv run p
 - **Multi-role**: admin atribui multiplos papeis por usuario; usuario escolhe papel ativo ao logar e pode trocar via avatar/perfil. Apenas 1 papel ativo por vez, armazenado na sessao.
 - **Intranet guard**: papéis `nir` e `scheduler` so acessam de dentro da intranet do hospital. Range de IPs configuravel via env var `INTRANET_IP_RANGE` (formato CIDR). Middleware bloqueia requests externos para esses papeis.
 - **PDF storage**: filesystem local (`MEDIA_ROOT`). Sem S3/object storage.
-- **Notificacoes**: todas in-app (dentro do aplicativo). Sem email, SMS ou push.
+- **Notificacoes operacionais**: todas in-app (dentro do aplicativo). Sem SMS ou push. Emails sao permitidos apenas para fluxos transacionais de conta/autenticacao/cadastro conforme `docs/adr/ADR-0002-emails-transacionais-autenticacao-cadastro.md`.
 - **Acesso externo**: via tunel Cloudflare com SSL. Header `CF-Connecting-IP` para IP real do cliente.
 - **Auditoria**: `CaseEvent` append-only como unica fonte de verdade sobre historico de casos.
 - **Cleanup**: marcar caso como `CLEANED`. Caso sai das filas operacionais e so aparece na auditoria.

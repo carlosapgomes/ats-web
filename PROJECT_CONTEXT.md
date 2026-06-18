@@ -63,7 +63,7 @@ com SSL.
 - **Frontend**: Templates Django + Bootstrap 5.3 (CDN) + Vanilla JS + Vanilla HTML.
 - **uv** como gerenciador de pacotes e virtualenv.
 - **PDF storage**: filesystem local (`MEDIA_ROOT`).
-- **Notificacoes**: todas in-app, sem email/SMS/push.
+- **Notificacoes operacionais**: todas in-app, sem SMS/push. Emails sao permitidos apenas para fluxos transacionais de conta/autenticacao/cadastro conforme ADR-0002.
 - **Auditoria**: `CaseEvent` append-only — unica fonte de verdade sobre historico.
 - **Cleanup**: marcar caso como `CLEANED` — sai das filas, so aparece na auditoria.
 

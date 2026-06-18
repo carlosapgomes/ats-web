@@ -7,6 +7,7 @@ Registros de decisões arquiteturais importantes.
 | Número | Título | Status | Data |
 |--------|--------|--------|------|
 | [ADR-0001](ADR-0001-arquitetura-django-web-ssr-ats-triagem-eda.md) | Arquitetura Django Web SSR para ATS de Triagem EDA | Accepted | 2026-05-05 |
+| [ADR-0002](ADR-0002-emails-transacionais-autenticacao-cadastro.md) | Emails transacionais para autenticação e cadastro | Accepted | 2026-06-18 |
 
 ## ADRs Deprecated/Superseded
 
