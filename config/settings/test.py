@@ -87,9 +87,10 @@ Q_CLUSTER = {
 # Locmem email backend for tests
 EMAIL_BACKEND = "django.core.mail.backends.locmem.EmailBackend"
 
-# Public URL for test password reset links
-PUBLIC_APP_BASE_URL = "http://testserver"
-INTERNAL_APP_BASE_URL = "http://testserver"
+# Distinct public/internal URLs so URL-selection tests are not false positives.
+# The two values MUST differ to detect regressions in get_account_action_base_url().
+PUBLIC_APP_BASE_URL = "https://public.test"
+INTERNAL_APP_BASE_URL = "https://internal.test"
 
 # UI: keep tests deterministic regardless of local .env
 APP_DISPLAY_NAME = "ATS"
