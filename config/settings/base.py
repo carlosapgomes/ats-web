@@ -189,8 +189,7 @@ EMAIL_HOST_PASSWORD = os.environ.get("EMAIL_HOST_PASSWORD", "")
 DEFAULT_FROM_EMAIL = os.environ.get("DEFAULT_FROM_EMAIL", "no-reply@chd.projetoshgrs.com")
 
 # URLs for password reset emails
-external_base_url = os.environ.get("PUBLIC_APP_BASE_URL", "https://chd.projetoshgrs.com")
-PUBLIC_APP_BASE_URL = external_base_url
+PUBLIC_APP_BASE_URL = os.environ.get("PUBLIC_APP_BASE_URL", "https://chd.projetoshgrs.com")
 INTERNAL_APP_BASE_URL = os.environ.get("INTERNAL_APP_BASE_URL", "https://10.17.175.38")
 
 # Rate limit for password reset (POST only)

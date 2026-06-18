@@ -1,4 +1,4 @@
-"""Password reset views with rate limiting and custom email context.
+"""Password reset views with rate limiting on POST.
 
 Uses Django native PasswordResetView/Done/Confirm/Complete views
 with custom templates and rate limiting on POST.
@@ -9,24 +9,8 @@ from django.contrib.auth import views as auth_views
 from django.core.cache import cache
 from django.urls import reverse
 
-from .models import User
-
 # Rate limit cache prefix
 RATE_LIMIT_CACHE_PREFIX = "pwreset_rate_limit"
-# Public role names — users with any of these get PUBLIC_APP_BASE_URL
-PUBLIC_ROLE_NAMES = {"doctor", "manager", "admin"}
-
-
-def get_account_action_base_url(user: User) -> str:
-    """Return the appropriate base URL for account action emails.
-
-    Users with any public role (doctor, manager, admin) get the public URL.
-    Users with only restricted roles (nir, scheduler) get the internal URL.
-    """
-    role_names = set(user.roles.values_list("name", flat=True))
-    if role_names & PUBLIC_ROLE_NAMES:
-        return settings.PUBLIC_APP_BASE_URL
-    return settings.INTERNAL_APP_BASE_URL
 
 
 def _is_rate_limited(ip: str, email: str) -> bool:
@@ -55,13 +39,12 @@ def _is_rate_limited(ip: str, email: str) -> bool:
 
 
 class RateLimitedPasswordResetView(auth_views.PasswordResetView):
-    """PasswordResetView with rate limiting and custom email context."""
+    """PasswordResetView with rate limiting on POST."""
 
     template_name = "accounts/password_reset_form.html"
     email_template_name = "accounts/email/password_reset_email.html"
     subject_template_name = "accounts/email/password_reset_subject.txt"
     success_url = "password_reset_done"
-    from_email = None  # Will use DEFAULT_FROM_EMAIL
 
     def form_valid(self, form):  # type: ignore[no-untyped-def]
         """Apply rate limiting before processing the form.
@@ -87,17 +70,6 @@ class RateLimitedPasswordResetView(auth_views.PasswordResetView):
     def get_success_url(self) -> str:
         """Return the URL to redirect to after successful form submission."""
         return str(reverse(self.success_url))
-
-    def get_context_data(self, **kwargs):  # type: ignore[no-untyped-def]
-        """Add site domain to context for email template."""
-        context = super().get_context_data(**kwargs)
-        user = context.get("user")
-        if user and user.is_authenticated:
-            # Use user's roles to determine base URL
-            context["base_url"] = get_account_action_base_url(user)
-        else:
-            context["base_url"] = settings.PUBLIC_APP_BASE_URL
-        return context
 
 
 class CustomPasswordResetDoneView(auth_views.PasswordResetDoneView):
