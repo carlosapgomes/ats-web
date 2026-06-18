@@ -7,6 +7,7 @@ and session preservation via update_session_auth_hash.
 from django.contrib.auth import views as auth_views
 from django.contrib.auth.decorators import login_required
 from django.shortcuts import render
+from django.urls import reverse
 
 
 @login_required
@@ -38,6 +39,4 @@ class CustomPasswordChangeView(auth_views.PasswordChangeView):
 
     def get_success_url(self) -> str:
         """Return the resolved URL for success redirect."""
-        from django.urls import reverse
-
         return reverse(self.success_url)
