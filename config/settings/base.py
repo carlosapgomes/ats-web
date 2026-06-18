@@ -175,6 +175,29 @@ CASE_LOCK_LEASE_SECONDS = 5 * 60
 CASE_LOCK_HEARTBEAT_SECONDS = 60
 CASE_LOCK_ACTIVITY_GRACE_SECONDS = 4 * 60
 
+# Password reset timeout (seconds, default 24h)
+PASSWORD_RESET_TIMEOUT = int(os.environ.get("PASSWORD_RESET_TIMEOUT", "86400"))
+
+# Email configuration (transactional emails for auth flows only)
+# See ADR-0002: emails are allowed only for transactional flows (password reset, registration)
+EMAIL_BACKEND = os.environ.get("EMAIL_BACKEND", "django.core.mail.backends.smtp.EmailBackend")
+EMAIL_HOST = os.environ.get("EMAIL_HOST", "email-smtp.us-east-2.amazonaws.com")
+EMAIL_PORT = int(os.environ.get("EMAIL_PORT", "587"))
+EMAIL_USE_TLS = os.environ.get("EMAIL_USE_TLS", "true").lower() in ("true", "1", "yes")
+EMAIL_HOST_USER = os.environ.get("EMAIL_HOST_USER", "")
+EMAIL_HOST_PASSWORD = os.environ.get("EMAIL_HOST_PASSWORD", "")
+DEFAULT_FROM_EMAIL = os.environ.get("DEFAULT_FROM_EMAIL", "no-reply@chd.projetoshgrs.com")
+
+# URLs for password reset emails
+external_base_url = os.environ.get("PUBLIC_APP_BASE_URL", "https://chd.projetoshgrs.com")
+PUBLIC_APP_BASE_URL = external_base_url
+INTERNAL_APP_BASE_URL = os.environ.get("INTERNAL_APP_BASE_URL", "https://10.17.175.38")
+
+# Rate limit for password reset (POST only)
+# Number of allowed attempts per IP/email per window
+PASSWORD_RESET_RATE_LIMIT = int(os.environ.get("PASSWORD_RESET_RATE_LIMIT", "5"))
+PASSWORD_RESET_RATE_WINDOW = int(os.environ.get("PASSWORD_RESET_RATE_WINDOW", "3600"))  # seconds (default 1 hour)
+
 # Password validation
 AUTH_PASSWORD_VALIDATORS = [
     {"NAME": "django.contrib.auth.password_validation.UserAttributeSimilarityValidator"},

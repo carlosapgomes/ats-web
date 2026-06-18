@@ -3,7 +3,7 @@
 ## Slices verticais
 
 - [x] Slice 000 — ADR + OpenSpec/design do change (`slices/slice-000-adr-and-openspec.md`)
-- [ ] Slice 001 — Password reset transacional end-to-end (`slices/slice-001-password-reset.md`)
+- [x] Slice 001 — Password reset transacional end-to-end (`slices/slice-001-password-reset.md`)
 - [ ] Slice 002 — Perfil do usuário + alteração de senha mantendo sessão atual (`slices/slice-002-profile-password-change.md`)
 - [ ] Slice 003 — Email automático de cadastro/ativação via token nativo (`slices/slice-003-registration-email.md`)
 - [ ] Slice 004 — Hardening futuro/opcional (`slices/slice-004-hardening-followups.md`)
