@@ -4,6 +4,7 @@ Uses Django native PasswordResetView/Done/Confirm/Complete views
 with custom templates and rate limiting on POST.
 """
 
+from django import forms
 from django.conf import settings
 from django.contrib.auth import views as auth_views
 from django.core.cache import cache
@@ -11,6 +12,20 @@ from django.urls import reverse
 
 # Rate limit cache prefix
 RATE_LIMIT_CACHE_PREFIX = "pwreset_rate_limit"
+
+
+class _BootstrapPasswordResetForm(auth_views.PasswordResetView.form_class):  # type: ignore[misc,valid-type]
+    """PasswordResetForm with the email field styled for Bootstrap.
+
+    The native form renders a plain EmailInput (no classes), so the field looks
+    out of place. Override only the widget to add form-control, matching the
+    rest of the project; everything else is inherited.
+    """
+
+    email = forms.EmailField(
+        label="Email",
+        widget=forms.EmailInput(attrs={"class": "form-control", "autocomplete": "email"}),
+    )
 
 
 def _is_rate_limited(ip: str, email: str) -> bool:
@@ -54,6 +69,7 @@ class RateLimitedPasswordResetView(auth_views.PasswordResetView):
     html_email_template_name = "accounts/email/password_reset_email.html"
     subject_template_name = "accounts/email/password_reset_subject.txt"
     success_url = "password_reset_done"
+    form_class = _BootstrapPasswordResetForm
 
     def form_valid(self, form):  # type: ignore[no-untyped-def]
         """Apply rate limiting before processing the form.
