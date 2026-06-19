@@ -139,3 +139,35 @@ class TestPasswordVisibilityToggle:
         assert "toggle" in content.lower() or "mostrar" in content.lower()
         # Should load the password-toggle.js script
         assert "password-toggle.js" in content
+
+
+@pytest.mark.django_db
+class TestNavigationBackToWork:
+    """Navigation: profile and password-change-done must link back to the
+    user's work page (home), otherwise the user is stuck.
+
+    ``home`` routes by the active role (doctor->queue, manager/admin->dashboard,
+    etc.), so linking to it is the generic way back to work for any role.
+    """
+
+    def test_profile_has_link_back_to_work_home(self, client) -> None:
+        """Profile page contains a link to the 'home' URL (work page)."""
+        user = User.objects.create_user(username="navhome", password="pass123!")
+        client.force_login(user)
+        response = client.get(reverse("profile"))
+        assert response.status_code == 200
+        content = response.content.decode()
+        # Distinct button text + link to home avoids a false positive: reverse('home')
+        # is '/', which appears in every page (asset paths, etc.).
+        assert "Voltar ao trabalho" in content, "profile must have a 'back to work' link"
+        assert 'href="' + reverse("home") + '"' in content or ('href="' + reverse("home") in content)
+
+    def test_password_change_done_has_link_back_to_work_home(self, client) -> None:
+        """Password-change-done page links back to work (home), not only profile."""
+        user = User.objects.create_user(username="navdone", password="pass123!")
+        client.force_login(user)
+        response = client.get(reverse("password_change_done"))
+        assert response.status_code == 200
+        content = response.content.decode()
+        assert "Voltar ao trabalho" in content, "password_change_done must have a 'back to work' link"
+        assert 'href="' + reverse("home") in content
