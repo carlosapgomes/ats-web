@@ -142,32 +142,32 @@ class TestPasswordVisibilityToggle:
 
 
 @pytest.mark.django_db
-class TestNavigationBackToWork:
+class TestNavigationBackToHome:
     """Navigation: profile and password-change-done must link back to the
-    user's work page (home), otherwise the user is stuck.
+    user's home page, otherwise the user is stuck.
 
     ``home`` routes by the active role (doctor->queue, manager/admin->dashboard,
-    etc.), so linking to it is the generic way back to work for any role.
+    etc.), so linking to it is the generic way back for any role.
     """
 
-    def test_profile_has_link_back_to_work_home(self, client) -> None:
-        """Profile page contains a link to the 'home' URL (work page)."""
+    def test_profile_has_link_back_to_home(self, client) -> None:
+        """Profile page contains a link to the 'home' URL."""
         user = User.objects.create_user(username="navhome", password="pass123!")
         client.force_login(user)
         response = client.get(reverse("profile"))
         assert response.status_code == 200
         content = response.content.decode()
-        # Distinct button text + link to home avoids a false positive: reverse('home')
+        # Distinct button label + link to home avoids a false positive: reverse('home')
         # is '/', which appears in every page (asset paths, etc.).
-        assert "Voltar ao trabalho" in content, "profile must have a 'back to work' link"
+        assert "Voltar ao início" in content, "profile must have a 'back to home' link"
         assert 'href="' + reverse("home") + '"' in content or ('href="' + reverse("home") in content)
 
-    def test_password_change_done_has_link_back_to_work_home(self, client) -> None:
-        """Password-change-done page links back to work (home), not only profile."""
+    def test_password_change_done_has_link_back_to_home(self, client) -> None:
+        """Password-change-done page links back to home, not only profile."""
         user = User.objects.create_user(username="navdone", password="pass123!")
         client.force_login(user)
         response = client.get(reverse("password_change_done"))
         assert response.status_code == 200
         content = response.content.decode()
-        assert "Voltar ao trabalho" in content, "password_change_done must have a 'back to work' link"
+        assert "Voltar ao início" in content, "password_change_done must have a 'back to home' link"
         assert 'href="' + reverse("home") in content
