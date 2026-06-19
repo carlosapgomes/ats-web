@@ -39,18 +39,35 @@ def _is_rate_limited(ip: str, email: str) -> bool:
 
 
 class RateLimitedPasswordResetView(auth_views.PasswordResetView):
-    """PasswordResetView with rate limiting on POST."""
+    """PasswordResetView with rate limiting on POST.
+
+    Email rendering: ``email_template_name`` is the plain-text body and
+    ``html_email_template_name`` is attached as a ``text/html`` alternative, so
+    the message is a proper multipart/alternative email (not raw HTML as text).
+    Django renders reset emails with a plain dict context, so context processors
+    (e.g. ``app_display_name``) do not run — we inject those values explicitly
+    via ``extra_email_context``.
+    """
 
     template_name = "accounts/password_reset_form.html"
-    email_template_name = "accounts/email/password_reset_email.html"
+    email_template_name = "accounts/email/password_reset_email.txt"
+    html_email_template_name = "accounts/email/password_reset_email.html"
     subject_template_name = "accounts/email/password_reset_subject.txt"
     success_url = "password_reset_done"
 
     def form_valid(self, form):  # type: ignore[no-untyped-def]
         """Apply rate limiting before processing the form.
 
-        If rate limited, still redirect to done page (no enumeration).
+        Also injects extra email context (populated here instead of overriding
+        the class attribute with a property, which mypy rejects as a read-only
+        override). ``self.extra_email_context`` is read by the parent's
+        ``form_valid`` when sending the email.
         """
+        self.extra_email_context = {
+            "app_display_name": settings.APP_DISPLAY_NAME,
+            "password_reset_timeout_hours": settings.PASSWORD_RESET_TIMEOUT // 3600,
+        }
+
         ip = self.get_client_ip()
         email = form.cleaned_data.get("email", "")
 
