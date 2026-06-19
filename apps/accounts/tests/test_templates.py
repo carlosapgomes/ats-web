@@ -159,6 +159,40 @@ class TestBaseTemplate:
         assert "--hospital-secondary" in css_content
         assert "--hospital-accent" in css_content
 
+    def test_form_control_border_rule_exists(self) -> None:
+        """app.css strengthens form-control/form-select borders in resting state.
+
+        Bootstrap's default input border (#dee2e6) is nearly invisible on low-
+        contrast monitors. app.css must override border-color for form-control
+        and form-select (scoped under .hospital-shell) in the resting state —
+        i.e. a rule WITHOUT :focus — so inputs are visible without focus.
+        """
+        import re
+
+        css_path = Path(settings.BASE_DIR) / "static" / "css" / "app.css"
+        css_content = css_path.read_text()
+
+        # Find a resting-state rule (selector WITHOUT :focus) whose selector
+        # includes form-control, then check it sets border-color using the
+        # design-system token. We split on '}' to iterate rule blocks.
+        blocks = re.split(r"\}", css_content)
+        resting_border = False
+        for block in blocks:
+            # Grab the selector portion (text before the first '{').
+            if "{" not in block:
+                continue
+            selector, body = block.split("{", 1)
+            if ":focus" in selector:
+                continue  # focus state, not what we want
+            if ".form-control" in selector or ".form-select" in selector:
+                if "border-color" in body and "var(--hospital-border)" in body:
+                    resting_border = True
+                    break
+        assert resting_border, (
+            "app.css must define a resting-state border-color for form-control/"
+            "form-select (without :focus), reusing var(--hospital-border)"
+        )
+
 
 @pytest.mark.django_db
 class TestAuthenticatedTemplate:

@@ -192,6 +192,13 @@ body.hospital-shell h6 {
   font-weight: 600;
 }
 
+.hospital-shell .form-control,
+.hospital-shell .form-select {
+  /* Bootstrap's default border (#dee2e6) is nearly invisible on low-contrast
+     monitors; reuse the design-system token for a clearer resting border. */
+  border-color: var(--hospital-border);
+}
+
 .hospital-shell .form-control:focus,
 .hospital-shell .form-select:focus {
   border-color: var(--hospital-accent);
