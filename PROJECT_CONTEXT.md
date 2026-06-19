@@ -63,7 +63,7 @@ com SSL.
 - **Frontend**: Templates Django + Bootstrap 5.3 (CDN) + Vanilla JS + Vanilla HTML.
 - **uv** como gerenciador de pacotes e virtualenv.
 - **PDF storage**: filesystem local (`MEDIA_ROOT`).
-- **Notificacoes operacionais**: todas in-app, sem SMS/push. Emails sao permitidos apenas para fluxos transacionais de conta/autenticacao/cadastro conforme ADR-0002.
+- **Notificacoes operacionais**: todas in-app, sem SMS/push. **Emails transacionais de conta** (reset de senha, convite de cadastro) sao enviados via AWS SES SMTP (sincrono) conforme ADR-0002; nunca para notificacoes operacionais de caso. URL do link (publica/interna) selecionada por papel do usuario.
 - **Auditoria**: `CaseEvent` append-only — unica fonte de verdade sobre historico.
 - **Cleanup**: marcar caso como `CLEANED` — sai das filas, so aparece na auditoria.
 
@@ -71,7 +71,7 @@ com SSL.
 
 ```text
 config/          # settings (base/dev/prod), urls, wsgi, asgi
-apps/accounts/   # User, Role, auth views, intranet guard middleware
+apps/accounts/   # User, Role, auth views, password reset, profile/password change, intranet guard middleware, email services (invitation)
 apps/cases/      # Case (FSM 17 estados), CaseEvent (auditoria)
 apps/llm/        # PromptTemplate (versionado, 1 ativo por nome)
 apps/pipeline/   # Pipeline LLM: client, services, policy engine, orchestrator, tasks
@@ -81,8 +81,8 @@ apps/doctor/     # Médico: fila, decisão, presenter de relatório (7 blocos)
 apps/scheduler/  # Agendador: fila, confirmação/desmarcação
 apps/dashboard/  # Dashboard gerencial: métricas, sumários, tabela de casos
 apps/admin_ui/   # Interface admin: gestão de usuários e prompts
-templates/       # base.html (tema hospitalar), login, switch-role, intake/, doctor/
-static/          # css/app.css (paleta hospitalar), js/upload.js
+templates/       # base.html (tema hospitalar), login, switch-role, perfil, password reset/change, intake/, doctor/
+static/          # css/app.css (paleta hospitalar), js/upload.js, js/password-toggle.js
 ```
 
 ### Stack resumido
@@ -135,10 +135,15 @@ static/          # css/app.css (paleta hospitalar), js/upload.js
   ASA estimado e Motivo objetivo.
 - **Role guard**: todas as views médicas exigem `@role_required('doctor')` com papel ativo `doctor`.
   Manager com role `doctor` ativo também acessa.
+- **Emails transacionais (ADR-0002)**: reset de senha usa views/token nativos do Django com rate limit
+  por IP/email e anti-enumeração. Convite de cadastro (criação administrativa) envia email automático
+  com link de reset; a URL base é pública (`PUBLIC_APP_BASE_URL`) quando o usuário tem qualquer papel
+  `doctor`/`manager`/`admin`, e interna (`INTERNAL_APP_BASE_URL`) quando só tem `nir`/`scheduler`.
+  Envio síncrono; falha SMTP não apaga o usuário criado.
 
 ## State do Sistema
 
-- **Fase atual**: Fase 3 CONCLUÍDA — débitos técnicos planejados
+- **Fase atual**: Fase 3 (débitos técnicos) — capacity de email transacional entregue
 - **Changes concluídos**:
   - `openspec/archive/bootstrap-django-ats-core/` (7 slices, Fase 0)
   - `openspec/archive/intake-nir/` (6 slices, Fase 1)
@@ -149,16 +154,16 @@ static/          # css/app.css (paleta hospitalar), js/upload.js
   - `openspec/archive/consolidate-duplicated-test-fixtures/` (1 slice)
   - `openspec/archive/align-uuid-route-parameter-annotations/` (1 slice)
   - `openspec/archive/release-lock-on-successful-handoff/` (1 slice)
-- **Changes ativos**: nenhum
+- **Change ativo (pronto para merge em main)**: `transactional-emails-auth-flows` (Slices 000–003 concluídos e validados em produção; Slice 004 hardening é opcional/futuro)
 - **Apps criados**: `apps/accounts/`, `apps/cases/`, `apps/llm/`, `apps/intake/`, `apps/pipeline/`,
   `apps/doctor/`, `apps/scheduler/`, `apps/dashboard/`, `apps/admin_ui/`
-- **Testes**: 1046 passando, quality gate verde
-- **Templates**: base.html com tema hospitalar, login, switch-role, intake (home, my_cases, case_detail),
-  doctor (queue, decision)
+- **Testes**: 1237 passando, quality gate verde (ruff + mypy + pytest)
+- **Templates**: base.html com tema hospitalar, login, switch-role, perfil, password reset/change,
+  intake (home, my_cases, case_detail), doctor (queue, decision)
 - **Documentacao de dominio**: `docs/DOMAIN_ANALYSIS.md`
 - **Investigações**: `docs/investigations/2026-05-18-nir-to-doctor-flow-review.md`
-- **ADR ativa**: `docs/adr/ADR-0001-arquitetura-django-web-ssr-ats-triagem-eda.md`
-- **Dívida técnica**: `django-fsm` deprecated → `viewflow.fsm` (não urgente)
+- **ADR ativas**: ADR-0001 (arquitetura Django SSR), ADR-0002 (emails transacionais de conta/autenticação)
+- **Dívida técnica**: `django-fsm` deprecated → `viewflow.fsm` (não urgente); observabilidade de logs do gunicorn / falha SMTP (candidato a change de hardening)
 
 ## Quality Bar
 
