@@ -199,6 +199,15 @@ body.hospital-shell h6 {
   border-color: var(--hospital-border);
 }
 
+/* The show/hide password toggle sits inside an input-group next to a password
+   field. Bootstrap paints btn-outline-secondary dark gray (#6c757d), which
+   clashes with the input's lighter border. Match the input's resting border so
+   the button reads as a continuation of the field; hover/focus still mark it as
+   clickable (handled by Bootstrap). */
+.hospital-shell .input-group .toggle-password {
+  border-color: var(--hospital-border);
+}
+
 .hospital-shell .form-control:focus,
 .hospital-shell .form-select:focus {
   border-color: var(--hospital-accent);
