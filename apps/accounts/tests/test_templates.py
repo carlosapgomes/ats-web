@@ -224,6 +224,29 @@ class TestBaseTemplate:
             "on .toggle-password so it matches the adjacent input border"
         )
 
+    def test_password_toggle_uses_eye_and_eye_slash_icons(self) -> None:
+        """The show/hide toggle uses eye/eye-slash icons, not emoji.
+
+        Earlier the toggle swapped a 'see-no-evil monkey' emoji (🙈) for an eye
+        emoji (👁). It must use proper eye and eye-slash icons (vector SVG) and
+        must not contain the monkey emoji anywhere (JS or templates).
+        """
+        js_path = Path(settings.BASE_DIR) / "static" / "js" / "password-toggle.js"
+        js_content = js_path.read_text()
+
+        # The JS must define distinct eye and eye-slash icon assets.
+        assert "EYE_SVG" in js_content, "password-toggle.js must define an EYE icon"
+        assert "EYE_SLASH_SVG" in js_content, "password-toggle.js must define an EYE_SLASH icon (not a monkey emoji)"
+        # No monkey emoji left in the JS.
+        assert "🙈" not in js_content, "monkey emoji must be removed from the toggle JS"
+
+        # And no monkey emoji left in any template either.
+        import glob
+
+        template_files = glob.glob(str(Path(settings.BASE_DIR) / "templates" / "**" / "*.html"), recursive=True)
+        offenders = [p for p in template_files if "🙈" in Path(p).read_text(encoding="utf-8")]
+        assert not offenders, f"monkey emoji still present in templates: {offenders}"
+
 
 @pytest.mark.django_db
 class TestAuthenticatedTemplate:
