@@ -51,6 +51,22 @@ class TestPasswordResetPage:
         content = response.content.decode()
         assert "email" in content.lower()
 
+    def test_password_reset_email_input_uses_bootstrap_form_control(self, client) -> None:
+        """The email field is styled with Bootstrap's form-control class.
+
+        The native Django PasswordResetForm renders a plain EmailInput without
+        project styling, so the field looks out of place (browser-default border
+        and sharp corners). The view must inject the form-control class, matching
+        every other field in the project.
+        """
+        response = client.get(reverse("password_reset"))
+        assert response.status_code == 200
+        content = response.content.decode()
+        # The email input itself must carry form-control (not just a nearby label).
+        assert "<input" in content
+        assert 'type="email"' in content or "type=email" in content
+        assert "form-control" in content
+
 
 @pytest.mark.django_db
 class TestPasswordResetPost:
