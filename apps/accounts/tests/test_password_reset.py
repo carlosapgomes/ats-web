@@ -294,3 +294,63 @@ class TestPasswordVisibilityToggle:
         assert "password" in content.lower()
         # Should have visibility toggle elements
         assert "toggle" in content.lower() or "mostrar" in content.lower() or "olho" in content.lower()
+
+
+@pytest.mark.django_db
+class TestPasswordResetEmailRendering:
+    """Email must be multipart (text + html) and include app_display_name.
+
+    Regression: Django's PasswordResetForm renders the reset email with a plain
+    dict context, so context processors do not run and ``app_display_name`` was
+    empty. Also ``email_template_name`` is the text body, so pointing it at an
+    HTML template sent raw HTML as plain text. Both are fixed by using a plain
+    text template + ``html_email_template_name`` and injecting values via
+    ``extra_email_context``.
+    """
+
+    def test_password_reset_email_is_multipart_with_html_alternative(self, client) -> None:
+        """Outgoing email has a text/plain body AND a text/html alternative."""
+        User.objects.create_user(
+            username="multipart@example.com",
+            email="multipart@example.com",
+            password="oldpass123!",
+        )
+        client.post(reverse("password_reset"), {"email": "multipart@example.com"})
+        assert len(mail.outbox) == 1
+
+        message = mail.outbox[0]
+        # Body is plain text (NOT raw HTML source)
+        assert "<!DOCTYPE html>" not in message.body
+        assert "<!DOCTYPE" not in message.body
+        assert "/reset/" in message.body  # text body still has the link
+
+        # An HTML alternative is attached
+        alternatives = getattr(message, "alternatives", [])
+        html_parts = [c for c, ctype in alternatives if ctype == "text/html"]
+        assert len(html_parts) == 1
+        assert "<html" in html_parts[0]
+        assert "/reset/" in html_parts[0]
+
+    def test_password_reset_email_includes_app_display_name(self, client) -> None:
+        """app_display_name is present in both the text body and HTML part."""
+        from django.conf import settings
+
+        User.objects.create_user(
+            username="appname@example.com",
+            email="appname@example.com",
+            password="oldpass123!",
+        )
+        client.post(reverse("password_reset"), {"email": "appname@example.com"})
+        assert len(mail.outbox) == 1
+
+        message = mail.outbox[0]
+        display_name = settings.APP_DISPLAY_NAME
+        assert display_name, "APP_DISPLAY_NAME must be set for this assertion"
+        # Text body
+        assert display_name in message.body
+        # HTML alternative
+        html_parts = [c for c, ctype in getattr(message, "alternatives", []) if ctype == "text/html"]
+        assert html_parts, "HTML alternative missing"
+        assert display_name in html_parts[0]
+        # Sanity: no empty <strong></strong> left from an unrendered variable
+        assert "<strong></strong>" not in html_parts[0]
