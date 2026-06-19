@@ -193,6 +193,37 @@ class TestBaseTemplate:
             "form-select (without :focus), reusing var(--hospital-border)"
         )
 
+    def test_toggle_password_border_matches_input(self) -> None:
+        """The show/hide password toggle uses the same border color as the input.
+
+        The toggle is a btn-outline-secondary button inside an input-group next to
+        a password field. Bootstrap paints btn-outline-secondary dark gray
+        (#6c757d), which clashes with the input's lighter hospital-border. app.css
+        must scope the toggle's resting border to var(--hospital-border) so the
+        button reads as a continuation of the input, while still letting the hover
+        state show it is clickable.
+        """
+        import re
+
+        css_path = Path(settings.BASE_DIR) / "static" / "css" / "app.css"
+        css_content = css_path.read_text()
+
+        blocks = re.split(r"\}", css_content)
+        toggle_border = False
+        for block in blocks:
+            if "{" not in block:
+                continue
+            selector, body = block.split("{", 1)
+            if ":hover" in selector or ":focus" in selector or ":active" in selector:
+                continue  # interaction states may differ; we only care about resting
+            if ".toggle-password" in selector and "border-color" in body and "var(--hospital-border)" in body:
+                toggle_border = True
+                break
+        assert toggle_border, (
+            "app.css must set a resting-state border-color: var(--hospital-border) "
+            "on .toggle-password so it matches the adjacent input border"
+        )
+
 
 @pytest.mark.django_db
 class TestAuthenticatedTemplate:
