@@ -14,6 +14,7 @@ from django.views.decorators.clickjacking import xframe_options_sameorigin
 from apps.accounts.decorators import role_required
 from apps.cases.models import Case, CaseAttachment, CaseStatus
 from apps.cases.services import (
+    ELIGIBLE_SUPPLEMENTAL_STATUSES,
     acknowledge_post_schedule_issue,
     add_supplemental_case_attachment,
     assert_case_lock,
@@ -31,7 +32,7 @@ from apps.cases.services import (
 )
 
 from .forms import CaseUploadForm
-from .services import process_uploaded_files
+from .services import process_uploaded_files, validate_attachment_file
 
 STATUS_LABELS: dict[str, str] = {
     "NEW": "Novo",
@@ -533,8 +534,6 @@ def case_detail(request: HttpRequest, case_id: uuid.UUID) -> HttpResponse:
         }
 
     # Elegibilidade para anexo complementar
-    from apps.cases.services import ELIGIBLE_SUPPLEMENTAL_STATUSES
-
     can_add_supplemental = (
         case.status not in (CaseStatus.CLEANED,)
         and not case.doctor_decision
@@ -692,8 +691,6 @@ def add_supplemental_attachment(
         return redirect("intake:case_detail", case_id=case.case_id)
 
     # Validate attachments using existing helpers
-    from apps.intake.services import validate_attachment_file
-
     for f in files:
         try:
             validate_attachment_file(f)

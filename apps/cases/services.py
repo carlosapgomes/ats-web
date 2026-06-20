@@ -19,6 +19,7 @@ from django.db.models import QuerySet
 from django.utils import timezone
 
 from apps.cases.models import Case, CaseAttachment, CaseStatus
+from apps.intake.services import create_case_attachment
 
 
 @dataclass(frozen=True)
@@ -879,8 +880,6 @@ def add_supplemental_case_attachment(
     Raises:
         ValueError: Se validações falharem.
     """
-    from apps.intake.services import create_case_attachment
-
     if not note.strip():
         raise ValueError("Justificativa/nota obrigatória para anexo complementar.")
 
@@ -917,6 +916,16 @@ def add_supplemental_case_attachment(
                     f"Este caso está reservado por Dr(a). {case.locked_by.display_name}. "
                     "Aguarde a liberação ou comunique o médico."
                 )
+
+        # Defesa em profundidade: limite de anexos ativos por caso.
+        # A view valida o lote inteiro antes do loop; aqui garantimos que qualquer
+        # caller direto do serviço também respeite o limite.
+        max_attachments = settings.INTAKE_MAX_ATTACHMENTS_PER_CASE
+        existing_active = case.attachments.filter(is_suppressed=False).count()
+        if existing_active + 1 > max_attachments:
+            raise ValueError(
+                f"Máximo de {max_attachments} anexos por caso. Já existem {existing_active} anexo(s) ativo(s)."
+            )
 
         # Criar o anexo via helper existente
         attachment = create_case_attachment(

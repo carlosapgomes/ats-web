@@ -312,6 +312,54 @@ class TestAddSupplementalAttachment:
                 note="Tentativa em caso encerrado.",
             )
 
+    # ── Test 6b: defesa em profundidade — limite de anexos no serviço ───
+
+    def test_add_supplemental_attachment_rejects_when_max_attachments_reached(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """O serviço valida o limite de anexos por caso, mesmo chamado direto.
+
+        A view valida o lote inteiro antes do loop; este teste garante que o
+        serviço de domínio também rejeita quando chamado por outro caller,
+        sem depender da view.
+        """
+        import django.conf
+
+        from apps.cases.models import CaseAttachment
+        from apps.cases.services import add_supplemental_case_attachment
+
+        # Limite baixo para evitar criar 10 anexos reais
+        monkeypatch.setattr(django.conf.settings, "INTAKE_MAX_ATTACHMENTS_PER_CASE", 2)
+
+        case, user = self._create_case_and_user(status=CaseStatus.WAIT_DOCTOR)
+
+        # Criar 2 anexos ativos (até o limite)
+        for i in range(2):
+            CaseAttachment.objects.create(
+                case=case,
+                file=SimpleUploadedFile(
+                    f"att_{i}.pdf", _create_pdf_bytes(f"anexo {i}"), content_type="application/pdf"
+                ),
+                original_filename=f"att_{i}.pdf",
+                stored_filename=f"stored_{i}.pdf",
+                content_type="application/pdf",
+                size_bytes=100,
+                sha256=f"{i}" * 64,
+                uploaded_by=user,
+                upload_phase="initial",
+                uploaded_when_case_status=CaseStatus.WAIT_DOCTOR,
+            )
+
+        # O 3º anexo deve falhar
+        uploaded_file = self._make_file(name="terceiro.pdf")
+        with pytest.raises(ValueError, match="Máximo de 2 anexos"):
+            add_supplemental_case_attachment(
+                case=case,
+                uploaded_file=uploaded_file,
+                user=user,
+                note="Tentativa acima do limite.",
+            )
+
 
 @pytest.mark.django_db
 class TestSupplementalLockBlocking:
