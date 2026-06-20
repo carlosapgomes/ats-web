@@ -57,7 +57,10 @@ Q_CLUSTER = {
     "orm": "default",
     "ALT_CLUSTERS": {
         "pdf": {
-            "workers": 4,
+            # PDF extraction is CPU/IO bound (PyMuPDF). 6 workers gives headroom for
+            # batch uploads where the NIR feeds several files at once without saturating
+            # a typical server. Calibrate against the number of CPU cores.
+            "workers": 6,
             "timeout": 180,
             "retry": 300,
             "save_limit": 500,
@@ -67,7 +70,9 @@ Q_CLUSTER = {
             "orm": "default",
         },
         "llm": {
-            "workers": 2,
+            # LLM pipeline is I/O bound (waits on OpenAI). Extra workers maximize
+            # throughput during batch feeding since each is mostly waiting on the API.
+            "workers": 3,
             "timeout": 900,
             "retry": 1200,
             "save_limit": 500,
