@@ -52,6 +52,25 @@
     <div class="d-none alert alert-info mb-3" id="upload-alert" role="alert">
     </div>
 
+    <!-- Attachment upload section -->
+    <div class="attachment-upload-section mt-3 mb-3" id="attachment-section">
+      <hr>
+      <div class="mb-2">
+        <label class="fw-semibold">📎 Anexos Clínicos (opcional)</label>
+        <p class="text-muted small mb-2">
+          Envie documentos complementares ao relatório principal.
+          Anexos são exibidos ao médico mas <strong>não são analisados automaticamente pela IA</strong>.
+        </p>
+      </div>
+      <input type="file" name="attachment_files" id="attachment-input"
+             class="form-control" multiple
+             accept=".pdf,.jpg,.jpeg,.png,application/pdf,image/jpeg,image/png">
+      <div class="form-text">
+        PDF, JPEG e PNG — até 10 arquivos, 20 MB cada, 200 MB no total.
+        Apenas quando houver exatamente 1 relatório principal.
+      </div>
+    </div>
+
     <button type="submit" class="btn btn-hospital w-100 w-md-auto" id="btn-upload" disabled>
       Enviar para Triagem
     </button>

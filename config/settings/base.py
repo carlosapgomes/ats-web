@@ -93,6 +93,11 @@ INTAKE_MAX_FILES_PER_BATCH = 30
 INTAKE_MAX_UPLOAD_BYTES_PER_FILE = 20 * 1024 * 1024  # 20 MB
 INTAKE_MAX_UPLOAD_BYTES_PER_BATCH = 600 * 1024 * 1024  # 600 MB
 
+# Attachment limits — anexos clínicos
+INTAKE_MAX_ATTACHMENTS_PER_CASE = 10
+INTAKE_MAX_ATTACHMENT_BYTES_PER_FILE = 20 * 1024 * 1024  # 20 MB
+INTAKE_MAX_ATTACHMENT_BYTES_PER_CASE = 200 * 1024 * 1024  # 200 MB
+
 # Regulation report gate — deterministic detection thresholds
 # Minimum cleaned text length to evaluate as a regulation report
 INTAKE_REGULATION_MIN_TEXT_CHARS = 500

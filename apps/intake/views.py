@@ -133,6 +133,8 @@ EVENT_LABELS: dict[str, str] = {
     # ── Vinda imediata ────────────────────────────────────────
     "IMMEDIATE_ADMISSION_OPERATIONAL_NOTICE": "Aviso de vinda imediata",
     "SCHEDULER_IMMEDIATE_ACK": "Ciência de vinda imediata",
+    # ── Anexos ────────────────────────────────────────────────
+    "CASE_ATTACHMENT_ADDED": "Anexo adicionado",
     # ── Encerramento administrativo ────────────────────────────
     "CASE_ADMINISTRATIVELY_CLOSED": "Encerrado administrativamente",
 }
@@ -187,6 +189,8 @@ EVENT_DOT_CSS: dict[str, str] = {
     # ── Vinda imediata ────────────────────────────────────────
     "IMMEDIATE_ADMISSION_OPERATIONAL_NOTICE": "system",
     "SCHEDULER_IMMEDIATE_ACK": "scheduler",
+    # ── Anexos ────────────────────────────────────────────────
+    "CASE_ATTACHMENT_ADDED": "system",
     # ── Encerramento administrativo ────────────────────────────
     "CASE_ADMINISTRATIVELY_CLOSED": "system",
 }
@@ -211,7 +215,8 @@ def intake_home(request: HttpRequest) -> HttpResponse:
     if request.method == "POST":
         form = CaseUploadForm(request.POST, request.FILES)
         files = request.FILES.getlist("pdf_files")
-        cases, errors = process_uploaded_files(files, user)
+        attachments = request.FILES.getlist("attachment_files")
+        cases, errors = process_uploaded_files(files, user, attachments=attachments or None)
 
         for error in errors:
             messages.warning(request, error)
