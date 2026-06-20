@@ -10,6 +10,11 @@ urlpatterns = [
     path("my-cases/partial/", views.my_cases_partial, name="my_cases_partial"),
     path("<uuid:case_id>/", views.case_detail, name="case_detail"),
     path("<uuid:case_id>/attachments/<uuid:attachment_id>/", views.serve_attachment, name="serve_attachment"),
+    path(
+        "<uuid:case_id>/attachments/<uuid:attachment_id>/suppress/",
+        views.suppress_attachment,
+        name="suppress_attachment",
+    ),
     path("<uuid:case_id>/pdf/", views.serve_pdf, name="serve_pdf"),
     path("<uuid:case_id>/confirm/", views.confirm_receipt, name="confirm_receipt"),
     path("<uuid:case_id>/lock/renew/", views.nir_lock_renew, name="nir_lock_renew"),

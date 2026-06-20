@@ -396,3 +396,49 @@ class TestDoctorDecisionRegressionAfterTemplateChanges:
         # mas os anexos devem estar completos
         assert attachments[0].original_filename in content
         assert attachments[1].original_filename in content
+
+
+@pytest.mark.django_db
+class TestDoctorAttachmentSuppressionRegression:
+    """Regressão: anexos suprimidos não aparecem para o médico (Slice 003)."""
+
+    def _create_role(self, name: str):
+        from apps.accounts.models import Role
+
+        role, _ = Role.objects.get_or_create(name=name)
+        return role
+
+    def _login_doctor(self, client):
+        user = User.objects.create_user(username="doc_supp_regr@test.com", password="testpass123")
+        user.roles.add(self._create_role("doctor"))
+        client.force_login(user)
+        session = client.session
+        session["active_role"] = "doctor"
+        session.save()
+        return user
+
+    def test_doctor_decision_does_not_render_suppressed_attachment(self, client) -> None:
+        """Anexo suprimido não aparece na tela médica (apenas ativos)."""
+        case, attachments, _ = _setup_case_with_attachments(attachment_count=2, suppress_some=True)
+        self._login_doctor(client)
+
+        response = client.get(f"/doctor/{case.case_id}/")
+        assert response.status_code == 200
+        content = response.content.decode()
+
+        # Anexo suprimido (primeiro) não deve aparecer
+        assert attachments[0].original_filename not in content
+        # Anexo ativo (segundo) deve aparecer
+        assert attachments[1].original_filename in content
+
+    def test_doctor_attachment_view_does_not_serve_suppressed_attachment(self, client) -> None:
+        """Rota médica retorna 404 para anexo suprimido."""
+        case, attachments, _ = _setup_case_with_attachments(attachment_count=1, suppress_some=True)
+        self._login_doctor(client)
+
+        # Primeiro anexo é suprimido
+        suppressed_att = attachments[0]
+        assert suppressed_att.is_suppressed is True
+
+        response = client.get(reverse("doctor:serve_attachment", args=[case.case_id, suppressed_att.attachment_id]))
+        assert response.status_code == 404
