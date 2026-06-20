@@ -24,22 +24,31 @@ def _make_case(
     agency_record_number: str = "AR99999",
     doctor_decision: str = "",
     doctor_reason: str = "",
+    doctor_decided_at: datetime | None = None,
     appointment_status: str = "",
     appointment_reason: str = "",
     appointment_decided_at: datetime | None = None,
     created_at: datetime | None = None,
+    status: str | None = None,
 ) -> Case:
-    """Cria um Case em estado final (denied/accepted) para testes de lookup."""
-    status = CaseStatus.NEW
+    """Cria um Case para testes de lookup.
 
-    if doctor_decision == "deny":
-        status = CaseStatus.DOCTOR_DENIED
-    elif appointment_status == "denied":
-        status = CaseStatus.APPT_DENIED
-    elif doctor_decision == "accept":
-        status = CaseStatus.DOCTOR_ACCEPTED
-    elif appointment_status == "confirmed":
-        status = CaseStatus.APPT_CONFIRMED
+    Se ``status`` for fornecido explicitamente, ele é usado diretamente.
+    Caso contrário, o status é inferido dos campos de decisão.
+    """
+    if status is None:
+        if doctor_decision == "deny":
+            status = CaseStatus.DOCTOR_DENIED
+        elif appointment_status == "denied":
+            status = CaseStatus.APPT_DENIED
+        elif doctor_decision == "accept":
+            status = CaseStatus.DOCTOR_ACCEPTED
+        elif appointment_status == "confirmed":
+            status = CaseStatus.APPT_CONFIRMED
+        else:
+            status = CaseStatus.NEW
+
+    decided_at_default = created_at or datetime.now(tz=UTC)
 
     case = Case.objects.create(
         created_by=user,
@@ -47,10 +56,10 @@ def _make_case(
         status=status,
         doctor_decision=doctor_decision,
         doctor_reason=doctor_reason,
-        doctor_decided_at=created_at or datetime.now(tz=UTC),
+        doctor_decided_at=doctor_decided_at or decided_at_default,
         appointment_status=appointment_status,
         appointment_reason=appointment_reason or "",
-        appointment_decided_at=appointment_decided_at or (created_at or datetime.now(tz=UTC)),
+        appointment_decided_at=appointment_decided_at or decided_at_default,
     )
     # created_at tem auto_now_add=True, então precisamos atualizar via update()
     # (refresh_from_db() conflita com FSMFieldDescriptor.protected)
@@ -352,6 +361,177 @@ class TestNormalizeReason:
 
 
 # ── Tests: PriorCaseContext dataclass ────────────────────────────────────────
+
+
+@pytest.mark.django_db
+class TestPriorCaseDecisionFields:
+    """Testes para lookup usar campos de decisão em vez de status transitório.
+
+    Verifica R2-R7 do slice: negativas encontradas mesmo com status CLEANED,
+    janela usa decided_at, ordenação por decided_at.
+    """
+
+    def test_doctor_denial_cleaned_status_still_found(self, django_user_model) -> None:
+        """Caso CLEANED com doctor_decision=deny é encontrado.
+
+        R2: status não importa, apenas doctor_decision e doctor_decided_at.
+        """
+        user = django_user_model.objects.create_user(username="u14", password="pw")
+        current = _make_case(user, agency_record_number="AR100")
+        _make_case(
+            user,
+            agency_record_number="AR100",
+            doctor_decision="deny",
+            doctor_reason="Risco cirúrgico",
+            doctor_decided_at=_utc_datetime(2),
+            status=CaseStatus.CLEANED,
+        )
+
+        result = lookup_prior_case_context(current.case_id, "AR100", now=NOW)
+
+        assert result.prior_case is not None, (
+            "Expected prior_case for CLEANED case with doctor_decision=deny, "
+            "got None because implementation still filters by status"
+        )
+        assert result.prior_case.decision == "doctor_denied"
+        assert result.prior_denial_count_7d == 1
+
+    def test_appointment_denial_cleaned_status_still_found(self, django_user_model) -> None:
+        """Caso CLEANED com appointment_status=denied é encontrado.
+
+        R3: status não importa, apenas appointment_status e appointment_decided_at.
+        """
+        user = django_user_model.objects.create_user(username="u15", password="pw")
+        current = _make_case(user, agency_record_number="AR101")
+        _make_case(
+            user,
+            agency_record_number="AR101",
+            appointment_status="denied",
+            appointment_reason="Paciente faltou",
+            appointment_decided_at=_utc_datetime(1),
+            status=CaseStatus.CLEANED,
+        )
+
+        result = lookup_prior_case_context(current.case_id, "AR101", now=NOW)
+
+        assert result.prior_case is not None, (
+            "Expected prior_case for CLEANED case with appointment_status=denied, "
+            "got None because implementation still filters by status"
+        )
+        assert result.prior_case.decision == "appointment_denied"
+        assert result.prior_denial_count_7d == 1
+
+    def test_doctor_denial_uses_decided_at_not_created_at_for_window(self, django_user_model) -> None:
+        """Janela usa doctor_decided_at, não created_at.
+
+        R4: caso com created_at recente mas doctor_decided_at fora da janela
+        não deve contar.
+        """
+        user = django_user_model.objects.create_user(username="u16", password="pw")
+        current = _make_case(user, agency_record_number="AR102")
+        _make_case(
+            user,
+            agency_record_number="AR102",
+            doctor_decision="deny",
+            doctor_reason="Antigo",
+            created_at=_utc_datetime(1),  # recente
+            doctor_decided_at=_utc_datetime(PRIOR_CASE_WINDOW_DAYS + 1),  # fora da janela
+        )
+
+        result = lookup_prior_case_context(current.case_id, "AR102", now=NOW)
+
+        assert result.prior_case is None, (
+            "Expected None because doctor_decided_at is outside window, "
+            "got a prior_case because implementation uses created_at"
+        )
+        assert result.prior_denial_count_7d == 0
+
+    def test_doctor_denial_old_created_at_but_recent_decision_is_found(self, django_user_model) -> None:
+        """Caso com created_at antigo mas doctor_decided_at recente é encontrado.
+
+        R4: janela usa decided_at.
+        """
+        user = django_user_model.objects.create_user(username="u17", password="pw")
+        current = _make_case(user, agency_record_number="AR103")
+        _make_case(
+            user,
+            agency_record_number="AR103",
+            doctor_decision="deny",
+            doctor_reason="Decisão recente",
+            created_at=_utc_datetime(30),  # antigo
+            doctor_decided_at=_utc_datetime(2),  # dentro da janela
+        )
+
+        result = lookup_prior_case_context(current.case_id, "AR103", now=NOW)
+
+        assert result.prior_case is not None, (
+            "Expected prior_case because doctor_decided_at is within window, "
+            "got None because implementation uses created_at for window"
+        )
+        assert result.prior_case.decision == "doctor_denied"
+        assert result.prior_denial_count_7d == 1
+
+    def test_appointment_denial_uses_decided_at_not_created_at_for_window(self, django_user_model) -> None:
+        """Janela usa appointment_decided_at, não created_at.
+
+        R4: caso com created_at recente mas appointment_decided_at fora da janela
+        não deve contar.
+        """
+        user = django_user_model.objects.create_user(username="u18", password="pw")
+        current = _make_case(user, agency_record_number="AR104")
+        _make_case(
+            user,
+            agency_record_number="AR104",
+            appointment_status="denied",
+            appointment_reason="Falta antiga",
+            created_at=_utc_datetime(1),  # recente
+            appointment_decided_at=_utc_datetime(PRIOR_CASE_WINDOW_DAYS + 1),  # fora
+        )
+
+        result = lookup_prior_case_context(current.case_id, "AR104", now=NOW)
+
+        assert result.prior_case is None, (
+            "Expected None because appointment_decided_at is outside window, "
+            "got a prior_case because implementation uses created_at"
+        )
+        assert result.prior_denial_count_7d == 0
+
+    def test_most_recent_prior_case_uses_decision_timestamp_not_created_at(self, django_user_model) -> None:
+        """Prior case retornado é o de maior decided_at, não created_at.
+
+        R5: dois casos, um com created_at recente mas decisão antiga,
+        outro com created_at antigo mas decisão recente.
+        """
+        user = django_user_model.objects.create_user(username="u19", password="pw")
+        current = _make_case(user, agency_record_number="AR105")
+        # Caso A: created_at recente (1d) mas decisão antiga (6d)
+        _make_case(
+            user,
+            agency_record_number="AR105",
+            doctor_decision="deny",
+            doctor_reason="Decisão antiga",
+            created_at=_utc_datetime(1),
+            doctor_decided_at=_utc_datetime(6),
+        )
+        # Caso B: created_at antigo (8d) mas decisão recente (1d)
+        case_b = _make_case(
+            user,
+            agency_record_number="AR105",
+            appointment_status="denied",
+            appointment_reason="Decisão recente",
+            created_at=_utc_datetime(8),
+            appointment_decided_at=_utc_datetime(1),
+        )
+
+        result = lookup_prior_case_context(current.case_id, "AR105", now=NOW)
+
+        assert result.prior_case is not None
+        assert result.prior_case.prior_case_id == str(case_b.case_id), (
+            "Expected most recent by decision timestamp (case B, 1d ago), "
+            "got case A because implementation orders by created_at"
+        )
+        assert result.prior_case.decision == "appointment_denied"
+        assert result.prior_denial_count_7d == 2
 
 
 class TestPriorCaseContextDefaults:
