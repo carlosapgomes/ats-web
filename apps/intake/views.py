@@ -2,6 +2,7 @@
 
 import uuid
 
+from django.conf import settings
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
 from django.db import models
@@ -14,6 +15,7 @@ from apps.accounts.decorators import role_required
 from apps.cases.models import Case, CaseAttachment, CaseStatus
 from apps.cases.services import (
     acknowledge_post_schedule_issue,
+    add_supplemental_case_attachment,
     assert_case_lock,
     claim_case_lock,
     compute_lock_display,
@@ -137,6 +139,7 @@ EVENT_LABELS: dict[str, str] = {
     # ── Anexos ────────────────────────────────────────────────
     "CASE_ATTACHMENT_ADDED": "Anexo adicionado",
     "CASE_ATTACHMENT_SUPPRESSED": "Anexo suprimido pelo NIR",
+    "CASE_ATTACHMENT_SUPPLEMENT_ADDED": "Anexo complementar adicionado",
     # ── Encerramento administrativo ────────────────────────────
     "CASE_ADMINISTRATIVELY_CLOSED": "Encerrado administrativamente",
 }
@@ -194,6 +197,7 @@ EVENT_DOT_CSS: dict[str, str] = {
     # ── Anexos ────────────────────────────────────────────────
     "CASE_ATTACHMENT_ADDED": "system",
     "CASE_ATTACHMENT_SUPPRESSED": "nir",
+    "CASE_ATTACHMENT_SUPPLEMENT_ADDED": "nir",
     # ── Encerramento administrativo ────────────────────────────
     "CASE_ADMINISTRATIVELY_CLOSED": "system",
 }
@@ -519,6 +523,15 @@ def case_detail(request: HttpRequest, case_id: uuid.UUID) -> HttpResponse:
             "appointment_status": case.appointment_status,
         }
 
+    # Elegibilidade para anexo complementar
+    from apps.cases.services import ELIGIBLE_SUPPLEMENTAL_STATUSES
+
+    can_add_supplemental = (
+        case.status not in (CaseStatus.CLEANED,)
+        and not case.doctor_decision
+        and case.status in ELIGIBLE_SUPPLEMENTAL_STATUSES
+    )
+
     # Nome do paciente
     patient_name = ""
     if case.structured_data and isinstance(case.structured_data, dict):
@@ -550,6 +563,7 @@ def case_detail(request: HttpRequest, case_id: uuid.UUID) -> HttpResponse:
             "back_label": "← Voltar para lista",
             "pdf_url": reverse("intake:serve_pdf", args=[case.case_id]),
             "attachments": active_attachments,
+            "can_add_supplemental": can_add_supplemental,
         },
     )
 
@@ -633,6 +647,77 @@ def suppress_attachment(
         messages.success(request, "Anexo suprimido com sucesso.")
     except ValueError as exc:
         messages.warning(request, str(exc))
+
+    return redirect("intake:case_detail", case_id=case.case_id)
+
+
+@login_required
+@role_required("nir")
+def add_supplemental_attachment(
+    request: HttpRequest,
+    case_id: uuid.UUID,
+) -> HttpResponse:
+    """POST: Adiciona anexo(s) complementar(es) a um caso antes da decisão médica.
+
+    Valida elegibilidade, lock médico (se WAIT_DOCTOR), justificativa obrigatória.
+    Aceita múltiplos arquivos.
+    Redireciona para detalhe do caso com mensagem.
+    """
+    if request.method != "POST":
+        return redirect("intake:case_detail", case_id=case_id)
+
+    case = get_object_or_404(
+        Case.objects.select_related("created_by"),
+        case_id=case_id,
+    )
+
+    note = request.POST.get("note", "").strip()
+    if not note:
+        messages.warning(request, "Justificativa obrigatória para anexo complementar.")
+        return redirect("intake:case_detail", case_id=case.case_id)
+
+    files = request.FILES.getlist("attachment_files")
+    if not files:
+        messages.warning(request, "Selecione ao menos um arquivo para anexar.")
+        return redirect("intake:case_detail", case_id=case.case_id)
+
+    # Validate attachments using existing helpers
+    from apps.intake.services import validate_attachment_file
+
+    for f in files:
+        try:
+            validate_attachment_file(f)
+        except ValueError as exc:
+            messages.warning(request, str(exc))
+            return redirect("intake:case_detail", case_id=case.case_id)
+
+    # Check max total attachments per case
+    existing_count = case.attachments.filter(is_suppressed=False).count()
+    max_attachments = settings.INTAKE_MAX_ATTACHMENTS_PER_CASE
+    if existing_count + len(files) > max_attachments:
+        messages.warning(
+            request,
+            f"Máximo de {max_attachments} anexos por caso. Já existem {existing_count} anexo(s).",
+        )
+        return redirect("intake:case_detail", case_id=case.case_id)
+
+    success_count = 0
+    for f in files:
+        try:
+            add_supplemental_case_attachment(
+                case=case,
+                uploaded_file=f,
+                user=request.user,
+                note=note,
+            )
+            success_count += 1
+        except ValueError as exc:
+            messages.warning(request, str(exc))
+            return redirect("intake:case_detail", case_id=case.case_id)
+
+    if success_count > 0:
+        msg = f"{success_count} anexo(s) complementar(es) adicionado(s) com sucesso."
+        messages.success(request, msg)
 
     return redirect("intake:case_detail", case_id=case.case_id)
 

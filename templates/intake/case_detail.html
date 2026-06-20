@@ -396,6 +396,57 @@
   {% endif %}
 </div>
 
+<!-- Anexo Complementar — Formulário NIR -->
+{% if can_add_supplemental %}
+<div class="card p-4 mb-4 border-primary">
+  <h5 class="mb-3">📎 Adicionar anexo complementar</h5>
+  <div class="alert alert-info small mb-3">
+    <strong>📌 Aviso:</strong>
+    Use para enviar laudo/documento que faltou no upload inicial.
+    Permitido apenas antes da decisão médica.
+  </div>
+
+  {% if case.status == "WAIT_DOCTOR" and lock_locked_by_display and not lock_held %}
+  <div class="alert alert-warning mb-3">
+    🔒 Este caso está reservado por <strong>{{ lock_locked_by_display }}</strong>.
+    Aguarde a liberação ou comunique o médico.
+  </div>
+  {% else %}
+  <form method="post"
+        action="{% url 'intake:supplemental_attachment_add' case.case_id %}"
+        enctype="multipart/form-data">
+    {% csrf_token %}
+    <div class="mb-3">
+      <label for="attachment_files" class="form-label fw-semibold">
+        Arquivos (PDF, JPEG, PNG)
+      </label>
+      <input type="file" name="attachment_files" id="attachment_files"
+             class="form-control" accept=".pdf,.jpg,.jpeg,.png"
+             multiple required>
+      <div class="form-text">
+        Formatos aceitos: PDF, JPEG/JPG e PNG.
+      </div>
+    </div>
+    <div class="mb-3">
+      <label for="note" class="form-label fw-semibold">
+        Justificativa <span class="text-danger">*</span>
+      </label>
+      <textarea name="note" id="note"
+                class="form-control" rows="2"
+                placeholder="Descreva por que este documento está sendo enviado agora..."
+                required></textarea>
+      <div class="form-text">
+        Informe o motivo do envio complementar.
+      </div>
+    </div>
+    <button type="submit" class="btn btn-hospital">
+      📤 Enviar anexo complementar
+    </button>
+  </form>
+  {% endif %}
+</div>
+{% endif %}
+
 <!-- Texto Extraído -->
 {% if case.extracted_text %}
 <div class="card p-4 mb-4">
@@ -446,9 +497,20 @@
         {% if att.content_type == "application/pdf" %}📄{% elif "image" in att.content_type %}🖼️{% else %}📎{% endif %}
         {{ att.original_filename }}
       </span>
-      <span class="text-muted small">{{ att.size_bytes|filesizeformat }}</span>
+      <span class="d-flex align-items-center gap-2">
+        {% if att.upload_phase == "supplemental" %}
+        <span class="badge bg-warning text-dark small">Adicionado após upload inicial</span>
+        {% endif %}
+        <span class="text-muted small">{{ att.size_bytes|filesizeformat }}</span>
+      </span>
     </div>
     <div class="card-body py-3">
+      {% if att.upload_phase == "supplemental" %}
+      <div class="alert alert-warning small py-1 px-2 mb-2">
+        <strong>📌</strong> Adicionado após upload inicial — não analisado automaticamente pela IA.
+        {% if att.note %}<br><em>Justificativa:</em> {{ att.note }}{% endif %}
+      </div>
+      {% endif %}
       {% if att.content_type == "application/pdf" %}
       <div class="ratio ratio-1x1" style="max-height: 70vh;">
         <embed src="{% url 'intake:serve_attachment' case.case_id att.attachment_id %}" type="application/pdf" style="width: 100%; height: 100%;">
