@@ -135,6 +135,7 @@ EVENT_LABELS: dict[str, str] = {
     "SCHEDULER_IMMEDIATE_ACK": "Ciência de vinda imediata",
     # ── Anexos ────────────────────────────────────────────────
     "CASE_ATTACHMENT_ADDED": "Anexo adicionado",
+    "CASE_ATTACHMENT_SUPPRESSED": "Anexo suprimido pelo NIR",
     # ── Encerramento administrativo ────────────────────────────
     "CASE_ADMINISTRATIVELY_CLOSED": "Encerrado administrativamente",
 }
@@ -191,6 +192,7 @@ EVENT_DOT_CSS: dict[str, str] = {
     "SCHEDULER_IMMEDIATE_ACK": "scheduler",
     # ── Anexos ────────────────────────────────────────────────
     "CASE_ATTACHMENT_ADDED": "system",
+    "CASE_ATTACHMENT_SUPPRESSED": "nir",
     # ── Encerramento administrativo ────────────────────────────
     "CASE_ADMINISTRATIVELY_CLOSED": "system",
 }
@@ -583,6 +585,57 @@ def serve_attachment(
         attachment.file.open("rb"),
         content_type=attachment.content_type,
     )
+
+
+@login_required
+@role_required("nir")
+def suppress_attachment(
+    request: HttpRequest,
+    case_id: uuid.UUID,
+    attachment_id: uuid.UUID,
+) -> HttpResponseBase:
+    """POST: Suprime um anexo ativo de forma auditável.
+
+    Acesso permitido para NIR com papel ativo 'nir'.
+    O caso não pode estar CLEANED.
+    Motivo obrigatório no POST.
+    Após sucesso, redireciona para detalhe do caso com mensagem.
+    """
+    if request.method != "POST":
+        return redirect("intake:case_detail", case_id=case_id)
+
+    case = get_object_or_404(
+        Case.objects.select_related("created_by"),
+        case_id=case_id,
+    )
+    if case.status == CaseStatus.CLEANED:
+        raise Http404("Anexo de caso concluído não está disponível na fila operacional.")
+
+    attachment = get_object_or_404(
+        CaseAttachment,
+        attachment_id=attachment_id,
+        case=case,
+        is_suppressed=False,
+    )
+
+    reason = request.POST.get("reason", "").strip()
+    if not reason:
+        messages.warning(request, "Informe o motivo da supressão do anexo.")
+        return redirect("intake:case_detail", case_id=case.case_id)
+
+    try:
+        from apps.cases.services import suppress_case_attachment
+
+        suppress_case_attachment(
+            attachment=attachment,
+            user=request.user,
+            reason=reason,
+        )
+        messages.success(request, "Anexo suprimido com sucesso.")
+    except ValueError as exc:
+        messages.warning(request, str(exc))
+
+    return redirect("intake:case_detail", case_id=case.case_id)
 
 
 @login_required

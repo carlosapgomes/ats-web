@@ -17,7 +17,7 @@ from django.db import transaction
 from django.db.models import QuerySet
 from django.utils import timezone
 
-from apps.cases.models import Case, CaseStatus
+from apps.cases.models import Case, CaseAttachment, CaseStatus
 
 
 @dataclass(frozen=True)
@@ -829,3 +829,73 @@ def administratively_close_case(
         case.save()
 
     return Case.objects.get(pk=case.pk)
+
+
+# ── Attachment suppression ────────────────────────────────────────────────
+
+
+def suppress_case_attachment(
+    *,
+    attachment: CaseAttachment,
+    user: Any,
+    reason: str,
+) -> CaseAttachment:
+    """Suprime um anexo ativo de forma auditável.
+
+    Operação transacional com select_for_update. Valida motivo obrigatório
+    e idempotência (anexo já suprimido não pode ser suprimido novamente).
+
+    Registra CASE_ATTACHMENT_SUPPRESSED em CaseEvent com payload contendo
+    metadados mínimos (sem conteúdo clínico integral).
+
+    Args:
+        attachment: O anexo a ser suprimido (deve estar ativo).
+        user: Usuário NIR que está suprimindo.
+        reason: Motivo obrigatório da supressão.
+
+    Returns:
+        O anexo com campos de supressão preenchidos.
+
+    Raises:
+        ValueError: Se motivo vazio ou anexo já suprimido.
+    """
+    if not reason.strip():
+        raise ValueError("Motivo obrigatório para supressão do anexo.")
+
+    with transaction.atomic():
+        # Lock the attachment row for update
+        att = CaseAttachment.objects.select_for_update().get(pk=attachment.pk)
+
+        if att.is_suppressed:
+            raise ValueError(f"Anexo {att.attachment_id} já está suprimido.")
+
+        now = timezone.now()
+        att.is_suppressed = True
+        att.suppressed_at = now
+        att.suppressed_by = user
+        att.suppression_reason = reason.strip()
+        att.save(
+            update_fields=[
+                "is_suppressed",
+                "suppressed_at",
+                "suppressed_by",
+                "suppression_reason",
+            ]
+        )
+
+        # Record audit event with metadata only (no clinical content)
+        _record_event(
+            att.case,
+            "CASE_ATTACHMENT_SUPPRESSED",
+            user,
+            payload={
+                "attachment_id": str(att.attachment_id),
+                "original_filename": att.original_filename,
+                "content_type": att.content_type,
+                "size_bytes": att.size_bytes,
+                "sha256": att.sha256,
+                "reason": reason.strip(),
+            },
+        )
+
+    return CaseAttachment.objects.get(pk=att.pk)

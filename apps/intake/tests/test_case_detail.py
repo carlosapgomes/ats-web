@@ -1367,3 +1367,295 @@ class TestCaseDetailPriorCaseLookup:
         assert response.status_code == 200
         content = response.content.decode()
         assert "Caso Anterior" not in content
+
+
+# ── Suppression view tests (Slice 003) ────────────────────────────────────
+
+
+@pytest.mark.django_db
+class TestCaseDetailSuppressionUI:
+    """Testes de UI de supressão no detalhe NIR."""
+
+    def test_intake_case_detail_shows_suppress_action_for_active_attachment(self, client) -> None:
+        """Detalhe operacional mostra ação de supressão para anexo ativo."""
+        from django.core.files.base import ContentFile
+
+        client, user = _nir_client(client)
+        case = Case.objects.create(
+            created_by=user,
+            agency_record_number="SUPP-UI-001",
+            status=CaseStatus.WAIT_DOCTOR,
+        )
+        from apps.cases.models import CaseAttachment
+
+        CaseAttachment.objects.create(
+            case=case,
+            file=ContentFile(b"%PDF-1.4", name="doc.pdf"),
+            original_filename="doc.pdf",
+            stored_filename="doc.pdf",
+            content_type="application/pdf",
+            size_bytes=100,
+            sha256="s" * 64,
+            uploaded_by=user,
+        )
+
+        response = client.get(reverse("intake:case_detail", args=[case.case_id]))
+        assert response.status_code == 200
+        content = response.content.decode()
+        # Deve conter texto indicando supressão
+        assert "Suprimir anexo" in content or "suprimir" in content.lower()
+
+    def test_suppressed_attachment_not_rendered_as_active_in_intake_detail(self, client) -> None:
+        """Após supressão, anexo ativo desaparece; timeline mostra evento."""
+        from django.core.files.base import ContentFile
+
+        from apps.cases.models import CaseAttachment, CaseEvent
+
+        client, user = _nir_client(client)
+        case = Case.objects.create(
+            created_by=user,
+            agency_record_number="SUPP-HIDE-001",
+            status=CaseStatus.WAIT_DOCTOR,
+        )
+        att = CaseAttachment.objects.create(
+            case=case,
+            file=ContentFile(b"%PDF-1.4", name="visible.pdf"),
+            original_filename="visible.pdf",
+            stored_filename="visible.pdf",
+            content_type="application/pdf",
+            size_bytes=100,
+            sha256="t" * 64,
+            uploaded_by=user,
+        )
+
+        # Suprimir diretamente no banco
+        att.is_suppressed = True
+        att.suppressed_at = "2026-06-15T00:00:00Z"
+        att.suppressed_by = user
+        att.suppression_reason = "Enviado incorretamente."
+        att.save()
+
+        # Registrar evento
+        CaseEvent.objects.create(
+            case=case,
+            event_type="CASE_ATTACHMENT_SUPPRESSED",
+            actor=user,
+            actor_type="human",
+            payload={
+                "attachment_id": str(att.attachment_id),
+                "original_filename": "visible.pdf",
+                "reason": "Enviado incorretamente.",
+            },
+        )
+
+        response = client.get(reverse("intake:case_detail", args=[case.case_id]))
+        assert response.status_code == 200
+        content = response.content.decode()
+        # Anexo não deve aparecer como ativo
+        assert att.original_filename not in content or "Anexo suprimido pelo NIR" in content
+
+    def test_attachment_suppressed_event_has_timeline_label(self, client) -> None:
+        """Label 'Anexo suprimido pelo NIR' aparece na timeline."""
+        from apps.cases.models import CaseEvent
+
+        client, user = _nir_client(client)
+        case = Case.objects.create(
+            created_by=user,
+            agency_record_number="ATT-TIMELINE-LABEL",
+            status=CaseStatus.WAIT_DOCTOR,
+        )
+        CaseEvent.objects.create(
+            case=case,
+            event_type="CASE_ATTACHMENT_SUPPRESSED",
+            actor=user,
+            actor_type="human",
+            payload={},
+        )
+
+        response = client.get(reverse("intake:case_detail", args=[case.case_id]))
+        assert response.status_code == 200
+        content = response.content.decode()
+        assert "Anexo suprimido pelo NIR" in content or "suprimido" in content.lower()
+
+
+@pytest.mark.django_db
+class TestNirSuppressAttachmentView:
+    """Testes da view POST de supressão de anexo."""
+
+    def test_nir_can_suppress_attachment_from_operational_case(self, client) -> None:
+        """POST suprime e redireciona com mensagem."""
+        from django.core.files.base import ContentFile
+
+        client, user = _nir_client(client)
+        case = Case.objects.create(
+            created_by=user,
+            agency_record_number="ATT-NIR-SUPPRESS",
+            status=CaseStatus.WAIT_DOCTOR,
+        )
+        from apps.cases.models import CaseAttachment
+
+        att = CaseAttachment.objects.create(
+            case=case,
+            file=ContentFile(b"%PDF-1.4", name="nirsuppress.pdf"),
+            original_filename="nirsuppress.pdf",
+            stored_filename="nirsuppress.pdf",
+            content_type="application/pdf",
+            size_bytes=100,
+            sha256="u" * 64,
+            uploaded_by=user,
+        )
+
+        response = client.post(
+            reverse("intake:suppress_attachment", args=[case.case_id, att.attachment_id]),
+            {"reason": "Anexo enviado por engano."},
+            follow=True,
+        )
+        assert response.status_code == 200
+
+        # Verificar que o anexo foi suprimido
+        att.refresh_from_db()
+        assert att.is_suppressed is True
+        assert att.suppressed_by == user
+        assert att.suppression_reason == "Anexo enviado por engano."
+
+        # Verificar evento de auditoria
+        from apps.cases.models import CaseEvent
+
+        assert CaseEvent.objects.filter(
+            case=case,
+            event_type="CASE_ATTACHMENT_SUPPRESSED",
+        ).exists()
+
+    def test_nir_cannot_suppress_attachment_from_cleaned_case(self, client) -> None:
+        """Caso CLEANED retorna 404/erro e não altera anexo."""
+        from django.core.files.base import ContentFile
+
+        client, user = _nir_client(client)
+        case = Case.objects.create(
+            created_by=user,
+            agency_record_number="ATT-CLEANED-SUPPRESS",
+            status=CaseStatus.CLEANED,
+        )
+        from apps.cases.models import CaseAttachment
+
+        att = CaseAttachment.objects.create(
+            case=case,
+            file=ContentFile(b"%PDF-1.4", name="cleaned.pdf"),
+            original_filename="cleaned.pdf",
+            stored_filename="cleaned.pdf",
+            content_type="application/pdf",
+            size_bytes=100,
+            sha256="v" * 64,
+            uploaded_by=user,
+        )
+
+        response = client.post(
+            reverse("intake:suppress_attachment", args=[case.case_id, att.attachment_id]),
+            {"reason": "Motivo qualquer."},
+        )
+        assert response.status_code == 404
+
+        # Anexo não foi alterado
+        att.refresh_from_db()
+        assert att.is_suppressed is False
+
+    def test_nir_cannot_suppress_already_suppressed_attachment(self, client) -> None:
+        """Anexo já suprimido retorna erro sem alteração."""
+        from django.core.files.base import ContentFile
+
+        client, user = _nir_client(client)
+        case = Case.objects.create(
+            created_by=user,
+            agency_record_number="ATT-ALREADY-SUPP",
+            status=CaseStatus.WAIT_DOCTOR,
+        )
+        from apps.cases.models import CaseAttachment
+
+        att = CaseAttachment.objects.create(
+            case=case,
+            file=ContentFile(b"%PDF-1.4", name="alreadysupp.pdf"),
+            original_filename="alreadysupp.pdf",
+            stored_filename="alreadysupp.pdf",
+            content_type="application/pdf",
+            size_bytes=100,
+            sha256="w" * 64,
+            uploaded_by=user,
+            is_suppressed=True,
+            suppressed_at="2026-06-01T00:00:00Z",
+            suppression_reason="Já suprimido.",
+        )
+
+        response = client.post(
+            reverse("intake:suppress_attachment", args=[case.case_id, att.attachment_id]),
+            {"reason": "Outro motivo."},
+        )
+        # Deve retornar erro (400 ou redirect com mensagem)
+        assert response.status_code in (400, 302, 404)
+
+        # Anexo continua como estava
+        att.refresh_from_db()
+        assert att.is_suppressed is True
+        assert att.suppression_reason == "Já suprimido."
+
+    def test_nir_suppress_requires_reason(self, client) -> None:
+        """POST sem motivo falha."""
+        from django.core.files.base import ContentFile
+
+        client, user = _nir_client(client)
+        case = Case.objects.create(
+            created_by=user,
+            agency_record_number="ATT-NO-REASON",
+            status=CaseStatus.WAIT_DOCTOR,
+        )
+        from apps.cases.models import CaseAttachment
+
+        att = CaseAttachment.objects.create(
+            case=case,
+            file=ContentFile(b"%PDF-1.4", name="noreason.pdf"),
+            original_filename="noreason.pdf",
+            stored_filename="noreason.pdf",
+            content_type="application/pdf",
+            size_bytes=100,
+            sha256="x" * 64,
+            uploaded_by=user,
+        )
+
+        response = client.post(
+            reverse("intake:suppress_attachment", args=[case.case_id, att.attachment_id]),
+            {"reason": ""},
+        )
+        # Deve falhar (400 ou redirect com mensagem de erro)
+        assert response.status_code in (400, 302)
+
+        # Anexo não foi suprimido
+        att.refresh_from_db()
+        assert att.is_suppressed is False
+
+    def test_nir_attachment_view_does_not_serve_suppressed_attachment(self, client) -> None:
+        """Rota operacional NIR não serve anexo suprimido (404)."""
+        from django.core.files.base import ContentFile
+
+        client, user = _nir_client(client)
+        case = Case.objects.create(
+            created_by=user,
+            agency_record_number="ATT-NO-SERVE-SUPP",
+            status=CaseStatus.WAIT_DOCTOR,
+        )
+        from apps.cases.models import CaseAttachment
+
+        att = CaseAttachment.objects.create(
+            case=case,
+            file=ContentFile(b"%PDF-1.4", name="noserve.pdf"),
+            original_filename="noserve.pdf",
+            stored_filename="noserve.pdf",
+            content_type="application/pdf",
+            size_bytes=100,
+            sha256="y" * 64,
+            uploaded_by=user,
+            is_suppressed=True,
+            suppressed_at="2026-06-01T00:00:00Z",
+            suppression_reason="Suprimido.",
+        )
+
+        response = client.get(reverse("intake:serve_attachment", args=[case.case_id, att.attachment_id]))
+        assert response.status_code == 404

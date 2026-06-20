@@ -470,6 +470,44 @@
         <a href="{% url 'intake:serve_attachment' case.case_id att.attachment_id %}"
            class="btn btn-sm btn-hospital-outline" target="_blank">Abrir em nova aba</a>
       </div>
+
+      {% if case.status != "CLEANED" %}
+      <!-- Suppress action -->
+      <hr class="my-2">
+      <div class="mt-2">
+        <button class="btn btn-sm btn-outline-warning" type="button"
+                data-bs-toggle="collapse" data-bs-target="#suppress-{{ att.attachment_id }}"
+                aria-expanded="false" aria-controls="suppress-{{ att.attachment_id }}">
+          🚫 Suprimir anexo enviado incorretamente
+        </button>
+        <div class="collapse mt-2" id="suppress-{{ att.attachment_id }}">
+          <div class="card card-body bg-light">
+            <p class="small text-muted mb-2">
+              Use apenas se este anexo foi enviado por engano, por exemplo por pertencer
+              a outro paciente. A ação será auditada e o anexo deixará de aparecer para o médico.
+            </p>
+            <form method="post"
+                  action="{% url 'intake:suppress_attachment' case.case_id att.attachment_id %}">
+              {% csrf_token %}
+              <div class="mb-2">
+                <label for="reason-{{ att.attachment_id }}" class="form-label small fw-semibold">
+                  Motivo da supressão <span class="text-danger">*</span>
+                </label>
+                <textarea name="reason" id="reason-{{ att.attachment_id }}"
+                          class="form-control form-control-sm" rows="2"
+                          placeholder="Descreva por que este anexo foi enviado incorretamente..."
+                          required></textarea>
+              </div>
+              <button type="submit" class="btn btn-sm btn-warning"
+                      onclick="return confirm('Confirma a supressão deste anexo? A ação será auditada.');">
+                Confirmar supressão
+              </button>
+            </form>
+          </div>
+        </div>
+      </div>
+      {% endif %}
+
     </div>
   </div>
   {% endfor %}
