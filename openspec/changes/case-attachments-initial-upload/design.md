@@ -438,6 +438,40 @@ Não adiciona anexos após decisão médica e não cria automaticamente caso cor
 | Slice horizontal sem valor | Slice 001 deve ser end-to-end mesmo tocando mais arquivos |
 | Escopo fugir para OCR/LLM | Manter processamento de anexos fora do change |
 
+## Limitações aceitas (não bloqueantes)
+
+Estas limitações foram avaliadas durante a implementação e aceitas como
+aceitáveis para este change. Não são bugs e não comprometem integridade de
+dados; documentam trade-offs conscientes.
+
+### L1. Lote de anexos complementares sem atomicidade transacional de batch
+
+O POST de anexo complementar pode enviar vários arquivos numa única
+requisição. Cada arquivo é commitado em sua própria `transaction.atomic()`
+em `add_supplemental_case_attachment`. Não há uma transação única envolvendo
+todo o lote.
+
+Cenário que poderia levar a inserção parcial: a elegibilidade do caso
+(`doctor_decision` vazio, status elegível, sem lock médico) mudar por ação
+concorrente **entre** duas inserções do mesmo lote (janela de milissegundos).
+
+Mitigações existentes que reduzem a janela a praticamente zero em fluxo
+normal:
+
+- Tipo e tamanho de cada arquivo são validados pela view **antes** do loop.
+- Limite de anexos por caso é validado pela view para o lote inteiro **antes**
+  do loop e, em defesa em profundidade, também pelo serviço a cada inserção.
+- Elegibilidade é verificada pelo serviço a cada inserção dentro de
+  `select_for_update()`.
+
+Pior caso realista: 1 anexo complementar é inserido num caso que, milissegundos
+depois, recebe decisão médica. Não há corrupção de dados; o anexo fica
+registrado com auditoria (`CASE_ATTACHMENT_SUPPLEMENT_ADDED`) e a auditoria
+permanece fonte de verdade. Corrigir exige refactor de API do serviço
+(split `assert_eligibility` + persist sem `atomic` própria, ou novo método
+de lote), com risco de regressão em código clínico estável. Avaliado como
+não justificado neste change.
+
 ## Futuro fora deste change
 
 Um change futuro deve classificar/processar anexos para IA:
