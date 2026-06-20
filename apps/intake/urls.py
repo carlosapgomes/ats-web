@@ -15,6 +15,11 @@ urlpatterns = [
         views.suppress_attachment,
         name="suppress_attachment",
     ),
+    path(
+        "<uuid:case_id>/attachments/supplemental/add/",
+        views.add_supplemental_attachment,
+        name="supplemental_attachment_add",
+    ),
     path("<uuid:case_id>/pdf/", views.serve_pdf, name="serve_pdf"),
     path("<uuid:case_id>/confirm/", views.confirm_receipt, name="confirm_receipt"),
     path("<uuid:case_id>/lock/renew/", views.nir_lock_renew, name="nir_lock_renew"),

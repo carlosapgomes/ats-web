@@ -13,6 +13,7 @@ from datetime import datetime, timedelta
 from typing import Any
 
 from django.conf import settings
+from django.core.files.uploadedfile import UploadedFile
 from django.db import transaction
 from django.db.models import QuerySet
 from django.utils import timezone
@@ -829,6 +830,124 @@ def administratively_close_case(
         case.save()
 
     return Case.objects.get(pk=case.pk)
+
+
+# ── Supplemental attachment ────────────────────────────────────────────────
+
+
+ELIGIBLE_SUPPLEMENTAL_STATUSES: frozenset[str] = frozenset(
+    {
+        CaseStatus.R1_ACK_PROCESSING,
+        CaseStatus.EXTRACTING,
+        CaseStatus.LLM_STRUCT,
+        CaseStatus.LLM_SUGGEST,
+        CaseStatus.R2_POST_WIDGET,
+        CaseStatus.WAIT_DOCTOR,
+    }
+)
+
+
+def add_supplemental_case_attachment(
+    *,
+    case: Case,
+    uploaded_file: UploadedFile,
+    user: Any,
+    note: str,
+) -> CaseAttachment:
+    """Adiciona um anexo complementar a um caso antes da decisão médica.
+
+    Regras:
+    - note é obrigatório e não vazio.
+    - Caso não pode ter doctor_decision preenchido.
+    - Caso não pode estar CLEANED.
+    - Status deve ser elegível (antes/durante avaliação médica).
+    - Se status == WAIT_DOCTOR e houver lock ativo de outro usuário, bloqueia.
+    - upload_phase = "supplemental"
+    - uploaded_when_case_status = case.status
+    - Registra CASE_ATTACHMENT_SUPPLEMENT_ADDED.
+    - Operação transacional com select_for_update().
+
+    Args:
+        case: O caso ao qual adicionar o anexo.
+        uploaded_file: Arquivo enviado.
+        user: Usuário NIR que está adicionando.
+        note: Justificativa obrigatória.
+
+    Returns:
+        O CaseAttachment criado.
+
+    Raises:
+        ValueError: Se validações falharem.
+    """
+    from apps.intake.services import create_case_attachment
+
+    if not note.strip():
+        raise ValueError("Justificativa/nota obrigatória para anexo complementar.")
+
+    with transaction.atomic():
+        case = Case.objects.select_for_update().get(pk=case.pk)
+
+        # Elegibilidade: status não CLEANED
+        if case.status == CaseStatus.CLEANED:
+            raise ValueError("Caso encerrado (CLEANED) não pode receber anexos complementares.")
+
+        # Elegibilidade: doctor_decision não preenchido
+        if case.doctor_decision:
+            raise ValueError(
+                "Caso já possui decisão médica. Anexos complementares só são permitidos antes da decisão médica."
+            )
+
+        # Elegibilidade: status elegível
+        if case.status not in ELIGIBLE_SUPPLEMENTAL_STATUSES:
+            raise ValueError(
+                f"Status {case.status} não é elegível para anexo complementar. "
+                f"Estados elegíveis: {sorted(ELIGIBLE_SUPPLEMENTAL_STATUSES)}"
+            )
+
+        # Lock check: se WAIT_DOCTOR, verificar lock ativo de outro usuário
+        if case.status == CaseStatus.WAIT_DOCTOR:
+            now = timezone.now()
+            if (
+                case.locked_by is not None
+                and case.locked_until is not None
+                and case.locked_until > now
+                and case.locked_by_id != user.pk
+            ):
+                raise ValueError(
+                    f"Este caso está reservado por Dr(a). {case.locked_by.display_name}. "
+                    "Aguarde a liberação ou comunique o médico."
+                )
+
+        # Criar o anexo via helper existente
+        attachment = create_case_attachment(
+            case=case,
+            uploaded_file=uploaded_file,
+            user=user,
+            upload_phase="supplemental",
+        )
+
+        # Preencher campos específicos
+        attachment.note = note.strip()
+        attachment.uploaded_when_case_status = case.status
+        attachment.save(update_fields=["note", "uploaded_when_case_status"])
+
+        # Registrar evento específico
+        _record_event(
+            case,
+            "CASE_ATTACHMENT_SUPPLEMENT_ADDED",
+            user,
+            payload={
+                "attachment_id": str(attachment.attachment_id),
+                "original_filename": attachment.original_filename,
+                "content_type": attachment.content_type,
+                "size_bytes": attachment.size_bytes,
+                "sha256": attachment.sha256,
+                "note": note.strip(),
+                "case_status_at_upload": case.status,
+            },
+        )
+
+    return CaseAttachment.objects.get(pk=attachment.pk)
 
 
 # ── Attachment suppression ────────────────────────────────────────────────
