@@ -564,8 +564,6 @@ def serve_pdf(request: HttpRequest, case_id: uuid.UUID) -> HttpResponseBase:
         raise Http404("PDF de caso concluído não está disponível na fila operacional.")
     if not case.pdf_file:
         raise Http404("PDF não encontrado para este caso.")
-    if not case.pdf_file:
-        raise Http404("PDF não encontrado para este caso.")
 
     return FileResponse(
         case.pdf_file.open("rb"),
