@@ -154,7 +154,7 @@ static/          # css/app.css (paleta hospitalar), js/upload.js, js/password-to
   - `openspec/archive/consolidate-duplicated-test-fixtures/` (1 slice)
   - `openspec/archive/align-uuid-route-parameter-annotations/` (1 slice)
   - `openspec/archive/release-lock-on-successful-handoff/` (1 slice)
-- **Change ativo (pronto para merge em main)**: `transactional-emails-auth-flows` (Slices 000–003 concluídos e validados em produção; Slice 004 hardening é opcional/futuro)
+- **Change merged em main (não arquivado)**: `transactional-emails-auth-flows` (Slices 000–003 concluídos e validados em produção; Slice 004 hardening será implementado direto em main)
 - **Apps criados**: `apps/accounts/`, `apps/cases/`, `apps/llm/`, `apps/intake/`, `apps/pipeline/`,
   `apps/doctor/`, `apps/scheduler/`, `apps/dashboard/`, `apps/admin_ui/`
 - **Testes**: 1237 passando, quality gate verde (ruff + mypy + pytest)
