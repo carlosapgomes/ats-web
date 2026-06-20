@@ -3,7 +3,7 @@
 ## Slices verticais
 
 - [x] Slice 001 — MVP end-to-end de anexos no upload único e tela médica (`slices/slice-001-attachment-upload-doctor-view.md`)
-- [ ] Slice 002 — UX condicional, detalhe compartilhado e hardening operacional (`slices/slice-002-attachment-ux-shared-detail-hardening.md`)
+- [x] Slice 002 — UX condicional, detalhe compartilhado e hardening operacional (`slices/slice-002-attachment-ux-shared-detail-hardening.md`)
 - [ ] Slice 003 — Supressão auditável de anexo enviado incorretamente (`slices/slice-003-auditable-attachment-suppression.md`)
 - [ ] Slice 004 — Anexos complementares antes da decisão médica (`slices/slice-004-supplemental-attachments-before-doctor-decision.md`)
 

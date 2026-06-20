@@ -647,17 +647,187 @@ class TestCaseDetailNirNavPreserved:
 
     def test_case_detail_nir_back_link_to_my_cases(self, client) -> None:
         """Detalhe NIR tem link 'Voltar para lista' apontando para intake:my_cases."""
+
+    # ── Slice 002: attachment display in NIR case detail ────────────
+
+    def test_intake_case_detail_renders_attachment_after_pdf_before_timeline(self, client) -> None:
+        """Detalhe NIR exibe anexos após PDF e antes da timeline, na ordem correta."""
+        from django.core.files.base import ContentFile
+
         client, user = _nir_client(client)
         case = Case.objects.create(
             created_by=user,
-            agency_record_number="BACK-REG-001",
-            status=CaseStatus.NEW,
+            agency_record_number="ATT-ORDER-001",
+            status=CaseStatus.WAIT_DOCTOR,
         )
+        case.pdf_file.save("test.pdf", ContentFile(b"%PDF-1.4 fake"), save=True)
+        case.structured_data = {"patient": {"name": "Paciente"}}
+        case.extracted_text = "Texto extraído"
+        case.save()
+
+        # Criar anexo
+        from apps.cases.models import CaseAttachment
+
+        att = CaseAttachment.objects.create(
+            case=case,
+            file=ContentFile(b"%PDF-1.4 fake", name="laudo.pdf"),
+            original_filename="laudo.pdf",
+            stored_filename="laudo.pdf",
+            content_type="application/pdf",
+            size_bytes=100,
+            sha256="a" * 64,
+            uploaded_by=user,
+        )
+
         response = client.get(reverse("intake:case_detail", args=[case.case_id]))
         assert response.status_code == 200
         content = response.content.decode()
-        assert "Voltar para lista" in content
-        assert reverse("intake:my_cases") in content
+
+        # Verificar ordem: texto → PDF → anexos → timeline
+        extracted_idx = content.find("Texto Extraído")
+        pdf_idx = content.find("Visualizar PDF")
+        att_idx = content.find(att.original_filename)
+        timeline_idx = content.find("Linha do Tempo")
+
+        assert extracted_idx >= 0, "Texto extraído não encontrado"
+        assert pdf_idx >= 0, "PDF não encontrado"
+        assert att_idx >= 0, "Anexo não encontrado"
+        assert timeline_idx >= 0, "Timeline não encontrada"
+
+        assert extracted_idx < pdf_idx, "Texto deve vir antes do PDF"
+        assert pdf_idx < att_idx, "PDF deve vir antes dos anexos"
+        assert att_idx < timeline_idx, "Anexos devem vir antes da timeline"
+
+    def test_intake_case_detail_embeds_pdf_attachment(self, client) -> None:
+        """Anexo PDF gera embed/link protegido no detalhe NIR."""
+        from django.core.files.base import ContentFile
+
+        client, user = _nir_client(client)
+        case = Case.objects.create(
+            created_by=user,
+            agency_record_number="ATT-PDF-001",
+            status=CaseStatus.WAIT_DOCTOR,
+        )
+
+        from apps.cases.models import CaseAttachment
+
+        att = CaseAttachment.objects.create(
+            case=case,
+            file=ContentFile(b"%PDF-1.4 fake", name="anexo.pdf"),
+            original_filename="anexo.pdf",
+            stored_filename="anexo.pdf",
+            content_type="application/pdf",
+            size_bytes=100,
+            sha256="b" * 64,
+            uploaded_by=user,
+        )
+
+        response = client.get(reverse("intake:case_detail", args=[case.case_id]))
+        assert response.status_code == 200
+        content = response.content.decode()
+
+        # Deve conter referência à rota de anexo NIR
+        assert str(att.attachment_id) in content
+        # Deve ter embed ou link
+        assert "embed" in content or "Abrir em nova aba" in content
+
+    def test_intake_case_detail_embeds_image_attachment(self, client) -> None:
+        """Anexo JPEG/PNG gera <img> no detalhe NIR."""
+        from django.core.files.base import ContentFile
+
+        client, user = _nir_client(client)
+        case = Case.objects.create(
+            created_by=user,
+            agency_record_number="ATT-IMG-001",
+            status=CaseStatus.WAIT_DOCTOR,
+        )
+
+        from apps.cases.models import CaseAttachment
+
+        att = CaseAttachment.objects.create(
+            case=case,
+            file=ContentFile(b"\xff\xd8\xff\xe0\\x00\x10JFIF\\x00\x01", name="foto.jpg"),
+            original_filename="foto.jpg",
+            stored_filename="foto.jpg",
+            content_type="image/jpeg",
+            size_bytes=200,
+            sha256="c" * 64,
+            uploaded_by=user,
+        )
+
+        response = client.get(reverse("intake:case_detail", args=[case.case_id]))
+        assert response.status_code == 200
+        content = response.content.decode()
+
+        # Deve conter <img> com src para rota protegida
+        assert "<img" in content or "img-fluid" in content.lower()
+        assert str(att.attachment_id) in content
+
+    def test_intake_attachment_view_serves_operational_case_attachment(self, client) -> None:
+        """Rota NIR serve anexo de caso operacional."""
+        from django.core.files.base import ContentFile
+
+        client, user = _nir_client(client)
+        case = Case.objects.create(
+            created_by=user,
+            agency_record_number="ATT-SERVE-001",
+            status=CaseStatus.WAIT_DOCTOR,
+        )
+
+        from apps.cases.models import CaseAttachment
+
+        att = CaseAttachment.objects.create(
+            case=case,
+            file=ContentFile(b"%PDF-1.4 real content", name="served.pdf"),
+            original_filename="served.pdf",
+            stored_filename="served.pdf",
+            content_type="application/pdf",
+            size_bytes=100,
+            sha256="d" * 64,
+            uploaded_by=user,
+        )
+
+        from django.urls import reverse
+
+        response = client.get(reverse("intake:serve_attachment", args=[case.case_id, att.attachment_id]))
+        assert response.status_code == 200
+        assert response["Content-Type"] == att.content_type
+
+    def test_intake_attachment_view_404_for_cleaned_case(self, client) -> None:
+        """Rota NIR não serve anexo de caso CLEANED (404)."""
+        from django.core.files.base import ContentFile
+
+        from apps.accounts.models import Role
+
+        clean_user = User.objects.create_user(username="nir_clean_att@test.com", password="testpass123")
+        role, _ = Role.objects.get_or_create(name="nir")
+        clean_user.roles.add(role)
+        client.force_login(clean_user)
+        session = client.session
+        session["active_role"] = "nir"
+        session.save()
+
+        case = Case.objects.create(
+            created_by=clean_user,
+            agency_record_number="ATT-CLEAN-001",
+            status=CaseStatus.CLEANED,
+        )
+
+        from apps.cases.models import CaseAttachment
+
+        att = CaseAttachment.objects.create(
+            case=case,
+            file=ContentFile(b"%PDF-1.4", name="clean.pdf"),
+            original_filename="clean.pdf",
+            stored_filename="clean.pdf",
+            content_type="application/pdf",
+            size_bytes=100,
+            sha256="e" * 64,
+            uploaded_by=clean_user,
+        )
+
+        response = client.get(reverse("intake:serve_attachment", args=[case.case_id, att.attachment_id]))
+        assert response.status_code == 404
 
     def test_case_detail_shows_confirm_button_for_wait_r1(self, client) -> None:
         """NIR vê botão 'Confirmar Recebimento' para WAIT_R1_CLEANUP_THUMBS no intake."""

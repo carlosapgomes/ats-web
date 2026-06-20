@@ -56,18 +56,43 @@
     <div class="attachment-upload-section mt-3 mb-3" id="attachment-section">
       <hr>
       <div class="mb-2">
-        <label class="fw-semibold">📎 Anexos Clínicos (opcional)</label>
-        <p class="text-muted small mb-2">
+        <label class="fw-semibold" id="attachment-label">📎 Anexos Clínicos (opcional)</label>
+        <p class="text-muted small mb-2" id="attachment-guidance">
           Envie documentos complementares ao relatório principal.
           Anexos são exibidos ao médico mas <strong>não são analisados automaticamente pela IA</strong>.
         </p>
+        <p class="text-muted small mb-2" id="attachment-single-pdf-message">
+          Anexos só podem ser enviados quando há exatamente um relatório principal selecionado.
+        </p>
       </div>
+
+      <!-- Attachment preview area (populated by JS) -->
+      <div class="d-none mb-3" id="attachment-preview">
+        <div class="d-flex justify-content-between align-items-center mb-2">
+          <span class="fw-semibold" id="attachment-count">0 anexo(s)</span>
+          <span class="text-muted small" id="attachment-total-size"></span>
+        </div>
+        <ul class="list-group list-group-flush border rounded-3" id="attachment-list">
+        </ul>
+      </div>
+
       <input type="file" name="attachment_files" id="attachment-input"
              class="form-control" multiple
-             accept=".pdf,.jpg,.jpeg,.png,application/pdf,image/jpeg,image/png">
-      <div class="form-text">
+             accept=".pdf,.jpg,.jpeg,.png,application/pdf,image/jpeg,image/png"
+             data-max-attachments="10"
+             data-max-attachment-bytes="20971520"
+             data-max-total-attachment-bytes="209715200">
+      <div class="form-text" id="attachment-form-text">
         PDF, JPEG e PNG — até 10 arquivos, 20 MB cada, 200 MB no total.
         Apenas quando houver exatamente 1 relatório principal.
+      </div>
+
+      <!-- Review confirmation checkbox -->
+      <div class="form-check mt-3 d-none" id="attachment-confirm-section">
+        <input class="form-check-input" type="checkbox" id="attachment-confirm" name="attachment_confirmed" value="1">
+        <label class="form-check-label small" for="attachment-confirm">
+          <strong>Confirmo que revisei os anexos e que pertencem ao mesmo paciente/caso.</strong>
+        </label>
       </div>
     </div>
 

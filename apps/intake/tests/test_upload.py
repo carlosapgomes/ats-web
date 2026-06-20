@@ -121,6 +121,53 @@ class TestUploadPage:
 
     def test_upload_page_shows_batch_count(self, client) -> None:
         """Template deve conter elemento para contagem do lote."""
+
+    # ── Slice 002: attachment section tests ─────────────────────────
+
+    def test_upload_page_has_attachment_section_with_guidance(self, client) -> None:
+        """Página de upload contém seção de anexos com texto de orientação."""
+        client, _ = _nir_client(client)
+        response = client.get(reverse("intake:home"))
+        assert response.status_code == 200
+        content = response.content.decode()
+
+        # Seção de anexos deve existir
+        assert "Anexos" in content or "anexos" in content
+        # Deve ter texto informando que anexos exigem exatamente 1 relatório principal
+        assert "1" in content and "exatamente" in content or "relatório principal" in content
+        # Input de anexos deve aceitar .pdf,.jpg,.jpeg,.png
+        assert ".pdf" in content or ".jpg" in content or ".jpeg" in content or ".png" in content
+        assert 'name="attachment_files"' in content
+        assert "accept" in content.lower()
+
+    def test_upload_page_requires_attachment_review_confirmation_when_attachments_present(self, client) -> None:
+        """Template contém checkbox de confirmação de revisão dos anexos."""
+        client, _ = _nir_client(client)
+        response = client.get(reverse("intake:home"))
+        assert response.status_code == 200
+        content = response.content.decode()
+
+        # Deve ter um checkbox de confirmação
+        assert 'type="checkbox"' in content or "form-check-input" in content
+        # Deve mencionar revisão dos anexos
+        assert "revisei" in content.lower() or "anexos" in content.lower()
+        # Deve mencionar que anexos pertencem ao mesmo paciente/caso
+        assert "mesmo paciente" in content.lower() or "mesmo caso" in content.lower()
+
+    def test_upload_js_contains_single_pdf_attachment_gate(self, client) -> None:
+        """Arquivo JS de upload contém lógica para exatamente 1 PDF."""
+        import os
+
+        js_path = os.path.join(settings.BASE_DIR, "static", "js", "upload.js")
+        assert os.path.exists(js_path), f"Arquivo JS não encontrado: {js_path}"
+        with open(js_path, encoding="utf-8") as f:
+            js_content = f.read()
+        # Deve ter referência a attachment ou anexo
+        assert "attachment" in js_content.lower() or "anexo" in js_content.lower()
+        # Deve ter lógica de contagem de PDFs
+        assert "attachment-section" in js_content or "attachment" in js_content.lower()
+        assert any(x in js_content.lower() for x in ["pdf", "count", "length", "filter"])
+
         client, _ = _nir_client(client)
         response = client.get(reverse("intake:home"))
         assert response.status_code == 200
