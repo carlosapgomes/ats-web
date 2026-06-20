@@ -143,7 +143,7 @@ static/          # css/app.css (paleta hospitalar), js/upload.js, js/password-to
 
 ## State do Sistema
 
-- **Fase atual**: Fase 3 (débitos técnicos) — capacity de email transacional entregue
+- **Fase atual**: Fase 3 (débitos técnicos) — capacity de anexos clínicos entregue
 - **Changes concluídos**:
   - `openspec/archive/bootstrap-django-ats-core/` (7 slices, Fase 0)
   - `openspec/archive/intake-nir/` (6 slices, Fase 1)
@@ -154,10 +154,11 @@ static/          # css/app.css (paleta hospitalar), js/upload.js, js/password-to
   - `openspec/archive/consolidate-duplicated-test-fixtures/` (1 slice)
   - `openspec/archive/align-uuid-route-parameter-annotations/` (1 slice)
   - `openspec/archive/release-lock-on-successful-handoff/` (1 slice)
-- **Change merged em main (não arquivado)**: `transactional-emails-auth-flows` (Slices 000–003 concluídos e validados em produção; Slice 004 hardening será implementado direto em main)
+- **Change merged em main (não arquivado)**: `case-attachments-initial-upload` (4 slices concluídos e validados; anexos clínicos PDF/JPEG/PNG no upload NIR, supressão auditável e anexos complementares antes da decisão médica). Limitação aceita L1: lote de anexos complementares sem atomicidade transacional de batch — ver `design.md`.
+- **Change anterior merged**: `transactional-emails-auth-flows` (Slices 000–003 concluídos e validados em produção; Slice 004 hardening será implementado direto em main)
 - **Apps criados**: `apps/accounts/`, `apps/cases/`, `apps/llm/`, `apps/intake/`, `apps/pipeline/`,
   `apps/doctor/`, `apps/scheduler/`, `apps/dashboard/`, `apps/admin_ui/`
-- **Testes**: 1237 passando, quality gate verde (ruff + mypy + pytest)
+- **Testes**: 1333 passando, quality gate verde (ruff + mypy + pytest)
 - **Templates**: base.html com tema hospitalar, login, switch-role, perfil, password reset/change,
   intake (home, my_cases, case_detail), doctor (queue, decision)
 - **Documentacao de dominio**: `docs/DOMAIN_ANALYSIS.md`
