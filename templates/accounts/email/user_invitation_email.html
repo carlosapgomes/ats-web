@@ -1,0 +1,34 @@
+{% load i18n %}{% autoescape off %}
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8">
+</head>
+<body style="font-family: sans-serif; line-height: 1.6; color: #1f2f3a;">
+    <p>Olá{{ user.first_name|yesno:", " }}{{ user.first_name }},</p>
+    <p>
+        Sua conta no <strong>{{ app_display_name }}</strong> foi criada.
+    </p>
+    <p>
+        Clique no link abaixo para definir sua senha e ativar seu acesso:
+    </p>
+    <p style="text-align: center; margin: 2rem 0;">
+        <a href="{{ action_url }}"
+           style="background-color: #0b4263; color: #fff; padding: 12px 24px;
+                  text-decoration: none; border-radius: 6px; display: inline-block;">
+            Definir senha
+        </a>
+    </p>
+    <p>
+        Se você não esperava este convite, ignore este email.
+    </p>
+    <p>
+        Este link expira em {{ password_reset_timeout }} hora{{ password_reset_timeout|pluralize:"s" }}.
+    </p>
+    <hr style="border: none; border-top: 1px solid #c7d8e2; margin: 1.5rem 0;">
+    <p style="font-size: 0.85rem; color: #4c6677;">
+        {{ app_display_name }} — Sistema de Triagem Hospitalar
+    </p>
+</body>
+</html>
+{% endautoescape %}

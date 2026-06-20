@@ -1,5 +1,6 @@
 """Views for admin_ui: user CRUD and management."""
 
+import logging
 import uuid
 
 from django.contrib import messages
@@ -10,11 +11,13 @@ from django.http import HttpRequest, HttpResponse
 from django.shortcuts import get_object_or_404, redirect, render
 
 from apps.accounts.models import Role
+from apps.accounts.services import send_user_invitation_email
 from apps.llm.models import PromptTemplate
 
 from .decorators import admin_or_manager_required, admin_required
 from .forms import PromptCreateForm, UserCreateForm, UserUpdateForm
 
+logger = logging.getLogger(__name__)
 User = get_user_model()
 
 
@@ -76,12 +79,28 @@ def user_list(request: HttpRequest) -> HttpResponse:
 @login_required
 @admin_required
 def user_create(request: HttpRequest) -> HttpResponse:
-    """Cria um novo usuário."""
+    """Cria um novo usuário e envia email de convite."""
     if request.method == "POST":
         form = UserCreateForm(request.POST)
         if form.is_valid():
-            form.save()
-            messages.success(request, "Usuário criado com sucesso.")
+            user = form.save()
+
+            # Envio automático de email de convite (Slice 003)
+            if user.email:
+                try:
+                    send_user_invitation_email(user)
+                except Exception:
+                    logger.exception(f"Falha ao enviar email de convite para {user.email}")
+                    messages.warning(
+                        request,
+                        "Usuário criado, mas não foi possível enviar o email de convite. "
+                        "O usuário pode usar a recuperação de senha na tela de login para definir a senha.",
+                    )
+                else:
+                    messages.success(request, "Usuário criado com sucesso. Email de convite enviado.")
+            else:
+                messages.success(request, "Usuário criado com sucesso.")
+
             return redirect("admin_ui:user_list")
     else:
         form = UserCreateForm()

@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% load static %}
 
 {% block title %}{{ app_display_name }} — Login{% endblock %}
 
@@ -17,12 +18,28 @@
                     </div>
                     <div class="mb-3">
                         <label for="{{ form.password.id_for_label }}" class="form-label">Senha</label>
-                        {{ form.password }}
+                        <div class="input-group">
+                            {{ form.password }}
+                            <button type="button" class="btn btn-outline-secondary toggle-password"
+                                    data-target="{{ form.password.auto_id }}" aria-label="Mostrar senha">
+                                <span class="toggle-icon" aria-hidden="true"></span>
+                            </button>
+                        </div>
                     </div>
                     <button type="submit" class="btn btn-hospital w-100">Entrar</button>
                 </form>
+
+                <div class="text-center mt-3">
+                    <a href="{% url 'password_reset' %}" class="text-decoration-none small">
+                        Esqueci minha senha
+                    </a>
+                </div>
             </div>
         </div>
     </div>
 </div>
+{% endblock %}
+
+{% block extra_js %}
+<script src="{% static 'js/password-toggle.js' %}"></script>
 {% endblock %}

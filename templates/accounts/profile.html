@@ -1,0 +1,45 @@
+{% extends "base.html" %}
+
+{% block title %}{{ app_display_name }} — Meu Perfil{% endblock %}
+
+{% block content %}
+<div class="row justify-content-center mt-4">
+    <div class="col-md-6">
+        <div class="card shadow">
+            <div class="card-header bg-hospital text-white">
+                <h4 class="mb-0">Meu Perfil</h4>
+            </div>
+            <div class="card-body">
+                <dl class="row mb-0">
+                    <dt class="col-sm-4">Usuário</dt>
+                    <dd class="col-sm-8">{{ user.username }}</dd>
+
+                    <dt class="col-sm-4">Nome</dt>
+                    <dd class="col-sm-8">{{ user.get_full_name|default:"—" }}</dd>
+
+                    <dt class="col-sm-4">Email</dt>
+                    <dd class="col-sm-8">{{ user.email|default:"—" }}</dd>
+
+                    <dt class="col-sm-4">Papéis</dt>
+                    <dd class="col-sm-8">
+                        {% if user_roles %}
+                            {{ user_roles|join:", " }}
+                        {% else %}
+                            <em>Nenhum papel atribuído</em>
+                        {% endif %}
+                    </dd>
+
+                    <dt class="col-sm-4">Papel ativo</dt>
+                    <dd class="col-sm-8">{{ active_role|default:"—" }}</dd>
+                </dl>
+            </div>
+            <div class="card-footer d-flex justify-content-end gap-2">
+                <a href="{% url 'home' %}" class="btn btn-outline-secondary">Voltar ao início</a>
+                <a href="{% url 'password_change' %}" class="btn btn-hospital">
+                    Alterar senha
+                </a>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

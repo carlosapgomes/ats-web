@@ -159,6 +159,94 @@ class TestBaseTemplate:
         assert "--hospital-secondary" in css_content
         assert "--hospital-accent" in css_content
 
+    def test_form_control_border_rule_exists(self) -> None:
+        """app.css strengthens form-control/form-select borders in resting state.
+
+        Bootstrap's default input border (#dee2e6) is nearly invisible on low-
+        contrast monitors. app.css must override border-color for form-control
+        and form-select (scoped under .hospital-shell) in the resting state —
+        i.e. a rule WITHOUT :focus — so inputs are visible without focus.
+        """
+        import re
+
+        css_path = Path(settings.BASE_DIR) / "static" / "css" / "app.css"
+        css_content = css_path.read_text()
+
+        # Find a resting-state rule (selector WITHOUT :focus) whose selector
+        # includes form-control, then check it sets border-color using the
+        # design-system token. We split on '}' to iterate rule blocks.
+        blocks = re.split(r"\}", css_content)
+        resting_border = False
+        for block in blocks:
+            # Grab the selector portion (text before the first '{').
+            if "{" not in block:
+                continue
+            selector, body = block.split("{", 1)
+            if ":focus" in selector:
+                continue  # focus state, not what we want
+            if ".form-control" in selector or ".form-select" in selector:
+                if "border-color" in body and "var(--hospital-border)" in body:
+                    resting_border = True
+                    break
+        assert resting_border, (
+            "app.css must define a resting-state border-color for form-control/"
+            "form-select (without :focus), reusing var(--hospital-border)"
+        )
+
+    def test_toggle_password_border_matches_input(self) -> None:
+        """The show/hide password toggle uses the same border color as the input.
+
+        The toggle is a btn-outline-secondary button inside an input-group next to
+        a password field. Bootstrap paints btn-outline-secondary dark gray
+        (#6c757d), which clashes with the input's lighter hospital-border. app.css
+        must scope the toggle's resting border to var(--hospital-border) so the
+        button reads as a continuation of the input, while still letting the hover
+        state show it is clickable.
+        """
+        import re
+
+        css_path = Path(settings.BASE_DIR) / "static" / "css" / "app.css"
+        css_content = css_path.read_text()
+
+        blocks = re.split(r"\}", css_content)
+        toggle_border = False
+        for block in blocks:
+            if "{" not in block:
+                continue
+            selector, body = block.split("{", 1)
+            if ":hover" in selector or ":focus" in selector or ":active" in selector:
+                continue  # interaction states may differ; we only care about resting
+            if ".toggle-password" in selector and "border-color" in body and "var(--hospital-border)" in body:
+                toggle_border = True
+                break
+        assert toggle_border, (
+            "app.css must set a resting-state border-color: var(--hospital-border) "
+            "on .toggle-password so it matches the adjacent input border"
+        )
+
+    def test_password_toggle_uses_eye_and_eye_slash_icons(self) -> None:
+        """The show/hide toggle uses eye/eye-slash icons, not emoji.
+
+        Earlier the toggle swapped a 'see-no-evil monkey' emoji (🙈) for an eye
+        emoji (👁). It must use proper eye and eye-slash icons (vector SVG) and
+        must not contain the monkey emoji anywhere (JS or templates).
+        """
+        js_path = Path(settings.BASE_DIR) / "static" / "js" / "password-toggle.js"
+        js_content = js_path.read_text()
+
+        # The JS must define distinct eye and eye-slash icon assets.
+        assert "EYE_SVG" in js_content, "password-toggle.js must define an EYE icon"
+        assert "EYE_SLASH_SVG" in js_content, "password-toggle.js must define an EYE_SLASH icon (not a monkey emoji)"
+        # No monkey emoji left in the JS.
+        assert "🙈" not in js_content, "monkey emoji must be removed from the toggle JS"
+
+        # And no monkey emoji left in any template either.
+        import glob
+
+        template_files = glob.glob(str(Path(settings.BASE_DIR) / "templates" / "**" / "*.html"), recursive=True)
+        offenders = [p for p in template_files if "🙈" in Path(p).read_text(encoding="utf-8")]
+        assert not offenders, f"monkey emoji still present in templates: {offenders}"
+
 
 @pytest.mark.django_db
 class TestAuthenticatedTemplate:
