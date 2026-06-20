@@ -355,3 +355,44 @@ class TestDoctorServeAttachmentView:
         response = client.get(reverse("doctor:serve_attachment", args=[case.case_id, att.attachment_id]))
         assert response.status_code == 200
         assert response["Content-Type"] == att.content_type
+
+
+@pytest.mark.django_db
+class TestDoctorDecisionRegressionAfterTemplateChanges:
+    """Regressão: alterações no template compartilhado não quebram tela médica."""
+
+    def _create_role(self, name: str):
+        from apps.accounts.models import Role
+
+        role, _ = Role.objects.get_or_create(name=name)
+        return role
+
+    def _login_doctor(self, client):
+        user = User.objects.create_user(username="doc_regr_att@test.com", password="testpass123")
+        user.roles.add(self._create_role("doctor"))
+        client.force_login(user)
+        session = client.session
+        session["active_role"] = "doctor"
+        session.save()
+        return user
+
+    def test_doctor_decision_still_renders_attachments_after_shared_template_changes(self, client) -> None:
+        """Tela médica continua exibindo anexos após alterações no template compartilhado."""
+        case, attachments, _ = _setup_case_with_attachments(attachment_count=2)
+        self._login_doctor(client)
+
+        response = client.get(f"/doctor/{case.case_id}/")
+        assert response.status_code == 200
+        content = response.content.decode()
+
+        # Ambos os anexos devem aparecer
+        assert attachments[0].original_filename in content
+        assert attachments[1].original_filename in content
+        # Aviso sobre anexos não analisados pela IA deve estar presente
+        assert "não analisados" in content.lower() or "automaticamente" in content.lower()
+        # Seção de anexos deve existir
+        assert "Anexos Clínicos" in content or "📎" in content
+        # PDF principal não está presente neste setup (sem pdf_file),
+        # mas os anexos devem estar completos
+        assert attachments[0].original_filename in content
+        assert attachments[1].original_filename in content

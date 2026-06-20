@@ -224,8 +224,59 @@ class TestAttachmentUpload:
         assert Case.objects.count() == 0
         assert CaseAttachment.objects.count() == 0
 
+    def test_attachment_total_size_limit_message(self, client, monkeypatch) -> None:
+        """Anexo total acima de 200 MB exibe mensagem clara."""
+        import django.conf
+
+        client, _ = _nir_client(client)
+        pdf = _pdf_file()
+
+        # Reduzir limite total para 150 bytes
+        monkeypatch.setattr(django.conf.settings, "INTAKE_MAX_ATTACHMENT_BYTES_PER_CASE", 150)
+
+        att1 = SimpleUploadedFile("img1.jpg", b"x" * 100, content_type="image/jpeg")
+        att2 = SimpleUploadedFile("img2.jpg", b"x" * 100, content_type="image/jpeg")
+
+        response = client.post(
+            reverse("intake:home"),
+            {"pdf_files": [pdf], "attachment_files": [att1, att2]},
+            follow=True,
+        )
+        content = response.content.decode()
+        assert "excede" in content.lower() or "limite" in content.lower() or "tamanho total" in content.lower()
+        assert Case.objects.count() == 0
+        assert CaseAttachment.objects.count() == 0
+
+    def test_bulk_upload_with_attachments_shows_clear_error_message(self, client) -> None:
+        """Upload com 2 PDFs + anexo mostra mensagem clara sobre anexos."""
+        client, _ = _nir_client(client)
+        pdf1 = _pdf_file("report1.pdf")
+        pdf2 = _pdf_file("report2.pdf")
+        att = _jpeg_file()
+
+        response = client.post(
+            reverse("intake:home"),
+            {"pdf_files": [pdf1, pdf2], "attachment_files": [att]},
+            follow=True,
+        )
+        content = response.content.decode()
+        # Mensagem deve ser clara sobre anexos com múltiplos PDFs
+        assert any(word in content.lower() for word in ["anexos", "apenas", "permitido", "relatório principal"])
+        # Casos devem ser criados (2 PDFs válidos)
+        assert Case.objects.count() == 2
+        assert CaseAttachment.objects.count() == 0
+
+    def test_case_attachment_added_event_has_timeline_label(self, client) -> None:
+        """CASE_ATTACHMENT_ADDED tem label 'Anexo adicionado'."""
+        # Verificar que o mapa EVENT_LABELS contém o label
+        from apps.intake.views import EVENT_LABELS
+
+        assert "CASE_ATTACHMENT_ADDED" in EVENT_LABELS
+        assert EVENT_LABELS["CASE_ATTACHMENT_ADDED"] == "Anexo adicionado"
+
     def test_upload_without_attachments_still_works(self, client) -> None:
         """Upload sem anexos continua funcionando."""
+
         client, _ = _nir_client(client)
         pdf = _pdf_file()
 

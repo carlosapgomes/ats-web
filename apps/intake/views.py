@@ -11,7 +11,7 @@ from django.urls import reverse
 from django.views.decorators.clickjacking import xframe_options_sameorigin
 
 from apps.accounts.decorators import role_required
-from apps.cases.models import Case, CaseStatus
+from apps.cases.models import Case, CaseAttachment, CaseStatus
 from apps.cases.services import (
     acknowledge_post_schedule_issue,
     assert_case_lock,
@@ -421,6 +421,9 @@ def case_detail(request: HttpRequest, case_id: uuid.UUID) -> HttpResponse:
         else:
             can_confirm = False
 
+    # Active attachments (non-suppressed, ordered by created_at)
+    active_attachments = list(case.attachments.filter(is_suppressed=False).order_by("created_at"))
+
     # Prior case lookup — extrair informações do evento PRIOR_CASE_LOOKUP
     prior_case_lookup = None
     for e in events:
@@ -543,7 +546,42 @@ def case_detail(request: HttpRequest, case_id: uuid.UUID) -> HttpResponse:
             "back_url": reverse("intake:my_cases"),
             "back_label": "← Voltar para lista",
             "pdf_url": reverse("intake:serve_pdf", args=[case.case_id]),
+            "attachments": active_attachments,
         },
+    )
+
+
+@login_required
+@role_required("nir")
+@xframe_options_sameorigin
+def serve_attachment(
+    request: HttpRequest,
+    case_id: uuid.UUID,
+    attachment_id: uuid.UUID,
+) -> HttpResponseBase:
+    """Serve um anexo protegido para visualização NIR.
+
+    Acesso permitido para NIR com papel ativo 'nir'.
+    O caso não pode estar CLEANED.
+    Anexos suprimidos retornam 404.
+    """
+    case = get_object_or_404(
+        Case.objects.select_related("created_by"),
+        case_id=case_id,
+    )
+    if case.status == CaseStatus.CLEANED:
+        raise Http404("Anexo de caso concluído não está disponível na fila operacional.")
+
+    attachment = get_object_or_404(
+        CaseAttachment,
+        attachment_id=attachment_id,
+        case=case,
+        is_suppressed=False,
+    )
+
+    return FileResponse(
+        attachment.file.open("rb"),
+        content_type=attachment.content_type,
     )
 
 
