@@ -431,6 +431,15 @@ def case_detail(request: HttpRequest, case_id: uuid.UUID) -> HttpResponse:
     # Active attachments (non-suppressed, ordered by created_at)
     active_attachments = list(case.attachments.filter(is_suppressed=False).order_by("created_at"))
 
+    # Para WAIT_DOCTOR, popular info de lock médico exclusivamente para a UI do
+    # anexo complementar (Spec R5: NIR vê mensagem de reserva em vez do form).
+    # Variáveis dedicadas para não poluir o bloco "Ações" do WAIT_R1_CLEANUP_THUMBS.
+    supplemental_lock_blocked_by = ""
+    if case.status == CaseStatus.WAIT_DOCTOR:
+        lock_display = compute_lock_display(case, user=user)
+        if lock_display["is_locked"]:
+            supplemental_lock_blocked_by = lock_display["locked_by_display"]
+
     # Prior case lookup — extrair informações do evento PRIOR_CASE_LOOKUP
     prior_case_lookup = None
     for e in events:
@@ -564,6 +573,7 @@ def case_detail(request: HttpRequest, case_id: uuid.UUID) -> HttpResponse:
             "pdf_url": reverse("intake:serve_pdf", args=[case.case_id]),
             "attachments": active_attachments,
             "can_add_supplemental": can_add_supplemental,
+            "supplemental_lock_blocked_by": supplemental_lock_blocked_by,
         },
     )
 

@@ -191,6 +191,57 @@ class TestIntakeCaseDetailSupplementalForm:
         content = response.content.decode()
         assert "Adicionar anexo complementar" not in content
 
+    def test_intake_case_detail_hides_supplemental_form_when_doctor_lock_active(self, client) -> None:
+        """Caso WAIT_DOCTOR com lock médico ativo esconde o form e mostra aviso.
+
+        Spec R5: o NIR deve ver mensagem com nome do médico EM VEZ do formulário.
+        Regressão: antes deste fix, ``lock_locked_by_display`` só era populado para
+        WAIT_R1_CLEANUP_THUMBS, então o form aparecia mesmo com lock médico.
+        """
+        from apps.accounts.models import Role
+
+        # Médico reserva o caso
+        doctor = User.objects.create_user(username="doc_lock_hide@test.com", password="testpass123")
+        doc_role, _ = Role.objects.get_or_create(name="doctor")
+        doctor.roles.add(doc_role)
+
+        client, user = _nir_client(client)
+        case = Case.objects.create(created_by=user, status=CaseStatus.NEW)
+        case = _advance_case_to(case, CaseStatus.WAIT_DOCTOR)
+
+        result = claim_case_lock(
+            case_id=case.case_id,
+            user=doctor,
+            expected_status=CaseStatus.WAIT_DOCTOR,
+            context="doctor_decision",
+            role="doctor",
+        )
+        assert result.acquired is True
+
+        response = client.get(reverse("intake:case_detail", args=[case.case_id]))
+        assert response.status_code == 200
+        content = response.content.decode()
+
+        # Aviso de bloqueio visível com nome do médico
+        assert "reservado por" in content.lower()
+        assert doctor.display_name in content
+        # Formulário NÃO deve aparecer (nem o action)
+        form_action = reverse("intake:supplemental_attachment_add", args=[case.case_id])
+        assert form_action not in content
+
+    def test_intake_case_detail_shows_supplemental_form_when_wait_doctor_no_lock(self, client) -> None:
+        """Caso WAIT_DOCTOR sem lock mostra o form normalmente (sem regressão)."""
+        client, user = _nir_client(client)
+        case = Case.objects.create(created_by=user, status=CaseStatus.NEW)
+        case = _advance_case_to(case, CaseStatus.WAIT_DOCTOR)
+
+        response = client.get(reverse("intake:case_detail", args=[case.case_id]))
+        assert response.status_code == 200
+        content = response.content.decode()
+        form_action = reverse("intake:supplemental_attachment_add", args=[case.case_id])
+        assert form_action in content
+        assert "reservado por" not in content.lower()
+
     # Test 11: POST cria anexo e redireciona
     def test_nir_can_post_supplemental_attachment(self, client) -> None:
         """POST cria anexo complementar e redireciona com mensagem."""
