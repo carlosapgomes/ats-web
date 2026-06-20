@@ -8,7 +8,7 @@ from __future__ import annotations
 import hashlib
 import io
 
-import fitz
+import fitz  # type: ignore[import-untyped]  # PyMuPDF
 import pytest
 from django.contrib.auth import get_user_model
 from django.core.files.uploadedfile import SimpleUploadedFile
