@@ -88,7 +88,7 @@ def lookup_prior_case_context(
         .select_related("doctor", "scheduler")
     )
 
-    # Filtra candidatos: verifica deterministickamente cada um
+    # Filtra candidatos: verifica deterministicamente cada um
     candidates = _build_denial_candidates(prior_case_qs, window_start, now)
 
     if not candidates:

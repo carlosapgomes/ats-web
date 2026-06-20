@@ -155,10 +155,11 @@ static/          # css/app.css (paleta hospitalar), js/upload.js, js/password-to
   - `openspec/archive/align-uuid-route-parameter-annotations/` (1 slice)
   - `openspec/archive/release-lock-on-successful-handoff/` (1 slice)
   - `openspec/archive/case-attachments-initial-upload/` (4 slices — anexos clínicos PDF/JPEG/PNG no upload NIR, supressão auditável e anexos complementares antes da decisão médica). Limitação aceita L1: lote de anexos complementares sem atomicidade transacional de batch — ver `design.md`.
+  - `openspec/archive/fix-prior-case-lookup-after-closure/` (1 slice — correção de bug: prior-case lookup agora usa campos estáveis de decisão `doctor_decision`/`appointment_status` + `*_decided_at`, não status FSM transitório; negativas recentes continuam encontradas mesmo após o caso avançar para `CLEANED`)
 - **Change merged em main (não arquivado)**: `transactional-emails-auth-flows` (Slices 000–003 concluídos e validados em produção; Slice 004 hardening será implementado direto em main)
 - **Apps criados**: `apps/accounts/`, `apps/cases/`, `apps/llm/`, `apps/intake/`, `apps/pipeline/`,
   `apps/doctor/`, `apps/scheduler/`, `apps/dashboard/`, `apps/admin_ui/`
-- **Testes**: 1333 passando, quality gate verde (ruff + mypy + pytest)
+- **Testes**: 1339 passando, quality gate verde (ruff + mypy + pytest)
 - **Templates**: base.html com tema hospitalar, login, switch-role, perfil, password reset/change,
   intake (home, my_cases, case_detail), doctor (queue, decision)
 - **Documentacao de dominio**: `docs/DOMAIN_ANALYSIS.md`
