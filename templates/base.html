@@ -33,13 +33,15 @@
       {% if user.is_authenticated %}
       <div class="text-lg-end">
         <div class="d-flex align-items-center justify-content-lg-end gap-2 mb-2">
-          <span class="rounded-circle bg-light text-dark d-inline-flex align-items-center justify-content-center" style="width:2rem;height:2rem;">👤</span>
-          <p class="app-session-meta mb-0">
-            {{ user.get_full_name|default:user.username }} · <strong>{{ active_role_display }}</strong>
+          <a href="{% url 'profile' %}" class="text-white text-decoration-none d-flex align-items-center gap-2">
+            <span class="rounded-circle bg-light text-dark d-inline-flex align-items-center justify-content-center" style="width:2rem;height:2rem;">👤</span>
+            <p class="app-session-meta mb-0">
+              {{ user.get_full_name|default:user.username }} · <strong>{{ active_role_display }}</strong>
             {% if queue_count %}
             <span class="badge bg-danger ms-1">{{ queue_count }}</span>
             {% endif %}
-          </p>
+            </p>
+          </a>
         </div>
         <div class="d-flex gap-1 justify-content-lg-end">
           {% if user.roles.count > 1 %}

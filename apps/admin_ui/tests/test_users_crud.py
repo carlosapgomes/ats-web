@@ -4,6 +4,8 @@ RED → GREEN → REFACTOR
 Testes escritos primeiro (RED), depois implementação (GREEN).
 """
 
+from typing import Any
+
 import pytest
 from django.contrib.auth import get_user_model
 from django.urls import reverse
@@ -680,6 +682,132 @@ class TestUserUnblock:
         response = client.post(reverse("admin_ui:user_unblock", args=[target.pk]))
         assert response.status_code == 302
         assert response.url == reverse("admin_ui:user_list")
+
+
+# ── User Create Email Invitation (Slice 003) ──────────────────────────────
+
+
+@pytest.mark.django_db
+class TestUserCreateInvitationEmail:
+    """Slice 003: Email automático de cadastro ao criar usuário."""
+
+    def _create_user_via_post(self, client, username: str, roles: list[str] | None = None) -> dict[str, Any]:
+        """Helper: POST create user and return response + created user."""
+        from apps.admin_ui.tests.test_users_crud import _login_as
+
+        _login_as(client, "admin")
+        role_pks = []
+        if roles:
+            for name in roles:
+                role, _ = Role.objects.get_or_create(name=name)
+                role_pks.append(role.pk)
+        Role.objects.get_or_create(name="nir")
+        data = {
+            "username": username,
+            "email": f"{username}@test.com",
+            "password": "SenhaForte123!",
+            "roles": role_pks,
+        }
+        response = client.post(reverse("admin_ui:user_create"), data)
+        created_user = User.objects.filter(username=username).first()
+        return {"response": response, "user": created_user}
+
+    def test_admin_user_create_sends_invitation_email_automatically(self, client) -> None:
+        """Criação de usuário envia email automático."""
+        from django.core import mail
+
+        result = self._create_user_via_post(client, "inviteauto", roles=["doctor"])
+        assert result["user"] is not None
+        assert len(mail.outbox) == 1
+        email = mail.outbox[0]
+        assert "inviteauto@test.com" in email.to
+
+    def test_admin_user_create_email_link_allows_password_reset(self, client) -> None:
+        """Link no email permite redefinir senha."""
+        from django.core import mail
+
+        result = self._create_user_via_post(client, "resetlink", roles=["nir"])
+        assert result["user"] is not None
+        assert len(mail.outbox) == 1
+
+        # Extrair link do email
+        body: str = mail.outbox[0].body
+        import re
+
+        path_match = re.search(r"/reset/[^\s]+/", body)
+        assert path_match is not None, "Link de reset não encontrado no email"
+        reset_path = path_match.group(0).rstrip("'\"<>)\n\r ")
+
+        # GET confirm page (segue redirect para set-password)
+        response = client.get(reset_path, follow=True)
+        assert response.status_code == 200
+
+        # POST nova senha
+        confirm_path = response.redirect_chain[-1][0] if response.redirect_chain else reset_path
+        response = client.post(
+            confirm_path,
+            {"new_password1": "NewStr0ng!Pass", "new_password2": "NewStr0ng!Pass"},
+        )
+        assert response.status_code == 302
+        complete_url = reverse("password_reset_complete")
+        assert complete_url in response.url
+
+        # Login com nova senha funciona
+        login_ok = client.login(username="resetlink", password="NewStr0ng!Pass")
+        assert login_ok is True
+
+    def test_admin_user_create_keeps_user_when_email_send_fails(self, client) -> None:
+        """Falha SMTP não apaga usuário e mostra mensagem."""
+        from unittest.mock import patch
+
+        from django.core import mail
+
+        _login_as(client, "admin")
+        Role.objects.get_or_create(name="nir")
+
+        # Patch no local de importação da view (from X import Y cria nome local)
+        with patch("apps.admin_ui.views.send_user_invitation_email") as mock_send:
+            mock_send.side_effect = Exception("SMTP Connection refused")
+
+            data = {
+                "username": "failmail",
+                "email": "failmail@test.com",
+                "password": "SenhaForte123!",
+                "roles": [],
+            }
+            response = client.post(reverse("admin_ui:user_create"), data)
+
+        # Usuário foi criado mesmo com falha no email
+        assert User.objects.filter(username="failmail").exists()
+
+        # Email não foi enviado
+        assert len(mail.outbox) == 0
+
+        # Redirect ocorreu (não quebrou)
+        assert response.status_code == 302
+        assert response.url == reverse("admin_ui:user_list")
+
+    def test_admin_user_create_nir_receives_internal_url(self, client) -> None:
+        """Usuário nir-only recebe link com URL interna."""
+        from django.conf import settings
+        from django.core import mail
+
+        result = self._create_user_via_post(client, "nirurl", roles=["nir"])
+        assert result["user"] is not None
+        assert len(mail.outbox) == 1
+        body = mail.outbox[0].body
+        assert settings.INTERNAL_APP_BASE_URL in body
+
+    def test_admin_user_create_doctor_receives_public_url(self, client) -> None:
+        """Usuário doctor recebe link com URL pública."""
+        from django.conf import settings
+        from django.core import mail
+
+        result = self._create_user_via_post(client, "docurl", roles=["doctor"])
+        assert result["user"] is not None
+        assert len(mail.outbox) == 1
+        body = mail.outbox[0].body
+        assert settings.PUBLIC_APP_BASE_URL in body
 
 
 # ── Nav Pills ────────────────────────────────────────────────────────────

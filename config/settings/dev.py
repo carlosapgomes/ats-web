@@ -19,6 +19,9 @@ from .base import *  # noqa: F401,F403
 
 DEBUG = os.environ.get("DJANGO_DEBUG", "true").lower() in ("true", "1", "yes")
 
+# Console email backend for development (no actual email sending)
+EMAIL_BACKEND = "django.core.mail.backends.console.EmailBackend"
+
 # Allow PDF embedded in same-origin <embed>/<iframe> (dev only)
 X_FRAME_OPTIONS = "SAMEORIGIN"
 SECRET_KEY = os.environ.get("DJANGO_SECRET_KEY", "dev-secret-key-not-for-production")

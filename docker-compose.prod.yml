@@ -32,6 +32,17 @@ services:
       OPENAI_API_KEY: ${OPENAI_API_KEY:?Set OPENAI_API_KEY}
       OPENAI_MODEL: ${OPENAI_MODEL:-gpt-4o}
       OPENAI_BASE_URL: ${OPENAI_BASE_URL:-https://api.openai.com/v1}
+      # Transactional email (SES SMTP) + account-action base URLs (Slice 003)
+      EMAIL_BACKEND: ${EMAIL_BACKEND:-django.core.mail.backends.smtp.EmailBackend}
+      EMAIL_HOST: ${EMAIL_HOST:-email-smtp.us-east-2.amazonaws.com}
+      EMAIL_PORT: ${EMAIL_PORT:-587}
+      EMAIL_USE_TLS: ${EMAIL_USE_TLS:-true}
+      EMAIL_HOST_USER: ${EMAIL_HOST_USER:-}
+      EMAIL_HOST_PASSWORD: ${EMAIL_HOST_PASSWORD:-}
+      DEFAULT_FROM_EMAIL: ${DEFAULT_FROM_EMAIL:-no-reply@chd.projetoshgrs.com}
+      PASSWORD_RESET_TIMEOUT: ${PASSWORD_RESET_TIMEOUT:-86400}
+      PUBLIC_APP_BASE_URL: ${PUBLIC_APP_BASE_URL:-https://chd.projetoshgrs.com}
+      INTERNAL_APP_BASE_URL: ${INTERNAL_APP_BASE_URL:-https://10.17.175.38}
     depends_on:
       db:
         condition: service_healthy
@@ -54,6 +65,17 @@ services:
       OPENAI_API_KEY: ${OPENAI_API_KEY:?Set OPENAI_API_KEY}
       OPENAI_MODEL: ${OPENAI_MODEL:-gpt-4o}
       OPENAI_BASE_URL: ${OPENAI_BASE_URL:-https://api.openai.com/v1}
+      # Transactional email (SES SMTP) + account-action base URLs (Slice 003)
+      EMAIL_BACKEND: ${EMAIL_BACKEND:-django.core.mail.backends.smtp.EmailBackend}
+      EMAIL_HOST: ${EMAIL_HOST:-email-smtp.us-east-2.amazonaws.com}
+      EMAIL_PORT: ${EMAIL_PORT:-587}
+      EMAIL_USE_TLS: ${EMAIL_USE_TLS:-true}
+      EMAIL_HOST_USER: ${EMAIL_HOST_USER:-}
+      EMAIL_HOST_PASSWORD: ${EMAIL_HOST_PASSWORD:-}
+      DEFAULT_FROM_EMAIL: ${DEFAULT_FROM_EMAIL:-no-reply@chd.projetoshgrs.com}
+      PASSWORD_RESET_TIMEOUT: ${PASSWORD_RESET_TIMEOUT:-86400}
+      PUBLIC_APP_BASE_URL: ${PUBLIC_APP_BASE_URL:-https://chd.projetoshgrs.com}
+      INTERNAL_APP_BASE_URL: ${INTERNAL_APP_BASE_URL:-https://10.17.175.38}
       Q_CLUSTER_NAME: llm
     volumes:
       - media_prod:/app/media
@@ -79,6 +101,17 @@ services:
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
       OPENAI_MODEL: ${OPENAI_MODEL:-gpt-4o}
       OPENAI_BASE_URL: ${OPENAI_BASE_URL:-https://api.openai.com/v1}
+      # Transactional email (SES SMTP) + account-action base URLs (Slice 003)
+      EMAIL_BACKEND: ${EMAIL_BACKEND:-django.core.mail.backends.smtp.EmailBackend}
+      EMAIL_HOST: ${EMAIL_HOST:-email-smtp.us-east-2.amazonaws.com}
+      EMAIL_PORT: ${EMAIL_PORT:-587}
+      EMAIL_USE_TLS: ${EMAIL_USE_TLS:-true}
+      EMAIL_HOST_USER: ${EMAIL_HOST_USER:-}
+      EMAIL_HOST_PASSWORD: ${EMAIL_HOST_PASSWORD:-}
+      DEFAULT_FROM_EMAIL: ${DEFAULT_FROM_EMAIL:-no-reply@chd.projetoshgrs.com}
+      PASSWORD_RESET_TIMEOUT: ${PASSWORD_RESET_TIMEOUT:-86400}
+      PUBLIC_APP_BASE_URL: ${PUBLIC_APP_BASE_URL:-https://chd.projetoshgrs.com}
+      INTERNAL_APP_BASE_URL: ${INTERNAL_APP_BASE_URL:-https://10.17.175.38}
       Q_CLUSTER_NAME: pdf
     volumes:
       - media_prod:/app/media
