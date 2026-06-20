@@ -19,6 +19,7 @@ from apps.cases.services import (
     compute_lock_display,
     expire_stale_locks_for_statuses,
     get_post_schedule_issue_reason_label,
+    suppress_case_attachment,
 )
 from apps.cases.services import (
     release_case_lock as release_lock_service,
@@ -624,8 +625,6 @@ def suppress_attachment(
         return redirect("intake:case_detail", case_id=case.case_id)
 
     try:
-        from apps.cases.services import suppress_case_attachment
-
         suppress_case_attachment(
             attachment=attachment,
             user=request.user,
