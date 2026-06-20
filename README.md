@@ -136,6 +136,9 @@ em background via `django-q2`.
 | `INTAKE_MAX_FILES_PER_BATCH` | 30 | Máximo de arquivos por submissão |
 | `INTAKE_MAX_UPLOAD_BYTES_PER_FILE` | 20 MB | Tamanho máximo por arquivo |
 | `INTAKE_MAX_UPLOAD_BYTES_PER_BATCH` | 600 MB | Tamanho máximo total do lote |
+| `INTAKE_MAX_ATTACHMENTS_PER_CASE` | 10 | Máximo de anexos clínicos por caso |
+| `INTAKE_MAX_ATTACHMENT_BYTES_PER_FILE` | 20 MB | Tamanho máximo por anexo (PDF/JPEG/PNG) |
+| `INTAKE_MAX_ATTACHMENT_BYTES_PER_CASE` | 200 MB | Tamanho máximo total de anexos por caso |
 
 ### Barreira de Aceitação — Relatório de Regulação
 
