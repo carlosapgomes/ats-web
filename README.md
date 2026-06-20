@@ -207,13 +207,21 @@ seguem para o scope gate EDA existente, que decide o roteamento médico.
 ### Operação em Produção
 
 - `web`, `pdf_worker` e `worker` compartilham o volume `media_prod` para acesso aos PDFs.
-- Escala recomendada inicial:
-  - **pdf_worker**: 2–4 workers (ajustar conforme volume de PDFs/dia).
-  - **worker (LLM)**: 1–2 workers (concorrência conservadora por rate limit/custo da API).
+- Escala atual em `config/settings/prod.py` (cluster interno `ALT_CLUSTERS`):
+  - **pdf_worker**: 6 workers (extração PDF é CPU/IO bound via PyMuPDF).
+  - **worker (LLM)**: 3 workers (pipeline é I/O bound — espera a API OpenAI).
 - **Alerta de custo LLM**: monitore o número de tasks enfileiradas no cluster `llm`.
   A capacidade real depende do tempo médio de resposta da LLM e dos rate limits
-  do provedor. Comece com 1–2 workers LLM e aumente gradualmente com monitoramento
-  de custo, latência, falhas por rate limit e tamanho da fila `llm`.
+  do provedor. Ajuste os workers gradualmente com monitoramento de custo,
+  latência, falhas por rate limit e tamanho da fila `llm`.
+- **Tuning de workers**: os counts ficam em `config/settings/prod.py`
+  (`Q_CLUSTER["ALT_CLUSTERS"]["pdf"]["workers"]` e `[...]["llm"]["workers"]`).
+  Aumentá-los escala o paralelismo dentro de um mesmo container. Cada processo
+  abre uma conexão Postgres; com `CONN_MAX_AGE=600` e health checks, o total fica
+  bem abaixo do limite padrão de 100 conexões (~12 hoje: 6 pdf + 3 llm + 3 gunicorn).
+  Se um container não der conta, o próximo passo é escalar containers via
+  `deploy.replicas` (override do compose), pois todos os containers do mesmo
+  `Q_CLUSTER_NAME` compartilham a fila via Postgres. Veja "Medindo gargalo" abaixo.
 - **Volume de media**: em produção, `media_prod` (definido em `docker-compose.prod.yml`)
   deve usar um driver de volume com backup periódico.
 
@@ -224,8 +232,8 @@ seguem para o scope gate EDA existente, que decide o roteamento médico.
 - `pdf_worker`: `Q_CLUSTER_NAME=pdf` — 2 workers.
 
 **Prod** (`docker-compose.prod.yml`):
-- `worker`: `Q_CLUSTER_NAME=llm` — 2 workers.
-- `pdf_worker`: `Q_CLUSTER_NAME=pdf` — 4 workers.
+- `worker`: `Q_CLUSTER_NAME=llm` — 3 workers.
+- `pdf_worker`: `Q_CLUSTER_NAME=pdf` — 6 workers.
 - Ambos montam `media_prod:/app/media`.
 
 ### Verificações Operacionais
@@ -245,6 +253,34 @@ docker exec -it ats-web-dev-db-1 psql -U ats_web -d ats_web_dev \
 docker exec -it ats-web-dev-db-1 psql -U ats_web -d ats_web_dev \
   -c "SELECT cluster, success, COUNT(*) FROM django_q_task GROUP BY cluster, success ORDER BY cluster, success;"
 ```
+
+#### Medindo gargalo (decidir se precisa escalar workers)
+
+Durante uma alimentação em lote real, compare tasks em execução vs. na fila.
+Se `running` estiver sempre no máximo configurado (6 para `pdf`, 3 para `llm`)
+e `queued` crescer, há gargalo de workers:
+
+```bash
+# running = tasks pegas por algum worker; queued = tasks esperando
+$DPROD exec web uv run python -c "
+import django, os
+os.environ['DJANGO_SETTINGS_MODULE']='config.settings.prod'
+django.setup()
+from django_q.models import Task
+from django.utils import timezone
+from datetime import timedelta
+running = Task.objects.filter(started__isnull=False, stopped__isnull=True).count()
+queued = Task.objects.filter(started__isnull=True).count()
+done_1h = Task.objects.filter(stopped__gte=timezone.now()-timedelta(hours=1)).count()
+print(f'running: {running}, queued: {queued}, done last 1h: {done_1h}')
+"
+```
+
+Se `queued` crescer com `running` saturado, aumentar `workers` em
+`config/settings/prod.py` (mais paralelismo no mesmo container) ou adicionar
+`deploy.replicas` no compose (mais containers). Se `queued` fica baixo e
+`running` raramente satura, o gargalo é outro (ex.: rate limit da OpenAI),
+e aumentar workers não vai ajudar.
 
 ## Quality Gate
 
