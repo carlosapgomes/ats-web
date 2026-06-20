@@ -14,7 +14,7 @@ from django.utils import timezone
 from django.views.decorators.clickjacking import xframe_options_sameorigin
 
 from apps.accounts.decorators import role_required
-from apps.cases.models import Case, CaseStatus
+from apps.cases.models import Case, CaseAttachment, CaseStatus
 from apps.cases.services import (
     assert_case_lock,
     claim_case_lock,
@@ -279,6 +279,11 @@ def doctor_queue_partial(request: HttpRequest) -> HttpResponse:
 # ── Decision helpers ─────────────────────────────────────────────────────
 
 
+def _get_active_attachments(case: Case) -> list[CaseAttachment]:
+    """Return non-suppressed attachments for a case, ordered by created_at."""
+    return list(case.attachments.filter(is_suppressed=False).order_by("created_at"))
+
+
 def _build_decision_context(case: Case, form: DoctorDecisionForm) -> dict[str, Any]:
     """Build context dict for the decision template."""
     from apps.pipeline.prior_case import lookup_prior_case_context
@@ -325,6 +330,7 @@ def _build_decision_context(case: Case, form: DoctorDecisionForm) -> dict[str, A
         "structured_data": case.structured_data or {},
         "prior_context": prior_context,
         "prior_decision_display": prior_decision_display,
+        "attachments": _get_active_attachments(case),
         "report": report,
     }
 
@@ -479,6 +485,44 @@ def doctor_submit(request: HttpRequest, case_id: uuid.UUID) -> HttpResponse:
     )
 
     return redirect("doctor:queue")
+
+
+@login_required
+@role_required("doctor")
+@xframe_options_sameorigin
+def serve_attachment(
+    request: HttpRequest,
+    case_id: uuid.UUID,
+    attachment_id: uuid.UUID,
+) -> HttpResponseBase:
+    """Serve um anexo protegido para visualização médica.
+
+    Acesso permitido se:
+    - case está em WAIT_DOCTOR; ou
+    - case.doctor == request.user e doctor_decision preenchido.
+
+    Anexos suprimidos retornam 404.
+    """
+    case = get_object_or_404(Case, pk=case_id)
+
+    # Check authorization
+    is_wait_doctor = case.status == CaseStatus.WAIT_DOCTOR
+    is_decided_by_user = case.doctor == request.user and bool(case.doctor_decision)
+
+    if not (is_wait_doctor or is_decided_by_user):
+        raise Http404("Anexo não encontrado.")
+
+    attachment = get_object_or_404(
+        CaseAttachment,
+        attachment_id=attachment_id,
+        case=case,
+        is_suppressed=False,
+    )
+
+    return FileResponse(
+        attachment.file.open("rb"),
+        content_type=attachment.content_type,
+    )
 
 
 @login_required

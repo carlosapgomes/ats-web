@@ -1,3 +1,4 @@
+import os
 import uuid
 
 from django.conf import settings
@@ -500,6 +501,90 @@ class CaseEvent(models.Model):
 
     def __str__(self) -> str:
         return f"CaseEvent {self.event_type} @ {self.timestamp}"
+
+
+def case_attachment_upload_to(instance: "CaseAttachment", filename: str) -> str:
+    """Gera caminho seguro: case_attachments/<case_id>/<attachment_id>.<ext>
+
+    Usa UUID do anexo em vez do nome original para evitar colisão e path traversal.
+    A extensão é extraída do content-type para consistência.
+    """
+    ext = _extension_for_content_type(instance.content_type)
+    return os.path.join(
+        "case_attachments",
+        str(instance.case_id),
+        f"{instance.attachment_id}{ext}",
+    )
+
+
+CONTENT_TYPE_EXTENSION_MAP: dict[str, str] = {
+    "application/pdf": ".pdf",
+    "image/jpeg": ".jpg",
+    "image/png": ".png",
+}
+
+
+ACCEPTED_ATTACHMENT_CONTENT_TYPES = set(CONTENT_TYPE_EXTENSION_MAP.keys())
+
+ACCEPTED_ATTACHMENT_EXTENSIONS = {".pdf", ".jpg", ".jpeg", ".png"}
+
+
+def _extension_for_content_type(content_type: str) -> str:
+    return CONTENT_TYPE_EXTENSION_MAP.get(content_type, ".bin")
+
+
+class CaseAttachment(models.Model):
+    """Anexo clínico vinculado a um Case.
+
+    Anexos são documentos complementares enviados pelo NIR junto com o
+    relatório principal (Case.pdf_file) ou posteriormente como complemento.
+    Não são processados pelo pipeline LLM — servem como evidência humana
+    para o médico.
+    """
+
+    attachment_id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    case = models.ForeignKey(
+        Case,
+        on_delete=models.CASCADE,
+        related_name="attachments",
+    )
+    file = models.FileField(upload_to=case_attachment_upload_to)
+    original_filename = models.CharField(max_length=255)
+    stored_filename = models.CharField(max_length=255)
+    content_type = models.CharField(max_length=100)
+    size_bytes = models.PositiveBigIntegerField()
+    sha256 = models.CharField(max_length=64, db_index=True)
+    uploaded_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.PROTECT,
+        related_name="case_attachments_uploaded",
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    # Suppression fields (auditable removal of wrong attachments)
+    is_suppressed = models.BooleanField(default=False, db_index=True)
+    suppressed_at = models.DateTimeField(null=True, blank=True)
+    suppressed_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        null=True,
+        blank=True,
+        on_delete=models.PROTECT,
+        related_name="case_attachments_suppressed",
+    )
+    suppression_reason = models.TextField(blank=True)
+
+    # Upload phase fields
+    upload_phase = models.CharField(max_length=20, default="initial")  # initial | supplemental
+    uploaded_when_case_status = models.CharField(max_length=30, blank=True)
+    note = models.TextField(blank=True)
+
+    class Meta:
+        indexes = [
+            models.Index(fields=["case", "created_at"]),
+        ]
+
+    def __str__(self) -> str:
+        return f"CaseAttachment {self.attachment_id} [{self.original_filename}]"
 
 
 class SupervisorSummary(models.Model):
