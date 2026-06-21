@@ -219,17 +219,26 @@ Não implementar neste slice:
 
 ## Critérios de sucesso
 
-- [ ] Endpoint `/notifications/unread-count/` retorna JSON correto para usuário autenticado.
-- [ ] Endpoint conta apenas notificações não lidas do usuário atual.
-- [ ] Endpoint não expõe PHI/lista de notificações.
-- [ ] Header expõe badge com URL de polling.
-- [ ] `static/js/notifications.js` usa Vanilla JS `fetch()`.
-- [ ] Polling só roda/consulta quando página está visível.
-- [ ] Badge atualiza `data-count` e acessibilidade.
-- [ ] JS não usa HTMX/WebSocket/SSE.
-- [ ] JS não atualiza thread de mensagens.
-- [ ] Testes novos passam.
-- [ ] Quality gate completo passa.
+- [x] Endpoint `/notifications/unread-count/` retorna JSON correto para usuário autenticado.
+- [x] Endpoint conta apenas notificações não lidas do usuário atual.
+- [x] Endpoint não expõe PHI/lista de notificações.
+- [x] Header expõe badge com URL de polling.
+- [x] `static/js/notifications.js` usa Vanilla JS `fetch()`.
+- [x] Polling só roda/consulta quando página está visível.
+- [x] Badge atualiza `data-count` e acessibilidade.
+- [x] JS não usa HTMX/WebSocket/SSE.
+- [x] JS não atualiza thread de mensagens.
+- [x] Testes novos passam.
+- [x] Quality gate completo passa.
+
+### Hardening (follow-up pós-slice)
+
+- [x] DRY: query de unread count extraída para `get_unread_notification_count()` em `apps/accounts/models.py`, reutilizada por context processor, `notifications_list` e endpoint (antes duplicada em 3 lugares).
+- [x] Endpoint restrito a GET via `@require_GET` (antes aceitava qualquer método).
+- [x] Teste `test_notifications_polling_does_not_target_case_thread` endurecido: `assert "/cases/" not in js_content` (antes era tautológico via `or "unread-count"` que sempre passava).
+- [x] Asserções `or` redundantes removidas em `test_notifications_js_is_loaded_for_authenticated_header` e `test_notifications_js_uses_fetch_and_visibility_state`.
+- [x] Imports top-of-module (`JsonResponse`, `require_GET`) em vez de inline no corpo da view.
+- [x] Migration corretiva `0005_rename_usernotification_indexes.py` alinha nomes de índice do Slice 001 (`0004`) com os determinísticos atuais do Django.
 
 ## Gates de autoavaliação
 
