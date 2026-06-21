@@ -3,7 +3,7 @@
 ## Slices verticais
 
 - [x] Slice 001 — Infraestrutura + avisos de anexos/correção (`slices/slice-001-system-notices-attachments-corrections.md`)
-- [ ] Slice 002 — Avisos de intercorrência/encerramento + hardening (`slices/slice-002-system-notices-operational-workflows.md`)
+- [x] Slice 002 — Avisos de intercorrência/encerramento + hardening (`slices/slice-002-system-notices-operational-workflows.md`)
 
 ## Definition of Done do change
 

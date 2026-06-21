@@ -420,3 +420,402 @@ def test_manual_message_with_mention_still_creates_notification(case_factory, us
 
     notif_count = UserNotification.objects.filter(case=case).count()
     assert notif_count > 0
+
+
+# ── Operational Workflow Integration Tests ─────────────────────────────────
+# Slice 002: system notices from post-schedule issue and administrative closure
+
+
+@pytest.fixture
+def _cleaned_and_eligible(case_factory, advance_to, user):
+    """Cria um caso CLEANED elegível para post-schedule issue."""
+    from apps.cases.models import Case, CaseStatus
+
+    case = advance_to(case_factory(user), CaseStatus.CLEANED)
+    case.doctor_decision = "accept"
+    case.doctor_admission_flow = "scheduled"
+    case.appointment_status = "confirmed"
+    case.appointment_at = "2026-07-15 10:00:00+00:00"
+    case.appointment_location = "Hospital Central"
+    case.save(
+        update_fields=[
+            "doctor_decision",
+            "doctor_admission_flow",
+            "appointment_status",
+            "appointment_at",
+            "appointment_location",
+        ]
+    )
+    return Case.objects.get(pk=case.pk)
+
+
+@pytest.fixture
+def _nir_user(db):
+    """Cria um usuário com papel nir."""
+    from apps.accounts.models import Role
+
+    user = User.objects.create_user(username="niruser", password="testpass")
+    role, _ = Role.objects.get_or_create(name="nir")
+    user.roles.add(role)
+    return user
+
+
+@pytest.mark.django_db
+class TestPostScheduleIssueSystemNotices:
+    """Testes de mensagens sistêmicas para eventos de intercorrência pós-agendamento."""
+
+    def test_post_schedule_issue_opened_creates_system_notice(
+        self, user, case_factory, advance_to, _cleaned_and_eligible, _nir_user
+    ):
+        """POST_SCHEDULE_ISSUE_OPENED gera mensagem sistêmica na thread."""
+        from apps.cases.models import CaseCommunicationMessage
+        from apps.cases.services import open_post_schedule_issue
+
+        case = open_post_schedule_issue(
+            case=_cleaned_and_eligible,
+            user=_nir_user,
+            reason="transport_unavailable",
+            message="Paciente sem transporte",
+        )
+
+        msgs = CaseCommunicationMessage.objects.filter(case=case, message_type="system")
+        assert msgs.count() >= 1
+        msg = msgs.order_by("-created_at").first()
+        assert msg is not None
+        assert msg.system_event_type == "POST_SCHEDULE_ISSUE_OPENED"
+        assert msg.author is None
+        assert "transporte" in msg.body.lower() or "Transporte" in msg.body
+
+    def test_post_schedule_issue_opened_notice_uses_reason_label_and_message(
+        self, user, case_factory, advance_to, _cleaned_and_eligible, _nir_user
+    ):
+        """Mensagem sistêmica contém label do motivo e mensagem do NIR."""
+        from apps.cases.models import CaseCommunicationMessage
+        from apps.cases.services import open_post_schedule_issue
+
+        case = open_post_schedule_issue(
+            case=_cleaned_and_eligible,
+            user=_nir_user,
+            reason="reschedule_request",
+            message="Precisamos reagendar para próxima semana",
+        )
+
+        msgs = CaseCommunicationMessage.objects.filter(case=case, system_event_type="POST_SCHEDULE_ISSUE_OPENED")
+        assert msgs.count() >= 1
+        msg = msgs.order_by("-created_at").first()
+        assert msg is not None
+        assert "Solicitação de reagendamento" in msg.body or "reagendamento" in msg.body.lower()
+        assert "Precisamos reagendar" in msg.body
+
+    def test_post_schedule_issue_responded_creates_system_notice(
+        self, user, case_factory, advance_to, _cleaned_and_eligible, _nir_user
+    ):
+        """POST_SCHEDULE_ISSUE_RESPONDED gera mensagem sistêmica."""
+        from apps.cases.models import CaseCommunicationMessage
+        from apps.cases.services import open_post_schedule_issue, respond_post_schedule_issue
+
+        case = open_post_schedule_issue(
+            case=_cleaned_and_eligible,
+            user=_nir_user,
+            reason="death",
+        )
+
+        case = respond_post_schedule_issue(
+            case=case, user=user, action="cancel", response_message="Agendamento cancelado"
+        )
+
+        msgs = CaseCommunicationMessage.objects.filter(case=case, system_event_type="POST_SCHEDULE_ISSUE_RESPONDED")
+        assert msgs.count() >= 1
+        msg = msgs.order_by("-created_at").first()
+        assert msg is not None
+        assert "Cancelado" in msg.body or "cancelado" in msg.body.lower()
+
+    def test_post_schedule_issue_responded_notice_includes_action_details(
+        self, user, case_factory, advance_to, _cleaned_and_eligible, _nir_user
+    ):
+        """Mensagem sistêmica de resposta inclui ação e detalhes."""
+        from apps.cases.models import CaseCommunicationMessage
+        from apps.cases.services import open_post_schedule_issue, respond_post_schedule_issue
+
+        case = open_post_schedule_issue(
+            case=_cleaned_and_eligible,
+            user=_nir_user,
+            reason="death",
+        )
+
+        # Testar reschedule com nova data
+        case2 = respond_post_schedule_issue(
+            case=case,
+            user=user,
+            action="reschedule",
+            appointment_at="2026-08-01T14:00:00Z",
+            appointment_location="Hospital Central - Sala 3",
+        )
+
+        msg = (
+            CaseCommunicationMessage.objects.filter(case=case2, system_event_type="POST_SCHEDULE_ISSUE_RESPONDED")
+            .order_by("-created_at")
+            .first()
+        )
+        assert msg is not None
+        assert "Reagendado" in msg.body
+
+    def test_post_schedule_issue_acknowledged_notice_behavior_is_documented(
+        self, user, case_factory, advance_to, _cleaned_and_eligible, _nir_user
+    ):
+        """Verifica que POST_SCHEDULE_ISSUE_ACKNOWLEDGED NÃO gera mensagem sistêmica.
+
+        Acknowledged é omitido porque: é um passo interno de workflow sem conteúdo
+        significativo para a thread. O NIR ver a resposta na thread já é a 'ciência'.
+        Incluir criaria ruído.
+        """
+        from apps.cases.models import CaseCommunicationMessage
+        from apps.cases.services import (
+            acknowledge_post_schedule_issue,
+            open_post_schedule_issue,
+            respond_post_schedule_issue,
+        )
+
+        case = open_post_schedule_issue(
+            case=_cleaned_and_eligible,
+            user=_nir_user,
+            reason="death",
+        )
+        case = respond_post_schedule_issue(case=case, user=user, action="cancel")
+        case = acknowledge_post_schedule_issue(case=case, user=_nir_user)
+
+        ack_msgs = CaseCommunicationMessage.objects.filter(
+            case=case, system_event_type="POST_SCHEDULE_ISSUE_ACKNOWLEDGED"
+        )
+        assert ack_msgs.count() == 0, (
+            "POST_SCHEDULE_ISSUE_ACKNOWLEDGED não deve gerar mensagem sistêmica — é ruído na thread"
+        )
+
+
+@pytest.mark.django_db
+class TestAdministrativeClosureSystemNotices:
+    """Testes de mensagens sistêmicas para encerramento administrativo."""
+
+    def test_administrative_closure_creates_system_notice(self, user, case_factory, advance_to):
+        """CASE_ADMINISTRATIVELY_CLOSED gera mensagem sistêmica."""
+        from apps.cases.models import Case, CaseCommunicationMessage, CaseStatus
+        from apps.cases.services import administratively_close_case
+
+        case = advance_to(case_factory(user), CaseStatus.WAIT_DOCTOR)
+        administratively_close_case(
+            case=case,
+            user=user,
+            reason_code="system_bug",
+            reason_text="Bug no processamento",
+            active_role="manager",
+        )
+
+        # Buscar instância fresca
+        case = Case.objects.get(pk=case.pk)
+
+        msgs = CaseCommunicationMessage.objects.filter(case=case, system_event_type="CASE_ADMINISTRATIVELY_CLOSED")
+        assert msgs.count() >= 1
+        msg = msgs.order_by("-created_at").first()
+        assert msg is not None
+        assert "encerrado" in msg.body.lower()
+
+    def test_administrative_closure_notice_includes_reason(self, user, case_factory, advance_to):
+        """Mensagem sistêmica de encerramento inclui motivo e status anterior."""
+        from apps.cases.models import Case, CaseCommunicationMessage, CaseStatus
+        from apps.cases.services import administratively_close_case
+
+        case = advance_to(case_factory(user), CaseStatus.WAIT_DOCTOR)
+        administratively_close_case(
+            case=case,
+            user=user,
+            reason_code="stuck_lock",
+            reason_text="Lock expirado do médico",
+            active_role="manager",
+        )
+
+        case = Case.objects.get(pk=case.pk)
+
+        msg = (
+            CaseCommunicationMessage.objects.filter(case=case, system_event_type="CASE_ADMINISTRATIVELY_CLOSED")
+            .order_by("-created_at")
+            .first()
+        )
+        assert msg is not None
+        assert "Lock expirado" in msg.body or "lock" in msg.body.lower()
+        assert "WAIT_DOCTOR" in msg.body or "Wait Doctor" in msg.body or "Wait" in msg.body
+
+
+@pytest.mark.django_db
+class TestOperationalSystemNoticeHardening:
+    """Testes de hardening: sistêmicas não geram notificação/badge."""
+
+    def test_operational_system_notices_do_not_create_user_notifications(
+        self, user, case_factory, advance_to, _cleaned_and_eligible, _nir_user
+    ):
+        """Eventos operacionais não criam UserNotification."""
+        from apps.accounts.models import UserNotification
+        from apps.cases.models import CaseStatus
+        from apps.cases.services import (
+            administratively_close_case,
+            open_post_schedule_issue,
+        )
+
+        notif_before = UserNotification.objects.count()
+
+        # Criar evento de intercorrência
+        open_post_schedule_issue(
+            case=_cleaned_and_eligible,
+            user=_nir_user,
+            reason="death",
+        )
+
+        # Criar evento de encerramento administrativo
+        case2 = advance_to(case_factory(user), CaseStatus.WAIT_DOCTOR)
+        administratively_close_case(
+            case=case2,
+            user=user,
+            reason_code="system_bug",
+            reason_text="Bug",
+            active_role="manager",
+        )
+
+        notif_after = UserNotification.objects.count()
+        assert notif_after == notif_before
+
+    def test_operational_system_notices_do_not_change_unread_badge_count(
+        self, user, case_factory, advance_to, _cleaned_and_eligible, _nir_user
+    ):
+        """Badge de notificações não muda por mensagens sistêmicas."""
+        from apps.accounts.models import get_unread_notification_count
+        from apps.cases.models import CaseStatus
+        from apps.cases.services import (
+            administratively_close_case,
+            open_post_schedule_issue,
+        )
+
+        badge_before = get_unread_notification_count(_nir_user)
+
+        open_post_schedule_issue(
+            case=_cleaned_and_eligible,
+            user=_nir_user,
+            reason="death",
+        )
+
+        case2 = advance_to(case_factory(user), CaseStatus.WAIT_DOCTOR)
+        administratively_close_case(
+            case=case2,
+            user=user,
+            reason_code="system_bug",
+            reason_text="Bug",
+            active_role="manager",
+        )
+
+        badge_after = get_unread_notification_count(_nir_user)
+        assert badge_after == badge_before
+
+    def test_system_notice_with_at_symbol_does_not_trigger_mention_notifications(
+        self, user, case_factory, advance_to, _cleaned_and_eligible, _nir_user
+    ):
+        """Mensagem sistêmica com @ não aciona menções."""
+        from apps.accounts.models import UserNotification
+        from apps.cases.services import open_post_schedule_issue
+
+        # Motivo/mensagem com @
+        open_post_schedule_issue(
+            case=_cleaned_and_eligible,
+            user=_nir_user,
+            reason="other",
+            message="Favor @nir verificar agenda. @doctor comunicou mudança.",
+        )
+
+        notif_count = UserNotification.objects.filter(case=_cleaned_and_eligible).count()
+        assert notif_count == 0
+
+    def test_system_notice_source_event_idempotency_for_operational_events(
+        self, user, case_factory, advance_to, _cleaned_and_eligible, _nir_user
+    ):
+        """Chamar criação duas vezes para mesmo evento não duplica."""
+        from apps.cases.models import CaseCommunicationMessage, CaseEvent
+
+        # Abrir intercorrência
+        from apps.cases.services import create_system_communication_notice_for_event, open_post_schedule_issue
+
+        case = open_post_schedule_issue(
+            case=_cleaned_and_eligible,
+            user=_nir_user,
+            reason="death",
+        )
+
+        event = CaseEvent.objects.filter(case=case, event_type="POST_SCHEDULE_ISSUE_OPENED").first()
+        assert event is not None
+
+        msg1 = create_system_communication_notice_for_event(event)
+        msg2 = create_system_communication_notice_for_event(event)
+
+        assert msg1 is not None
+        assert msg2 is not None
+        assert msg1.pk == msg2.pk
+
+        count = CaseCommunicationMessage.objects.filter(source_event=event).count()
+        assert count == 1
+
+    def test_manual_mentions_still_create_notifications_after_system_notice_changes(
+        self, user, case_factory, advance_to
+    ):
+        """Regressão: mensagem manual com @menção ainda cria notificação."""
+        from apps.accounts.models import User, UserNotification
+        from apps.cases.models import CaseStatus
+        from apps.cases.services import post_case_communication_message
+
+        doctor_user = User.objects.create_user(username="doutor", is_active=True)
+        from apps.accounts.models import Role
+
+        role, _ = Role.objects.get_or_create(name="doctor")
+        doctor_user.roles.add(role)
+
+        case = advance_to(case_factory(user), CaseStatus.WAIT_APPT)
+        post_case_communication_message(
+            case=case,
+            author=user,
+            author_role="nir",
+            body="Por favor, @doctor verifique este caso.",
+        )
+
+        notif_count = UserNotification.objects.filter(case=case).count()
+        assert notif_count > 0
+
+    def test_workflow_structured_fields_are_unchanged_by_system_notice(
+        self, user, case_factory, advance_to, _cleaned_and_eligible, _nir_user
+    ):
+        """Campos estruturados de intercorrência/encerramento continuam corretos."""
+        from apps.cases.models import CaseStatus
+        from apps.cases.services import (
+            administratively_close_case,
+            open_post_schedule_issue,
+        )
+
+        # Abrir intercorrência
+        case = open_post_schedule_issue(
+            case=_cleaned_and_eligible,
+            user=_nir_user,
+            reason="transport_unavailable",
+            message="Sem transporte",
+        )
+        assert case.post_schedule_issue_status == "opened"
+        assert case.post_schedule_issue_reason == "transport_unavailable"
+        assert case.post_schedule_issue_message == "Sem transporte"
+        assert case.post_schedule_issue_opened_by == _nir_user
+        assert case.status == CaseStatus.WAIT_APPT
+
+        # Encerrar administrativamente
+        case2 = advance_to(case_factory(user), CaseStatus.WAIT_DOCTOR)
+        case2 = administratively_close_case(
+            case=case2,
+            user=user,
+            reason_code="system_bug",
+            reason_text="Bug crítico no processamento",
+            active_role="admin",
+        )
+        assert case2.status == CaseStatus.CLEANED
+        assert case2.locked_by is None
+        assert CaseEvent.objects.filter(case=case2, event_type="CASE_ADMINISTRATIVELY_CLOSED").exists()
