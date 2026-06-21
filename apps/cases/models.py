@@ -124,6 +124,24 @@ class Case(models.Model):
     )
     post_schedule_issue_responded_at = models.DateTimeField(null=True, blank=True)
 
+    # Corrected resubmission linkage
+    corrects_case = models.ForeignKey(
+        "self",
+        null=True,
+        blank=True,
+        on_delete=models.PROTECT,
+        related_name="corrected_by_cases",
+    )
+    correction_reason = models.TextField(blank=True)
+    correction_created_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        null=True,
+        blank=True,
+        on_delete=models.PROTECT,
+        related_name="case_corrections_created",
+    )
+    correction_created_at = models.DateTimeField(null=True, blank=True)
+
     # Lock / Lease fields
     locked_by = models.ForeignKey(
         settings.AUTH_USER_MODEL,

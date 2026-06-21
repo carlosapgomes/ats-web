@@ -325,6 +325,20 @@
 <div class="card p-4">
   <h5 class="mb-3">Ações</h5>
 
+  {% if case.status != "CLEANED" %}
+  <!-- Reenvio corrigido -- disponível para qualquer caso operacional -->
+  <div class="mb-3">
+    <a href="{% url 'intake:corrected_resubmission' case.case_id %}"
+       class="btn btn-outline-warning btn-sm">
+      ↻ Reenviar caso corrigido
+    </a>
+    <span class="text-muted small ms-2">
+      Cria um novo caso a partir deste, sem alterar o original.
+    </span>
+  </div>
+  <hr class="my-3">
+  {% endif %}
+
   {% if lock_locked_by_display %}
   <div class="alert alert-warning mb-3">
     🔒 Este resultado está sendo verificado por <strong>{{ lock_locked_by_display }}</strong>.

@@ -21,6 +21,7 @@ urlpatterns = [
         name="supplemental_attachment_add",
     ),
     path("<uuid:case_id>/pdf/", views.serve_pdf, name="serve_pdf"),
+    path("<uuid:case_id>/corrected-resubmission/", views.corrected_resubmission, name="corrected_resubmission"),
     path("<uuid:case_id>/confirm/", views.confirm_receipt, name="confirm_receipt"),
     path("<uuid:case_id>/lock/renew/", views.nir_lock_renew, name="nir_lock_renew"),
     path("<uuid:case_id>/lock/release/", views.nir_lock_release, name="nir_lock_release"),
