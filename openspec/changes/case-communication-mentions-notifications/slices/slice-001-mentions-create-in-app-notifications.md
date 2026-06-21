@@ -356,19 +356,28 @@ Não implementar neste slice:
 
 ## Critérios de sucesso
 
-- [ ] `UserNotification` criado com migration.
-- [ ] Menções por papel criam notificações.
-- [ ] Menções por username criam notificações.
-- [ ] Autor não recebe notificação própria.
-- [ ] Destinatários duplicados são deduplicados.
-- [ ] Mensagem sem menção não cria notificação.
-- [ ] Evento de comunicação inclui resumo de menções/count.
-- [ ] Header mostra badge SSR de não lidas.
-- [ ] Tela de notificações lista apenas notificações do usuário.
-- [ ] Abrir/marcar notificação atualiza `read_at`.
-- [ ] Não há polling/JS/HTMX neste slice.
-- [ ] Testes novos passam.
-- [ ] Quality gate completo passa.
+- [x] `UserNotification` criado com migration.
+- [x] Menções por papel criam notificações.
+- [x] Menções por username criam notificações.
+- [x] Autor não recebe notificação própria.
+- [x] Destinatários duplicados são deduplicados.
+- [x] Mensagem sem menção não cria notificação.
+- [x] Evento de comunicação inclui resumo de menções/count.
+- [x] Header mostra badge SSR de não lidas.
+- [x] Tela de notificações lista apenas notificações do usuário.
+- [x] Abrir/marcar notificação atualiza `read_at`.
+- [x] Não há polling/JS/HTMX neste slice.
+- [x] Testes novos passam.
+- [x] Quality gate completo passa.
+
+### Hardening (follow-up pós-slice)
+
+- [x] R7/D9: redirect de médico em caso decidido por si → `doctor:decided_detail` (antes caía em `doctor:queue`).
+- [x] D5: resolução de username case-insensitive (`username__iexact`) — `@Maria` resolve `maria`.
+- [x] URLs de redirect via `reverse()` (sem paths hardcoded `/cases/my-cases/` e `/dashboard/`).
+- [x] `notification_count` reflete inserções reais (diff antes/depois do `bulk_create`), não o tamanho do input.
+- [x] Teste do badge endurecido: valida explicitamente `data-count="1"` (antes usava `or` que sempre passava).
+- [x] Cobertura: username desconhecido → 0 notificações (teste de serviço).
 
 ## Gates de autoavaliação
 

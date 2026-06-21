@@ -178,20 +178,13 @@ class TestNotificationCreationService:
         """@doctor cria notificação para usuários ativos com papel doctor."""
         from apps.accounts.models import UserNotification
         from apps.accounts.services import create_case_communication_notifications
-        from apps.cases.services import post_case_communication_message
 
         case = case_factory(user)
         # Criar segundo médico
         doctor2 = User.objects.create_user(username="doctor2", password="testpass")
         doctor2.roles.add(Role.objects.get(name="doctor"))
 
-        msg = post_case_communication_message(
-            case=case,
-            author=user,
-            author_role="nir",
-            body="@doctor revisar urgente",
-        )
-
+        msg = _create_message_direct(case, user, "@doctor revisar urgente")
         result = create_case_communication_notifications(message=msg)
         assert result.notification_count == 2  # user_doctor + doctor2
         assert "doctor" in result.mentioned_roles
@@ -204,16 +197,9 @@ class TestNotificationCreationService:
         """@maria cria notificação para usuário com username maria."""
         from apps.accounts.models import UserNotification
         from apps.accounts.services import create_case_communication_notifications
-        from apps.cases.services import post_case_communication_message
 
         case = case_factory(user)
-        msg = post_case_communication_message(
-            case=case,
-            author=user,
-            author_role="nir",
-            body="@maria por favor",
-        )
-
+        msg = _create_message_direct(case, user, "@maria por favor")
         result = create_case_communication_notifications(message=msg)
         assert result.notification_count == 1
         assert "maria" in result.mentioned_usernames
@@ -224,16 +210,9 @@ class TestNotificationCreationService:
     ) -> None:
         """Usuários inativos ou blocked não recebem notificação."""
         from apps.accounts.services import create_case_communication_notifications
-        from apps.cases.services import post_case_communication_message
 
         case = case_factory(user)
-        msg = post_case_communication_message(
-            case=case,
-            author=user,
-            author_role="nir",
-            body="@doctor revisar",
-        )
-
+        msg = _create_message_direct(case, user, "@doctor revisar")
         result = create_case_communication_notifications(message=msg)
         # Apenas user_doctor (active) recebe, inactive_user e blocked_user são excluídos
         assert result.notification_count == 1
@@ -243,16 +222,9 @@ class TestNotificationCreationService:
     ) -> None:
         """Autor mencionando @doctor não recebe própria notificação."""
         from apps.accounts.services import create_case_communication_notifications
-        from apps.cases.services import post_case_communication_message
 
         case = case_factory(user_doctor)
-        msg = post_case_communication_message(
-            case=case,
-            author=user_doctor,
-            author_role="doctor",
-            body="@doctor eu mesmo?",
-        )
-
+        msg = _create_message_direct(case, user_doctor, "@doctor eu mesmo?")
         result = create_case_communication_notifications(message=msg)
         # Nenhum outro doctor ativo, e o autor foi excluído
         assert result.notification_count == 0
@@ -263,17 +235,10 @@ class TestNotificationCreationService:
         """Usuário mencionado por @doctor @doctor1 recebe 1 notificação."""
         from apps.accounts.models import UserNotification
         from apps.accounts.services import create_case_communication_notifications
-        from apps.cases.services import post_case_communication_message
 
         case = case_factory(user)
         # user_doctor tem username doctor1 e role doctor
-        msg = post_case_communication_message(
-            case=case,
-            author=user,
-            author_role="nir",
-            body="@doctor @doctor1 urgente",
-        )
-
+        msg = _create_message_direct(case, user, "@doctor @doctor1 urgente")
         result = create_case_communication_notifications(message=msg)
         assert result.notification_count == 1
         assert UserNotification.objects.filter(recipient=user_doctor, case=case).count() == 1
@@ -281,16 +246,9 @@ class TestNotificationCreationService:
     def test_message_without_mentions_creates_no_notifications(self, db: Any, case_factory: Any, user: Any) -> None:
         """Mensagem sem menção não cria notificação."""
         from apps.accounts.services import create_case_communication_notifications
-        from apps.cases.services import post_case_communication_message
 
         case = case_factory(user)
-        msg = post_case_communication_message(
-            case=case,
-            author=user,
-            author_role="nir",
-            body="Mensagem normal sem menção",
-        )
-
+        msg = _create_message_direct(case, user, "Mensagem normal sem menção")
         result = create_case_communication_notifications(message=msg)
         assert result.notification_count == 0
 
@@ -298,21 +256,18 @@ class TestNotificationCreationService:
         self, db: Any, case_factory: Any, user: Any, user_doctor: Any, user_maria: Any
     ) -> None:
         """Payload do evento inclui mentioned_roles, mentioned_usernames e notification_count."""
-        from apps.accounts.services import create_case_communication_notifications
         from apps.cases.models import CaseEvent
         from apps.cases.services import post_case_communication_message
 
         case = case_factory(user)
-        msg = post_case_communication_message(
+        post_case_communication_message(
             case=case,
             author=user,
             author_role="nir",
             body="@doctor @maria revisar urgente",
         )
 
-        create_case_communication_notifications(message=msg)
-
-        # Verify payload via CaseEvent
+        # Verify payload via CaseEvent (post já enriquece o payload)
         events = list(CaseEvent.objects.filter(case=case, event_type="CASE_COMMUNICATION_MESSAGE_POSTED"))
         assert len(events) == 1
         payload = events[0].payload or {}
@@ -370,7 +325,11 @@ class TestNotificationViews:
     def test_header_shows_unread_notification_badge(
         self, db: Any, client: Any, case_with_notification: Any, user_doctor: Any
     ) -> None:
-        """Badge SSR mostra contagem de não lidas no header."""
+        """Badge SSR mostra contagem real de não lidas no header.
+
+        A asserção valida explicitamente ``data-count="1"`` — não basta a
+        presença da classe ``.notif-badge``, que aparece mesmo com count=0.
+        """
         client.force_login(user_doctor)
         session = client.session
         session["active_role"] = "doctor"
@@ -379,7 +338,7 @@ class TestNotificationViews:
         # Home redireciona, então testamos contra a página de notificações que herda base.html
         response = client.get(reverse("notifications"))
         content = response.content.decode()
-        assert 'data-count="1"' in content or "notif-badge" in content
+        assert 'data-count="1"' in content
 
     def test_notifications_list_shows_only_current_user_notifications(
         self, db: Any, client: Any, case_factory: Any, user: Any, user_doctor: Any, user_nir: Any
@@ -567,8 +526,11 @@ class TestNotificationViews:
         assert "nenhuma" in content.lower() or "sem notifica" in content.lower()
 
 
+# ── Hardening: redirect por papel, case-insensitive username, count preciso ─
+
+
+# Helper to create an authenticated client for a user.
 def _get_client(user: Any) -> Any:
-    """Helper to create an authenticated client for a user."""
     from django.test.client import Client
 
     c = Client()
@@ -577,3 +539,155 @@ def _get_client(user: Any) -> Any:
     session["active_role"] = list(user.roles.values_list("name", flat=True))[0]
     session.save()
     return c
+
+
+def _create_message_direct(case: Any, author: Any, body: str) -> Any:
+    """Cria CaseCommunicationMessage direto, sem passar pelo post service.
+
+    Útil para testar ``create_case_communication_notifications`` de forma
+    isolada, sem acoplar ao ``post_case_communication_message``.
+    """
+    from apps.cases.models import CaseCommunicationMessage
+
+    return CaseCommunicationMessage.objects.create(
+        case=case,
+        author=author,
+        author_role="nir",
+        body=body,
+    )
+
+
+class TestNotificationRedirectResolution:
+    """Tests para resolve_notification_redirect_url (R7/D9 hardening)."""
+
+    def test_doctor_waiting_redirected_to_decision(self, db: Any, case_factory: Any, user_doctor: Any) -> None:
+        from apps.accounts.services import resolve_notification_redirect_url
+        from apps.cases.models import Case, CaseStatus
+
+        case = case_factory(user_doctor)
+        Case.objects.filter(pk=case.pk).update(status=CaseStatus.WAIT_DOCTOR)
+        case = Case.objects.get(pk=case.pk)
+
+        url = resolve_notification_redirect_url(case=case, user=user_doctor, active_role="doctor")
+        assert url == reverse("doctor:decision", kwargs={"case_id": case.pk})
+
+    def test_doctor_who_decided_case_redirected_to_decided_detail(
+        self, db: Any, case_factory: Any, user_doctor: Any
+    ) -> None:
+        """Médico destinatário que decidiu o caso → doctor:decided_detail."""
+        from apps.accounts.services import resolve_notification_redirect_url
+        from apps.cases.models import Case, CaseStatus
+
+        case = case_factory(user_doctor)
+        Case.objects.filter(pk=case.pk).update(
+            doctor=user_doctor,
+            doctor_decision="accept",
+            status=CaseStatus.DOCTOR_ACCEPTED,
+        )
+        case = Case.objects.get(pk=case.pk)
+
+        url = resolve_notification_redirect_url(case=case, user=user_doctor, active_role="doctor")
+        assert url == reverse("doctor:decided_detail", kwargs={"case_id": case.pk})
+
+    def test_doctor_other_case_decided_falls_back_to_queue(
+        self, db: Any, case_factory: Any, user_doctor: Any, user: Any
+    ) -> None:
+        """Caso decidido por outro médico → fallback doctor:queue."""
+        from apps.accounts.services import resolve_notification_redirect_url
+        from apps.cases.models import Case, CaseStatus
+
+        case = case_factory(user)
+        # Decidido por outro médico (não o destinatário): doctor fica NULL
+        Case.objects.filter(pk=case.pk).update(
+            doctor=None,
+            doctor_decision="accept",
+            status=CaseStatus.DOCTOR_ACCEPTED,
+        )
+        case = Case.objects.get(pk=case.pk)
+
+        url = resolve_notification_redirect_url(case=case, user=user_doctor, active_role="doctor")
+        assert url == reverse("doctor:queue")
+
+    def test_nir_non_cleaned_redirected_to_case_detail(self, db: Any, case_factory: Any, user_nir: Any) -> None:
+        from apps.accounts.services import resolve_notification_redirect_url
+        from apps.cases.models import Case, CaseStatus
+
+        case = case_factory(user_nir)
+        Case.objects.filter(pk=case.pk).update(status=CaseStatus.WAIT_DOCTOR)
+        case = Case.objects.get(pk=case.pk)
+
+        url = resolve_notification_redirect_url(case=case, user=user_nir, active_role="nir")
+        assert url == reverse("intake:case_detail", kwargs={"case_id": case.pk})
+
+    def test_scheduler_waiting_appointment_redirected_to_confirm(
+        self, db: Any, case_factory: Any, user_scheduler: Any
+    ) -> None:
+        from apps.accounts.services import resolve_notification_redirect_url
+        from apps.cases.models import Case, CaseStatus
+
+        case = case_factory(user_scheduler)
+        Case.objects.filter(pk=case.pk).update(status=CaseStatus.WAIT_APPT)
+        case = Case.objects.get(pk=case.pk)
+
+        url = resolve_notification_redirect_url(case=case, user=user_scheduler, active_role="scheduler")
+        assert url == reverse("scheduler:confirm", kwargs={"case_id": case.pk})
+
+    def test_redirect_urls_are_reversed_not_hardcoded(self, db: Any, case_factory: Any, user_scheduler: Any) -> None:
+        """URLs de redirect devem vir de reverse(), não ser paths hardcoded."""
+        from apps.accounts.services import resolve_notification_redirect_url
+        from apps.cases.models import Case, CaseStatus
+
+        case = case_factory(user_scheduler)
+        # Fallback scheduler (não WAIT_APPT) → reverse('scheduler:queue')
+        Case.objects.filter(pk=case.pk).update(status=CaseStatus.CLEANED)
+        case = Case.objects.get(pk=case.pk)
+
+        url = resolve_notification_redirect_url(case=case, user=user_scheduler, active_role="scheduler")
+        assert url == reverse("scheduler:queue")
+
+        # Fallback manager → reverse('dashboard:index')
+        url_mgr = resolve_notification_redirect_url(case=case, user=user_scheduler, active_role="manager")
+        assert url_mgr == reverse("dashboard:index")
+
+        # Fallback nir CLEANED → reverse('intake:home')
+        url_nir = resolve_notification_redirect_url(case=case, user=user_scheduler, active_role="nir")
+        assert url_nir == reverse("intake:home")
+
+
+class TestMentionResolutionHardening:
+    """Hardening: case-insensitive username, unknown tokens, count preciso."""
+
+    def test_username_mention_is_case_insensitive(self, db: Any, case_factory: Any, user: Any, user_maria: Any) -> None:
+        """@Maria (maiusculo) resolve para usuario com username 'maria'."""
+        from apps.accounts.models import UserNotification
+        from apps.accounts.services import create_case_communication_notifications
+
+        case = case_factory(user)
+        msg = _create_message_direct(case, user, "Favor revisar @Maria")
+        result = create_case_communication_notifications(message=msg)
+        assert result.notification_count == 1
+        assert UserNotification.objects.filter(recipient=user_maria, case=case).count() == 1
+
+    def test_service_with_unknown_username_creates_no_notification(self, db: Any, case_factory: Any, user: Any) -> None:
+        """@ghost (sem usuario correspondente) → 0 notificacoes."""
+        from apps.accounts.services import create_case_communication_notifications
+
+        case = case_factory(user)
+        msg = _create_message_direct(case, user, "Oi @ghost sem destino")
+        result = create_case_communication_notifications(message=msg)
+        assert result.notification_count == 0
+
+    def test_notification_count_reflects_actually_inserted_only(
+        self, db: Any, case_factory: Any, user: Any, user_doctor: Any
+    ) -> None:
+        """Chamar o servico 2x na mesma msg retorna 0 na 2a (unique constraint)."""
+        from apps.accounts.services import create_case_communication_notifications
+
+        case = case_factory(user)
+        msg = _create_message_direct(case, user, "@doctor urgente")
+
+        first = create_case_communication_notifications(message=msg)
+        second = create_case_communication_notifications(message=msg)
+
+        assert first.notification_count == 1
+        assert second.notification_count == 0

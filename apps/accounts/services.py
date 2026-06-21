@@ -14,6 +14,7 @@ from typing import TYPE_CHECKING, Any
 from django.conf import settings
 from django.contrib.auth.tokens import PasswordResetTokenGenerator
 from django.core.mail import EmailMultiAlternatives
+from django.db.models import Q
 from django.template.loader import render_to_string
 from django.utils import timezone
 from django.utils.encoding import force_bytes
@@ -122,11 +123,14 @@ def create_case_communication_notifications(*, message: CaseCommunicationMessage
         ).values_list("id", flat=True)
         role_recipient_ids = set(role_users)
 
-    # Resolver destinatários por username
+    # Resolver destinatários por username (case-insensitive, conforme D5)
     username_recipient_ids: set[int] = set()
     if parsed.username_tokens:
+        username_q = Q()
+        for token in parsed.username_tokens:
+            username_q |= Q(username__iexact=token)
         username_users = User.objects.filter(
-            username__in=parsed.username_tokens,
+            username_q,
             is_active=True,
             account_status="active",
         ).values_list("id", flat=True)
@@ -160,9 +164,20 @@ def create_case_communication_notifications(*, message: CaseCommunicationMessage
 
     created_count = 0
     if notifications:
-        # bulk_create com ignore_conflicts por causa do unique constraint
-        created = UserNotification.objects.bulk_create(notifications, ignore_conflicts=True)
-        created_count = len(created)
+        # bulk_create(ignore_conflicts=True) não informa quantas linhas foram efetivamente
+        # inseridas (devolve um objeto por item do input). Consultamos o total antes/depois
+        # para obter a contagem real de inserções nesta chamada, respeitando o unique
+        # constraint que descarta duplicatas silenciosamente.
+        existing_before = UserNotification.objects.filter(
+            recipient_id__in=all_recipient_ids,
+            communication_message=message,
+        ).count()
+        UserNotification.objects.bulk_create(notifications, ignore_conflicts=True)
+        existing_after = UserNotification.objects.filter(
+            recipient_id__in=all_recipient_ids,
+            communication_message=message,
+        ).count()
+        created_count = existing_after - existing_before
 
     return NotificationCreationResult(
         mentioned_roles=tuple(sorted(parsed.role_tokens)),
@@ -185,7 +200,7 @@ def resolve_notification_redirect_url(*, case: Any, user: Any, active_role: str)
         active_role: O papel ativo do usuário no momento.
 
     Returns:
-        URL de redirecionamento.
+        URL de redirecionamento obtida via ``reverse()`` (sem paths hardcoded).
     """
     from django.urls import reverse
 
@@ -196,11 +211,14 @@ def resolve_notification_redirect_url(*, case: Any, user: Any, active_role: str)
     if active_role == "nir":
         if status != CaseStatus.CLEANED:
             return reverse("intake:case_detail", kwargs={"case_id": case.pk})
-        return "/cases/my-cases/"
+        return reverse("intake:home")
 
     if active_role == "doctor":
         if status == CaseStatus.WAIT_DOCTOR:
             return reverse("doctor:decision", kwargs={"case_id": case.pk})
+        # Caso já decidido pelo próprio médico destinatário → detalhe read-only.
+        if case.doctor_id is not None and case.doctor_id == user.pk and case.doctor_decision in ("accept", "deny"):
+            return reverse("doctor:decided_detail", kwargs={"case_id": case.pk})
         return reverse("doctor:queue")
 
     if active_role == "scheduler":
@@ -209,7 +227,7 @@ def resolve_notification_redirect_url(*, case: Any, user: Any, active_role: str)
         return reverse("scheduler:queue")
 
     # manager / admin / fallback
-    return "/dashboard/"
+    return reverse("dashboard:index")
 
 
 # ── Email services (original) ────────────────────────────────────────────
