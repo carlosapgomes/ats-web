@@ -16,6 +16,7 @@ from django.views.decorators.clickjacking import xframe_options_sameorigin
 from apps.accounts.decorators import role_required
 from apps.cases.models import Case, CaseAttachment, CaseStatus
 from apps.cases.services import (
+    CASE_COMMUNICATION_MAX_LENGTH,
     assert_case_lock,
     claim_case_lock,
     compute_lock_display,
@@ -284,8 +285,10 @@ def _get_active_attachments(case: Case) -> list[CaseAttachment]:
     return list(case.attachments.filter(is_suppressed=False).order_by("created_at"))
 
 
-def _build_decision_context(case: Case, form: DoctorDecisionForm) -> dict[str, Any]:
+def _build_decision_context(case: Case, form: DoctorDecisionForm, request: HttpRequest | None = None) -> dict[str, Any]:
     """Build context dict for the decision template."""
+    from django.urls import reverse
+
     from apps.pipeline.prior_case import lookup_prior_case_context
 
     # ── Correction context (R5) ──────────────────────────────────────
@@ -373,6 +376,12 @@ def _build_decision_context(case: Case, form: DoctorDecisionForm) -> dict[str, A
         "report": report,
         "correction_context": correction_context,
         "hide_prior_case_card": hide_prior_case_card,
+        # ── Comunicação operacional ───────────────────────────────
+        "communication_messages": case.communication_messages.select_related("author").all(),
+        "can_post_communication": case.status != CaseStatus.CLEANED,
+        "communication_post_url": reverse("intake:post_case_communication", args=[case.case_id]),
+        "communication_next_url": ((request.get_full_path() + "#case-communication") if request is not None else "#"),
+        "communication_max_length": CASE_COMMUNICATION_MAX_LENGTH,
     }
 
 
@@ -420,7 +429,7 @@ def doctor_decision(request: HttpRequest, case_id: uuid.UUID) -> HttpResponse:
     # Use fresh DB instance (refresh_from_db conflicts with django-fsm)
     case = get_object_or_404(Case, pk=case_id)
     form = DoctorDecisionForm()
-    context = _build_decision_context(case, form)
+    context = _build_decision_context(case, form, request=request)
     context["lock_token"] = str(result.token)
     return render(request, "doctor/decision.html", context)
 
@@ -450,7 +459,7 @@ def doctor_submit(request: HttpRequest, case_id: uuid.UUID) -> HttpResponse:
 
     if token is None:
         form = DoctorDecisionForm(request.POST)
-        ctx = _build_decision_context(case, form)
+        ctx = _build_decision_context(case, form, request=request)
         ctx["lock_error"] = "Sua reserva para este caso expirou ou não é válida. Volte para a fila e tente novamente."
         messages.warning(request, "Token de reserva não encontrado. Volte para a fila.")
         return render(request, "doctor/decision.html", ctx)
@@ -465,7 +474,7 @@ def doctor_submit(request: HttpRequest, case_id: uuid.UUID) -> HttpResponse:
         )
     except PermissionError as exc:
         form = DoctorDecisionForm(request.POST)
-        ctx = _build_decision_context(case, form)
+        ctx = _build_decision_context(case, form, request=request)
         ctx["lock_error"] = str(exc)
         messages.warning(request, str(exc))
         return render(request, "doctor/decision.html", ctx)
@@ -473,7 +482,7 @@ def doctor_submit(request: HttpRequest, case_id: uuid.UUID) -> HttpResponse:
     form = DoctorDecisionForm(request.POST)
 
     if not form.is_valid():
-        ctx = _build_decision_context(case, form)
+        ctx = _build_decision_context(case, form, request=request)
         ctx["lock_token"] = raw_token
         return render(request, "doctor/decision.html", ctx)
 
@@ -713,6 +722,12 @@ def doctor_decided_detail(request: HttpRequest, case_id: uuid.UUID) -> HttpRespo
             "back_url": reverse("doctor:queue") + "?tab=decided",
             "back_label": "← Voltar aos decididos hoje",
             "pdf_url": reverse("doctor:serve_pdf", args=[case.case_id]),
+            # ── Comunicação operacional ───────────────────────────────
+            "communication_messages": case.communication_messages.select_related("author").all(),
+            "can_post_communication": False,
+            "communication_post_url": reverse("intake:post_case_communication", args=[case.case_id]),
+            "communication_next_url": request.get_full_path() + "#case-communication",
+            "communication_max_length": CASE_COMMUNICATION_MAX_LENGTH,
         },
     )
 

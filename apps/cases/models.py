@@ -630,3 +630,29 @@ class SupervisorSummary(models.Model):
 
     def __str__(self) -> str:
         return f"SupervisorSummary {self.window_start} – {self.window_end} [{self.status}]"
+
+
+class CaseCommunicationMessage(models.Model):
+    """Mensagem de comunicação operacional vinculada a um Case.
+
+    Append-only no MVP. A mensagem pertence sempre a exatamente um Case
+    e carrega um snapshot do papel ativo do autor no momento do post.
+    """
+
+    message_id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    case = models.ForeignKey(Case, on_delete=models.CASCADE, related_name="communication_messages")
+    author = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.PROTECT,
+        related_name="case_communication_messages",
+    )
+    author_role = models.CharField(max_length=30)
+    body = models.TextField()
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["created_at"]
+        indexes = [models.Index(fields=["case", "created_at"])]
+
+    def __str__(self) -> str:
+        return f"CaseCommunicationMessage {self.message_id} [{self.author_role}]"

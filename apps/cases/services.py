@@ -18,7 +18,7 @@ from django.db import transaction
 from django.db.models import QuerySet
 from django.utils import timezone
 
-from apps.cases.models import Case, CaseAttachment, CaseStatus
+from apps.cases.models import Case, CaseAttachment, CaseCommunicationMessage, CaseStatus
 from apps.intake.services import create_case_attachment
 
 
@@ -688,6 +688,80 @@ def acknowledge_post_schedule_issue(
         case.save()
 
     return Case.objects.get(pk=case.pk)
+
+
+# ── Case communication services ──────────────────────────────────────────────
+
+
+ALLOWED_COMMUNICATION_ROLES = {"nir", "doctor", "scheduler", "manager", "admin"}
+CASE_COMMUNICATION_MAX_LENGTH = 2000
+
+
+class CaseCommunicationError(ValueError):
+    pass
+
+
+def post_case_communication_message(
+    *,
+    case: Case,
+    author: Any,
+    author_role: str,
+    body: str,
+) -> CaseCommunicationMessage:
+    """Cria uma mensagem de comunicação operacional em um Case.
+
+    Regras de validação:
+    1. author_role deve estar em ALLOWED_COMMUNICATION_ROLES.
+    2. body não pode ser vazio/apenas espaços.
+    3. body é normalizado com strip().
+    4. body não pode exceder CASE_COMMUNICATION_MAX_LENGTH.
+    5. Caso CLEANED rejeita post no MVP.
+
+    Em caso de sucesso:
+    - Cria CaseCommunicationMessage.
+    - Cria CaseEvent CASE_COMMUNICATION_MESSAGE_POSTED.
+    """
+    from apps.cases.models import CaseEvent
+
+    # Validação 1: papel permitido
+    if author_role not in ALLOWED_COMMUNICATION_ROLES:
+        raise CaseCommunicationError(f"Papel '{author_role}' não permitido para comunicação operacional.")
+
+    # Validação 2: body não vazio
+    stripped_body = body.strip()
+    if not stripped_body:
+        raise CaseCommunicationError("A mensagem não pode estar vazia ou conter apenas espaços.")
+
+    # Validação 4: tamanho máximo
+    if len(stripped_body) > CASE_COMMUNICATION_MAX_LENGTH:
+        raise CaseCommunicationError(f"A mensagem excede o limite de {CASE_COMMUNICATION_MAX_LENGTH} caracteres.")
+
+    # Validação 5: caso CLEANED bloqueia post no MVP
+    if case.status == CaseStatus.CLEANED:
+        raise CaseCommunicationError("Não é possível enviar mensagens em um caso encerrado (CLEANED).")
+
+    # Criar a mensagem
+    msg = CaseCommunicationMessage.objects.create(
+        case=case,
+        author=author,
+        author_role=author_role,
+        body=stripped_body,
+    )
+
+    # Criar evento auditável
+    CaseEvent.objects.create(
+        case=case,
+        event_type="CASE_COMMUNICATION_MESSAGE_POSTED",
+        actor=author,
+        actor_type="human",
+        payload={
+            "message_id": str(msg.message_id),
+            "author_role": author_role,
+            "body_preview": stripped_body[:120],
+        },
+    )
+
+    return msg
 
 
 def compute_lock_display(case: Case, user: Any = None) -> dict[str, Any]:
