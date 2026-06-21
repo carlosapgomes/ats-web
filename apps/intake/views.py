@@ -768,6 +768,10 @@ def corrected_resubmission(request: HttpRequest, case_id: uuid.UUID) -> HttpResp
         if not pdf_file:
             errors.append("Selecione um novo PDF principal para o reenvio.")
 
+        # Validate explicit confirmation checkbox (backend is source of truth)
+        if not request.POST.get("confirmation"):
+            errors.append("Confirme que os documentos do caso anterior não serão herdados.")
+
         if errors:
             for err in errors:
                 messages.warning(request, err)
