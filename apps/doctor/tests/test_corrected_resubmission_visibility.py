@@ -11,7 +11,7 @@ from django.contrib.auth import get_user_model
 from django.urls import reverse
 from django.utils import timezone
 
-from apps.cases.models import Case, CaseEvent, CaseStatus
+from apps.cases.models import Case, CaseStatus
 
 User = get_user_model()
 
@@ -225,36 +225,24 @@ class TestDoctorDecisionCorrectionVisibility:
             doctor_decided_at=timezone.now(),
         )
 
+        # Mesmo agency_record_number entre original e novo caso: isso faz o
+        # prior-case lookup (que agrupa por agency_record_number) encontrar o
+        # original, exercitando de fato a lógica de deduplicação R7 em
+        # _build_decision_context (hide_prior_case_card=True). Sem vínculo
+        # explícito, o card genérico seria renderizado aqui.
         new_case = Case.objects.create(
             created_by=nir,
             corrects_case=original,
             correction_reason="Laudo corrigido",
             correction_created_by=nir,
             correction_created_at=timezone.now(),
-            agency_record_number="NEW-DUP-001",
+            agency_record_number="DUP-001",
             status=CaseStatus.WAIT_DOCTOR,
         )
         new_case.structured_data = {"patient": {"name": "Dup Paciente", "age": 50, "gender": "Masculino"}}
         new_case.summary_text = "Indicação de EDA"
         new_case.suggested_action = {"suggestion": "accept", "support_recommendation": "none"}
         new_case.save()
-
-        # Criar evento PRIOR_CASE_LOOKUP que referencia o mesmo original
-        CaseEvent.objects.create(
-            case=new_case,
-            event_type="PRIOR_CASE_LOOKUP",
-            actor=None,
-            actor_type="system",
-            payload={
-                "prior_case_id": str(original.case_id),
-                "decision": "doctor_denied",
-                "reason": "Sem critérios",
-                "decided_at": original.doctor_decided_at.isoformat() if original.doctor_decided_at else "",
-                "decided_by": doctor.display_name,
-                "decided_by_role": "doctor",
-                "prior_denial_count_7d": 1,
-            },
-        )
 
         self._claim_lock(client, new_case.case_id, doctor)
         response = client.get(reverse("doctor:decision", args=[new_case.case_id]))
@@ -263,7 +251,8 @@ class TestDoctorDecisionCorrectionVisibility:
 
         # Card de reenvio corrigido deve aparecer
         assert "Reenvio corrigido" in content
-        # Card genérico "Caso Anterior — Negação Recente" não deve aparecer
+        # Card genérico "Caso Anterior — Negação Recente" não deve aparecer,
+        # pois hide_prior_case_card suprime a duplicidade com o vínculo explícito
         assert "Caso Anterior" not in content
 
     def test_doctor_decision_without_correction_keeps_prior_case_card(self, client) -> None:
