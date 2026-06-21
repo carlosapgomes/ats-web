@@ -5,8 +5,6 @@ RED phase: all tests should fail before implementation.
 
 from __future__ import annotations
 
-import sys
-
 import pytest
 from django.conf import settings
 from django.contrib.auth import get_user_model
@@ -268,18 +266,32 @@ class TestSchedulerCommunicationHardening:
     def test_no_notification_badge_required_for_mvp(self):
         """R9: MVP não depende de UserNotification/badge.
 
-        Verifica que nenhum módulo importa UserNotification no contexto
-        do MVP de comunicação.
-        """
-        # Verify that the communication service does not import UserNotification
-        notification_modules = [
-            mod_name
-            for mod_name in sys.modules
-            if mod_name is not None and "notification" in mod_name.lower() and ("ats" in mod_name or "apps" in mod_name)
-        ]
-        if notification_modules:
-            pytest.fail(f"Notification module(s) imported: {notification_modules}")
+        Verificação estática e determinística: nenhum arquivo da
+        superfície de comunicação deste change referencia
+        ``UserNotification`` ou artefatos de badge/unread-count.
 
-        # Also verify that the endpoint view doesn't create any notification-like objects
-        # by checking the response doesn't contain notification-related HTML
-        assert True
+        Escopar aos arquivos de comunicação (em vez de ``sys.modules``)
+        evita falsos positivos quando um modelo ``UserNotification`` for
+        criado em change futura num módulo novo — este teste só falha se a
+        própria superfície de comunicação for acoplada a notificações.
+        """
+        import os
+        import re
+
+        communication_files = [
+            "apps/cases/services.py",
+            "apps/intake/views.py",
+            "apps/doctor/views.py",
+            "apps/scheduler/views.py",
+            "templates/cases/_communication_thread.html",
+        ]
+        pattern = re.compile(r"UserNotification|notification_badge|unread_count")
+        offenders = []
+        for rel_path in communication_files:
+            full_path = os.path.join(settings.BASE_DIR, rel_path)
+            with open(full_path) as f:
+                content = f.read()
+            matches = pattern.findall(content)
+            if matches:
+                offenders.append((rel_path, set(matches)))
+        assert not offenders, f"A superfície de comunicação referencia artefatos de notificação: {offenders}"

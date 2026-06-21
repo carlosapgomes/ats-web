@@ -7,20 +7,20 @@
 
 ## Definition of Done do change
 
-- [ ] Modelo `CaseCommunicationMessage` criado ou nome equivalente aprovado.
-- [ ] Mensagens sempre vinculadas a exatamente um `Case`.
-- [ ] Mensagens têm autor, papel ativo no momento do post, corpo e data/hora.
-- [ ] Migration criada.
-- [ ] Serviço de domínio valida e cria mensagens, sem lógica pesada em views/templates.
-- [ ] Mensagem vazia/apenas espaços é rejeitada.
-- [ ] Mensagem acima do limite definido é rejeitada.
-- [ ] Usuário sem papel operacional permitido não consegue postar.
-- [ ] Post em caso `CLEANED` é bloqueado no MVP, salvo decisão explícita documentada no relatório.
-- [ ] Cada post gera evento `CASE_COMMUNICATION_MESSAGE_POSTED` ou nome equivalente aprovado.
-- [ ] Payload do evento inclui `message_id`, `author_role` e `body_preview`.
-- [ ] Corpo completo da mensagem não é duplicado integralmente em `CaseEvent.payload`.
-- [ ] NIR vê e posta mensagens no detalhe operacional do caso.
-- [ ] Médico vê e posta mensagens na tela de decisão do caso.
+- [x] Modelo `CaseCommunicationMessage` criado ou nome equivalente aprovado.
+- [x] Mensagens sempre vinculadas a exatamente um `Case`.
+- [x] Mensagens têm autor, papel ativo no momento do post, corpo e data/hora.
+- [x] Migration criada.
+- [x] Serviço de domínio valida e cria mensagens, sem lógica pesada em views/templates.
+- [x] Mensagem vazia/apenas espaços é rejeitada.
+- [x] Mensagem acima do limite definido é rejeitada.
+- [x] Usuário sem papel operacional permitido não consegue postar.
+- [x] Post em caso `CLEANED` é bloqueado no MVP, salvo decisão explícita documentada no relatório.
+- [x] Cada post gera evento `CASE_COMMUNICATION_MESSAGE_POSTED` ou nome equivalente aprovado.
+- [x] Payload do evento inclui `message_id`, `author_role` e `body_preview`.
+- [x] Corpo completo da mensagem não é duplicado integralmente em `CaseEvent.payload`.
+- [x] NIR vê e posta mensagens no detalhe operacional do caso.
+- [x] Médico vê e posta mensagens na tela de decisão do caso.
 - [x] Agendador vê e posta mensagens na tela de agendamento/intercorrência prevista.
 - [x] Mensagens aparecem em ordem cronológica.
 - [x] UI mostra autor, papel e data/hora.
@@ -28,7 +28,7 @@
 - [x] Partial/template compartilhado evita duplicação visual desnecessária.
 - [x] Labels/dots de timeline incluem `CASE_COMMUNICATION_MESSAGE_POSTED`.
 - [x] Nenhum estado FSM é criado ou alterado.
-- [ ] `doctor_reason`, `doctor_observation`, `appointment_reason` e `correction_reason` não são redefinidos.
+- [x] `doctor_reason`, `doctor_observation`, `appointment_reason` e `correction_reason` não são redefinidos.
 - [x] Nenhum chat global é criado.
 - [x] Nenhuma notificação in-app é criada neste change.
 - [x] Nenhum polling periódico é implementado neste change.
