@@ -53,12 +53,33 @@ configuradas no host:
 - `CSRF_TRUSTED_ORIGINS`, `ALLOWED_HOSTS`, `INTRANET_IP_RANGE`
 - Demais vars esperadas por `docker-compose.prod.yml`
 
-Confirmar a partição de backups:
+Confirmar a partição de backups (leitura — qualquer usuário vê o uso):
 
 ```bash
 df -h /archive/backups                 # uso < 80%, espaço livre suficiente
-touch /archive/backups/.write-test && rm /archive/backups/.write-test
 ```
+
+### Modelo de dois atores (segurança)
+
+O usuário `apps` (que roda o Docker rootless e o deploy) é isolado e
+**só pode escrever** no diretório de instalação e no seu `$HOME`. Ele
+**não escreve** em `/archive/backups` (pertencente a `root`). Por isso,
+todo I/O contra `/archive/backups` segue o padrão:
+
+1. **`apps`** extrai os dados para um *staging* temporário (apps-owned).
+2. Um **usuário administrativo com `sudo`** move os arquivos do staging
+   para `/archive/backups/` (e, no rollback, o caminho inverso).
+
+O *staging* usado no runbook é um diretório no `$HOME` do `apps`:
+
+```bash
+# Como apps:
+export STAGING_DIR="${HOME}/backup-staging"   # ex.: /home/apps/backup-staging
+mkdir -p "$STAGING_DIR"
+```
+
+> Qualquer caminho apps-owned serve; o `$HOME` é o default por ser
+> persistente e fora de `/tmp` (que é limpo no reboot).
 
 ---
 
@@ -72,23 +93,58 @@ DPROD="docker compose -f docker-compose.yml -f docker-compose.prod.yml"
 
 ### Passo 1 — Backup (obrigatório)
 
-```bash
-# 1a. Snapshot do Postgres
-$DPROD exec -T db pg_dump -U ats_web -d ats_web -Fc \
-  > /archive/backups/pre-corrected-resubmission-$(date +%Y%m%d-%H%M).dump
+O backup segue o modelo de dois atores: `apps` extrai para o staging,
+um admin com `sudo` move para `/archive/backups/`.
 
-# 1b. Snapshot do volume de media (PDFs/anexos) — opcional mas recomendado
-docker run --rm -v ats-web-prod_media_prod:/data:ro \
-  -v /archive/backups:/backup alpine \
-  tar czf /backup/media-pre-corrected-resubmission-$(date +%Y%m%d-%H%M).tgz -C /data .
+**Como `apps` (extração para staging):**
+
+```bash
+DPROD="docker compose -f docker-compose.yml -f docker-compose.prod.yml"
+export STAGING_DIR="${HOME}/backup-staging"
+mkdir -p "$STAGING_DIR"
+TS=$(date +%Y%m%d-%H%M)
+
+# 1a. Extrair dump do Postgres para o staging
+$DPROD exec -T db pg_dump -U ats_web -d ats_web -Fc \
+  > "$STAGING_DIR/pre-corrected-resubmission-${TS}.dump"
+
+# 1b. Extrair snapshot do volume de mídia (PDFs/anexos) para o staging
+docker run --rm \
+  -v ats-web-prod_media_prod:/data:ro \
+  -v "$STAGING_DIR:/backup" alpine \
+  tar czf "/backup/media-pre-corrected-resubmission-${TS}.tgz" -C /data .
 
 # Confirmar que os arquivos não estão vazios
-ls -lh /archive/backups/pre-corrected-resubmission-*.dump
-ls -lh /archive/backups/media-pre-corrected-resubmission-*.tgz
+ls -lh "$STAGING_DIR/pre-corrected-resubmission-${TS}".dump \
+       "$STAGING_DIR/media-pre-corrected-resubmission-${TS}".tgz
+
+echo "TS=$TS"  # anote este timestamp — usado pelo admin e no rollback
 ```
 
-> Anote o nome do arquivo de dump gerado — ele é referenciado no
-> **Plano de Rollback**.
+**Como `admin` (move para `/archive/backups/`):**
+
+Substitua `<TS>` pelo timestamp anotado acima.
+
+```bash
+STAGING_DIR="/home/apps/backup-staging"   # ajustar ao HOME do apps
+ARCHIVE="/archive/backups"
+TS=<TS>
+
+sudo mv "$STAGING_DIR/pre-corrected-resubmission-${TS}.dump" "$ARCHIVE/"
+sudo mv "$STAGING_DIR/media-pre-corrected-resubmission-${TS}.tgz" "$ARCHIVE/"
+sudo chown root:root \
+  "$ARCHIVE/pre-corrected-resubmission-${TS}.dump" \
+  "$ARCHIVE/media-pre-corrected-resubmission-${TS}.tgz"
+sudo chmod 640 \
+  "$ARCHIVE/pre-corrected-resubmission-${TS}.dump" \
+  "$ARCHIVE/media-pre-corrected-resubmission-${TS}.tgz"
+
+# Confirmar
+sudo ls -lh "$ARCHIVE/pre-corrected-resubmission-${TS}".dump \
+            "$ARCHIVE/media-pre-corrected-resubmission-${TS}".tgz
+```
+
+> Anote o `TS` — ele é referenciado no **Plano de Rollback**.
 
 ### Passo 2 — Atualizar código
 
@@ -216,18 +272,44 @@ $DPROD up -d
 
 ### 4.3 Rollback de última instância (restaurar backup)
 
-Usar o snapshot criado no Passo 1. Substitua `<TIMESTAMP>` pelo nome do
-arquivo anotado:
+Usar o snapshot criado no Passo 1. Substitua `<TS>` pelo timestamp
+anotado. Segue o modelo de dois atores (inverso do backup): o admin
+copia de `/archive/backups/` para o staging e devolve a propriedade ao
+`apps`, que então restaura.
+
+**Como `admin` (copia do archive para o staging):**
 
 ```bash
+STAGING_DIR="/home/apps/backup-staging"   # ajustar ao HOME do apps
+ARCHIVE="/archive/backups"
+TS=<TS>
+
+sudo cp "$ARCHIVE/pre-corrected-resubmission-${TS}.dump" "$STAGING_DIR/"
+sudo cp "$ARCHIVE/media-pre-corrected-resubmission-${TS}.tgz" "$STAGING_DIR/"
+sudo chown apps:apps \
+  "$STAGING_DIR/pre-corrected-resubmission-${TS}.dump" \
+  "$STAGING_DIR/media-pre-corrected-resubmission-${TS}.tgz"
+```
+
+> `apps:apps` assume user:group primário do `apps`; ajuste se o grupo
+> for diferente.
+
+**Como `apps` (restaura a partir do staging):**
+
+```bash
+DPROD="docker compose -f docker-compose.yml -f docker-compose.prod.yml"
+STAGING_DIR="${HOME}/backup-staging"
+TS=<TS>
+
 # Restaurar dump do Postgres
 $DPROD exec -T db pg_restore -U ats_web -d ats_web -c -1 \
-  < /archive/backups/pre-corrected-resubmission-<TIMESTAMP>.dump
+  < "$STAGING_DIR/pre-corrected-resubmission-${TS}.dump"
 
 # Restaurar mídia (se necessário)
-docker run --rm -v ats-web-prod_media_prod:/data \
-  -v /archive/backups:/backup alpine \
-  tar xzf /backup/media-pre-corrected-resubmission-<TIMESTAMP>.tgz -C /data
+docker run --rm \
+  -v ats-web-prod_media_prod:/data \
+  -v "$STAGING_DIR:/backup" alpine \
+  tar xzf "/backup/media-pre-corrected-resubmission-${TS}.tgz" -C /data
 
 # Voltar código
 git checkout <commit-anterior-ao-change>
