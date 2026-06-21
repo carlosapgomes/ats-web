@@ -42,7 +42,7 @@
   - [x] `uv run pytest`
 - [x] Relatório markdown temporário criado por cada slice.
 - [x] Este `tasks.md` atualizado.
-- [ ] Commit e push realizados após cada slice.
+- [x] Commit e push realizados após cada slice.
 
 ## Notas para implementadores
 

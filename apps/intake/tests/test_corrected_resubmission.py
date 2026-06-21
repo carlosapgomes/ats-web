@@ -245,6 +245,18 @@ class TestCorrectedResubmissionPost:
         assert response.status_code == 200
         assert Case.objects.count() == 1
 
+    def test_post_requires_confirmation(self, client) -> None:
+        """POST sem checkbox de confirmação não cria caso (backend é fonte de verdade)."""
+        nir_client, nir_user = _nir_client(client)
+        original = Case.objects.create(created_by=nir_user)
+        url = reverse("intake:corrected_resubmission", args=[original.case_id])
+        response = nir_client.post(
+            url,
+            {"correction_reason": "Laudo corrigido", "pdf_file": _simple_pdf()},
+        )
+        assert response.status_code == 200
+        assert Case.objects.count() == 1
+
     def test_post_creates_new_case_linked_to_original(self, client) -> None:
         """POST válido cria novo caso vinculado ao original."""
         nir_client, nir_user = _nir_client(client)
@@ -258,6 +270,7 @@ class TestCorrectedResubmissionPost:
                 {
                     "correction_reason": "Documento incompleto. Enviando laudo corrigido.",
                     "pdf_file": pdf,
+                    "confirmation": "on",
                 },
             )
 
@@ -319,6 +332,7 @@ class TestCorrectedResubmissionPost:
                 {
                     "correction_reason": "Laudo corrigido",
                     "pdf_file": pdf,
+                    "confirmation": "on",
                 },
             )
 
@@ -349,7 +363,7 @@ class TestCorrectedResubmissionPost:
         with patch("apps.intake.tasks.enqueue_pdf_extraction"):
             response = nir_client.post(
                 url,
-                {"correction_reason": "Laudo corrigido", "pdf_file": pdf},
+                {"correction_reason": "Laudo corrigido", "pdf_file": pdf, "confirmation": "on"},
             )
 
         assert response.status_code == 302
@@ -388,6 +402,7 @@ class TestCorrectedResubmissionPost:
                     "correction_reason": "Laudo corrigido",
                     "pdf_file": pdf,
                     "attachment_files": [new_att],
+                    "confirmation": "on",
                 },
             )
 
@@ -413,7 +428,7 @@ class TestCorrectedResubmissionPost:
         with patch("apps.intake.tasks.enqueue_pdf_extraction"):
             nir_client.post(
                 url,
-                {"correction_reason": "Laudo corrigido", "pdf_file": pdf},
+                {"correction_reason": "Laudo corrigido", "pdf_file": pdf, "confirmation": "on"},
             )
 
         new_case = Case.objects.exclude(case_id=original.case_id).first()
@@ -439,7 +454,7 @@ class TestCorrectedResubmissionPost:
         with patch("apps.intake.tasks.enqueue_pdf_extraction") as mock_enqueue:
             nir_client.post(
                 url,
-                {"correction_reason": "Documento corrigido", "pdf_file": pdf},
+                {"correction_reason": "Documento corrigido", "pdf_file": pdf, "confirmation": "on"},
             )
 
         new_case = Case.objects.exclude(case_id=original.case_id).first()
