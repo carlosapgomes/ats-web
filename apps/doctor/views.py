@@ -299,7 +299,6 @@ def _build_decision_context(case: Case, form: DoctorDecisionForm) -> dict[str, A
                 "original_agency_record_number": original.agency_record_number or "",
                 "original_patient_name": original.patient_name,
                 "original_created_at": original.created_at,
-                "original_status_label": "",
                 "correction_reason": case.correction_reason,
                 "correction_created_by": case.correction_created_by.get_full_name()
                 if case.correction_created_by
