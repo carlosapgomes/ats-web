@@ -61,6 +61,7 @@ class Case(models.Model):
     extracted_text = models.TextField(blank=True)
     agency_record_number = models.CharField(max_length=20, blank=True)
     agency_record_extracted_at = models.DateTimeField(null=True, blank=True)
+    regulation_days_on_screen = models.PositiveIntegerField(null=True, blank=True, db_index=True)
 
     # LLM artifacts
     structured_data = models.JSONField(blank=True, null=True)

@@ -43,3 +43,55 @@ class TestWatermarkStripping:
         cleaned, record = strip_watermark_and_extract_record(text)
         assert "João   " not in cleaned  # extra spaces removed
         assert "João" in cleaned
+
+
+class TestExtractRegulationDaysOnScreen:
+    """extract_regulation_days_on_screen extrai "Dias em tela: N" do texto."""
+
+    def test_returns_none_when_not_found(self) -> None:
+        from apps.intake.pdf_utils import extract_regulation_days_on_screen
+
+        text = "Paciente: João\nRelatório de endoscopia\nCódigo: 12345"
+        assert extract_regulation_days_on_screen(text) is None
+
+    def test_returns_zero(self) -> None:
+        from apps.intake.pdf_utils import extract_regulation_days_on_screen
+
+        text = "Dias em tela: 0"
+        assert extract_regulation_days_on_screen(text) == 0
+
+    def test_returns_positive_integer(self) -> None:
+        from apps.intake.pdf_utils import extract_regulation_days_on_screen
+
+        text = "Dias em tela: 12"
+        assert extract_regulation_days_on_screen(text) == 12
+
+    def test_case_insensitive(self) -> None:
+        from apps.intake.pdf_utils import extract_regulation_days_on_screen
+
+        text = "DIAS EM TELA : 7"
+        assert extract_regulation_days_on_screen(text) == 7
+
+    def test_extra_spaces_variations(self) -> None:
+        from apps.intake.pdf_utils import extract_regulation_days_on_screen
+
+        text = "Dias  em  tela:  5"
+        assert extract_regulation_days_on_screen(text) == 5
+
+    def test_returns_max_when_multiple_occurrences(self) -> None:
+        from apps.intake.pdf_utils import extract_regulation_days_on_screen
+
+        text = "Dias em tela: 3\nAlgum texto\nDias em tela: 5\nMais texto\nDias em tela: 4"
+        assert extract_regulation_days_on_screen(text) == 5
+
+    def test_returns_max_when_same_value_repeated(self) -> None:
+        from apps.intake.pdf_utils import extract_regulation_days_on_screen
+
+        text = "Dias em tela: 3\nDias em tela: 3\nDias em tela: 3"
+        assert extract_regulation_days_on_screen(text) == 3
+
+    def test_ignores_numbers_not_after_dias_em_tela(self) -> None:
+        from apps.intake.pdf_utils import extract_regulation_days_on_screen
+
+        text = "Paciente: 123\nTelefone: 98765\nDias em tela: 8"
+        assert extract_regulation_days_on_screen(text) == 8

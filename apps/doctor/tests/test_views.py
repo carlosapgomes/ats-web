@@ -608,6 +608,121 @@ class TestDoctorQueueView:
         response = client.get(f"/doctor/decided/{case.case_id}/")
         assert response.status_code == 404
 
+    # ── Regulation days on screen ordering tests ────────────────────────
+
+    def test_queue_orders_by_regulation_days_on_screen_desc(self, client) -> None:
+        """WAIT_DOCTOR cases ordered by regulation_days_on_screen DESC."""
+        nir_user = User.objects.create_user(username="nir_order@test.com", password="testpass123")
+        nir_user.roles.add(self._create_role("nir"))
+
+        now = timezone.now()
+
+        case_a = Case.objects.create(
+            created_by=nir_user,
+            status=CaseStatus.WAIT_DOCTOR,
+            regulation_days_on_screen=2,
+            structured_data={"patient": {"name": "Case A (2 days)", "age": 40, "gender": "M"}},
+        )
+        Case.objects.filter(case_id=case_a.case_id).update(created_at=now - timedelta(hours=3))
+
+        case_b = Case.objects.create(
+            created_by=nir_user,
+            status=CaseStatus.WAIT_DOCTOR,
+            regulation_days_on_screen=10,
+            structured_data={"patient": {"name": "Case B (10 days)", "age": 50, "gender": "F"}},
+        )
+        Case.objects.filter(case_id=case_b.case_id).update(created_at=now - timedelta(hours=2))
+
+        case_c = Case.objects.create(
+            created_by=nir_user,
+            status=CaseStatus.WAIT_DOCTOR,
+            regulation_days_on_screen=None,
+            structured_data={"patient": {"name": "Case C (null)", "age": 30, "gender": "M"}},
+        )
+        Case.objects.filter(case_id=case_c.case_id).update(created_at=now - timedelta(hours=1))
+
+        self._login_as(client, "doctor")
+        response = client.get("/doctor/")
+        assert response.status_code == 200
+        content = response.content.decode()
+
+        # B (10) deve aparecer antes de A (2), e A antes de C (null)
+        pos_b = content.index("Case B (10 days)")
+        pos_a = content.index("Case A (2 days)")
+        pos_c = content.index("Case C (null)")
+        assert pos_b < pos_a, f"B (10) should be before A (2): B={pos_b}, A={pos_a}"
+        assert pos_a < pos_c, f"A (2) should be before C (null): A={pos_a}, C={pos_c}"
+
+    def test_queue_shows_regulation_days_badge_when_available(self, client) -> None:
+        """Card exibe "Dias em tela: N" quando o campo está preenchido."""
+        nir_user = User.objects.create_user(username="nir_badge@test.com", password="testpass123")
+        nir_user.roles.add(self._create_role("nir"))
+
+        case = Case.objects.create(
+            created_by=nir_user,
+            status=CaseStatus.WAIT_DOCTOR,
+            regulation_days_on_screen=10,
+            structured_data={"patient": {"name": "Badge Test", "age": 45, "gender": "M"}},
+        )
+        case.save()
+
+        self._login_as(client, "doctor")
+        response = client.get("/doctor/")
+        assert response.status_code == 200
+        content = response.content.decode()
+        assert "Dias em tela: 10" in content
+
+    def test_queue_hides_regulation_days_badge_when_null(self, client) -> None:
+        """Card NÃO exibe badge "Dias em tela" quando o campo é None."""
+        nir_user = User.objects.create_user(username="nir_nobadge@test.com", password="testpass123")
+        nir_user.roles.add(self._create_role("nir"))
+
+        case = Case.objects.create(
+            created_by=nir_user,
+            status=CaseStatus.WAIT_DOCTOR,
+            regulation_days_on_screen=None,
+            structured_data={"patient": {"name": "No Badge", "age": 35, "gender": "F"}},
+        )
+        case.save()
+
+        self._login_as(client, "doctor")
+        response = client.get("/doctor/")
+        assert response.status_code == 200
+        content = response.content.decode()
+        assert "Dias em tela:" not in content
+
+    def test_queue_uses_created_at_as_tiebreaker(self, client) -> None:
+        """Empate em regulation_days_on_screen usa created_at mais antigo primeiro."""
+        nir_user = User.objects.create_user(username="nir_tie@test.com", password="testpass123")
+        nir_user.roles.add(self._create_role("nir"))
+
+        now = timezone.now()
+
+        old_case = Case.objects.create(
+            created_by=nir_user,
+            status=CaseStatus.WAIT_DOCTOR,
+            regulation_days_on_screen=5,
+            structured_data={"patient": {"name": "Old (created first)", "age": 40, "gender": "M"}},
+        )
+        Case.objects.filter(case_id=old_case.case_id).update(created_at=now - timedelta(hours=5))
+
+        new_case = Case.objects.create(
+            created_by=nir_user,
+            status=CaseStatus.WAIT_DOCTOR,
+            regulation_days_on_screen=5,
+            structured_data={"patient": {"name": "New (created later)", "age": 50, "gender": "F"}},
+        )
+        Case.objects.filter(case_id=new_case.case_id).update(created_at=now - timedelta(hours=1))
+
+        self._login_as(client, "doctor")
+        response = client.get("/doctor/")
+        assert response.status_code == 200
+        content = response.content.decode()
+
+        pos_old = content.index("Old (created first)")
+        pos_new = content.index("New (created later)")
+        assert pos_old < pos_new, "Older case should appear before newer when tie"
+
     def test_queue_partial_preserves_decided_tab(self, client) -> None:
         """R3: HTMX partial for ?tab=decided returns only decided content."""
         doctor_user = User.objects.create_user(username="doc_partial@test.com", password="testpass123")

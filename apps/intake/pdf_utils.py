@@ -140,6 +140,23 @@ def extract_explicit_record_number(text: str) -> str:
     return _extract_record_number(text)
 
 
+_DAYS_ON_SCREEN_PATTERN = re.compile(
+    r"\bDias\s+em\s+tela\s*:\s*(\d+)\b",
+    flags=re.IGNORECASE,
+)
+
+
+def extract_regulation_days_on_screen(text: str) -> int | None:
+    """Extrai o maior valor de "Dias em tela: N" do texto.
+
+    Procura por ocorrências do padrão "Dias em tela: <número>" (case-insensitive,
+    com variações de espaços) e retorna o maior inteiro encontrado.
+    Retorna None se nenhuma ocorrência for encontrada.
+    """
+    matches = [int(value) for value in _DAYS_ON_SCREEN_PATTERN.findall(text)]
+    return max(matches) if matches else None
+
+
 def _normalize_whitespace(text: str) -> str:
     """Normalize spaces while preserving paragraph linebreaks."""
     normalized_lines: list[str] = []
