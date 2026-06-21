@@ -183,3 +183,19 @@ def notifications_mark_all_read(request):  # type: ignore[no-untyped-def]
 
     UserNotification.objects.filter(recipient=request.user, read_at__isnull=True).update(read_at=timezone.now())
     return redirect("notifications")
+
+
+@login_required
+def notifications_unread_count(request):  # type: ignore[no-untyped-def]
+    """Retorna JSON com a contagem de notificações não lidas do usuário autenticado.
+
+    Resposta: {"unread_count": N}
+    Não expõe lista de notificações, PHI ou dados de outros usuários.
+    """
+    from django.http import JsonResponse
+
+    count = UserNotification.objects.filter(
+        recipient=request.user,
+        read_at__isnull=True,
+    ).count()
+    return JsonResponse({"unread_count": count})

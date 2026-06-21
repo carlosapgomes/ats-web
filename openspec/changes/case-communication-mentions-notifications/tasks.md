@@ -3,7 +3,7 @@
 ## Slices verticais
 
 - [x] Slice 001 — Menções criam notificações e inbox SSR (`slices/slice-001-mentions-create-in-app-notifications.md`)
-- [ ] Slice 002 — Polling Vanilla JS e hardening do badge (`slices/slice-002-vanilla-js-badge-polling.md`)
+- [x] Slice 002 — Polling Vanilla JS e hardening do badge (`slices/slice-002-vanilla-js-badge-polling.md`)
 
 ## Definition of Done do change
 
@@ -25,12 +25,12 @@
 - [ ] Abrir notificação marca `read_at` e redireciona com fallback seguro por papel/status.
 - [ ] Marcar uma notificação como lida funciona.
 - [ ] Marcar todas como lidas funciona.
-- [ ] Endpoint `GET /notifications/unread-count/` retorna JSON só para usuário autenticado.
-- [ ] Polling do badge usa Vanilla JS.
-- [ ] Polling só atualiza badge/contagem, não a thread do caso.
-- [ ] Polling respeita `document.visibilityState === "visible"` ou estratégia equivalente.
-- [ ] Não é usado HTMX para notificações.
-- [ ] WebSocket/SSE não são introduzidos.
+- [x] Endpoint `GET /notifications/unread-count/` retorna JSON só para usuário autenticado.
+- [x] Polling do badge usa Vanilla JS.
+- [x] Polling só atualiza badge/contagem, não a thread do caso.
+- [x] Polling respeita `document.visibilityState === "visible"` ou estratégia equivalente.
+- [x] Não é usado HTMX para notificações.
+- [x] WebSocket/SSE não são introduzidos.
 - [ ] SMS/push/email operacional não são introduzidos.
 - [ ] Chat global não é introduzido.
 - [ ] Autocomplete de menções não é introduzido.

@@ -37,7 +37,10 @@
           <a href="{% url 'notifications' %}"
              id="notification-badge"
              class="btn btn-sm btn-light notif-badge"
-             data-count="{{ notification_unread_count|default:0 }}">
+             data-notifications-badge
+             data-unread-count-url="{% url 'notifications_unread_count' %}"
+             data-count="{{ notification_unread_count|default:0 }}"
+             aria-label="Notificações: {{ notification_unread_count|default:0 }} não lidas">
             Notificações
             {% if notification_unread_count %}
             <span class="badge bg-danger ms-1">{{ notification_unread_count }}</span>
@@ -90,6 +93,7 @@
 <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
 <script src="https://unpkg.com/htmx.org@2.0.4"></script>
 <script src="{% static 'js/app.js' %}"></script>
+<script src="{% static 'js/notifications.js' %}"></script>
 {% block extra_js %}{% endblock %}
 </body>
 </html>

@@ -34,6 +34,11 @@ urlpatterns = [
         views.notifications_mark_all_read,
         name="notifications_mark_all_read",
     ),
+    path(
+        "notifications/unread-count/",
+        views.notifications_unread_count,
+        name="notifications_unread_count",
+    ),
     # Profile and password change
     path("profile/", profile_view, name="profile"),
     path(

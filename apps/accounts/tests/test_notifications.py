@@ -5,9 +5,11 @@ RED phase: all tests should fail before implementation.
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Any
 
 import pytest
+from django.conf import settings
 from django.contrib.auth import get_user_model
 from django.urls import reverse
 
@@ -691,3 +693,148 @@ class TestMentionResolutionHardening:
 
         assert first.notification_count == 1
         assert second.notification_count == 0
+
+
+# ── Slice 002: Unread count endpoint and Vanilla JS polling ──────────────
+
+
+class TestUnreadCountEndpoint:
+    """Tests for GET /notifications/unread-count/ endpoint."""
+
+    def test_unread_count_requires_login(self, db: Any, client: Any) -> None:
+        """Usuário anônimo não recebe JSON de count."""
+        response = client.get(reverse("notifications_unread_count"))
+        assert response.status_code == 302
+        assert "/login/" in response.url
+
+    def test_unread_count_returns_only_current_user_unread_notifications(
+        self, db: Any, client: Any, case_factory: Any, user: Any, user_doctor: Any, user_nir: Any
+    ) -> None:
+        """Conta só notificações não lidas do usuário autenticado."""
+        from apps.cases.services import post_case_communication_message
+
+        case = case_factory(user)
+        post_case_communication_message(case=case, author=user, author_role="nir", body="@doctor test")
+        case2 = case_factory(user)
+        post_case_communication_message(case=case2, author=user, author_role="nir", body="@nir test")
+
+        client.force_login(user_doctor)
+        session = client.session
+        session["active_role"] = "doctor"
+        session.save()
+
+        response = client.get(reverse("notifications_unread_count"))
+        assert response.status_code == 200
+        data = response.json()
+        assert data == {"unread_count": 1}
+
+    def test_unread_count_excludes_read_notifications(
+        self, db: Any, client: Any, case_factory: Any, user: Any, user_doctor: Any
+    ) -> None:
+        """read_at preenchido não conta."""
+        from django.utils import timezone
+
+        from apps.accounts.models import UserNotification
+        from apps.cases.services import post_case_communication_message
+
+        case = case_factory(user)
+        post_case_communication_message(case=case, author=user, author_role="nir", body="@doctor test")
+
+        notif = UserNotification.objects.get(recipient=user_doctor, case=case)
+        notif.read_at = timezone.now()
+        notif.save(update_fields=["read_at"])
+
+        client.force_login(user_doctor)
+        session = client.session
+        session["active_role"] = "doctor"
+        session.save()
+
+        response = client.get(reverse("notifications_unread_count"))
+        assert response.status_code == 200
+        data = response.json()
+        assert data == {"unread_count": 0}
+
+    def test_unread_count_response_contains_no_phi_or_notification_list(
+        self, db: Any, client: Any, case_factory: Any, user: Any, user_doctor: Any
+    ) -> None:
+        """Resposta contém apenas unread_count ou campos técnicos mínimos."""
+        from apps.cases.services import post_case_communication_message
+
+        case = case_factory(user)
+        post_case_communication_message(case=case, author=user, author_role="nir", body="@doctor test")
+
+        client.force_login(user_doctor)
+        session = client.session
+        session["active_role"] = "doctor"
+        session.save()
+
+        response = client.get(reverse("notifications_unread_count"))
+        assert response.status_code == 200
+        data = response.json()
+        allowed_keys = {"unread_count"}
+        assert set(data.keys()) == allowed_keys, (
+            f"Resposta contém chaves não permitidas: {set(data.keys()) - allowed_keys}"
+        )
+
+
+class TestNotificationBadgeTemplate:
+    """Tests for notification badge attributes and JS loading in base.html."""
+
+    def test_base_template_exposes_notification_badge_polling_url(self, db: Any, client: Any, user_doctor: Any) -> None:
+        """Render de página autenticada contém data-notifications-badge e data-unread-count-url."""
+        client.force_login(user_doctor)
+        session = client.session
+        session["active_role"] = "doctor"
+        session.save()
+
+        response = client.get(reverse("notifications"))
+        assert response.status_code == 200
+        content = response.content.decode()
+        assert "data-notifications-badge" in content
+        assert "data-unread-count-url" in content
+        assert reverse("notifications_unread_count") in content
+
+    def test_notifications_js_is_loaded_for_authenticated_header(self, db: Any, client: Any, user_doctor: Any) -> None:
+        """base.html inclui static/js/notifications.js."""
+        client.force_login(user_doctor)
+        session = client.session
+        session["active_role"] = "doctor"
+        session.save()
+
+        response = client.get(reverse("notifications"))
+        assert response.status_code == 200
+        content = response.content.decode()
+        assert "notifications.js" in content
+        assert "static/js/notifications.js" in content or "/static/js/notifications.js" in content
+
+
+class TestNotificationJsHardening:
+    """Tests for Vanilla JS hardening in static/js/notifications.js."""
+
+    JS_PATH = Path(settings.BASE_DIR) / "static" / "js" / "notifications.js"
+
+    def test_notifications_js_file_exists(self) -> None:
+        """O arquivo notifications.js deve existir."""
+        assert self.JS_PATH.exists(), f"Arquivo não encontrado: {self.JS_PATH}"
+
+    def test_notifications_js_uses_fetch_and_visibility_state(self) -> None:
+        """Arquivo JS contém fetch e document.visibilityState."""
+        js_content = self.JS_PATH.read_text()
+        assert "fetch" in js_content
+        assert "document.visibilityState" in js_content or "visibilityState" in js_content
+
+    def test_notifications_js_does_not_use_htmx_websocket_or_sse(self) -> None:
+        """JS não contém hx-get, hx-trigger, WebSocket, EventSource."""
+        js_content = self.JS_PATH.read_text()
+        assert "hx-get" not in js_content
+        assert "hx-trigger" not in js_content
+        assert "WebSocket" not in js_content
+        assert "EventSource" not in js_content
+
+    def test_notifications_polling_does_not_target_case_thread(self) -> None:
+        """JS não referencia case-communication, communication_thread, ou endpoint de mensagens."""
+        js_content = self.JS_PATH.read_text()
+        assert "case-communication" not in js_content.lower()
+        assert "communication_thread" not in js_content.lower()
+        # Não deve conter endpoints de caso
+        assert "/cases/" not in js_content or "unread-count" in js_content
