@@ -192,6 +192,24 @@ Motivos:
 
 Apenas eventos novos, criados após a implementação, geram mensagens sistêmicas.
 
+### D10. Formatador de `POST_SCHEDULE_ISSUE_RESPONDED` e projeção pura do payload
+
+O formatador `_format_post_schedule_issue_responded` consome apenas o payload
+do evento (`{action, response_message}`) e **não consulta campos estruturados do `Case`**
+(`appointment_at`, `appointment_location`, etc.), mesmo para `action=reschedule`.
+
+Motivo: o formatador é uma projeção legível do `CaseEvent`. Consultar o `Case`
+injetaria acoplamento de leitura na camada de formatação de evento, e a fonte de
+verdade para a nova data/hora continua sendo `case.appointment_at` (campo
+estrutural) e o próprio `CaseEvent`. Duplicar a nova data na mensagem sistêmica
+aumentaria o risco de inconsistência entre thread e dados estruturados.
+
+Trade-off aceito no MVP: a thread não mostra inline a nova data/hora do
+reagendamento; ela permanece acessível nos campos estruturais do caso e na
+timeline. Se houver demanda futura, enriquecer o payload do evento
+`POST_SCHEDULE_ISSUE_RESPONDED` com a nova data mantém o formatador como
+projeção pura do payload, sem acoplar leitura de modelo.
+
 ## Arquivos previstos
 
 ### Slice 001
