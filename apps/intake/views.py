@@ -15,7 +15,9 @@ from django.views.decorators.clickjacking import xframe_options_sameorigin
 from apps.accounts.decorators import role_required
 from apps.cases.models import Case, CaseAttachment, CaseStatus
 from apps.cases.services import (
+    CASE_COMMUNICATION_MAX_LENGTH,
     ELIGIBLE_SUPPLEMENTAL_STATUSES,
+    CaseCommunicationError,
     acknowledge_post_schedule_issue,
     add_supplemental_case_attachment,
     assert_case_lock,
@@ -23,6 +25,7 @@ from apps.cases.services import (
     compute_lock_display,
     expire_stale_locks_for_statuses,
     get_post_schedule_issue_reason_label,
+    post_case_communication_message,
     suppress_case_attachment,
 )
 from apps.cases.services import (
@@ -149,6 +152,8 @@ EVENT_LABELS: dict[str, str] = {
     # ── Reenvio corrigido ─────────────────────────────────────
     "CASE_CORRECTION_CREATED": "Reenvio corrigido criado",
     "CASE_MARKED_SUPERSEDED": "Caso corrigido por novo envio",
+    # ── Comunicação operacional ───────────────────────────────
+    "CASE_COMMUNICATION_MESSAGE_POSTED": "Mensagem operacional registrada",
 }
 
 # Cores do dot da timeline por event_type
@@ -210,6 +215,8 @@ EVENT_DOT_CSS: dict[str, str] = {
     # ── Reenvio corrigido ─────────────────────────────────────
     "CASE_CORRECTION_CREATED": "nir",
     "CASE_MARKED_SUPERSEDED": "system",
+    # ── Comunicação operacional ───────────────────────────────
+    "CASE_COMMUNICATION_MESSAGE_POSTED": "system",
 }
 
 # Etapas do stepper
@@ -621,6 +628,12 @@ def case_detail(request: HttpRequest, case_id: uuid.UUID) -> HttpResponse:
             "supplemental_lock_blocked_by": supplemental_lock_blocked_by,
             "correction_context": correction_context,
             "corrected_by_cases": corrected_by_cases_list,
+            # ── Comunicação operacional ───────────────────────────────
+            "communication_messages": case.communication_messages.select_related("author").all(),
+            "can_post_communication": case.status != CaseStatus.CLEANED,
+            "communication_post_url": reverse("intake:post_case_communication", args=[case.case_id]),
+            "communication_next_url": request.get_full_path() + "#case-communication",
+            "communication_max_length": CASE_COMMUNICATION_MAX_LENGTH,
         },
     )
 
@@ -775,6 +788,50 @@ def add_supplemental_attachment(
         messages.success(request, msg)
 
     return redirect("intake:case_detail", case_id=case.case_id)
+
+
+@login_required
+def post_case_communication(request: HttpRequest, case_id: uuid.UUID) -> HttpResponse:
+    """POST: Cria uma mensagem de comunicação operacional no caso.
+
+    Valida active_role da sessão, chama o serviço de domínio e
+    redireciona para next seguro ou fallback.
+    """
+    if request.method != "POST":
+        return redirect("intake:case_detail", case_id=case_id)
+
+    case = get_object_or_404(Case, case_id=case_id)
+    active_role = request.session.get("active_role", "")
+    body = request.POST.get("body", "")
+
+    try:
+        post_case_communication_message(
+            case=case,
+            author=request.user,
+            author_role=active_role,
+            body=body,
+        )
+        messages.success(request, "Mensagem enviada com sucesso.")
+    except CaseCommunicationError as exc:
+        messages.warning(request, str(exc))
+    except Exception:
+        logger.exception("Erro inesperado ao postar mensagem de comunicação.")
+        messages.warning(request, "Erro inesperado ao enviar mensagem. Tente novamente.")
+
+    # Redirect seguro
+    next_url = request.POST.get("next", "")
+    if next_url and not _is_safe_redirect(next_url):
+        next_url = ""
+    if not next_url:
+        next_url = reverse("intake:case_detail", args=[case.case_id])
+    return redirect(next_url)
+
+
+def _is_safe_redirect(url: str) -> bool:
+    """Verifica se a URL de redirect é segura (mesmo host)."""
+    from django.utils.http import url_has_allowed_host_and_scheme
+
+    return url_has_allowed_host_and_scheme(url, allowed_hosts=None)
 
 
 @login_required

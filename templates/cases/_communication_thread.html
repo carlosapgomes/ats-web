@@ -1,0 +1,52 @@
+{% comment %}
+Partial reutilizável: thread de comunicação operacional por caso.
+
+Contexto esperado:
+  communication_messages   — QuerySet de CaseCommunicationMessage (select_related "author")
+  can_post_communication   — bool
+  communication_post_url   — str
+  communication_next_url  — str
+  communication_max_length — int
+{% endcomment %}
+<div class="card p-4 mb-4" id="case-communication">
+  <h5 class="mb-2">💬 Comunicação operacional</h5>
+  <div class="alert alert-info small mb-3 py-2">
+    Use este espaço para esclarecimentos e coordenação sobre este caso.
+    Decisões formais, agendamento e encerramento continuam nos fluxos estruturados.
+  </div>
+
+  {% if communication_messages %}
+    <div class="communication-thread mb-3">
+      {% for msg in communication_messages %}
+      <div class="communication-message mb-3 pb-3 border-bottom">
+        <div class="d-flex justify-content-between align-items-center mb-1">
+          <span class="fw-semibold small">
+            {{ msg.author.get_full_name|default:msg.author.username }}
+            <span class="badge bg-secondary ms-1">{{ msg.author_role|upper }}</span>
+          </span>
+          <span class="text-muted small">{{ msg.created_at|date:"d/m/Y H:i" }}</span>
+        </div>
+        <p class="mb-0" style="white-space: pre-wrap;">{{ msg.body }}</p>
+      </div>
+      {% endfor %}
+    </div>
+  {% else %}
+    <p class="text-muted mb-3">Nenhuma mensagem operacional registrada neste caso.</p>
+  {% endif %}
+
+  {% if can_post_communication %}
+  <form method="post" action="{{ communication_post_url }}">
+    {% csrf_token %}
+    <div class="mb-2">
+      <textarea name="body" class="form-control" rows="3"
+                placeholder="Escreva uma mensagem operacional sobre este caso..."
+                maxlength="{{ communication_max_length }}" required></textarea>
+      <div class="form-text">Máximo de {{ communication_max_length }} caracteres.</div>
+    </div>
+    <input type="hidden" name="next" value="{{ communication_next_url }}">
+    <button type="submit" class="btn btn-hospital">Enviar mensagem</button>
+  </form>
+  {% else %}
+  <p class="text-muted small mb-0">Não é possível enviar mensagens neste caso.</p>
+  {% endif %}
+</div>

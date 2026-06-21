@@ -28,4 +28,5 @@ urlpatterns = [
     # Post-schedule intercurrence
     path("closed-cases/", views.closed_cases_search, name="closed_cases_search"),
     path("closed-cases/<uuid:case_id>/issue/", views.post_schedule_issue_open, name="post_schedule_issue_open"),
+    path("<uuid:case_id>/communication/", views.post_case_communication, name="post_case_communication"),
 ]
