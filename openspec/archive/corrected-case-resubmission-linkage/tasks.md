@@ -5,6 +5,22 @@
 - [x] Slice 001 — Fluxo NIR de reenvio corrigido explícito (`slices/slice-001-explicit-corrected-resubmission-flow.md`)
 - [x] Slice 002 — Visibilidade NIR/médico da relação entre casos (`slices/slice-002-correction-relationship-visibility.md`)
 
+## Status final do change
+
+Change **concluído e arquivado**. Todos os itens da Definition of Done abaixo marcados. Commits em `main`:
+
+- `05084cc` — Slice 001 (fluxo NIR explícito + migration + service + view/template + eventos + 13 testes)
+- `0b69b82` — Quick fix: validação do checkbox de confirmação no backend (fonte de verdade)
+- `67edea9` — Slice 002 (cards NIR, card médico, badge na busca de encerrados, deduplicação R7 + 10 testes)
+- `8d138f7` — Quick fix: teste R7 genuíno (mesmo `agency_record_number`, exercita `hide_prior_case_card`) + remoção de `original_status_label` inerte no contexto médico
+- `40953e7` / `5282cae` / `f4c1aec` — Runbook de deploy (`docs/deploy/corrected-case-resubmission-linkage.md`), com modelo de 2 atores para `/archive/backups` e Quick reference
+
+### Hardening pós-slices
+
+- **Backend como fonte de verdade do checkbox de confirmação** (R5/R6 do Slice 001): a view rejeita POST sem `confirmation`, sem depender apenas do `required` HTML5.
+- **Teste de deduplicação R7 robusto**: o teste original era falso-positivo (usava `agency_record_number` distintos, então o prior-case lookup não encontrava o original e o card genérico sumia pela guarda do template, não pela lógica `hide_prior_case_card`). Corrigido para usar o mesmo número, exercitando de fato a deduplicação — verificado com RED sanity check (quebra da lógica faz o teste falhar).
+- **Limpeza**: removida a chave inerte `original_status_label: ""` do `correction_context` da view médica (nunca renderizada em `decision.html`); a view NIR mantém a sua versão preenchida, pois `case_detail.html` a usa.
+
 ## Definition of Done do change
 
 - [x] `Case` possui relação opcional para caso anterior corrigido (`corrects_case`).
