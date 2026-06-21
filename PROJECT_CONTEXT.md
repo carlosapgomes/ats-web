@@ -105,7 +105,7 @@ static/          # css/app.css (paleta hospitalar), js/upload.js, js/password-to
 
 - **User** (AbstractUser): multi-role via M2M(Role), `account_status`, papel ativo na sessao
 - **Role**: nir, doctor, scheduler, manager, admin
-- **Case**: FSM 17 estados, 30+ campos (PDF, LLM artifacts, decisao medica, agendamento)
+- **Case**: FSM 17 estados, 30+ campos (PDF, LLM artifacts, decisao medica, agendamento). Vínculo opcional de reenvio corrigido: `corrects_case` (self-FK) + `correction_reason`/`correction_created_by`/`correction_created_at`.
 - **CaseEvent**: auditoria append-only (~40 tipos de evento)
 - **PromptTemplate**: versionado, apenas 1 ativo por nome
 
@@ -140,6 +140,13 @@ static/          # css/app.css (paleta hospitalar), js/upload.js, js/password-to
   com link de reset; a URL base é pública (`PUBLIC_APP_BASE_URL`) quando o usuário tem qualquer papel
   `doctor`/`manager`/`admin`, e interna (`INTERNAL_APP_BASE_URL`) quando só tem `nir`/`scheduler`.
   Envio síncrono; falha SMTP não apaga o usuário criado.
+- **Reenvio corrigido explícito**: o NIR pode partir de um caso anterior e criar um novo `Case` vinculado
+  via `corrects_case`, com motivo obrigatório. O novo caso NÃO herda PDF, anexos, eventos, decisões ou
+  dados extraídos do anterior; o anterior não é reaberto nem muda de status. Eventos
+  `CASE_CORRECTION_CREATED` (novo) e `CASE_MARKED_SUPERSEDED` (original) registram a relação. Visível
+  para NIR (cards no detalhe + badge na busca de encerrados) e médico (card na decisão com motivo do
+  NIR + aviso de não-herança de documentos). Quando o vínculo explícito aponta para o mesmo caso do
+  prior-case lookup, o card genérico é suprimido para evitar duplicidade visual.
 
 ## State do Sistema
 
@@ -156,10 +163,11 @@ static/          # css/app.css (paleta hospitalar), js/upload.js, js/password-to
   - `openspec/archive/release-lock-on-successful-handoff/` (1 slice)
   - `openspec/archive/case-attachments-initial-upload/` (4 slices — anexos clínicos PDF/JPEG/PNG no upload NIR, supressão auditável e anexos complementares antes da decisão médica). Limitação aceita L1: lote de anexos complementares sem atomicidade transacional de batch — ver `design.md`.
   - `openspec/archive/fix-prior-case-lookup-after-closure/` (1 slice — correção de bug: prior-case lookup agora usa campos estáveis de decisão `doctor_decision`/`appointment_status` + `*_decided_at`, não status FSM transitório; negativas recentes continuam encontradas mesmo após o caso avançar para `CLEANED`)
+  - `openspec/archive/corrected-case-resubmission-linkage/` (2 slices — fluxo NIR de reenvio corrigido explícito: novo `Case` vinculado via `corrects_case` + motivo obrigatório, sem herdar/reabrir o anterior; eventos `CASE_CORRECTION_CREATED`/`CASE_MARKED_SUPERSEDED`; visibilidade NIR e médico com deduplicação vs. prior-case lookup). Deploy runbook em `docs/deploy/corrected-case-resubmission-linkage.md`.
 - **Change merged em main (não arquivado)**: `transactional-emails-auth-flows` (Slices 000–003 concluídos e validados em produção; Slice 004 hardening será implementado direto em main)
 - **Apps criados**: `apps/accounts/`, `apps/cases/`, `apps/llm/`, `apps/intake/`, `apps/pipeline/`,
   `apps/doctor/`, `apps/scheduler/`, `apps/dashboard/`, `apps/admin_ui/`
-- **Testes**: 1339 passando, quality gate verde (ruff + mypy + pytest)
+- **Testes**: 1363 passando, quality gate verde (ruff + mypy + pytest)
 - **Templates**: base.html com tema hospitalar, login, switch-role, perfil, password reset/change,
   intake (home, my_cases, case_detail), doctor (queue, decision)
 - **Documentacao de dominio**: `docs/DOMAIN_ANALYSIS.md`
