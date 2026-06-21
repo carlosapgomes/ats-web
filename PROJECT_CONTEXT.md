@@ -108,6 +108,7 @@ static/          # css/app.css (paleta hospitalar), js/upload.js, js/password-to
 - **Case**: FSM 17 estados, 30+ campos (PDF, LLM artifacts, decisao medica, agendamento). Vínculo opcional de reenvio corrigido: `corrects_case` (self-FK) + `correction_reason`/`correction_created_by`/`correction_created_at`.
 - **CaseEvent**: auditoria append-only (~40 tipos de evento)
 - **CaseCommunicationMessage**: thread operacional append-only vinculada a um `Case` (comunicação entre NIR/médico/scheduler para esclarecimentos; NÃO substitui decisão/agendamento/eventos estruturados)
+- **UserNotification**: notificação in-app user-scoped criada por menções explícitas (`@role`/`@username`) em `CaseCommunicationMessage`; badge SSR + inbox “Minhas notificações” + polling Vanilla JS do badge
 - **PromptTemplate**: versionado, apenas 1 ativo por nome
 
 ## Regras Nao Negociaveis
@@ -156,8 +157,13 @@ static/          # css/app.css (paleta hospitalar), js/upload.js, js/password-to
   `_communication_thread.html` reutilizado em 4 telas. Cada post gera evento auditável
   `CASE_COMMUNICATION_MESSAGE_POSTED` (payload enxuto com `message_id`/`author_role`/`body_preview`).
   NÃO substitui decisão médica, motivo de negativa, observação de decisão, agendamento, intercorrência
-  estruturada, supressão de anexo nem reenvio corrigido. Sem notificações/polling/HTMX/WebSocket neste
-  MVP (futuro: `case-communication-mentions-notifications`).
+  estruturada, supressão de anexo nem reenvio corrigido. **Menções explícitas** (`@nir`/`@doctor`/`@scheduler`/`@manager`/`@admin` e `@username` ativo) criam
+  `UserNotification` para destinatários elegíveis (exclui autor, deduplica, ignora inativos/blocked);
+  payload do evento `CASE_COMMUNICATION_MESSAGE_POSTED` inclui `mentioned_roles`/`mentioned_usernames`/`notification_count`.
+  Badge SSR no header via `get_unread_notification_count()` (helper único/DRY) + endpoint `GET /notifications/unread-count/`
+  (`@require_GET`) + polling Vanilla JS (`static/js/notifications.js`, 45s, respeita `document.visibilityState`,
+  backoff em erro). Página “Minhas notificações” com abrir/marcar lida/marcar todas + redirect seguro por papel/status.
+  Sem autocomplete, aliases avançados, marcação AJAX, push/SMS/email operacional, WebSocket/SSE ou polling da thread.
 
 ## State do Sistema
 
@@ -176,10 +182,11 @@ static/          # css/app.css (paleta hospitalar), js/upload.js, js/password-to
   - `openspec/archive/fix-prior-case-lookup-after-closure/` (1 slice — correção de bug: prior-case lookup agora usa campos estáveis de decisão `doctor_decision`/`appointment_status` + `*_decided_at`, não status FSM transitório; negativas recentes continuam encontradas mesmo após o caso avançar para `CLEANED`)
   - `openspec/archive/corrected-case-resubmission-linkage/` (2 slices — fluxo NIR de reenvio corrigido explícito: novo `Case` vinculado via `corrects_case` + motivo obrigatório, sem herdar/reabrir o anterior; eventos `CASE_CORRECTION_CREATED`/`CASE_MARKED_SUPERSEDED`; visibilidade NIR e médico com deduplicação vs. prior-case lookup). Deploy runbook em `docs/deploy/corrected-case-resubmission-linkage.md`.
   - `openspec/archive/case-operational-communication-mvp/` (2 slices — thread operacional append-only por caso `CaseCommunicationMessage` para esclarecimentos entre NIR/médico/scheduler; serviço `post_case_communication_message` com validações + endpoint POST `/cases/<id>/communication/` com redirect seguro + partial reutilizado em 4 telas + evento auditável `CASE_COMMUNICATION_MESSAGE_POSTED`. Sem notificações/polling/HTMX/WebSocket; FSM inalterada).
+  - `openspec/archive/case-communication-mentions-notifications/` (2 slices + 2 hardening pós-revisão — menções `@role`/`@username` em `CaseCommunicationMessage` criam `UserNotification` (UUID PK, indexes, unique constraint); parser + `create_case_communication_notifications` (exclui autor, deduplica, ignora inativos/blocked) + badge SSR via helper DRY `get_unread_notification_count()` + inbox “Minhas notificações” com redirect seguro por papel/status + endpoint `GET /notifications/unread-count/` (`@require_GET`) + polling Vanilla JS (`fetch()`, 45s, `document.visibilityState`, backoff). Sem autocomplete/aliases/push/SMS/email/WebSocket/SSE/marcação AJAX/polling de thread).
 - **Change merged em main (não arquivado)**: `transactional-emails-auth-flows` (Slices 000–003 concluídos e validados em produção; Slice 004 hardening será implementado direto em main)
 - **Apps criados**: `apps/accounts/`, `apps/cases/`, `apps/llm/`, `apps/intake/`, `apps/pipeline/`,
   `apps/doctor/`, `apps/scheduler/`, `apps/dashboard/`, `apps/admin_ui/`
-- **Testes**: 1395 passando, quality gate verde (ruff + mypy + pytest)
+- **Testes**: 1442 passando, quality gate verde (ruff + mypy + pytest)
 - **Templates**: base.html com tema hospitalar, login, switch-role, perfil, password reset/change,
   intake (home, my_cases, case_detail), doctor (queue, decision)
 - **Documentacao de dominio**: `docs/DOMAIN_ANALYSIS.md`
