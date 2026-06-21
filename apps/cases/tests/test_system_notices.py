@@ -530,10 +530,27 @@ class TestPostScheduleIssueSystemNotices:
         assert msg is not None
         assert "Cancelado" in msg.body or "cancelado" in msg.body.lower()
 
+    @pytest.mark.parametrize(
+        "action, expected_label, appointment_at",
+        [
+            ("cancel", "Cancelado", None),
+            ("reschedule", "Reagendado", "2026-08-01T14:00:00Z"),
+            ("maintain", "Mantido", None),
+            ("deny", "Solicitação negada", None),
+        ],
+    )
     def test_post_schedule_issue_responded_notice_includes_action_details(
-        self, user, case_factory, advance_to, _cleaned_and_eligible, _nir_user
+        self,
+        user,
+        case_factory,
+        advance_to,
+        _cleaned_and_eligible,
+        _nir_user,
+        action,
+        expected_label,
+        appointment_at,
     ):
-        """Mensagem sistêmica de resposta inclui ação e detalhes."""
+        """Cada ação do scheduler gera label amigável correta na mensagem sistêmica."""
         from apps.cases.models import CaseCommunicationMessage
         from apps.cases.services import open_post_schedule_issue, respond_post_schedule_issue
 
@@ -543,13 +560,12 @@ class TestPostScheduleIssueSystemNotices:
             reason="death",
         )
 
-        # Testar reschedule com nova data
         case2 = respond_post_schedule_issue(
             case=case,
             user=user,
-            action="reschedule",
-            appointment_at="2026-08-01T14:00:00Z",
-            appointment_location="Hospital Central - Sala 3",
+            action=action,
+            appointment_at=appointment_at,
+            appointment_location="Hospital Central - Sala 3" if appointment_at else "",
         )
 
         msg = (
@@ -558,7 +574,7 @@ class TestPostScheduleIssueSystemNotices:
             .first()
         )
         assert msg is not None
-        assert "Reagendado" in msg.body
+        assert expected_label in msg.body
 
     def test_post_schedule_issue_acknowledged_notice_behavior_is_documented(
         self, user, case_factory, advance_to, _cleaned_and_eligible, _nir_user
