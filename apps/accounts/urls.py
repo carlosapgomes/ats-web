@@ -17,6 +17,23 @@ urlpatterns = [
     path("login/", views.login_view, name="login"),
     path("logout/", views.logout_view, name="logout"),
     path("switch-role/", views.switch_role_view, name="switch_role"),
+    # Notifications
+    path("notifications/", views.notifications_list, name="notifications"),
+    path(
+        "notifications/<uuid:notification_id>/open/",
+        views.notification_open,
+        name="notification_open",
+    ),
+    path(
+        "notifications/<uuid:notification_id>/read/",
+        views.notification_mark_read,
+        name="notification_mark_read",
+    ),
+    path(
+        "notifications/mark-all-read/",
+        views.notifications_mark_all_read,
+        name="notifications_mark_all_read",
+    ),
     # Profile and password change
     path("profile/", profile_view, name="profile"),
     path(

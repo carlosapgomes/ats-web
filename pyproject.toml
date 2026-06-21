@@ -54,7 +54,7 @@ disable_error_code = ["no-untyped-def"]
 
 [[tool.mypy.overrides]]
 module = "apps.accounts.tests.*"
-disable_error_code = ["no-untyped-def", "no-untyped-call", "assignment"]
+disable_error_code = ["no-untyped-def", "no-untyped-call", "assignment", "valid-type"]
 
 [[tool.mypy.overrides]]
 module = "apps.cases.tests.*"

@@ -57,6 +57,7 @@ TEMPLATES = [
                 "apps.accounts.context_processors.role_context",
                 "apps.accounts.context_processors.queue_counts",
                 "apps.accounts.context_processors.app_display_name",
+                "apps.accounts.context_processors.notification_unread_count",
             ],
         },
     },
