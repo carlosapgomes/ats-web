@@ -80,16 +80,22 @@
                 </span>
               </div>
               <div class="col-md-4 text-md-end mt-2 mt-md-0">
+                {% if item.corrected_by_count > 0 %}
+                  <span class="badge bg-info text-dark me-2 mb-1">↻ Corrigido por novo envio</span>
+                {% endif %}
+                <a href="{% url 'intake:corrected_resubmission' item.case.case_id %}" class="btn btn-sm btn-outline-warning me-2 mb-1">
+                  ↻ Reenviar caso corrigido
+                </a>
                 {% if item.issue_status == "opened" %}
-                  <span class="badge bg-warning text-dark me-2">🔔 Intercorrência em avaliação</span>
+                  <span class="badge bg-warning text-dark me-2 mb-1">🔔 Intercorrência em avaliação</span>
                 {% elif item.issue_status == "responded" %}
-                  <span class="badge bg-info text-dark me-2">↻ Intercorrência respondida</span>
+                  <span class="badge bg-info text-dark me-2 mb-1">↻ Intercorrência respondida</span>
                 {% elif item.eligible %}
-                  <a href="{% url 'intake:post_schedule_issue_open' item.case.case_id %}" class="btn btn-sm btn-hospital">
+                  <a href="{% url 'intake:post_schedule_issue_open' item.case.case_id %}" class="btn btn-sm btn-hospital mb-1">
                     Registrar intercorrência
                   </a>
                 {% else %}
-                  <span class="text-muted small d-block">
+                  <span class="text-muted small d-block mb-1">
                     {{ item.ineligibility_reason }}
                   </span>
                 {% endif %}

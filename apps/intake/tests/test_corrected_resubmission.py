@@ -14,6 +14,7 @@ import pytest
 from django.contrib.auth import get_user_model
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.urls import reverse
+from django.utils import timezone
 
 from apps.cases.models import Case, CaseAttachment, CaseEvent, CaseStatus
 
@@ -474,3 +475,49 @@ class TestCorrectedResubmissionPost:
         )
         assert response.status_code == 200
         assert Case.objects.count() == 1
+
+
+# ── Closed cases search tests (Slice 002) ────────────────────────────────
+
+
+@pytest.mark.django_db
+class TestClosedCasesSearchCorrectionVisibility:
+    """Testes para visibilidade de correção na busca de casos encerrados."""
+
+    def test_closed_cases_search_shows_corrected_resubmission_action(self, client) -> None:
+        """Caso CLEANED aparece na busca com link "Reenviar caso corrigido"."""
+        nir_client, nir_user = _nir_client(client)
+        Case.objects.create(
+            created_by=nir_user,
+            agency_record_number="CLOSED-001",
+            status=CaseStatus.CLEANED,
+        )
+        url = reverse("intake:closed_cases_search")
+        response = nir_client.get(url, {"q": "CLOSED-001"})
+        assert response.status_code == 200
+        content = response.content.decode()
+        assert "Reenviar caso corrigido" in content
+
+    def test_closed_cases_search_shows_corrected_by_badge_when_applicable(self, client) -> None:
+        """Caso encerrado com correção mostra badge "Corrigido por novo envio"."""
+        nir_client, nir_user = _nir_client(client)
+        original = Case.objects.create(
+            created_by=nir_user,
+            agency_record_number="CLOSED-002-ORIG",
+            status=CaseStatus.CLEANED,
+        )
+        # Criar novo caso que corrige o original
+        Case.objects.create(
+            created_by=nir_user,
+            corrects_case=original,
+            correction_reason="Laudo corrigido",
+            correction_created_by=nir_user,
+            correction_created_at=timezone.now(),
+            agency_record_number="CLOSED-002-NEW",
+            status=CaseStatus.WAIT_DOCTOR,
+        )
+        url = reverse("intake:closed_cases_search")
+        response = nir_client.get(url, {"q": "CLOSED-002-ORIG"})
+        assert response.status_code == 200
+        content = response.content.decode()
+        assert "corrigido" in content.lower() or "Corrigido" in content

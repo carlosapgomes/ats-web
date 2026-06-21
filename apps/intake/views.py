@@ -549,6 +549,43 @@ def case_detail(request: HttpRequest, case_id: uuid.UUID) -> HttpResponse:
         and case.status in ELIGIBLE_SUPPLEMENTAL_STATUSES
     )
 
+    # ── Correction context (R1: corrects_case card) ──────────────
+    correction_context = None
+    if case.corrects_case_id:
+        try:
+            original = Case.objects.get(pk=case.corrects_case_id)
+            correction_context = {
+                "type": "corrects_case",
+                "original_case_id": str(original.case_id),
+                "original_agency_record_number": original.agency_record_number or str(original.case_id)[:8],
+                "original_short_id": str(original.case_id)[:8],
+                "original_patient_name": original.patient_name,
+                "original_created_at": original.created_at,
+                "original_status": original.status,
+                "original_status_label": STATUS_LABELS.get(original.status, original.get_status_display()),
+                "correction_reason": case.correction_reason,
+                "correction_created_by": case.correction_created_by.get_full_name()
+                if case.correction_created_by
+                else "",
+                "correction_created_at": case.correction_created_at,
+            }
+        except Case.DoesNotExist:
+            pass
+
+    # ── Correction context (R2: corrected_by_cases card) ───────────
+    corrected_by_cases_list: list[dict[str, object]] = []
+    if hasattr(case, "corrected_by_cases"):
+        corrected_qs = case.corrected_by_cases.all().order_by("-correction_created_at", "-created_at")
+        corrected_by_cases_list = [
+            {
+                "case_id": str(c.case_id),
+                "short_id": str(c.case_id)[:8],
+                "agency_record_number": c.agency_record_number or "",
+                "correction_created_at": c.correction_created_at or c.created_at,
+            }
+            for c in corrected_qs
+        ]
+
     # Nome do paciente
     patient_name = ""
     if case.structured_data and isinstance(case.structured_data, dict):
@@ -582,6 +619,8 @@ def case_detail(request: HttpRequest, case_id: uuid.UUID) -> HttpResponse:
             "attachments": active_attachments,
             "can_add_supplemental": can_add_supplemental,
             "supplemental_lock_blocked_by": supplemental_lock_blocked_by,
+            "correction_context": correction_context,
+            "corrected_by_cases": corrected_by_cases_list,
         },
     )
 
@@ -1032,6 +1071,10 @@ def closed_cases_search(request: HttpRequest) -> HttpResponse:
 
         for c in qs:
             eligible = is_post_schedule_issue_eligible(c)
+            # Check if this case has corrected_by_cases (R3)
+            corrected_by_count = 0
+            if hasattr(c, "corrected_by_cases"):
+                corrected_by_count = c.corrected_by_cases.count()
             results.append(
                 {
                     "case": c,
@@ -1042,6 +1085,7 @@ def closed_cases_search(request: HttpRequest) -> HttpResponse:
                     "patient_name": c.patient_name,
                     "has_active_issue": bool(c.post_schedule_issue_status),
                     "issue_status": c.post_schedule_issue_status or "",
+                    "corrected_by_count": corrected_by_count,
                 }
             )
 

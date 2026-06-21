@@ -273,6 +273,49 @@
 </div>
 {% endif %}
 
+<!-- Correction: corrects_case card (R1) -->
+{% if correction_context %}
+<div class="card p-4 mb-4 border-warning">
+  <h5 class="mb-3">↻ Reenvio corrigido</h5>
+  <div class="row g-3">
+    <div class="col-md-6">
+      <p class="mb-1 text-muted small">Caso anterior</p>
+      <p class="mb-0 fw-medium">{{ correction_context.original_agency_record_number }}</p>
+    </div>
+    <div class="col-md-6">
+      <p class="mb-1 text-muted small">Status do caso anterior</p>
+      <p class="mb-0">{{ correction_context.original_status_label }}</p>
+    </div>
+  </div>
+  <div class="row g-3 mt-2">
+    <div class="col-md-6">
+      <p class="mb-1 text-muted small">Motivo do reenvio</p>
+      <p class="mb-0 fw-medium">{{ correction_context.correction_reason }}</p>
+    </div>
+    <div class="col-md-6">
+      <p class="mb-1 text-muted small">Criado por / em</p>
+      <p class="mb-0">{{ correction_context.correction_created_by }} — {{ correction_context.correction_created_at|date:"d/m/Y H:i" }}</p>
+    </div>
+  </div>
+  <div class="alert alert-warning mt-3 mb-0 small">
+    <strong>⚠ Atenção:</strong> Documentos e anexos do caso anterior não foram herdados.
+  </div>
+</div>
+{% endif %}
+
+<!-- Correction: corrected_by_cases card (R2) -->
+{% if corrected_by_cases %}
+<div class="card p-4 mb-4 border-info">
+  <h5 class="mb-3">↻ Caso corrigido por novo envio</h5>
+  <p class="mb-2">Este caso foi corrigido pelo(s) caso(s):</p>
+  <ul class="mb-0">
+    {% for cbc in corrected_by_cases %}
+    <li>{{ cbc.agency_record_number|default:cbc.short_id }} ({{ cbc.correction_created_at|date:"d/m/Y H:i" }})</li>
+    {% endfor %}
+  </ul>
+</div>
+{% endif %}
+
 {% if case.has_doctor_observation %}
 <div class="card p-4 mb-4 border-info">
   <h5 class="mb-3">📝 Observação Médica</h5>

@@ -288,6 +288,37 @@ def _build_decision_context(case: Case, form: DoctorDecisionForm) -> dict[str, A
     """Build context dict for the decision template."""
     from apps.pipeline.prior_case import lookup_prior_case_context
 
+    # ── Correction context (R5) ──────────────────────────────────────
+    correction_context: dict[str, object] | None = None
+    if case.corrects_case_id:
+        try:
+            original: Case = Case.objects.get(pk=case.corrects_case_id)
+            correction_context = {
+                "original_case_id": str(original.case_id),
+                "original_case_short_id": str(original.case_id)[:8],
+                "original_agency_record_number": original.agency_record_number or "",
+                "original_patient_name": original.patient_name,
+                "original_created_at": original.created_at,
+                "original_status_label": "",
+                "correction_reason": case.correction_reason,
+                "correction_created_by": case.correction_created_by.get_full_name()
+                if case.correction_created_by
+                else "",
+                "correction_created_at": case.correction_created_at,
+                # Doctor decision summary from original case
+                "doctor_decision": original.doctor_decision or "",
+                "doctor_decided_at": original.doctor_decided_at,
+                "doctor_display": original.doctor_display,
+                "doctor_reason": original.doctor_reason or "",
+                # Scheduler decision summary from original case
+                "appointment_status": original.appointment_status or "",
+                "appointment_decided_at": original.appointment_decided_at,
+                "scheduler_display": original.scheduler_display,
+                "appointment_reason": original.appointment_reason or "",
+            }
+        except Case.DoesNotExist:
+            pass
+
     prior_context = None
     prior_decision_display = ""
     recent_denial_ctx = None
@@ -316,6 +347,15 @@ def _build_decision_context(case: Case, form: DoctorDecisionForm) -> dict[str, A
     )
     report = presenter.build_report()
 
+    # ── Suppress duplicate prior-case card when same as correction (R7) ──
+    # If the case has an explicit correction and the prior case lookup
+    # found the same case, hide the generic prior-case card to avoid
+    # showing two redundant cards.
+    hide_prior_case_card = False
+    if correction_context and prior_context and prior_context.prior_case:
+        if str(prior_context.prior_case.prior_case_id) == str(correction_context["original_case_id"]):
+            hide_prior_case_card = True
+
     return {
         "case": case,
         "form": form,
@@ -332,6 +372,8 @@ def _build_decision_context(case: Case, form: DoctorDecisionForm) -> dict[str, A
         "prior_decision_display": prior_decision_display,
         "attachments": _get_active_attachments(case),
         "report": report,
+        "correction_context": correction_context,
+        "hide_prior_case_card": hide_prior_case_card,
     }
 
 
