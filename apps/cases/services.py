@@ -1206,9 +1206,6 @@ POST_SCHEDULE_ISSUE_ACTION_LABELS: dict[str, str] = {
 }
 
 
-FORMAT_ACTIONS_WITH_APPT: frozenset[str] = frozenset({"reschedule", "maintain"})
-
-
 def _format_post_schedule_issue_responded(payload: dict[str, object]) -> str:
     """Formata corpo para POST_SCHEDULE_ISSUE_RESPONDED."""
     action = str(payload.get("action", "") or "")
