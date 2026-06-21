@@ -1,0 +1,132 @@
+{% extends "base.html" %}
+{% load static %}
+
+{% block title %}Reenvio Corrigido — {{ original_case.agency_record_number|default:original_case.case_id|truncatechars:8 }}{% endblock %}
+
+{% block subtitle %}Novo encaminhamento corrigido a partir de caso anterior{% endblock %}
+
+{% block nav %}
+<nav class="app-nav mt-3" aria-label="Navegação">
+  <ul class="nav nav-pills gap-2">
+    <li class="nav-item">
+      <a class="nav-link" href="{% url 'intake:home' %}">Novo Encaminhamento</a>
+    </li>
+    <li class="nav-item">
+      <a class="nav-link" href="{% url 'intake:my_cases' %}">Meus Casos</a>
+    </li>
+  </ul>
+</nav>
+{% endblock %}
+
+{% block content %}
+
+<!-- Alerta informativo -->
+<div class="alert alert-warning d-flex align-items-start gap-3 mb-4" role="alert">
+  <div class="fs-4">↻</div>
+  <div>
+    <strong>Reenvio corrigido</strong><br>
+    Você está criando um <strong>novo caso</strong> a partir de um caso anterior.
+    O caso anterior <strong>não será alterado</strong> — seus documentos, anexos e decisões permanecem intactos.
+    O novo caso passará pelo pipeline normal de processamento e avaliação médica.
+  </div>
+</div>
+
+<!-- Card do caso anterior -->
+<div class="card p-4 mb-4 border-secondary">
+  <h5 class="mb-3">📋 Caso Anterior</h5>
+  <div class="row g-3">
+    <div class="col-md-4">
+      <p class="mb-1 text-muted small">Paciente</p>
+      <p class="mb-0 fw-medium">{{ patient_name|default:"—" }}</p>
+    </div>
+    <div class="col-md-4">
+      <p class="mb-1 text-muted small">Registro</p>
+      <p class="mb-0 fw-medium">{{ original_case.agency_record_number|default:"—" }}</p>
+    </div>
+    <div class="col-md-4">
+      <p class="mb-1 text-muted small">Status atual</p>
+      <p class="mb-0"><span class="status-badge {{ status_css }}">{{ status_label }}</span></p>
+    </div>
+  </div>
+  <div class="row g-3 mt-2">
+    <div class="col-md-6">
+      <p class="mb-1 text-muted small">Data de envio</p>
+      <p class="mb-0">{{ original_case.created_at|date:"d/m/Y H:i" }}</p>
+    </div>
+    <div class="col-md-6">
+      <p class="mb-1 text-muted small">Enviado por</p>
+      <p class="mb-0">{{ original_case.created_by.get_full_name|default:original_case.created_by.username }}</p>
+    </div>
+  </div>
+</div>
+
+<!-- Formulário de reenvio corrigido -->
+<div class="card p-4">
+  <h5 class="mb-3">📤 Novo Envio Corrigido</h5>
+
+  <form method="post" enctype="multipart/form-data">
+    {% csrf_token %}
+
+    <!-- Motivo -->
+    <div class="mb-4">
+      <label for="correction_reason" class="form-label fw-semibold">
+        Motivo do reenvio corrigido <span class="text-danger">*</span>
+      </label>
+      <textarea name="correction_reason" id="correction_reason"
+                class="form-control" rows="3"
+                placeholder="Descreva o motivo do reenvio corrigido (ex: relatório incompleto, anexo errado, documento faltante...)"
+                required></textarea>
+      <div class="form-text">
+        Este motivo ficará registrado em ambos os casos para auditoria.
+      </div>
+    </div>
+
+    <!-- Novo PDF principal -->
+    <div class="mb-4">
+      <label for="pdf_file" class="form-label fw-semibold">
+        Novo relatório principal (PDF) <span class="text-danger">*</span>
+      </label>
+      <input type="file" name="pdf_file" id="pdf_file"
+             class="form-control" accept=".pdf" required>
+      <div class="form-text">
+        Apenas PDF. O relatório anterior <strong>não</strong> será herdado.
+      </div>
+    </div>
+
+    <!-- Anexos opcionais -->
+    <div class="mb-4">
+      <label for="attachment_files" class="form-label fw-semibold">
+        Anexos do novo caso <span class="text-muted">(opcional)</span>
+      </label>
+      <input type="file" name="attachment_files" id="attachment_files"
+             class="form-control" accept=".pdf,.jpg,.jpeg,.png" multiple>
+      <div class="form-text">
+        Formatos aceitos: PDF, JPEG/JPG e PNG. Anexos do caso anterior <strong>não</strong> são herdados.
+      </div>
+    </div>
+
+    <!-- Confirmação -->
+    <div class="mb-4">
+      <div class="form-check">
+        <input type="checkbox" name="confirmation" id="confirmation"
+               class="form-check-input" required>
+        <label class="form-check-label" for="confirmation">
+          <strong>Confirmo que este é um novo envio corrigido</strong> e que os documentos, anexos e dados do caso anterior
+          <strong>não</strong> serão herdados. O caso anterior permanece inalterado na auditoria.
+        </label>
+      </div>
+    </div>
+
+    <!-- Botões -->
+    <div class="d-flex gap-2">
+      <button type="submit" class="btn btn-hospital">
+        📤 Enviar caso corrigido
+      </button>
+      <a href="{% url 'intake:case_detail' original_case.case_id %}" class="btn btn-outline-secondary">
+        ← Cancelar
+      </a>
+    </div>
+  </form>
+</div>
+
+{% endblock %}

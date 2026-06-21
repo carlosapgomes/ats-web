@@ -1,5 +1,6 @@
 """Views do app intake."""
 
+import logging
 import uuid
 
 from django.conf import settings
@@ -33,6 +34,8 @@ from apps.cases.services import (
 
 from .forms import CaseUploadForm
 from .services import process_uploaded_files, validate_attachment_file
+
+logger = logging.getLogger(__name__)
 
 STATUS_LABELS: dict[str, str] = {
     "NEW": "Novo",
@@ -143,6 +146,9 @@ EVENT_LABELS: dict[str, str] = {
     "CASE_ATTACHMENT_SUPPLEMENT_ADDED": "Anexo complementar adicionado",
     # ── Encerramento administrativo ────────────────────────────
     "CASE_ADMINISTRATIVELY_CLOSED": "Encerrado administrativamente",
+    # ── Reenvio corrigido ─────────────────────────────────────
+    "CASE_CORRECTION_CREATED": "Reenvio corrigido criado",
+    "CASE_MARKED_SUPERSEDED": "Caso corrigido por novo envio",
 }
 
 # Cores do dot da timeline por event_type
@@ -201,6 +207,9 @@ EVENT_DOT_CSS: dict[str, str] = {
     "CASE_ATTACHMENT_SUPPLEMENT_ADDED": "nir",
     # ── Encerramento administrativo ────────────────────────────
     "CASE_ADMINISTRATIVELY_CLOSED": "system",
+    # ── Reenvio corrigido ─────────────────────────────────────
+    "CASE_CORRECTION_CREATED": "nir",
+    "CASE_MARKED_SUPERSEDED": "system",
 }
 
 # Etapas do stepper
@@ -727,6 +736,93 @@ def add_supplemental_attachment(
         messages.success(request, msg)
 
     return redirect("intake:case_detail", case_id=case.case_id)
+
+
+@login_required
+@role_required("nir")
+def corrected_resubmission(request: HttpRequest, case_id: uuid.UUID) -> HttpResponse:
+    """Formulário NIR de reenvio corrigido explícito.
+
+    GET: Exibe formulário contextualizado pelo caso anterior.
+    POST: Cria novo Case vinculado ao anterior com novo PDF e motivo.
+    """
+    from apps.intake.services import create_corrected_resubmission
+
+    original_case = get_object_or_404(
+        Case.objects.select_related("created_by"),
+        case_id=case_id,
+    )
+
+    if request.method == "POST":
+        correction_reason = request.POST.get("correction_reason", "")
+        pdf_file = request.FILES.get("pdf_file")
+        attachment_files = request.FILES.getlist("attachment_files")
+
+        errors: list[str] = []
+
+        # Validate reason
+        if not correction_reason.strip():
+            errors.append("Informe o motivo do reenvio corrigido.")
+
+        # Validate PDF presence
+        if not pdf_file:
+            errors.append("Selecione um novo PDF principal para o reenvio.")
+
+        if errors:
+            for err in errors:
+                messages.warning(request, err)
+            return render(
+                request,
+                "intake/corrected_resubmission.html",
+                {
+                    "original_case": original_case,
+                    "patient_name": original_case.patient_name,
+                },
+            )
+
+        # pdf_file já validado acima como não-None
+        assert pdf_file is not None  # nosec
+        assert request.user.is_authenticated  # nosec
+
+        try:
+            new_case = create_corrected_resubmission(
+                original_case=original_case,
+                pdf_file=pdf_file,
+                user=request.user,
+                correction_reason=correction_reason,
+                attachments=attachment_files or None,
+            )
+            messages.success(
+                request,
+                f"Reenvio corrigido criado com sucesso. Novo caso: {new_case.case_id}",
+            )
+            return redirect("intake:case_detail", case_id=new_case.case_id)
+        except ValueError as exc:
+            messages.warning(request, str(exc))
+        except Exception:
+            logger.exception("Erro ao criar reenvio corrigido")
+            messages.warning(request, "Erro inesperado ao criar reenvio corrigido. Tente novamente.")
+
+        return render(
+            request,
+            "intake/corrected_resubmission.html",
+            {
+                "original_case": original_case,
+                "patient_name": original_case.patient_name,
+            },
+        )
+
+    # GET
+    return render(
+        request,
+        "intake/corrected_resubmission.html",
+        {
+            "original_case": original_case,
+            "patient_name": original_case.patient_name,
+            "status_label": STATUS_LABELS.get(original_case.status, original_case.get_status_display()),
+            "status_css": STATUS_CSS_CLASS.get(original_case.status, "status-pending"),
+        },
+    )
 
 
 @login_required

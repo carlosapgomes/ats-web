@@ -335,3 +335,107 @@ def _create_case_from_file(file: UploadedFile, user: AccountsUser) -> Case:
     enqueue_pdf_extraction(case.case_id)
 
     return case
+
+
+# ── Corrected resubmission ──────────────────────────────────────────────
+
+
+def create_corrected_resubmission(
+    *,
+    original_case: Case,
+    pdf_file: UploadedFile,
+    user: AccountsUser,
+    correction_reason: str,
+    attachments: list[UploadedFile] | None = None,
+) -> Case:
+    """Create a new Case that explicitly corrects a previous Case.
+
+    Steps:
+    1. Validate correction_reason (required, not blank).
+    2. Validate pdf_file (must be a single valid PDF).
+    3. Validate attachments per existing rules.
+    4. Create new ``Case`` with correction metadata.
+    5. Save PDF and advance FSM to ``R1_ACK_PROCESSING``.
+    6. Enqueue PDF extraction.
+    7. Save attachments on the new case (if provided).
+    8. Record ``CASE_CORRECTION_CREATED`` on the new case.
+    9. Record ``CASE_MARKED_SUPERSEDED`` on the original case.
+    10. Return the new case.
+
+    The original case is NOT modified in status, decision fields,
+    attachments, or any other data.
+    """
+    from django.utils import timezone as tz
+
+    # 1. Validate correction_reason
+    reason = (correction_reason or "").strip()
+    if not reason:
+        raise ValueError("Motivo do reenvio corrigido é obrigatório.")
+
+    # 2. Validate PDF
+    validate_single_file(pdf_file)
+
+    # 3. Validate attachments
+    att_list = attachments or []
+    if att_list:
+        validate_attachments(att_list, pdf_count=1)
+
+    # 4. Create new Case with correction metadata
+    new_case = Case.objects.create(
+        created_by=user,
+        corrects_case=original_case,
+        correction_reason=reason,
+        correction_created_by=user,
+        correction_created_at=tz.now(),
+    )
+
+    # 5. Save PDF and advance FSM: NEW → R1_ACK_PROCESSING
+    new_case.pdf_file = pdf_file
+    new_case.save()
+
+    new_case.start_processing(user=user)
+    new_case.save()
+
+    # 6. Enqueue PDF extraction
+    from apps.intake.tasks import enqueue_pdf_extraction
+
+    enqueue_pdf_extraction(new_case.case_id)
+
+    # 7. Save attachments on the new case (if provided)
+    if att_list:
+        for att_file in att_list:
+            attachment = create_case_attachment(
+                case=new_case,
+                uploaded_file=att_file,
+                user=user,
+                upload_phase="initial",
+            )
+            record_attachment_event(attachment)
+
+    # 8. Record CASE_CORRECTION_CREATED on new case
+    new_case._record_event(
+        "CASE_CORRECTION_CREATED",
+        user=user,
+        payload={
+            "original_case_id": str(original_case.case_id),
+            "original_agency_record_number": original_case.agency_record_number or "",
+            "correction_reason": reason,
+            "created_by_id": str(user.pk),
+        },
+    )
+    new_case.save()
+
+    # 9. Record CASE_MARKED_SUPERSEDED on original case
+    original_case._record_event(
+        "CASE_MARKED_SUPERSEDED",
+        user=user,
+        payload={
+            "corrected_case_id": str(new_case.case_id),
+            "corrected_agency_record_number": new_case.agency_record_number or "",
+            "correction_reason": reason,
+            "created_by_id": str(user.pk),
+        },
+    )
+    original_case.save()
+
+    return new_case
