@@ -2,6 +2,7 @@ import os
 import uuid
 
 from django.conf import settings
+from django.core.exceptions import ValidationError
 from django.db import models
 from django_fsm import FSMField, transition
 
@@ -687,8 +688,8 @@ class CaseCommunicationMessage(models.Model):
         """
         if self.message_type == "user":
             if self.author is None:
-                raise ValueError("Mensagens manuais (message_type='user') exigem author.")
+                raise ValidationError("Mensagens manuais (message_type='user') exigem author.")
             if not self.author_role:
-                raise ValueError("Mensagens manuais (message_type='user') exigem author_role.")
+                raise ValidationError("Mensagens manuais (message_type='user') exigem author_role.")
         if self.message_type not in ("user", "system"):
-            raise ValueError(f"message_type inválido: '{self.message_type}'. Use 'user' ou 'system'.")
+            raise ValidationError(f"message_type inválido: '{self.message_type}'. Use 'user' ou 'system'.")

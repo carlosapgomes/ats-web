@@ -9,6 +9,7 @@ import uuid
 
 import pytest
 from django.contrib.auth import get_user_model
+from django.core.exceptions import ValidationError
 
 from apps.cases.models import CaseEvent
 
@@ -57,7 +58,7 @@ def test_manual_communication_message_still_requires_author_via_service(case_fac
         body="Mensagem sem autor.",
         message_type="user",
     )
-    with pytest.raises(ValueError, match="exigem author"):
+    with pytest.raises(ValidationError, match="exigem author"):
         msg.full_clean()
 
     # Mensagem manual normal ainda funciona
