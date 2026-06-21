@@ -6,7 +6,7 @@ from typing import Any
 
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
-from django.db.models import QuerySet
+from django.db.models import F, QuerySet
 from django.http import FileResponse, Http404, HttpRequest, HttpResponse, HttpResponseBase, JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
@@ -183,6 +183,7 @@ def _build_case_card(case: Case, wait_minutes: int, user: Any = None) -> dict[st
         "doctor_decided_at": case.doctor_decided_at,
         "wait_minutes": wait_minutes,
         "is_urgent": wait_minutes <= 15,
+        "regulation_days_on_screen": case.regulation_days_on_screen,
     }
 
     # Lock info
@@ -213,7 +214,9 @@ def _doctor_queue_context(request: HttpRequest) -> dict[str, Any]:
 
     # ── Pending cases ──────────────────────────────────────────────
     pending_cases: QuerySet[Case] = (
-        Case.objects.filter(status=CaseStatus.WAIT_DOCTOR).select_related("locked_by").order_by("created_at")
+        Case.objects.filter(status=CaseStatus.WAIT_DOCTOR)
+        .select_related("locked_by")
+        .order_by(F("regulation_days_on_screen").desc(nulls_last=True), "created_at")
     )
 
     pending_cards: list[dict[str, Any]] = []

@@ -151,6 +151,7 @@ def _do_extraction(case: Case) -> None:
     from apps.intake.pdf_utils import (
         extract_explicit_record_number,
         extract_pdf_text,
+        extract_regulation_days_on_screen,
         strip_watermark_and_extract_record,
     )
 
@@ -171,6 +172,7 @@ def _do_extraction(case: Case) -> None:
     case.extracted_text = cleaned_text
     case.agency_record_number = record_number  # may be fallback; caller can clear
     case.agency_record_extracted_at = timezone.now()
+    case.regulation_days_on_screen = extract_regulation_days_on_screen(cleaned_text)
     case.save()
 
     # Transition: EXTRACTING → LLM_STRUCT

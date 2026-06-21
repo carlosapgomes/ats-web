@@ -805,3 +805,104 @@ class TestExecutePdfExtractionRegulationGate:
         case = Case.objects.get(case_id=case.case_id)
         assert case.agency_record_number == "123456"
         assert len(pipeline_calls) == 1
+
+    @pytest.mark.django_db
+    def test_persists_regulation_days_on_screen(self, user, monkeypatch) -> None:
+        """Extrai "Dias em tela: N" do texto e persiste no Case."""
+        from apps.intake.tasks import execute_pdf_extraction
+
+        # Texto com Dias em tela: 9
+        text_with_days = (
+            "RELATORIO DE OCORRENCIAS\n"
+            "Governo do Estado da Bahia\n"
+            "Codigo: 12345\n"
+            "Dias em tela: 9\n"
+            "Resumo Clinico: Paciente de 45 anos.\n" + "Texto extra para atingir o tamanho minimo. " * 20
+        )
+
+        monkeypatch.setattr(
+            "apps.intake.pdf_utils.extract_pdf_text",
+            lambda _path: text_with_days,
+        )
+        monkeypatch.setattr(
+            "apps.intake.pdf_utils.strip_watermark_and_extract_record",
+            lambda text: (text, "12345"),
+        )
+        pipeline_calls: list[tuple[object, ...]] = []
+        monkeypatch.setattr(
+            "apps.pipeline.tasks.enqueue_pipeline",
+            lambda case_id: pipeline_calls.append((case_id,)),
+        )
+
+        case = _make_case_at_r1_ack(user)
+        execute_pdf_extraction(str(case.case_id))
+
+        case = Case.objects.get(case_id=case.case_id)
+        assert case.regulation_days_on_screen == 9
+
+    @pytest.mark.django_db
+    def test_persists_max_when_multiple_days_on_screen(self, user, monkeypatch) -> None:
+        """Quando múltiplos "Dias em tela", persiste o maior valor."""
+        from apps.intake.tasks import execute_pdf_extraction
+
+        # Texto com Dias em tela em múltiplas páginas
+        text_with_multiple = (
+            "RELATORIO DE OCORRENCIAS\n"
+            "Governo do Estado da Bahia\n"
+            "Codigo: 12345\n"
+            "Dias em tela: 3\n"
+            "(page break)\n"
+            "Dias em tela: 7\n"
+            "(page break)\n"
+            "Dias em tela: 5\n"
+            "Resumo Clinico: Paciente de 45 anos.\n" + "Texto extra para atingir o tamanho minimo. " * 20
+        )
+
+        monkeypatch.setattr(
+            "apps.intake.pdf_utils.extract_pdf_text",
+            lambda _path: text_with_multiple,
+        )
+        monkeypatch.setattr(
+            "apps.intake.pdf_utils.strip_watermark_and_extract_record",
+            lambda text: (text, "12345"),
+        )
+        pipeline_calls: list[tuple[object, ...]] = []
+        monkeypatch.setattr(
+            "apps.pipeline.tasks.enqueue_pipeline",
+            lambda case_id: pipeline_calls.append((case_id,)),
+        )
+
+        case = _make_case_at_r1_ack(user)
+        execute_pdf_extraction(str(case.case_id))
+
+        case = Case.objects.get(case_id=case.case_id)
+        assert case.regulation_days_on_screen == 7
+
+    @pytest.mark.django_db
+    def test_sets_null_when_no_days_on_screen(self, user, monkeypatch) -> None:
+        """Quando não há "Dias em tela", o campo fica None."""
+        from apps.intake.tasks import execute_pdf_extraction
+
+        text = self._regulation_text()  # contém Dias em tela: 3
+        # Remove a linha Dias em tela para simular ausência
+        text = text.replace("Dias em tela: 3\n", "")
+
+        monkeypatch.setattr(
+            "apps.intake.pdf_utils.extract_pdf_text",
+            lambda _path: text,
+        )
+        monkeypatch.setattr(
+            "apps.intake.pdf_utils.strip_watermark_and_extract_record",
+            lambda t: (t, "123456"),
+        )
+        pipeline_calls: list[tuple[object, ...]] = []
+        monkeypatch.setattr(
+            "apps.pipeline.tasks.enqueue_pipeline",
+            lambda case_id: pipeline_calls.append((case_id,)),
+        )
+
+        case = _make_case_at_r1_ack(user)
+        execute_pdf_extraction(str(case.case_id))
+
+        case = Case.objects.get(case_id=case.case_id)
+        assert case.regulation_days_on_screen is None
