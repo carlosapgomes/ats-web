@@ -7,7 +7,7 @@ for the Case model, using Django/PostgreSQL transactions.
 from __future__ import annotations
 
 import uuid
-from collections.abc import Iterable
+from collections.abc import Callable, Iterable
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from typing import Any
@@ -18,7 +18,7 @@ from django.db import transaction
 from django.db.models import QuerySet
 from django.utils import timezone
 
-from apps.cases.models import Case, CaseAttachment, CaseCommunicationMessage, CaseStatus
+from apps.cases.models import Case, CaseAttachment, CaseCommunicationMessage, CaseEvent, CaseStatus
 from apps.intake.services import create_case_attachment
 
 
@@ -1108,3 +1108,132 @@ def suppress_case_attachment(
         )
 
     return CaseAttachment.objects.get(pk=att.pk)
+
+
+# ── System communication notices ────────────────────────────────────────
+
+
+SUPPORTED_SYSTEM_NOTICE_EVENT_TYPES: frozenset[str] = frozenset(
+    {
+        "CASE_ATTACHMENT_SUPPRESSED",
+        "CASE_ATTACHMENT_SUPPLEMENT_ADDED",
+        "CASE_CORRECTION_CREATED",
+        "CASE_MARKED_SUPERSEDED",
+    }
+)
+"""Eventos do Slice 001 que geram mensagens sistêmicas na thread."""
+
+
+# Máximo de caracteres para o corpo de uma mensagem sistêmica
+SYSTEM_NOTICE_BODY_MAX_LENGTH = 500
+
+
+def _format_attachment_suppressed(payload: dict[str, object]) -> str:
+    """Formata corpo para CASE_ATTACHMENT_SUPPRESSED."""
+    filename = str(payload.get("original_filename", "") or "")
+    reason = str(payload.get("reason", "") or "")
+    parts = ["Anexo suprimido pelo NIR"]
+    if filename:
+        parts.append(filename)
+    if reason:
+        parts.append(f"— motivo: {reason}")
+    return " ".join(parts).strip()
+
+
+def _format_attachment_supplement_added(payload: dict[str, object]) -> str:
+    """Formata corpo para CASE_ATTACHMENT_SUPPLEMENT_ADDED."""
+    filename = str(payload.get("original_filename", "") or "")
+    note = str(payload.get("note", "") or "")
+    parts = ["Anexo complementar adicionado pelo NIR"]
+    if filename:
+        parts.append(filename)
+    if note:
+        parts.append(f"— observação: {note}")
+    return " ".join(parts).strip()
+
+
+def _format_correction_created(payload: dict[str, object]) -> str:
+    """Formata corpo para CASE_CORRECTION_CREATED."""
+    reason = str(payload.get("correction_reason", "") or "")
+    parts = ["Reenvio corrigido criado pelo NIR para este caso."]
+    if reason:
+        parts.append(f"Motivo: {reason}")
+    return " ".join(parts).strip()
+
+
+def _format_marked_superseded(payload: dict[str, object]) -> str:
+    """Formata corpo para CASE_MARKED_SUPERSEDED."""
+    reason = str(payload.get("correction_reason", "") or "")
+    parts = ["Este caso foi corrigido por novo envio."]
+    if reason:
+        parts.append(f"Motivo: {reason}")
+    return " ".join(parts).strip()
+
+
+_SYSTEM_NOTICE_FORMATTERS: dict[str, Callable[[dict[str, object]], str]] = {
+    "CASE_ATTACHMENT_SUPPRESSED": _format_attachment_suppressed,
+    "CASE_ATTACHMENT_SUPPLEMENT_ADDED": _format_attachment_supplement_added,
+    "CASE_CORRECTION_CREATED": _format_correction_created,
+    "CASE_MARKED_SUPERSEDED": _format_marked_superseded,
+}
+
+
+def build_system_notice_body(event: CaseEvent) -> str | None:
+    """Constrói o corpo da mensagem sistêmica para um CaseEvent.
+
+    Retorna None se o evento não for suportado.
+    O corpo é truncado em SYSTEM_NOTICE_BODY_MAX_LENGTH.
+    """
+    fmt = _SYSTEM_NOTICE_FORMATTERS.get(event.event_type)
+    if fmt is None:
+        return None
+    body: str = fmt(event.payload or {})
+    if len(body) > SYSTEM_NOTICE_BODY_MAX_LENGTH:
+        body = body[: SYSTEM_NOTICE_BODY_MAX_LENGTH - 3] + "..."
+    return body
+
+
+def create_system_communication_notice_for_event(event: CaseEvent) -> CaseCommunicationMessage | None:
+    """Projeta um CaseEvent suportado em CaseCommunicationMessage sistêmica.
+
+    Regras:
+    - Retorna None para evento não suportado.
+    - Se já existir event.communication_notice, retorna a existente (idempotente).
+    - Cria CaseCommunicationMessage com message_type="system".
+    - author=None, author_role="".
+    - Não cria notificação individual.
+    - Não cria CaseEvent adicional.
+    """
+    from apps.cases.models import CaseCommunicationMessage
+
+    # Ignorar eventos não suportados
+    if event.event_type not in SUPPORTED_SYSTEM_NOTICE_EVENT_TYPES:
+        return None
+
+    # Ignorar events de comunicação (evitar loop/ruído)
+    if event.event_type == "CASE_COMMUNICATION_MESSAGE_POSTED":
+        return None
+
+    # Idempotência: verificar se já existe
+    try:
+        return event.communication_notice
+    except CaseCommunicationMessage.DoesNotExist:
+        pass
+
+    # Construir corpo
+    body = build_system_notice_body(event)
+    if body is None:
+        return None
+
+    # Criar mensagem sistêmica (sem notificações)
+    msg = CaseCommunicationMessage.objects.create(
+        case=event.case,
+        message_type="system",
+        author=None,
+        author_role="",
+        body=body,
+        source_event=event,
+        system_event_type=event.event_type,
+    )
+
+    return msg

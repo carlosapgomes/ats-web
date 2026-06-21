@@ -27,3 +27,26 @@ def record_case_event(sender: type[Case], instance: Case, created: bool, **kwarg
             payload=pending["payload"],
         )
         instance._pending_event = None  # type: ignore[assignment]
+
+
+@receiver(post_save, sender=CaseEvent)
+def create_case_event_system_notice(
+    sender: type[CaseEvent],
+    instance: CaseEvent,
+    created: bool,
+    **kwargs: object,
+) -> None:
+    """Projeta CaseEvent suportado em mensagem sistêmica na thread.
+
+    Ignora eventos não suportados e CASE_COMMUNICATION_MESSAGE_POSTED
+    para evitar loop/ruído. Idempotente por source_event.
+
+    Não cria UserNotification para mensagens sistêmicas.
+    """
+    if not created:
+        return
+
+    # Importação tardia para evitar circular import
+    from apps.cases.services import create_system_communication_notice_for_event
+
+    create_system_communication_notice_for_event(instance)

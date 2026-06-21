@@ -637,17 +637,37 @@ class CaseCommunicationMessage(models.Model):
 
     Append-only no MVP. A mensagem pertence sempre a exatamente um Case
     e carrega um snapshot do papel ativo do autor no momento do post.
+
+    Suporta dois tipos:
+    - user: mensagem manual com autor e papel definidos (via serviço).
+    - system: mensagem sistêmica automática, sem autor, referenciando CaseEvent.
+
+    Mensagens sistêmicas aparecem apenas na thread do caso e NÃO geram
+    UserNotification, badge ou estado de lida/resolvida.
     """
+
+    message_type = models.CharField(max_length=20, default="user")
+    """user (manual) ou system (automática)."""
 
     message_id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     case = models.ForeignKey(Case, on_delete=models.CASCADE, related_name="communication_messages")
     author = models.ForeignKey(
         settings.AUTH_USER_MODEL,
+        null=True,
+        blank=True,
         on_delete=models.PROTECT,
         related_name="case_communication_messages",
     )
-    author_role = models.CharField(max_length=30)
+    author_role = models.CharField(max_length=30, blank=True)
     body = models.TextField()
+    source_event = models.OneToOneField(
+        CaseEvent,
+        null=True,
+        blank=True,
+        on_delete=models.CASCADE,
+        related_name="communication_notice",
+    )
+    system_event_type = models.CharField(max_length=80, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
@@ -655,4 +675,20 @@ class CaseCommunicationMessage(models.Model):
         indexes = [models.Index(fields=["case", "created_at"])]
 
     def __str__(self) -> str:
+        if self.message_type == "system":
+            return f"CaseCommunicationMessage {self.message_id} [system: {self.system_event_type}]"
         return f"CaseCommunicationMessage {self.message_id} [{self.author_role}]"
+
+    def clean(self) -> None:
+        """Valida integridade dos campos antes de salvar.
+
+        - Mensagens manuais (message_type='user') exigem author e author_role.
+        - message_type deve ser 'user' ou 'system'.
+        """
+        if self.message_type == "user":
+            if self.author is None:
+                raise ValueError("Mensagens manuais (message_type='user') exigem author.")
+            if not self.author_role:
+                raise ValueError("Mensagens manuais (message_type='user') exigem author_role.")
+        if self.message_type not in ("user", "system"):
+            raise ValueError(f"message_type inválido: '{self.message_type}'. Use 'user' ou 'system'.")

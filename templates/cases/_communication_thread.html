@@ -21,8 +21,13 @@ Contexto esperado:
       <div class="communication-message mb-3 pb-3 border-bottom">
         <div class="d-flex justify-content-between align-items-center mb-1">
           <span class="fw-semibold small">
-            {{ msg.author.get_full_name|default:msg.author.username }}
-            <span class="badge bg-secondary ms-1">{{ msg.author_role|upper }}</span>
+            {% if msg.message_type == "system" %}
+              Sistema
+              <span class="badge bg-info text-dark ms-1">SISTEMA</span>
+            {% else %}
+              {{ msg.author.get_full_name|default:msg.author.username }}
+              <span class="badge bg-secondary ms-1">{{ msg.author_role|upper }}</span>
+            {% endif %}
           </span>
           <span class="text-muted small">{{ msg.created_at|date:"d/m/Y H:i" }}</span>
         </div>
