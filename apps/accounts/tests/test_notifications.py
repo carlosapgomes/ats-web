@@ -776,6 +776,16 @@ class TestUnreadCountEndpoint:
             f"Resposta contém chaves não permitidas: {set(data.keys()) - allowed_keys}"
         )
 
+    def test_unread_count_endpoint_rejects_non_get_methods(self, db: Any, client: Any, user_doctor: Any) -> None:
+        """Endpoint aceita apenas GET — POST/PUT/etc devem ser rejeitados."""
+        client.force_login(user_doctor)
+        session = client.session
+        session["active_role"] = "doctor"
+        session.save()
+
+        response = client.post(reverse("notifications_unread_count"))
+        assert response.status_code == 405
+
 
 class TestNotificationBadgeTemplate:
     """Tests for notification badge attributes and JS loading in base.html."""
@@ -794,6 +804,34 @@ class TestNotificationBadgeTemplate:
         assert "data-unread-count-url" in content
         assert reverse("notifications_unread_count") in content
 
+    def test_unread_count_helper_is_consistent_across_context_and_endpoint(
+        self, db: Any, client: Any, case_factory: Any, user: Any, user_doctor: Any
+    ) -> None:
+        """Context processor (badge SSR) e endpoint JSON devem concordar.
+
+        Garante que não haja duas queries de contagem divergentes (DRY):
+        ambos devem usar o mesmo helper.
+        """
+        from apps.cases.services import post_case_communication_message
+
+        case = case_factory(user)
+        post_case_communication_message(case=case, author=user, author_role="nir", body="@doctor ola")
+
+        client.force_login(user_doctor)
+        session = client.session
+        session["active_role"] = "doctor"
+        session.save()
+
+        # Render SSR expõe o badge com data-count vindo do context processor
+        page = client.get(reverse("notifications"))
+        assert page.status_code == 200
+        assert 'data-count="1"' in page.content.decode()
+
+        # Endpoint JSON deve retornar o mesmo número
+        api = client.get(reverse("notifications_unread_count"))
+        assert api.status_code == 200
+        assert api.json()["unread_count"] == 1
+
     def test_notifications_js_is_loaded_for_authenticated_header(self, db: Any, client: Any, user_doctor: Any) -> None:
         """base.html inclui static/js/notifications.js."""
         client.force_login(user_doctor)
@@ -804,8 +842,7 @@ class TestNotificationBadgeTemplate:
         response = client.get(reverse("notifications"))
         assert response.status_code == 200
         content = response.content.decode()
-        assert "notifications.js" in content
-        assert "static/js/notifications.js" in content or "/static/js/notifications.js" in content
+        assert "/static/js/notifications.js" in content
 
 
 class TestNotificationJsHardening:
@@ -821,7 +858,7 @@ class TestNotificationJsHardening:
         """Arquivo JS contém fetch e document.visibilityState."""
         js_content = self.JS_PATH.read_text()
         assert "fetch" in js_content
-        assert "document.visibilityState" in js_content or "visibilityState" in js_content
+        assert "document.visibilityState" in js_content
 
     def test_notifications_js_does_not_use_htmx_websocket_or_sse(self) -> None:
         """JS não contém hx-get, hx-trigger, WebSocket, EventSource."""
@@ -836,5 +873,6 @@ class TestNotificationJsHardening:
         js_content = self.JS_PATH.read_text()
         assert "case-communication" not in js_content.lower()
         assert "communication_thread" not in js_content.lower()
-        # Não deve conter endpoints de caso
-        assert "/cases/" not in js_content or "unread-count" in js_content
+        # Não deve conter endpoints de caso (token "unread-count" refere-se
+        # apenas ao endpoint de contagem, não à thread).
+        assert "/cases/" not in js_content

@@ -3,11 +3,13 @@
 from django.contrib import messages
 from django.contrib.auth import authenticate, login, logout
 from django.contrib.auth.decorators import login_required
+from django.http import JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
+from django.views.decorators.http import require_GET
 
 from .context_processors import ROLE_DISPLAY_NAMES
 from .forms import LoginForm, RoleSelectForm
-from .models import UserNotification
+from .models import UserNotification, get_unread_notification_count
 
 
 def login_view(request):  # type: ignore[no-untyped-def]
@@ -114,13 +116,12 @@ def notifications_list(request):  # type: ignore[no-untyped-def]
     notifications = UserNotification.objects.filter(recipient=request.user).select_related(
         "case", "communication_message", "triggered_by"
     )
-    unread_count = notifications.filter(read_at__isnull=True).count()
     return render(
         request,
         "accounts/notifications.html",
         {
             "notifications": notifications,
-            "unread_count": unread_count,
+            "unread_count": get_unread_notification_count(request.user),
         },
     )
 
@@ -186,16 +187,11 @@ def notifications_mark_all_read(request):  # type: ignore[no-untyped-def]
 
 
 @login_required
+@require_GET
 def notifications_unread_count(request):  # type: ignore[no-untyped-def]
     """Retorna JSON com a contagem de notificações não lidas do usuário autenticado.
 
     Resposta: {"unread_count": N}
     Não expõe lista de notificações, PHI ou dados de outros usuários.
     """
-    from django.http import JsonResponse
-
-    count = UserNotification.objects.filter(
-        recipient=request.user,
-        read_at__isnull=True,
-    ).count()
-    return JsonResponse({"unread_count": count})
+    return JsonResponse({"unread_count": get_unread_notification_count(request.user)})

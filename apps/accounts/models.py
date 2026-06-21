@@ -3,7 +3,7 @@
 import uuid
 
 from django.conf import settings
-from django.contrib.auth.models import AbstractUser
+from django.contrib.auth.models import AbstractUser, AnonymousUser
 from django.core.exceptions import ValidationError
 from django.db import models
 
@@ -131,3 +131,14 @@ class UserNotification(models.Model):
 
     def __str__(self) -> str:
         return f"UserNotification {self.notification_id} -> {self.recipient}"
+
+
+def get_unread_notification_count(user: User | AnonymousUser) -> int:
+    """Contagem de notificações não lidas para um usuário.
+
+    Single source of truth usada pelo context processor (badge SSR),
+    pela view da inbox e pelo endpoint JSON de unread-count (DRY).
+    """
+    if not user.is_authenticated:
+        return 0
+    return UserNotification.objects.filter(recipient=user, read_at__isnull=True).count()

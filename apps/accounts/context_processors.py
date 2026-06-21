@@ -3,7 +3,7 @@
 from django.conf import settings
 from django.utils import timezone
 
-from apps.accounts.models import UserNotification
+from apps.accounts.models import get_unread_notification_count
 from apps.cases.models import Case, CaseStatus
 
 ROLE_DISPLAY_NAMES = {
@@ -39,10 +39,7 @@ def notification_unread_count(request):  # type: ignore[no-untyped-def]
 
     Contagem de notificações não lidas para o usuário autenticado.
     """
-    if not request.user.is_authenticated:
-        return {}
-    count = UserNotification.objects.filter(recipient=request.user, read_at__isnull=True).count()
-    return {"notification_unread_count": count}
+    return {"notification_unread_count": get_unread_notification_count(request.user)}
 
 
 def queue_counts(request):  # type: ignore[no-untyped-def]
