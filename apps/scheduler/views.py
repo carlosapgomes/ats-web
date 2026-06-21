@@ -15,6 +15,7 @@ from django.utils import timezone
 from apps.accounts.decorators import role_required
 from apps.cases.models import Case, CaseStatus
 from apps.cases.services import (
+    CASE_COMMUNICATION_MAX_LENGTH,
     assert_case_lock,
     claim_case_lock,
     compute_lock_display,
@@ -468,6 +469,7 @@ def immediate_ack(request: HttpRequest, case_id: uuid.UUID) -> HttpResponse:
 def _build_confirm_context(
     case: Case,
     form: SchedulerDecisionForm | PostScheduleIssueForm,
+    request: HttpRequest | None = None,
 ) -> dict[str, Any]:
     """Build context dict for the confirm template."""
     ctx: dict[str, Any] = {
@@ -482,6 +484,12 @@ def _build_confirm_context(
         "support_flag_display": _get_support_flag_display(case),
         "admission_flow_display": _get_admission_flow_display(case),
         "origin_unit": case.get_origin_unit_display(compact=False),
+        # Communication thread context
+        "communication_messages": case.communication_messages.select_related("author").all(),
+        "can_post_communication": case.status != CaseStatus.CLEANED,
+        "communication_post_url": reverse("intake:post_case_communication", args=[case.case_id]),
+        "communication_next_url": ((request.get_full_path() + "#case-communication") if request is not None else "#"),
+        "communication_max_length": CASE_COMMUNICATION_MAX_LENGTH,
     }
     # Include post-schedule issue info if applicable
     if case.post_schedule_issue_status == "opened":
@@ -546,7 +554,7 @@ def scheduler_confirm(request: HttpRequest, case_id: uuid.UUID) -> HttpResponse:
     # Fresh DB instance
     case = get_object_or_404(Case.objects.select_related("doctor"), pk=case_id)
     form = PostScheduleIssueForm() if has_psi else SchedulerDecisionForm()
-    context = _build_confirm_context(case, form)
+    context = _build_confirm_context(case, form, request=request)
     context["lock_token"] = str(result.token)
     template = "scheduler/confirm_post_schedule_issue.html" if has_psi else "scheduler/confirm.html"
     return render(request, template, context)
@@ -584,7 +592,7 @@ def scheduler_submit(request: HttpRequest, case_id: uuid.UUID) -> HttpResponse:
     if token is None:
         form_cls = PostScheduleIssueForm if has_psi else SchedulerDecisionForm
         form = form_cls(request.POST)
-        ctx = _build_confirm_context(case, form)
+        ctx = _build_confirm_context(case, form, request=request)
         ctx["lock_error"] = "Sua reserva para este caso expirou ou não é válida. Volte para a fila e tente novamente."
         messages.warning(request, "Token de reserva não encontrado. Volte para a fila.")
         template = "scheduler/confirm_post_schedule_issue.html" if has_psi else "scheduler/confirm.html"
@@ -601,7 +609,7 @@ def scheduler_submit(request: HttpRequest, case_id: uuid.UUID) -> HttpResponse:
     except PermissionError as exc:
         form_cls = PostScheduleIssueForm if has_psi else SchedulerDecisionForm
         form = form_cls(request.POST)
-        ctx = _build_confirm_context(case, form)
+        ctx = _build_confirm_context(case, form, request=request)
         ctx["lock_error"] = str(exc)
         messages.warning(request, str(exc))
         template = "scheduler/confirm_post_schedule_issue.html" if has_psi else "scheduler/confirm.html"
@@ -612,7 +620,7 @@ def scheduler_submit(request: HttpRequest, case_id: uuid.UUID) -> HttpResponse:
         form = PostScheduleIssueForm(request.POST)
 
         if not form.is_valid():
-            ctx = _build_confirm_context(case, form)
+            ctx = _build_confirm_context(case, form, request=request)
             ctx["lock_token"] = raw_token
             return render(request, "scheduler/confirm_post_schedule_issue.html", ctx)
 
@@ -643,7 +651,7 @@ def scheduler_submit(request: HttpRequest, case_id: uuid.UUID) -> HttpResponse:
 
         except ValueError as exc:
             form.add_error(None, str(exc))
-            ctx = _build_confirm_context(case, form)
+            ctx = _build_confirm_context(case, form, request=request)
             ctx["lock_token"] = raw_token
             return render(request, "scheduler/confirm_post_schedule_issue.html", ctx)
     else:
@@ -651,7 +659,7 @@ def scheduler_submit(request: HttpRequest, case_id: uuid.UUID) -> HttpResponse:
         form = SchedulerDecisionForm(request.POST)
 
         if not form.is_valid():
-            ctx = _build_confirm_context(case, form)
+            ctx = _build_confirm_context(case, form, request=request)
             ctx["lock_token"] = raw_token
             return render(request, "scheduler/confirm.html", ctx)
 
