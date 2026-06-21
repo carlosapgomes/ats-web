@@ -1119,9 +1119,24 @@ SUPPORTED_SYSTEM_NOTICE_EVENT_TYPES: frozenset[str] = frozenset(
         "CASE_ATTACHMENT_SUPPLEMENT_ADDED",
         "CASE_CORRECTION_CREATED",
         "CASE_MARKED_SUPERSEDED",
+        # Slice 002 — eventos operacionais estruturados
+        "POST_SCHEDULE_ISSUE_OPENED",
+        "POST_SCHEDULE_ISSUE_RESPONDED",
+        "CASE_ADMINISTRATIVELY_CLOSED",
+        # POST_SCHEDULE_ISSUE_ACKNOWLEDGED omitido: é ruído na thread,
+        # pois o NIR ver a resposta do agendador já é a 'ciência'.
     }
 )
-"""Eventos do Slice 001 que geram mensagens sistêmicas na thread."""
+"""Eventos suportados que geram mensagens sistêmicas na thread.
+
+Slice 001: artefatos clínicos e reenvio corrigido.
+Slice 002: fluxos operacionais estruturados (intercorrência, encerramento).
+
+POST_SCHEDULE_ISSUE_ACKNOWLEDGED foi avaliado e omitido:
+- payload vazio ({}) sem conteúdo significativo para a thread;
+- é passo interno de workflow;
+- NIR ver a resposta na thread já representa a 'ciência'.
+"""
 
 
 # Máximo de caracteres para o corpo de uma mensagem sistêmica
@@ -1170,11 +1185,68 @@ def _format_marked_superseded(payload: dict[str, object]) -> str:
     return " ".join(parts).strip()
 
 
+def _format_post_schedule_issue_opened(payload: dict[str, object]) -> str:
+    """Formata corpo para POST_SCHEDULE_ISSUE_OPENED."""
+    reason = str(payload.get("reason", "") or "")
+    message = str(payload.get("message", "") or "")
+    label = get_post_schedule_issue_reason_label(reason)
+    parts = ["Intercorrência pós-agendamento aberta pelo NIR"]
+    if label:
+        parts.append(f"— {label}")
+    if message:
+        parts.append(f"Mensagem: {message}")
+    return " ".join(parts).strip()
+
+
+POST_SCHEDULE_ISSUE_ACTION_LABELS: dict[str, str] = {
+    "cancel": "Cancelado",
+    "reschedule": "Reagendado",
+    "maintain": "Mantido",
+    "deny": "Solicitação negada",
+}
+
+
+FORMAT_ACTIONS_WITH_APPT: frozenset[str] = frozenset({"reschedule", "maintain"})
+
+
+def _format_post_schedule_issue_responded(payload: dict[str, object]) -> str:
+    """Formata corpo para POST_SCHEDULE_ISSUE_RESPONDED."""
+    action = str(payload.get("action", "") or "")
+    response_message = str(payload.get("response_message", "") or "")
+    action_label = POST_SCHEDULE_ISSUE_ACTION_LABELS.get(action, action)
+    parts = ["Intercorrência respondida pelo agendador"]
+    if action:
+        parts.append(f"— {action_label}")
+    if response_message:
+        parts.append(f"Mensagem: {response_message}")
+    return " ".join(parts).strip()
+
+
+def _format_administratively_closed(payload: dict[str, object]) -> str:
+    """Formata corpo para CASE_ADMINISTRATIVELY_CLOSED."""
+    reason_code = str(payload.get("reason_code", "") or "")
+    reason_text = str(payload.get("reason_text", "") or "")
+    previous_status = str(payload.get("previous_status", "") or "")
+    reason_label = ADMINISTRATIVE_CLOSURE_REASONS.get(reason_code, reason_code)
+    parts = ["Caso encerrado administrativamente"]
+    if reason_label:
+        parts.append(f"— motivo: {reason_label}")
+    if reason_text and reason_text != reason_label:
+        parts.append(f"({reason_text})")
+    if previous_status:
+        parts.append(f"Status anterior: {previous_status}")
+    return " ".join(parts).strip()
+
+
 _SYSTEM_NOTICE_FORMATTERS: dict[str, Callable[[dict[str, object]], str]] = {
     "CASE_ATTACHMENT_SUPPRESSED": _format_attachment_suppressed,
     "CASE_ATTACHMENT_SUPPLEMENT_ADDED": _format_attachment_supplement_added,
     "CASE_CORRECTION_CREATED": _format_correction_created,
     "CASE_MARKED_SUPERSEDED": _format_marked_superseded,
+    # Slice 002
+    "POST_SCHEDULE_ISSUE_OPENED": _format_post_schedule_issue_opened,
+    "POST_SCHEDULE_ISSUE_RESPONDED": _format_post_schedule_issue_responded,
+    "CASE_ADMINISTRATIVELY_CLOSED": _format_administratively_closed,
 }
 
 
