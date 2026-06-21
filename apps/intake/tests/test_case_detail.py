@@ -1659,3 +1659,101 @@ class TestNirSuppressAttachmentView:
 
         response = client.get(reverse("intake:serve_attachment", args=[case.case_id, att.attachment_id]))
         assert response.status_code == 404
+
+
+# ── Correction relationship visibility tests (Slice 002) ─────────────────
+
+
+@pytest.mark.django_db
+class TestCaseDetailCorrectionVisibility:
+    """Testes para visibilidade da relação de correção no detalhe NIR."""
+
+    def _nir_user(self):
+        from apps.accounts.models import Role
+
+        user = User.objects.create_user(username="nir_corr@test.com", password="testpass123")
+        role, _ = Role.objects.get_or_create(name="nir")
+        user.roles.add(role)
+        return user
+
+    def _nir_client(self, client):
+        user = self._nir_user()
+        client.force_login(user)
+        session = client.session
+        session["active_role"] = "nir"
+        session.save()
+        return client, user
+
+    def test_case_detail_shows_corrects_case_card_for_corrected_case(self, client) -> None:
+        """Novo caso com corrects_case mostra card "Reenvio corrigido"."""
+        client, user = self._nir_client(client)
+        original = Case.objects.create(
+            created_by=user,
+            agency_record_number="ORIG-001",
+            status=CaseStatus.DOCTOR_DENIED,
+        )
+        new_case = Case.objects.create(
+            created_by=user,
+            corrects_case=original,
+            correction_reason="Documento incompleto",
+            correction_created_by=user,
+            correction_created_at=timezone.now(),
+            agency_record_number="NEW-001",
+            status=CaseStatus.WAIT_DOCTOR,
+        )
+        response = client.get(reverse("intake:case_detail", args=[new_case.case_id]))
+        assert response.status_code == 200
+        content = response.content.decode()
+        assert "Reenvio corrigido" in content
+        assert "ORIG-001" in content
+        assert "Documento incompleto" in content
+
+    def test_case_detail_shows_corrected_by_card_for_original_case(self, client) -> None:
+        """Caso original com corrected_by_cases mostra que foi corrigido."""
+        client, user = self._nir_client(client)
+        original = Case.objects.create(
+            created_by=user,
+            agency_record_number="ORIG-002",
+            status=CaseStatus.DOCTOR_DENIED,
+        )
+        new_case = Case.objects.create(
+            created_by=user,
+            corrects_case=original,
+            correction_reason="Laudo corrigido",
+            correction_created_by=user,
+            correction_created_at=timezone.now(),
+            agency_record_number="NEW-002",
+            status=CaseStatus.WAIT_DOCTOR,
+        )
+        response = client.get(reverse("intake:case_detail", args=[original.case_id]))
+        assert response.status_code == 200
+        content = response.content.decode()
+        assert "corrigido" in content.lower()
+        # O novo caso deve ser mencionado
+        assert str(new_case.case_id)[:8] in content or "NEW-002" in content
+
+    def test_correction_events_have_human_labels_in_timeline(self, client) -> None:
+        """Eventos de correção têm labels em português na timeline."""
+        client, user = self._nir_client(client)
+        case = Case.objects.create(
+            created_by=user,
+            agency_record_number="TIMELINE-CORR-001",
+            status=CaseStatus.NEW,
+        )
+        CaseEvent.objects.create(
+            case=case,
+            event_type="CASE_CORRECTION_CREATED",
+            actor=user,
+            actor_type="human",
+        )
+        CaseEvent.objects.create(
+            case=case,
+            event_type="CASE_MARKED_SUPERSEDED",
+            actor=user,
+            actor_type="human",
+        )
+        response = client.get(reverse("intake:case_detail", args=[case.case_id]))
+        assert response.status_code == 200
+        content = response.content.decode()
+        assert "Reenvio corrigido criado" in content
+        assert "Caso corrigido por novo envio" in content

@@ -3,7 +3,7 @@
 ## Slices verticais
 
 - [x] Slice 001 — Fluxo NIR de reenvio corrigido explícito (`slices/slice-001-explicit-corrected-resubmission-flow.md`)
-- [ ] Slice 002 — Visibilidade NIR/médico da relação entre casos (`slices/slice-002-correction-relationship-visibility.md`)
+- [x] Slice 002 — Visibilidade NIR/médico da relação entre casos (`slices/slice-002-correction-relationship-visibility.md`)
 
 ## Definition of Done do change
 
@@ -20,15 +20,15 @@
 - [x] Anexos enviados no reenvio pertencem apenas ao novo caso.
 - [x] Evento `CASE_CORRECTION_CREATED` é registrado no novo caso.
 - [x] Evento `CASE_MARKED_SUPERSEDED` é registrado no caso anterior.
-- [ ] NIR vê no caso novo que ele corrige um caso anterior e vê o motivo do reenvio.
-- [ ] NIR vê no caso anterior, quando acessível/listado, que existe caso corrigido relacionado.
-- [ ] Busca de casos encerrados oferece caminho para reenvio corrigido.
-- [ ] Médico vê card claro de "Reenvio corrigido" na tela de decisão do novo caso.
-- [ ] Card médico mostra resumo seguro do caso anterior: registro/id, envio, desfecho/decisão e motivo do reenvio.
-- [ ] Card médico informa explicitamente que documentos/anexos do caso anterior não foram herdados.
-- [ ] Médico não vê PDF/anexos/timeline completa do caso anterior embutidos no novo caso.
-- [ ] Card genérico de prior-case lookup não duplica visualmente o mesmo caso anterior quando houver vínculo explícito.
-- [ ] Prior-case lookup automático continua funcionando para uploads normais sem vínculo explícito.
+- [x] NIR vê no caso novo que ele corrige um caso anterior e vê o motivo do reenvio.
+- [x] NIR vê no caso anterior, quando acessível/listado, que existe caso corrigido relacionado.
+- [x] Busca de casos encerrados oferece caminho para reenvio corrigido.
+- [x] Médico vê card claro de "Reenvio corrigido" na tela de decisão do novo caso.
+- [x] Card médico mostra resumo seguro do caso anterior: registro/id, envio, desfecho/decisão e motivo do reenvio.
+- [x] Card médico informa explicitamente que documentos/anexos do caso anterior não foram herdados.
+- [x] Médico não vê PDF/anexos/timeline completa do caso anterior embutidos no novo caso.
+- [x] Card genérico de prior-case lookup não duplica visualmente o mesmo caso anterior quando houver vínculo explícito.
+- [x] Prior-case lookup automático continua funcionando para uploads normais sem vínculo explícito.
 - [x] `doctor_reason`, `doctor_observation` e `correction_reason` mantêm semânticas separadas.
 - [x] `doctor_observation` não é removido nem redesenhado neste change.
 - [x] FSM não é alterada.
