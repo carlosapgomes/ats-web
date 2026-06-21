@@ -2073,3 +2073,196 @@ class TestSchedulerProcessedTodayTab:
         content = response.content.decode()
         assert "PARTIAL-PROC" in content
         assert "Atualizado automaticamente" in content
+
+
+@pytest.mark.django_db
+class TestSchedulerQueueRegulationDays:
+    """Tests for regulation_days_on_screen ordering and display in scheduler queue."""
+
+    def _create_role(self, name: str):
+        role, _ = Role.objects.get_or_create(name=name)
+        return role
+
+    def _login_as(self, client, role_name: str) -> None:
+        user = User.objects.create_user(username=f"{role_name}@regdays.test", password="testpass123")
+        user.roles.add(self._create_role(role_name))
+        client.force_login(user)
+        session = client.session
+        session["active_role"] = role_name
+        session.save()
+
+    # ── Ordering tests ──────────────────────────────────────────────────
+
+    def test_queue_orders_wait_appt_by_regulation_days_desc(self, client) -> None:
+        """WAIT_APPT ordena por regulation_days_on_screen DESC, NULL por último."""
+        nir_user = User.objects.create_user(username="nir_regorder@test.com", password="testpass123")
+        nir_user.roles.add(self._create_role("nir"))
+
+        now = timezone.now()
+
+        case_a = Case.objects.create(
+            created_by=nir_user,
+            status=CaseStatus.WAIT_APPT,
+            regulation_days_on_screen=2,
+            doctor_decision="accept",
+            doctor_admission_flow="scheduled",
+            structured_data={"patient": {"name": "Case A (2 days)", "age": 40, "gender": "M"}},
+        )
+        Case.objects.filter(case_id=case_a.case_id).update(created_at=now - timedelta(hours=3))
+
+        case_b = Case.objects.create(
+            created_by=nir_user,
+            status=CaseStatus.WAIT_APPT,
+            regulation_days_on_screen=10,
+            doctor_decision="accept",
+            doctor_admission_flow="scheduled",
+            structured_data={"patient": {"name": "Case B (10 days)", "age": 50, "gender": "F"}},
+        )
+        Case.objects.filter(case_id=case_b.case_id).update(created_at=now - timedelta(hours=2))
+
+        case_c = Case.objects.create(
+            created_by=nir_user,
+            status=CaseStatus.WAIT_APPT,
+            regulation_days_on_screen=None,
+            doctor_decision="accept",
+            doctor_admission_flow="scheduled",
+            structured_data={"patient": {"name": "Case C (null)", "age": 30, "gender": "M"}},
+        )
+        Case.objects.filter(case_id=case_c.case_id).update(created_at=now - timedelta(hours=1))
+
+        self._login_as(client, "scheduler")
+        response = client.get("/scheduler/")
+        assert response.status_code == 200
+        content = response.content.decode()
+
+        # B (10) deve aparecer antes de A (2), e A antes de C (null)
+        pos_b = content.index("Case B (10 days)")
+        pos_a = content.index("Case A (2 days)")
+        pos_c = content.index("Case C (null)")
+        assert pos_b < pos_a, f"B (10) should be before A (2): B={pos_b}, A={pos_a}"
+        assert pos_a < pos_c, f"A (2) should be before C (null): A={pos_a}, C={pos_c}"
+
+    # ── Display tests ───────────────────────────────────────────────────
+
+    def test_queue_shows_regulation_days_badge_when_available(self, client) -> None:
+        """Card WAIT_APPT exibe badge 'Dias em tela: N' quando disponível."""
+        nir_user = User.objects.create_user(username="nir_regbadge@test.com", password="testpass123")
+        nir_user.roles.add(self._create_role("nir"))
+
+        Case.objects.create(
+            created_by=nir_user,
+            status=CaseStatus.WAIT_APPT,
+            regulation_days_on_screen=10,
+            doctor_decision="accept",
+            doctor_admission_flow="scheduled",
+            structured_data={"patient": {"name": "Badge Test", "age": 45, "gender": "M"}},
+        )
+
+        self._login_as(client, "scheduler")
+        response = client.get("/scheduler/")
+        assert response.status_code == 200
+        content = response.content.decode()
+        assert "Dias em tela: 10" in content
+
+    def test_queue_hides_regulation_days_badge_when_null(self, client) -> None:
+        """Card WAIT_APPT NÃO exibe badge 'Dias em tela' quando campo é None."""
+        nir_user = User.objects.create_user(username="nir_noreg@test.com", password="testpass123")
+        nir_user.roles.add(self._create_role("nir"))
+
+        Case.objects.create(
+            created_by=nir_user,
+            status=CaseStatus.WAIT_APPT,
+            regulation_days_on_screen=None,
+            doctor_decision="accept",
+            doctor_admission_flow="scheduled",
+            structured_data={"patient": {"name": "No Badge", "age": 35, "gender": "F"}},
+        )
+
+        self._login_as(client, "scheduler")
+        response = client.get("/scheduler/")
+        assert response.status_code == 200
+        content = response.content.decode()
+        assert "Dias em tela:" not in content
+
+    # ── Tiebreaker test ─────────────────────────────────────────────────
+
+    def test_queue_uses_created_at_as_tiebreaker(self, client) -> None:
+        """Empate em regulation_days_on_screen usa created_at mais antigo primeiro."""
+        nir_user = User.objects.create_user(username="nir_tiesched@test.com", password="testpass123")
+        nir_user.roles.add(self._create_role("nir"))
+
+        now = timezone.now()
+
+        old_case = Case.objects.create(
+            created_by=nir_user,
+            status=CaseStatus.WAIT_APPT,
+            regulation_days_on_screen=5,
+            doctor_decision="accept",
+            doctor_admission_flow="scheduled",
+            structured_data={"patient": {"name": "Old (created first)", "age": 40, "gender": "M"}},
+        )
+        Case.objects.filter(case_id=old_case.case_id).update(created_at=now - timedelta(hours=5))
+
+        new_case = Case.objects.create(
+            created_by=nir_user,
+            status=CaseStatus.WAIT_APPT,
+            regulation_days_on_screen=5,
+            doctor_decision="accept",
+            doctor_admission_flow="scheduled",
+            structured_data={"patient": {"name": "New (created later)", "age": 50, "gender": "F"}},
+        )
+        Case.objects.filter(case_id=new_case.case_id).update(created_at=now - timedelta(hours=1))
+
+        self._login_as(client, "scheduler")
+        response = client.get("/scheduler/")
+        assert response.status_code == 200
+        content = response.content.decode()
+
+        pos_old = content.index("Old (created first)")
+        pos_new = content.index("New (created later)")
+        assert pos_old < pos_new, "Older case should appear before newer when tie"
+
+    # ── Immediate notice above WAIT_APPT test ───────────────────────────
+
+    def test_immediate_notice_remains_above_wait_appt(self, client) -> None:
+        """Vinda imediata continua aparecendo acima de WAIT_APPT com alto Dias em tela."""
+        nir_user = User.objects.create_user(username="nir_immabv@test.com", password="testpass123")
+        nir_user.roles.add(self._create_role("nir"))
+
+        # Immediate notice case
+        imm_case = Case.objects.create(
+            created_by=nir_user,
+            status=CaseStatus.WAIT_R1_CLEANUP_THUMBS,
+            doctor_decision="accept",
+            doctor_admission_flow="immediate",
+            doctor_support_flag="anesthesist",
+            structured_data={"patient": {"name": "Vinda Imediata Topo", "age": 60, "gender": "F"}},
+        )
+        CaseEvent.objects.create(
+            case=imm_case,
+            actor_type="human",
+            actor=nir_user,
+            event_type="IMMEDIATE_ADMISSION_OPERATIONAL_NOTICE",
+            timestamp=timezone.now(),
+        )
+
+        # WAIT_APPT case with very high regulation_days_on_screen
+        Case.objects.create(
+            created_by=nir_user,
+            status=CaseStatus.WAIT_APPT,
+            regulation_days_on_screen=999,
+            doctor_decision="accept",
+            doctor_admission_flow="scheduled",
+            structured_data={"patient": {"name": "WAIT_APPT Alto Score", "age": 50, "gender": "M"}},
+        )
+
+        self._login_as(client, "scheduler")
+        response = client.get("/scheduler/")
+        assert response.status_code == 200
+        content = response.content.decode()
+
+        # Vinda imediata autorizada deve aparecer antes do WAIT_APPT
+        assert "Vinda imediata autorizada" in content
+        pos_immediate = content.index("Vinda imediata autorizada")
+        pos_wait_appt = content.index("WAIT_APPT Alto Score")
+        assert pos_immediate < pos_wait_appt, "Immediate notice should appear before WAIT_APPT cases"
