@@ -6,7 +6,7 @@ from typing import Any
 
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
-from django.db.models import QuerySet
+from django.db.models import F, QuerySet
 from django.http import FileResponse, Http404, HttpRequest, HttpResponse, HttpResponseBase, JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
@@ -135,6 +135,7 @@ def _build_case_card(case: Case, wait_minutes: int, user: Any = None) -> dict[st
         # Lock fields
         **compute_lock_display(case, user=user),
         # Post-schedule intercurrence fields
+        "regulation_days_on_screen": case.regulation_days_on_screen,
         "has_post_schedule_issue": has_psi,
         "post_schedule_issue_reason": case.post_schedule_issue_reason if has_psi else "",
         "post_schedule_issue_reason_label": get_post_schedule_issue_reason_label(case.post_schedule_issue_reason)
@@ -174,7 +175,9 @@ def _scheduler_queue_context(user: Any = None, tab: str = "pending") -> dict[str
 
     # ── Pending cases (always computed for badges) ──────────────────────
     pending_cases: QuerySet[Case] = (
-        Case.objects.filter(status=CaseStatus.WAIT_APPT).select_related("doctor", "locked_by").order_by("created_at")
+        Case.objects.filter(status=CaseStatus.WAIT_APPT)
+        .select_related("doctor", "locked_by")
+        .order_by(F("regulation_days_on_screen").desc(nulls_last=True), "created_at")
     )
 
     pending_cards: list[dict[str, Any]] = []
