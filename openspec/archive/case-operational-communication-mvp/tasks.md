@@ -5,6 +5,22 @@
 - [x] Slice 001 — Thread operacional NIR ↔ Médico (`slices/slice-001-nir-doctor-case-thread.md`)
 - [x] Slice 002 — Extensão para agendamento e hardening (`slices/slice-002-scheduler-communication-hardening.md`)
 
+## Status final do change
+
+Change **concluído e arquivado**. Todos os itens da Definition of Done abaixo marcados. Commits em `main`:
+
+- `34b22c5` — Slice 001 (modelo `CaseCommunicationMessage` + migration `0008` + serviço `post_case_communication_message` + endpoint POST `/cases/<id>/communication/` + partial `_communication_thread.html` + telas NIR/médico + evento `CASE_COMMUNICATION_MESSAGE_POSTED` + label/dot de timeline + 23 testes)
+- `5ae8f00` — Slice 002 (contexto de comunicação no helper do scheduler + includes nas telas `confirm.html`/`confirm_post_schedule_issue.html` + 9 testes cobrindo visibilidade/post/cross-role/blank/CLEANED/regressão de submit/label/anti-HTMX/anti-notificação)
+- `b5ebd6f` — Finalização do DoD (36 itens marcados) + hardening do teste R9 (inspeção estática escopada à superfície de comunicação em vez de `sys.modules`, robusto à futura change de `UserNotification`)
+
+### Hardening pós-slices
+
+- **Regra de negócio no serviço, não na view**: `post_case_communication_message` valida papel permitido, blank/spaces, tamanho máximo e caso `CLEANED`; a view apenas adapta request/response e usa `messages.success`/`messages.warning`.
+- **Redirect seguro**: `post_case_communication` valida `next` com `url_has_allowed_host_and_scheme` antes de redirecionar — sem open redirect.
+- **DRY real**: contexto de comunicação centralizado em helper (`_build_confirm_context` no scheduler, contexto inline no NIR/médico); partial único reutilizado por 4 telas (NIR, médico, scheduler confirm, scheduler intercorrência); serviço e endpoint únicos.
+- **Teste anti-notificação determinístico**: R9 inspeciona estaticamente os 5 arquivos da superfície de comunicação por `UserNotification`/`notification_badge`/`unread_count`. Não depende de `sys.modules`, então não quebra quando uma change futura criar `UserNotification` num módulo novo — só falha se a própria superfície de comunicação for acoplada a notificações.
+- **FSM inalterada**: nenhum dos 17 estados foi criado/alterado; `doctor_reason`/`doctor_observation`/`appointment_reason`/`correction_reason` não foram redefinidos.
+
 ## Definition of Done do change
 
 - [x] Modelo `CaseCommunicationMessage` criado ou nome equivalente aprovado.
