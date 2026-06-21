@@ -1,22 +1,219 @@
-"""Services for transactional email flows (Slice 003).
+"""Services for transactional email flows (Slice 003) and mention/notification services (Slice 001).
 
 Centralized helpers for sending account-related transactional emails
-as defined by ADR-0002.
+as defined by ADR-0002, and for parsing mention tokens in case communication
+messages and creating in-app notifications.
 """
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+import re
+from dataclasses import dataclass, field
+from typing import TYPE_CHECKING, Any
 
 from django.conf import settings
 from django.contrib.auth.tokens import PasswordResetTokenGenerator
 from django.core.mail import EmailMultiAlternatives
 from django.template.loader import render_to_string
+from django.utils import timezone
 from django.utils.encoding import force_bytes
 from django.utils.http import urlsafe_base64_encode
 
 if TYPE_CHECKING:
     from apps.accounts.models import User
+    from apps.cases.models import CaseCommunicationMessage
+
+
+# ── Mention Parser ────────────────────────────────────────────────────────
+
+
+MENTION_TOKEN_RE = re.compile(r"(?<!\w)@([A-Za-z0-9_\.\-]{2,50})")
+"""Regex para capturar tokens de menção no corpo da mensagem.
+
+Não captura @ que já faz parte de outro token (ex: email).
+"""
+
+COMMUNICATION_MENTION_ROLES: set[str] = {"nir", "doctor", "scheduler", "manager", "admin"}
+"""Papéis reconhecidos como tokens de menção."""
+
+
+@dataclass(frozen=True)
+class MentionParseResult:
+    """Resultado do parser de menções."""
+
+    role_tokens: set[str] = field(default_factory=set)
+    username_tokens: set[str] = field(default_factory=set)
+
+
+def parse_mentions(body: str) -> MentionParseResult:
+    """Extrai tokens de menção de um corpo de mensagem.
+
+    Tokens de papel (case-insensitive) são normalizados para lowercase.
+    Tokens de username: qualquer @token que não seja papel reconhecido.
+    Tokens repetidos são deduplicados.
+
+    Args:
+        body: O texto da mensagem.
+
+    Returns:
+        MentionParseResult com conjuntos de role_tokens e username_tokens.
+    """
+    matches = MENTION_TOKEN_RE.findall(body)
+    if not matches:
+        return MentionParseResult()
+
+    role_tokens: set[str] = set()
+    username_tokens: set[str] = set()
+
+    for token in matches:
+        normalized = token.lower()
+        if normalized in COMMUNICATION_MENTION_ROLES:
+            role_tokens.add(normalized)
+        else:
+            username_tokens.add(token)
+
+    return MentionParseResult(role_tokens=role_tokens, username_tokens=username_tokens)
+
+
+# ── Notification Creation ─────────────────────────────────────────────────
+
+
+@dataclass(frozen=True)
+class NotificationCreationResult:
+    """Resultado da criação de notificações para uma mensagem."""
+
+    mentioned_roles: tuple[str, ...] = ()
+    mentioned_usernames: tuple[str, ...] = ()
+    notification_count: int = 0
+
+
+def create_case_communication_notifications(*, message: CaseCommunicationMessage) -> NotificationCreationResult:
+    """Cria notificações para destinatários mencionados em uma mensagem.
+
+    Regras:
+    1. Papéis reconhecidos resolvem usuários ativos com aquele papel.
+    2. Usernames resolvem usuários ativos com username correspondente.
+    3. Destinatários duplicados (papel + username) recebem 1 notificação.
+    4. Autor da mensagem não recebe notificação.
+    5. Usuários inativos (is_active=False ou account_status!="active") não recebem.
+    6. No máximo uma notificação por destinatário por mensagem (unique constraint).
+    7. Mensagem sem menção retorna notification_count=0.
+
+    Args:
+        message: A CaseCommunicationMessage recém-criada.
+
+    Returns:
+        NotificationCreationResult com resumo das menções e contagem.
+    """
+    from apps.accounts.models import Role, User, UserNotification
+
+    parsed = parse_mentions(message.body)
+    if not parsed.role_tokens and not parsed.username_tokens:
+        return NotificationCreationResult()
+
+    # Resolver destinatários por papel
+    role_recipient_ids: set[int] = set()
+    if parsed.role_tokens:
+        role_qs = Role.objects.filter(name__in=parsed.role_tokens)
+        role_users = User.objects.filter(
+            roles__in=role_qs,
+            is_active=True,
+            account_status="active",
+        ).values_list("id", flat=True)
+        role_recipient_ids = set(role_users)
+
+    # Resolver destinatários por username
+    username_recipient_ids: set[int] = set()
+    if parsed.username_tokens:
+        username_users = User.objects.filter(
+            username__in=parsed.username_tokens,
+            is_active=True,
+            account_status="active",
+        ).values_list("id", flat=True)
+        username_recipient_ids = set(username_users)
+
+    # Combinar e excluir autor
+    all_recipient_ids = (role_recipient_ids | username_recipient_ids) - {message.author_id}
+
+    if not all_recipient_ids:
+        return NotificationCreationResult(
+            mentioned_roles=tuple(sorted(parsed.role_tokens)),
+            mentioned_usernames=tuple(sorted(parsed.username_tokens)),
+            notification_count=0,
+        )
+
+    # Criar notificações
+    now = timezone.now()
+    notifications = [
+        UserNotification(
+            recipient_id=rid,
+            case=message.case,
+            communication_message=message,
+            triggered_by=message.author,
+            notification_type="case_communication_mention",
+            title="Você foi mencionado em um caso",
+            body_preview=message.body[:240],
+            created_at=now,
+        )
+        for rid in sorted(all_recipient_ids)
+    ]
+
+    created_count = 0
+    if notifications:
+        # bulk_create com ignore_conflicts por causa do unique constraint
+        created = UserNotification.objects.bulk_create(notifications, ignore_conflicts=True)
+        created_count = len(created)
+
+    return NotificationCreationResult(
+        mentioned_roles=tuple(sorted(parsed.role_tokens)),
+        mentioned_usernames=tuple(sorted(parsed.username_tokens)),
+        notification_count=created_count,
+    )
+
+
+# ── Redirecionamento seguro ao abrir notificação ─────────────────────────
+
+
+def resolve_notification_redirect_url(*, case: Any, user: Any, active_role: str) -> str:
+    """Define a URL de redirecionamento seguro ao abrir uma notificação.
+
+    Baseado no papel ativo e status do caso.
+
+    Args:
+        case: O Case vinculado à notificação.
+        user: O usuário destinatário.
+        active_role: O papel ativo do usuário no momento.
+
+    Returns:
+        URL de redirecionamento.
+    """
+    from django.urls import reverse
+
+    from apps.cases.models import CaseStatus
+
+    status = case.status
+
+    if active_role == "nir":
+        if status != CaseStatus.CLEANED:
+            return reverse("intake:case_detail", kwargs={"case_id": case.pk})
+        return "/cases/my-cases/"
+
+    if active_role == "doctor":
+        if status == CaseStatus.WAIT_DOCTOR:
+            return reverse("doctor:decision", kwargs={"case_id": case.pk})
+        return reverse("doctor:queue")
+
+    if active_role == "scheduler":
+        if status == CaseStatus.WAIT_APPT:
+            return reverse("scheduler:confirm", kwargs={"case_id": case.pk})
+        return reverse("scheduler:queue")
+
+    # manager / admin / fallback
+    return "/dashboard/"
+
+
+# ── Email services (original) ────────────────────────────────────────────
+
 
 PUBLIC_ROLE_NAMES = {"doctor", "manager", "admin"}
 """Role names that grant access from public URL (outside intranet)."""

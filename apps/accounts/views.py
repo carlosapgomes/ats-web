@@ -1,12 +1,13 @@
-"""Views for authentication: login, logout, role switching, and home."""
+"""Views for authentication: login, logout, role switching, home, and notifications."""
 
 from django.contrib import messages
 from django.contrib.auth import authenticate, login, logout
 from django.contrib.auth.decorators import login_required
-from django.shortcuts import redirect, render
+from django.shortcuts import get_object_or_404, redirect, render
 
 from .context_processors import ROLE_DISPLAY_NAMES
 from .forms import LoginForm, RoleSelectForm
+from .models import UserNotification
 
 
 def login_view(request):  # type: ignore[no-untyped-def]
@@ -102,3 +103,83 @@ def home_view(request):  # type: ignore[no-untyped-def]
         return redirect("dashboard:index")
 
     return redirect("/switch-role/")
+
+
+# ── Notification Views ────────────────────────────────────────────────────
+
+
+@login_required
+def notifications_list(request):  # type: ignore[no-untyped-def]
+    """Exibe a lista de notificações do usuário autenticado."""
+    notifications = UserNotification.objects.filter(recipient=request.user).select_related(
+        "case", "communication_message", "triggered_by"
+    )
+    unread_count = notifications.filter(read_at__isnull=True).count()
+    return render(
+        request,
+        "accounts/notifications.html",
+        {
+            "notifications": notifications,
+            "unread_count": unread_count,
+        },
+    )
+
+
+@login_required
+def notification_open(request, notification_id):  # type: ignore[no-untyped-def]
+    """Abre uma notificação: marca como lida e redireciona."""
+    from .services import resolve_notification_redirect_url
+
+    notification = get_object_or_404(
+        UserNotification,
+        notification_id=notification_id,
+        recipient=request.user,
+    )
+
+    # Marcar como lida se ainda não foi
+    if notification.read_at is None:
+        from django.utils import timezone
+
+        notification.read_at = timezone.now()
+        notification.save(update_fields=["read_at"])
+
+    # Redirecionar com base no papel ativo
+    active_role = request.session.get("active_role", "")
+    redirect_url = resolve_notification_redirect_url(
+        case=notification.case,
+        user=request.user,
+        active_role=active_role,
+    )
+    return redirect(redirect_url)
+
+
+@login_required
+def notification_mark_read(request, notification_id):  # type: ignore[no-untyped-def]
+    """Marca uma notificação como lida via POST."""
+    if request.method != "POST":
+        return redirect("notifications")
+
+    notification = get_object_or_404(
+        UserNotification,
+        notification_id=notification_id,
+        recipient=request.user,
+    )
+    if notification.read_at is None:
+        from django.utils import timezone
+
+        notification.read_at = timezone.now()
+        notification.save(update_fields=["read_at"])
+
+    return redirect("notifications")
+
+
+@login_required
+def notifications_mark_all_read(request):  # type: ignore[no-untyped-def]
+    """Marca todas as notificações não lidas do usuário como lidas via POST."""
+    if request.method != "POST":
+        return redirect("notifications")
+
+    from django.utils import timezone
+
+    UserNotification.objects.filter(recipient=request.user, read_at__isnull=True).update(read_at=timezone.now())
+    return redirect("notifications")

@@ -721,6 +721,7 @@ def post_case_communication_message(
     - Cria CaseCommunicationMessage.
     - Cria CaseEvent CASE_COMMUNICATION_MESSAGE_POSTED.
     """
+    from apps.accounts.services import create_case_communication_notifications
     from apps.cases.models import CaseEvent
 
     # Validação 1: papel permitido
@@ -748,7 +749,10 @@ def post_case_communication_message(
         body=stripped_body,
     )
 
-    # Criar evento auditável
+    # Criar notificações para menções (se houver)
+    notification_result = create_case_communication_notifications(message=msg)
+
+    # Criar evento auditável com dados de notificações
     CaseEvent.objects.create(
         case=case,
         event_type="CASE_COMMUNICATION_MESSAGE_POSTED",
@@ -758,6 +762,9 @@ def post_case_communication_message(
             "message_id": str(msg.message_id),
             "author_role": author_role,
             "body_preview": stripped_body[:120],
+            "mentioned_roles": list(notification_result.mentioned_roles),
+            "mentioned_usernames": list(notification_result.mentioned_usernames),
+            "notification_count": notification_result.notification_count,
         },
     )
 

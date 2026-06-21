@@ -1,0 +1,67 @@
+{% extends "base.html" %}
+{% load static %}
+
+{% block title %}Minhas Notificações — {{ app_display_name }}{% endblock %}
+
+{% block subtitle %}Minhas Notificações{% endblock %}
+
+{% block content %}
+<div class="container">
+  <div class="d-flex justify-content-between align-items-center mb-3">
+    <h2>
+      Minhas Notificações
+      {% if unread_count %}
+      <span class="badge bg-danger ms-2">{{ unread_count }} não {{ unread_count|pluralize:"lida,lidas" }}</span>
+      {% endif %}
+    </h2>
+    {% if unread_count %}
+    <form method="post" action="{% url 'notifications_mark_all_read' %}">
+      {% csrf_token %}
+      <button type="submit" class="btn btn-outline-secondary btn-sm">Marcar todas como lidas</button>
+    </form>
+    {% endif %}
+  </div>
+
+  {% if notifications %}
+  <div class="list-group">
+    {% for notification in notifications %}
+    <div class="list-group-item list-group-item-action d-flex justify-content-between align-items-start {% if not notification.read_at %}list-group-item-primary{% endif %}">
+      <div class="ms-2 me-auto">
+        <div class="fw-bold">
+          {% if not notification.read_at %}
+          <span class="text-primary me-1">●</span>
+          {% endif %}
+          {{ notification.title }}
+        </div>
+        <p class="mb-1 text-muted small">{{ notification.body_preview|truncatechars:120 }}</p>
+        <small class="text-muted">
+          Caso #{{ notification.case.protocol|default:notification.case.pk }} ·
+          {{ notification.created_at|date:"d/m/Y H:i" }}
+          {% if notification.triggered_by %}
+          · por {{ notification.triggered_by.display_name }}
+          {% endif %}
+        </small>
+      </div>
+      <div class="d-flex gap-1">
+        <a href="{% url 'notification_open' notification_id=notification.notification_id %}"
+           class="btn btn-sm btn-primary">
+          Abrir caso
+        </a>
+        {% if not notification.read_at %}
+        <form method="post" action="{% url 'notification_mark_read' notification_id=notification.notification_id %}">
+          {% csrf_token %}
+          <button type="submit" class="btn btn-sm btn-outline-secondary">Marcar como lida</button>
+        </form>
+        {% endif %}
+      </div>
+    </div>
+    {% endfor %}
+  </div>
+  {% else %}
+  <div class="text-center py-5 text-muted">
+    <p class="mb-0 fs-5">Nenhuma notificação</p>
+    <p class="small">Você será notificado quando for mencionado em uma mensagem de caso.</p>
+  </div>
+  {% endif %}
+</div>
+{% endblock %}
