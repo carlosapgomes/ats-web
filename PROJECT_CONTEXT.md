@@ -107,6 +107,7 @@ static/          # css/app.css (paleta hospitalar), js/upload.js, js/password-to
 - **Role**: nir, doctor, scheduler, manager, admin
 - **Case**: FSM 17 estados, 30+ campos (PDF, LLM artifacts, decisao medica, agendamento). Vínculo opcional de reenvio corrigido: `corrects_case` (self-FK) + `correction_reason`/`correction_created_by`/`correction_created_at`.
 - **CaseEvent**: auditoria append-only (~40 tipos de evento)
+- **CaseCommunicationMessage**: thread operacional append-only vinculada a um `Case` (comunicação entre NIR/médico/scheduler para esclarecimentos; NÃO substitui decisão/agendamento/eventos estruturados)
 - **PromptTemplate**: versionado, apenas 1 ativo por nome
 
 ## Regras Nao Negociaveis
@@ -117,7 +118,7 @@ static/          # css/app.css (paleta hospitalar), js/upload.js, js/password-to
 - Todas as dependencias via `uv` + `pyproject.toml`.
 - Toda mudanca relevante deve deixar evidencia no Git (spec/task/commit).
 - FSM com 17 estados preservados — rastreabilidade completa de quem fez o que e quando.
-- `case_messages` NAO existe neste projeto — `CaseEvent` cobre toda a rastreabilidade.
+- `case_messages` (entidade legada de mensagens de sistema) NAO existe neste projeto — `CaseEvent` cobre toda a rastreabilidade de estados/decisões. Comunicação operacional entre humanos vive em `CaseCommunicationMessage` e não substitui eventos estruturados.
 - Templates textuais e parsers de Matrix nao existem — formularios HTML substituem.
 - Reactions/thumbs-up nao existem — botao "Confirmar Recebimento" substitui.
 
@@ -147,6 +148,16 @@ static/          # css/app.css (paleta hospitalar), js/upload.js, js/password-to
   para NIR (cards no detalhe + badge na busca de encerrados) e médico (card na decisão com motivo do
   NIR + aviso de não-herança de documentos). Quando o vínculo explícito aponta para o mesmo caso do
   prior-case lookup, o card genérico é suprimido para evitar duplicidade visual.
+- **Comunicação operacional por caso**: thread append-only (`CaseCommunicationMessage`) vinculada a
+  exatamente um `Case`, para esclarecimentos/coordenação entre NIR/médico/scheduler. Serviço único
+  `post_case_communication_message` valida papel permitido (`nir`/`doctor`/`scheduler`/`manager`/`admin`),
+  blank/spaces, limite de 2000 chars e bloqueia post em caso `CLEANED`. Endpoint POST único
+  `/cases/<id>/communication/` com redirect seguro (`url_has_allowed_host_and_scheme`). Partial único
+  `_communication_thread.html` reutilizado em 4 telas. Cada post gera evento auditável
+  `CASE_COMMUNICATION_MESSAGE_POSTED` (payload enxuto com `message_id`/`author_role`/`body_preview`).
+  NÃO substitui decisão médica, motivo de negativa, observação de decisão, agendamento, intercorrência
+  estruturada, supressão de anexo nem reenvio corrigido. Sem notificações/polling/HTMX/WebSocket neste
+  MVP (futuro: `case-communication-mentions-notifications`).
 
 ## State do Sistema
 
@@ -164,10 +175,11 @@ static/          # css/app.css (paleta hospitalar), js/upload.js, js/password-to
   - `openspec/archive/case-attachments-initial-upload/` (4 slices — anexos clínicos PDF/JPEG/PNG no upload NIR, supressão auditável e anexos complementares antes da decisão médica). Limitação aceita L1: lote de anexos complementares sem atomicidade transacional de batch — ver `design.md`.
   - `openspec/archive/fix-prior-case-lookup-after-closure/` (1 slice — correção de bug: prior-case lookup agora usa campos estáveis de decisão `doctor_decision`/`appointment_status` + `*_decided_at`, não status FSM transitório; negativas recentes continuam encontradas mesmo após o caso avançar para `CLEANED`)
   - `openspec/archive/corrected-case-resubmission-linkage/` (2 slices — fluxo NIR de reenvio corrigido explícito: novo `Case` vinculado via `corrects_case` + motivo obrigatório, sem herdar/reabrir o anterior; eventos `CASE_CORRECTION_CREATED`/`CASE_MARKED_SUPERSEDED`; visibilidade NIR e médico com deduplicação vs. prior-case lookup). Deploy runbook em `docs/deploy/corrected-case-resubmission-linkage.md`.
+  - `openspec/archive/case-operational-communication-mvp/` (2 slices — thread operacional append-only por caso `CaseCommunicationMessage` para esclarecimentos entre NIR/médico/scheduler; serviço `post_case_communication_message` com validações + endpoint POST `/cases/<id>/communication/` com redirect seguro + partial reutilizado em 4 telas + evento auditável `CASE_COMMUNICATION_MESSAGE_POSTED`. Sem notificações/polling/HTMX/WebSocket; FSM inalterada).
 - **Change merged em main (não arquivado)**: `transactional-emails-auth-flows` (Slices 000–003 concluídos e validados em produção; Slice 004 hardening será implementado direto em main)
 - **Apps criados**: `apps/accounts/`, `apps/cases/`, `apps/llm/`, `apps/intake/`, `apps/pipeline/`,
   `apps/doctor/`, `apps/scheduler/`, `apps/dashboard/`, `apps/admin_ui/`
-- **Testes**: 1363 passando, quality gate verde (ruff + mypy + pytest)
+- **Testes**: 1395 passando, quality gate verde (ruff + mypy + pytest)
 - **Templates**: base.html com tema hospitalar, login, switch-role, perfil, password reset/change,
   intake (home, my_cases, case_detail), doctor (queue, decision)
 - **Documentacao de dominio**: `docs/DOMAIN_ANALYSIS.md`
