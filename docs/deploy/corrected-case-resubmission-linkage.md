@@ -8,6 +8,47 @@
 
 ---
 
+## Quick reference
+
+Cópia de mão — para uso **após** leitura completa do runbook e após o
+Passo 1 (backup) já estar em `/archive/backups/`. Executar como `apps`,
+no diretório de instalação.
+
+```bash
+DPROD="docker compose -f docker-compose.yml -f docker-compose.prod.yml"
+
+# 1. (pré) Backup já feito e movido para /archive/backups/ pelo admin.
+
+# 2. Atualizar código
+git fetch origin && git checkout main && git pull origin main
+git log --oneline -3        # confirmar 8d138f7 (ou superior) no topo
+
+# 3. Build das novas imagens
+$DPROD build --pull web worker pdf_worker
+
+# 4. Aplicar migration (app no ar, zero downtime)
+#    Saída esperada: Applying cases.0007_add_correction_fields... OK
+#    Se erro: NÃO continuar — ir para a Seção 4 (Rollback).
+$DPROD run --rm web uv run python manage.py migrate --settings=config.settings.prod
+
+# 5. Subir containers com a imagem nova
+$DPROD up -d
+
+# 6. Verificação imediata
+$DPROD ps                                                   # todos "running"
+$DPROD logs --tail=30 web worker pdf_worker                 # sem traceback
+
+curl -sS -o /dev/null -w "%{http_code}\n" https://chd.projetoshgrs.com/   # 200 ou 302
+
+$DPROD exec -T web uv run python manage.py showmigrations cases \
+  --settings=config.settings.prod | tail -10                # [X] 0007_add_correction_fields
+```
+
+> Passos 7 (validação funcional manual) e 8 (monitoramento 24h) seguem
+> abaixo em formato completo.
+
+---
+
 ## 1. Análise de risco
 
 | Aspecto | Avaliação |
