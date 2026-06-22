@@ -1107,7 +1107,7 @@ class TestDoctorDecisionPriorCaseCard:
         assert response.status_code == 200
         content = response.content.decode()
         assert "Caso Anterior" in content
-        assert "Triagem Negada" in content
+        assert "Regulação Negada" in content
         assert "Contorno clínico elevado" in content
         assert "Dr. Carlos — CRM 99999" in content
 

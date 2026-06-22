@@ -192,7 +192,7 @@ class TestDoctorDecisionAttachmentDisplay:
         content = response.content.decode()
         # Deve conter o nome original do anexo
         assert attachments[0].original_filename in content
-        # Deve conter o aviso de que anexos não foram analisados pela IA
+        # Deve conter o aviso de que anexos não foram analisados pelo sistema
         assert "não analisados" in content.lower() or "automaticamente" in content.lower()
 
     def test_doctor_decision_embeds_pdf_attachment(self, client) -> None:
@@ -388,7 +388,7 @@ class TestDoctorDecisionRegressionAfterTemplateChanges:
         # Ambos os anexos devem aparecer
         assert attachments[0].original_filename in content
         assert attachments[1].original_filename in content
-        # Aviso sobre anexos não analisados pela IA deve estar presente
+        # Aviso sobre anexos não analisados pelo sistema deve estar presente
         assert "não analisados" in content.lower() or "automaticamente" in content.lower()
         # Seção de anexos deve existir
         assert "Anexos Clínicos" in content or "📎" in content
