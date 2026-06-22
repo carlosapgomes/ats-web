@@ -677,6 +677,7 @@ def scheduler_submit(request: HttpRequest, case_id: uuid.UUID) -> HttpResponse:
             appt_time = form.cleaned_data["appointment_time"]
             case.appointment_status = "confirmed"
             case.appointment_at = datetime.combine(appt_date, appt_time).replace(tzinfo=timezone.get_current_timezone())
+            case.appointment_location = form.cleaned_data.get("appointment_location", "")
             case.appointment_instructions = form.cleaned_data.get("notes", "")
 
             # FSM transition: WAIT_APPT → APPT_CONFIRMED
