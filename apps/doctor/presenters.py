@@ -333,7 +333,7 @@ class DoctorReportPresenter:
         blocks = report["blocks"]
         denial = report["recent_denial"]
 
-        lines: list[str] = ["# Resumo técnico da triagem\n"]
+        lines: list[str] = ["# Resumo técnico da regulação\n"]
 
         # Context
         lines.append(f"procedimento solicitado: {context['procedure']}")
@@ -779,7 +779,7 @@ class DoctorReportPresenter:
     @staticmethod
     def _format_denial_decision(value: Any) -> str:
         if value == "deny_triage":
-            return "negado na triagem"
+            return "negado na regulação"
         if value == "deny_appointment":
             return "negado no agendamento"
         return "negado"

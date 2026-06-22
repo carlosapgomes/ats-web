@@ -87,7 +87,7 @@ DOCTOR_DECISION_MAP: dict[str, str] = {
 
 # Prior case decision mapping for display on UI cards
 PRIOR_DECISION_DISPLAY: dict[str, str] = {
-    "doctor_denied": "Triagem Negada",
+    "doctor_denied": "Regulação Negada",
     "appointment_denied": "Agendamento Negado",
 }
 

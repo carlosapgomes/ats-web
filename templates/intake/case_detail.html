@@ -332,7 +332,7 @@
       <p class="mb-1 text-muted small">Decisão</p>
       <p class="mb-0 fw-medium">
         {% if prior_case_lookup.decision == "doctor_denied" %}
-          Triagem Negada
+          Regulação Negada
         {% elif prior_case_lookup.decision == "appointment_denied" %}
           Agendamento Negado
         {% else %}
@@ -544,7 +544,7 @@
 <div class="card p-4 mb-4">
   <h5 class="mb-3">📎 Anexos Clínicos</h5>
   <div class="alert alert-info small mb-3">
-    <strong>📌 Aviso:</strong> Anexos enviados pelo NIR — não analisados automaticamente pela IA.
+    <strong>📌 Aviso:</strong> Anexos enviados pelo NIR — não analisados automaticamente pelo sistema.
   </div>
 
   {% for att in attachments %}
@@ -564,7 +564,7 @@
     <div class="card-body py-3">
       {% if att.upload_phase == "supplemental" %}
       <div class="alert alert-warning small py-1 px-2 mb-2">
-        <strong>📌</strong> Adicionado após upload inicial — não analisado automaticamente pela IA.
+        <strong>📌</strong> Adicionado após upload inicial — não analisado automaticamente pelo sistema.
         {% if att.note %}<br><em>Justificativa:</em> {{ att.note }}{% endif %}
       </div>
       {% endif %}

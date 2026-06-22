@@ -1343,7 +1343,7 @@ class TestCaseDetailPriorCaseLookup:
         assert response.status_code == 200
         content = response.content.decode()
         assert "Caso Anterior" in content
-        assert "Triagem Negada" in content
+        assert "Regulação Negada" in content
         assert "Contorno clínico elevado" in content
         assert "Dr. Teste — CRM 12345" in content
         assert "2026-05-30" in content

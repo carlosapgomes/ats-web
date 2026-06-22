@@ -490,7 +490,7 @@ class TestDoctorReportPresenter:
         report = presenter.build_report()
         assert report["recent_denial"] is not None
         denial_lines = report["recent_denial"]["lines"]
-        assert any("negado na triagem" in line for line in denial_lines)
+        assert any("negado na regulação" in line for line in denial_lines)
         assert any("Contorno clínico elevado" in line for line in denial_lines)
         assert any("2" in line and "últimos 7 dias" in line for line in denial_lines)
 
@@ -515,7 +515,7 @@ class TestDoctorReportPresenter:
             recent_denial_context=_make_recent_denial_context(),
         )
         text = presenter.build_text_report()
-        assert "Resumo técnico da triagem" in text
+        assert "Resumo técnico da regulação" in text
         assert "## Resumo clínico" in text
         assert "## Achados críticos" in text
         assert "## Pendências críticas" in text
