@@ -529,7 +529,7 @@ class TestDashboardNavPills:
         assert "Usuários" in content
 
     def test_has_auditoria_pill(self, client) -> None:
-        """Nav pill 'Auditoria' aparece (placeholder)."""
+        """Nav pill 'Auditoria' oculta (hidden placeholder)."""
         _login_as(client, "manager")
         response = client.get("/dashboard/")
         assert response.status_code == 200
