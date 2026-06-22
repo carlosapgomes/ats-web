@@ -19,6 +19,11 @@ class SchedulerDecisionForm(forms.Form):
         required=False,
         widget=forms.TimeInput(attrs={"type": "time"}),
     )
+    appointment_location = forms.CharField(
+        required=False,
+        widget=forms.TextInput(attrs={"placeholder": "Ex: Hospital Central - Sala 2"}),
+        label="Local",
+    )
     notes = forms.CharField(widget=forms.Textarea, required=False)
     reason = forms.CharField(widget=forms.Textarea, required=False)
 
