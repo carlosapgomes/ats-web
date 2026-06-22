@@ -410,4 +410,5 @@ class TestPromptNavPills:
         assert "Dashboard" in content
         assert "Prompts" in content
         assert "Usuários" in content
+        # Auditoria está oculta (hidden), mas o texto ainda está no HTML
         assert "Auditoria" in content
