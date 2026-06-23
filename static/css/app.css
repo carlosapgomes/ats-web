@@ -258,6 +258,23 @@ body.hospital-shell h6 {
 
 /* ---------- Notification badge (bell icon) ---------- */
 
+.notification-icon-btn {
+  width: 2rem;
+  height: 2rem;
+  min-height: 2rem;
+  padding: 0;
+  border-radius: 999px;
+  color: var(--hospital-primary);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.notification-icon-btn:hover,
+.notification-icon-btn:focus {
+  color: var(--hospital-primary);
+}
+
 .notification-badge {
   position: relative;
 }

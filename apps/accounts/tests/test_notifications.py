@@ -821,8 +821,9 @@ class TestNotificationBadgeTemplate:
         assert response.status_code == 200
         content = response.content.decode()
 
-        # Sino preserva atributos obrigatórios de polling
+        # Sino preserva atributos obrigatórios de polling e usa forma circular consistente com avatar
         assert 'id="notification-badge"' in content
+        assert "notification-icon-btn" in content
         assert "data-notifications-badge" in content
         assert "data-unread-count-url" in content
 
