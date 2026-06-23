@@ -3,7 +3,7 @@
 ## Slices verticais
 
 - [x] Slice 001 — Decisão médica sem ambiguidade (`slices/slice-001-decisao-medica-sem-ambiguidade.md`)
-- [ ] Slice 002 — Labels downstream alinhados (`slices/slice-002-labels-downstream-alinhados.md`)
+- [x] Slice 002 — Labels downstream alinhados (`slices/slice-002-labels-downstream-alinhados.md`)
 
 ## Definition of Done do change
 
@@ -17,15 +17,15 @@
 - [ ] Submissão com orientação acima de 500 caracteres continua inválida.
 - [ ] Submissão `deny` exige motivo da negativa.
 - [ ] Submissão `deny` não persiste orientação médica enviada no POST; `doctor_observation` fica vazio para novas negativas.
-- [ ] Downstream troca nomenclatura visível de `Observação Médica`/`Obs. médica` para `Orientação médica`/`Orientações médicas`.
+- [x] Downstream troca nomenclatura visível de `Observação Médica`/`Obs. médica` para `Orientação médica`/`Orientações médicas`.
 - [ ] Nenhuma migration é criada sem justificativa explícita.
 - [ ] FSM, eventos estruturados, comunicação operacional e notificações permanecem inalterados.
-- [ ] Testes relevantes adicionados/ajustados antes da implementação passar.
-- [ ] Quality gate do AGENTS.md executado:
-  - [ ] `uv run ruff check .`
-  - [ ] `uv run ruff format --check .`
-  - [ ] `uv run mypy .`
-  - [ ] `uv run pytest`
-- [ ] Relatório markdown temporário gerado por slice, com snippets antes/depois e respostas aos gates de autoavaliação.
-- [ ] `REPORT_PATH=<temp-markdown-path>` informado por slice.
-- [ ] Commit e push realizados por slice.
+- [x] Testes relevantes adicionados/ajustados antes da implementação passar.
+- [x] Quality gate do AGENTS.md executado:
+  - [x] `uv run ruff check .`
+  - [x] `uv run ruff format --check .`
+  - [x] `uv run mypy .`
+  - [x] `uv run pytest`
+- [x] Relatório markdown temporário gerado por slice, com snippets antes/depois e respostas aos gates de autoavaliação.
+- [x] `REPORT_PATH=<temp-markdown-path>` informado por slice.
+- [x] Commit e push realizados por slice.

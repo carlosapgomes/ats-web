@@ -599,7 +599,7 @@ class TestDashboardCaseDetailAdmin:
 
         assert response.status_code == 200
         content = response.content.decode()
-        assert "Observação Médica" in content
+        assert "Orientações médicas" in content
         assert "Observação importante para supervisão e administração" in content
         assert "Confirmar" not in content
 
@@ -616,7 +616,7 @@ class TestDashboardCaseDetailAdmin:
         response = client.get(reverse("dashboard:case_detail", args=[case.case_id]))
 
         assert response.status_code == 200
-        assert "Observação Médica" not in response.content.decode()
+        assert "Orientações médicas" not in response.content.decode()
 
     def test_terminal_appointment_denied_shows_denied_not_confirmed(self, client) -> None:
         """WAIT_R1_CLEANUP_THUMBS com appointment_status="denied" mostra Agendamento Negado, não Confirmado."""

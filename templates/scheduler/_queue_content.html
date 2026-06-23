@@ -26,7 +26,7 @@
             <div class="col-lg-8">
               <div class="patient-name mb-1">{{ c.patient_name }}</div>
               {% if c.has_doctor_observation %}
-              <span class="badge bg-info text-dark mb-2">📝 Obs. médica</span>
+              <span class="badge bg-info text-dark mb-2">📝 Orientação médica</span>
               {% endif %}
               <div class="case-meta mb-2">
                 {% if c.agency_record_number %}Reg. {{ c.agency_record_number }} · {% endif %}
@@ -48,7 +48,7 @@
               </div>
               {% if c.has_doctor_observation %}
               <div class="alert alert-info py-2 px-3 mt-2 mb-0 small">
-                <strong>📝 Observação médica:</strong> {{ c.doctor_observation }}
+                <strong>📝 Orientação médica:</strong> {{ c.doctor_observation }}
               </div>
               {% endif %}
             </div>
@@ -79,7 +79,7 @@
             <span class="badge bg-warning text-dark mb-2">Dias em tela: {{ c.regulation_days_on_screen }}</span>
             {% endif %}
             {% if c.has_doctor_observation %}
-            <span class="badge bg-info text-dark mb-2">📝 Obs. médica</span>
+            <span class="badge bg-info text-dark mb-2">📝 Orientação médica</span>
             {% endif %}
             {% if c.has_post_schedule_issue %}
             <span class="badge bg-warning text-dark mb-2">⚠️ Intercorrência pós-agendamento</span>

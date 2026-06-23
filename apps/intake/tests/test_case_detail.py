@@ -157,9 +157,9 @@ class TestCaseDetailRenders:
         assert "Abrir em nova aba" in content
 
     def test_case_detail_shows_doctor_observation(self, client) -> None:
-        """Detalhe do NIR mostra card com a observação médica completa."""
+        """Detalhe do NIR mostra card com orientações médicas completas."""
         client, user = _nir_client(client)
-        observation = "Observação Médica completa\nPreservar quebras de linha."
+        observation = "Orientações médicas completas\nPreservar quebras de linha."
         case = Case.objects.create(
             created_by=user,
             agency_record_number="OBS-DETAIL-001",
@@ -171,8 +171,8 @@ class TestCaseDetailRenders:
 
         assert response.status_code == 200
         content = response.content.decode()
-        assert "Observação Médica" in content
-        assert "Observação Médica completa" in content
+        assert "Orientações médicas" in content
+        assert "Orientações médicas completas" in content
         assert "Preservar quebras de linha." in content
         assert "white-space: pre-wrap" in content
 
@@ -196,8 +196,8 @@ class TestCaseDetailRenders:
 
         assert empty_response.status_code == 200
         assert spaces_response.status_code == 200
-        assert "Observação Médica" not in empty_response.content.decode()
-        assert "Observação Médica" not in spaces_response.content.decode()
+        assert "Orientações médicas" not in empty_response.content.decode()
+        assert "Orientações médicas" not in spaces_response.content.decode()
 
 
 @pytest.mark.django_db

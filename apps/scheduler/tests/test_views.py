@@ -95,7 +95,7 @@ class TestSchedulerQueueView:
         content = response.content.decode()
         assert "Paciente Com Obs" in content
         assert "Paciente Sem Obs" in content
-        assert content.count("Obs. médica") == 1
+        assert content.count("Orientação médica") == 1
 
     def test_queue_shows_pending_cases(self, client) -> None:
         """Pending (WAIT_APPT) cases appear in the queue."""
@@ -180,7 +180,7 @@ class TestSchedulerQueueView:
         assert response.status_code == 200
         content = response.content.decode()
         assert "Imediata Com Obs" in content
-        assert "Observação médica" in content
+        assert "Orientação médica" in content
         assert observation in content
 
     def test_queue_shows_immediate_admission_operational_notice(self, client) -> None:
@@ -507,18 +507,18 @@ class TestSchedulerConfirmView:
         response = client.get(f"/scheduler/{case.case_id}/")
         assert response.status_code == 200
         content = response.content.decode()
-        assert "Observação Médica" in content
+        assert "Orientações médicas" in content
         assert observation in content
 
     def test_confirm_hides_doctor_observation_when_empty_or_spaces(self, client) -> None:
-        """Confirm page does not render empty observation UI."""
+        """Confirm page does not render empty orientation UI."""
         self._login_as(client, "scheduler")
         case = self._create_waited_case(doctor_observation="   ")
 
         response = client.get(f"/scheduler/{case.case_id}/")
         assert response.status_code == 200
         content = response.content.decode()
-        assert "Observação Médica" not in content
+        assert "Orientações médicas" not in content
 
     def test_confirm_shows_doctor_display(self, client) -> None:
         """Confirm page shows doctor name and CRM."""
