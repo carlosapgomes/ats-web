@@ -492,7 +492,11 @@ def doctor_submit(request: HttpRequest, case_id: uuid.UUID) -> HttpResponse:
     decision = form.cleaned_data["decision"]
 
     # Persist decision fields
-    case.doctor_observation = form.cleaned_data.get("observation", "")
+    # Observation (orientation) is only persisted for accept; deny clears it
+    if decision == "accept":
+        case.doctor_observation = form.cleaned_data.get("observation", "").strip()
+    else:
+        case.doctor_observation = ""
     case.doctor_decision = decision
     case.doctor_support_flag = form.cleaned_data.get("support_flag", "") or "none"
     case.doctor_admission_flow = form.cleaned_data.get("admission_flow", "")

@@ -960,6 +960,49 @@ class TestDoctorDecisionView:
         assert "62" in content
         assert "2026-0506-001" in content
 
+    def test_decision_form_uses_acceptance_orientation_label(self, client) -> None:
+        """R1: Form label shows 'Orientações para agendamento/execução', not 'Observação Médica'."""
+        case = self._create_case_in_status(CaseStatus.WAIT_DOCTOR)
+        case.structured_data = {"patient": {"name": "Label Test", "age": 40, "gender": "Masculino"}}
+        case.save()
+        self._login_as(client, "doctor")
+        response = client.get(f"/doctor/{case.case_id}/")
+        assert response.status_code == 200
+        content = response.content.decode()
+        assert "Orientações para agendamento/execução" in content
+        assert "Observação Médica" not in content
+
+    def test_decision_page_guides_missing_documents_to_operational_communication(self, client) -> None:
+        """R3: Page guides user to use Comunicação operacional for missing docs."""
+        case = self._create_case_in_status(CaseStatus.WAIT_DOCTOR)
+        case.structured_data = {"patient": {"name": "Microcopy Test", "age": 45, "gender": "Feminino"}}
+        case.save()
+        self._login_as(client, "doctor")
+        response = client.get(f"/doctor/{case.case_id}/")
+        assert response.status_code == 200
+        content = response.content.decode()
+        assert "Comunicação operacional" in content
+        assert "NIR" in content
+        assert "volte sem decidir" in content or "Voltar sem decidir" in content
+
+    def test_decision_page_cancel_link_says_back_without_deciding(self, client) -> None:
+        """R4: Return link says 'Voltar sem decidir', not 'Cancelar'."""
+        case = self._create_case_in_status(CaseStatus.WAIT_DOCTOR)
+        case.structured_data = {"patient": {"name": "Cancel Test", "age": 35, "gender": "Masculino"}}
+        case.save()
+        self._login_as(client, "doctor")
+        response = client.get(f"/doctor/{case.case_id}/")
+        assert response.status_code == 200
+        content = response.content.decode()
+        assert "Voltar sem decidir" in content
+        import re
+
+        actions_match = re.search(r'<div class="d-flex gap-2">.*?</div>\s*</form>', content, re.DOTALL)
+        if actions_match:
+            actions_html = actions_match.group(0)
+            assert "Voltar sem decidir" in actions_html
+            assert "Cancelar" not in actions_html
+
     def test_decision_shows_ia_extraction(self, client) -> None:
         """Decision page displays IA extraction data: diagnosis, summary, suggestions."""
         case = self._create_case_in_status(CaseStatus.WAIT_DOCTOR)
@@ -1829,7 +1872,7 @@ class TestDoctorSubmitView:
     # ── Observation submit tests ──────────────────────────────────────────
 
     def test_submit_accept_with_observation_persists(self, client) -> None:
-        """POST accept with observation persists case.doctor_observation."""
+        """POST accept with observation persists case.doctor_observation (orientation)."""
         case = self._create_case_in_status(CaseStatus.WAIT_DOCTOR)
         case.structured_data = {"patient": {"name": "Obs Accept", "age": 40, "gender": "Masculino"}}
         case.save()
@@ -1843,19 +1886,19 @@ class TestDoctorSubmitView:
                 "decision": "accept",
                 "support_flag": "anesthesist",
                 "admission_flow": "scheduled",
-                "observation": "Paciente com comorbidades. Necessário leito UTI.",
+                "observation": "Priorizar por anemia. Agendar com anestesia.",
                 "lock_token": token,
             },
         )
         assert response.status_code == 302
 
         case = Case.objects.get(pk=case.pk)
-        assert case.doctor_observation == "Paciente com comorbidades. Necessário leito UTI."
+        assert case.doctor_observation == "Priorizar por anemia. Agendar com anestesia."
 
-    def test_submit_deny_with_observation_persists(self, client) -> None:
-        """POST deny with observation persists case.doctor_observation."""
+    def test_submit_deny_with_observation_ignores_orientation(self, client) -> None:
+        """POST deny with observation does NOT persist orientation; doctor_observation stays empty."""
         case = self._create_case_in_status(CaseStatus.WAIT_DOCTOR)
-        case.structured_data = {"patient": {"name": "Obs Deny", "age": 50, "gender": "Feminino"}}
+        case.structured_data = {"patient": {"name": "Deny Obs Ignore", "age": 50, "gender": "Feminino"}}
         case.save()
 
         doctor = self._login_as(client, "doctor")
@@ -1873,7 +1916,34 @@ class TestDoctorSubmitView:
         assert response.status_code == 302
 
         case = Case.objects.get(pk=case.pk)
-        assert case.doctor_observation == "Encaminhar para avaliação clínica."
+        assert case.doctor_reason == "Sem indicação cirúrgica"
+        assert case.doctor_observation == "", (
+            f"Expected doctor_observation to be empty on deny, got: {case.doctor_observation!r}"
+        )
+
+    def test_submit_accept_strips_orientation_whitespace(self, client) -> None:
+        """POST accept strips whitespace from observation before persisting."""
+        case = self._create_case_in_status(CaseStatus.WAIT_DOCTOR)
+        case.structured_data = {"patient": {"name": "Strip Test", "age": 40, "gender": "Masculino"}}
+        case.save()
+
+        doctor = self._login_as(client, "doctor")
+        token = self._claim_lock(case.case_id, doctor)
+
+        response = client.post(
+            f"/doctor/{case.case_id}/submit/",
+            data={
+                "decision": "accept",
+                "support_flag": "none",
+                "admission_flow": "scheduled",
+                "observation": "  Espaços ao redor  ",
+                "lock_token": token,
+            },
+        )
+        assert response.status_code == 302
+
+        case = Case.objects.get(pk=case.pk)
+        assert case.doctor_observation == "Espaços ao redor"
 
     def test_submit_without_observation_persists_empty_string(self, client) -> None:
         """POST without observation persists empty string and doesn't break flow."""

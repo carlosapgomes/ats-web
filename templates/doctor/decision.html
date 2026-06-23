@@ -94,6 +94,12 @@
                 {% if form.admission_flow.errors %}<div class="invalid-feedback d-block">{{ form.admission_flow.errors.0 }}</div>{% else %}<div class="invalid-feedback">Selecione o fluxo de admissão.</div>{% endif %}
               </div>
             </div>
+            <div class="mb-3">
+              <label for="doctor-observation" class="form-label">{{ form.observation.label }}</label>
+              <textarea class="form-control{% if form.observation.errors %} is-invalid{% endif %}" id="doctor-observation" name="observation" rows="2" maxlength="500" placeholder="{{ form.observation.field.widget.attrs.placeholder }}">{{ form.observation.value|default:"" }}</textarea>
+              {% if form.observation.errors %}<div class="invalid-feedback d-block">{{ form.observation.errors.0 }}</div>{% endif %}
+              <div class="form-text">{{ form.observation.help_text }}</div>
+            </div>
           </div>
 
           <div class="decision-section{% if form.decision.value == 'deny' %} active{% endif %}" id="deny-section">
@@ -110,11 +116,12 @@
             <div class="form-text">Preenchido automaticamente pelo sistema.</div>
           </div>
 
-          <div class="mb-4">
-            <label for="doctor-observation" class="form-label">{{ form.observation.label }}</label>
-            <textarea class="form-control{% if form.observation.errors %} is-invalid{% endif %}" id="doctor-observation" name="observation" rows="2" maxlength="500" placeholder="Informações adicionais sobre o caso...">{{ form.observation.value|default:"" }}</textarea>
-            {% if form.observation.errors %}<div class="invalid-feedback d-block">{{ form.observation.errors.0 }}</div>{% endif %}
-            <div class="form-text">{{ form.observation.help_text }}</div>
+          <div class="alert alert-info small mb-4 py-2" role="alert">
+            💬 <strong>Precisa de mais informações?</strong>
+            Se faltam documentos ou dados para decidir, envie uma mensagem na
+            <strong>Comunicação operacional</strong> marcando o <strong>NIR</strong>
+            e <strong>volte sem decidir</strong>.
+            Não use negativa apenas para solicitar complemento.
           </div>
 
           {% if lock_error %}
@@ -128,7 +135,7 @@
 
           <div class="d-flex gap-2">
             <button type="submit" class="btn btn-hospital btn-lg flex-grow-1" id="btn-submit">Enviar Decisão</button>
-            <a href="{% url 'doctor:queue' %}" class="btn btn-outline-secondary btn-lg">Cancelar</a>
+            <a href="{% url 'doctor:queue' %}" class="btn btn-outline-secondary btn-lg">Voltar sem decidir</a>
           </div>
         </form>
       </div>
