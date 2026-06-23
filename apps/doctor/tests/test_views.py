@@ -723,6 +723,28 @@ class TestDoctorQueueView:
         pos_new = content.index("New (created later)")
         assert pos_old < pos_new, "Older case should appear before newer when tie"
 
+    def test_queue_nav_uses_action_and_neutral_count_badges(self, client) -> None:
+        """R1: Pendentes uses action badge, Decididos Hoje uses neutral badge."""
+        self._login_as(client, "doctor")
+        response = client.get("/doctor/")
+        assert response.status_code == 200
+        content = response.content.decode()
+
+        # Pendentes should have data-count and the action/danger class
+        assert "nav-count-badge--danger" in content, "Pendentes must use danger/action badge class"
+        # Decididos Hoje should have data-count and the neutral class
+        assert "nav-count-badge--neutral" in content, "Decididos Hoje must use neutral badge class"
+        # Decididos Hoje must NOT use .notif-badge
+        # Check the Decididos Hoje link area (rough check before the closing </a>)
+        content_lower = content.lower()
+        decided_pos = content_lower.find("decididos hoje")
+        assert decided_pos > -1, "Decididos Hoje text not found"
+        # Look backwards from 'Decididos Hoje' to find the <a tag and check for notif-badge
+        a_tag_start = content.rfind("<a", 0, decided_pos)
+        if a_tag_start > -1:
+            a_tag_section = content[a_tag_start : decided_pos + 50]
+            assert "notif-badge" not in a_tag_section, "Decididos Hoje must not use .notif-badge"
+
     def test_queue_partial_preserves_decided_tab(self, client) -> None:
         """R3: HTMX partial for ?tab=decided returns only decided content."""
         doctor_user = User.objects.create_user(username="doc_partial@test.com", password="testpass123")
