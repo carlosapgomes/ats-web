@@ -256,7 +256,36 @@ body.hospital-shell h6 {
   margin-bottom: 0.15rem;
 }
 
-/* ---------- Notification badge ---------- */
+/* ---------- Notification badge (bell icon) ---------- */
+
+.notification-badge {
+  position: relative;
+}
+
+.notification-badge::after {
+  content: attr(data-count);
+  position: absolute;
+  top: -6px;
+  right: -10px;
+  background: #e74c3c;
+  color: #fff;
+  font-size: 0.7rem;
+  font-weight: 700;
+  min-width: 18px;
+  height: 18px;
+  line-height: 18px;
+  text-align: center;
+  border-radius: 999px;
+  padding: 0 4px;
+  z-index: 1;
+}
+
+.notification-badge:not([data-count])::after,
+.notification-badge[data-count="0"]::after {
+  display: none;
+}
+
+/* ---------- Tab badge (operational queue counters) ---------- */
 
 .notif-badge {
   position: relative;

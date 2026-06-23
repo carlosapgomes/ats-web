@@ -14,12 +14,15 @@
       <span class="badge bg-danger ms-2">{{ unread_count }} não {{ unread_count|pluralize:"lida,lidas" }}</span>
       {% endif %}
     </h2>
-    {% if unread_count %}
-    <form method="post" action="{% url 'notifications_mark_all_read' %}">
-      {% csrf_token %}
-      <button type="submit" class="btn btn-outline-secondary btn-sm">Marcar todas como lidas</button>
-    </form>
-    {% endif %}
+    <div class="d-flex gap-2">
+      <a href="{% url 'home' %}" class="btn btn-outline-secondary btn-sm">Voltar ao início</a>
+      {% if unread_count %}
+      <form method="post" action="{% url 'notifications_mark_all_read' %}">
+        {% csrf_token %}
+        <button type="submit" class="btn btn-outline-secondary btn-sm">Marcar todas como lidas</button>
+      </form>
+      {% endif %}
+    </div>
   </div>
 
   {% if notifications %}

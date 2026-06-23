@@ -44,27 +44,15 @@
 
   /**
    * Update the badge DOM element with the new count.
+   *
+   * The visual counter is rendered via CSS pseudo-element (::after)
+   * based on the data-count attribute. The badge is always a single
+   * source of truth via data-count, avoiding duplication.
+   *
    * @param {number} count - The unread count.
    */
   function updateBadge(count) {
     badgeEl.setAttribute("data-count", String(count));
-
-    // Update visible count badge inside the link
-    var countBadge = badgeEl.querySelector(".badge");
-    if (count > 0) {
-      if (!countBadge) {
-        var newBadge = document.createElement("span");
-        newBadge.className = "badge bg-danger ms-1";
-        newBadge.textContent = String(count);
-        badgeEl.appendChild(newBadge);
-      } else {
-        countBadge.textContent = String(count);
-      }
-    } else {
-      if (countBadge) {
-        countBadge.remove();
-      }
-    }
 
     // Update aria-label for accessibility
     var label =

@@ -804,36 +804,14 @@ class TestNotificationBadgeTemplate:
         assert "data-unread-count-url" in content
         assert reverse("notifications_unread_count") in content
 
-    def test_unread_count_helper_is_consistent_across_context_and_endpoint(
-        self, db: Any, client: Any, case_factory: Any, user: Any, user_doctor: Any
+    def test_header_renders_notification_bell_with_polling_attributes(
+        self, db: Any, client: Any, user_doctor: Any
     ) -> None:
-        """Context processor (badge SSR) e endpoint JSON devem concordar.
+        """Header autenticado renderiza sino com atributos de polling.
 
-        Garante que não haja duas queries de contagem divergentes (DRY):
-        ambos devem usar o mesmo helper.
+        R1: sino substitui botão textual grande Notificações.
+        R2: contador não duplica (pseudo-elemento OU span, não ambos visíveis).
         """
-        from apps.cases.services import post_case_communication_message
-
-        case = case_factory(user)
-        post_case_communication_message(case=case, author=user, author_role="nir", body="@doctor ola")
-
-        client.force_login(user_doctor)
-        session = client.session
-        session["active_role"] = "doctor"
-        session.save()
-
-        # Render SSR expõe o badge com data-count vindo do context processor
-        page = client.get(reverse("notifications"))
-        assert page.status_code == 200
-        assert 'data-count="1"' in page.content.decode()
-
-        # Endpoint JSON deve retornar o mesmo número
-        api = client.get(reverse("notifications_unread_count"))
-        assert api.status_code == 200
-        assert api.json()["unread_count"] == 1
-
-    def test_notifications_js_is_loaded_for_authenticated_header(self, db: Any, client: Any, user_doctor: Any) -> None:
-        """base.html inclui static/js/notifications.js."""
         client.force_login(user_doctor)
         session = client.session
         session["active_role"] = "doctor"
@@ -842,7 +820,62 @@ class TestNotificationBadgeTemplate:
         response = client.get(reverse("notifications"))
         assert response.status_code == 200
         content = response.content.decode()
-        assert "/static/js/notifications.js" in content
+
+        # Sino preserva atributos obrigatórios de polling
+        assert 'id="notification-badge"' in content
+        assert "data-notifications-badge" in content
+        assert "data-unread-count-url" in content
+
+        # Sino tem aria-label acessível
+        assert "aria-label=" in content
+        assert "Notificações" in content
+
+        # Sino contém SVG (ícone de sino inline)
+        assert "<svg" in content
+        assert "bell" in content.lower() or 'viewBox="0 0 16 16"' in content
+
+        # Sino contém visually-hidden com texto acessível
+        assert "visually-hidden" in content
+
+        # Sino NÃO contém texto visível grande "Notificações" como conteúdo textual do link
+        # O link não deve ter "Notificações" como texto solto (apenas no visually-hidden)
+        # Procura pelo padrão antigo: >Notificações< precedido por > ou espaço
+        assert ">Notificações\n" not in content
+
+    def test_notifications_page_has_back_to_home_link_when_empty(self, db: Any, client: Any, user_doctor: Any) -> None:
+        """Página de notificações vazia tem botão Voltar ao início."""
+        client.force_login(user_doctor)
+        session = client.session
+        session["active_role"] = "doctor"
+        session.save()
+
+        response = client.get(reverse("notifications"))
+        assert response.status_code == 200
+        content = response.content.decode()
+        assert "Voltar ao início" in content
+        url_home = reverse("home")
+        assert url_home in content
+
+    def test_notifications_page_has_back_to_home_link_with_notifications(
+        self, db: Any, client: Any, case_factory: Any, user: Any, user_doctor: Any
+    ) -> None:
+        """Página de notificações com notificações tem botão Voltar ao início."""
+        from apps.cases.services import post_case_communication_message
+
+        case = case_factory(user)
+        post_case_communication_message(case=case, author=user, author_role="nir", body="@doctor revisar")
+
+        client.force_login(user_doctor)
+        session = client.session
+        session["active_role"] = "doctor"
+        session.save()
+
+        response = client.get(reverse("notifications"))
+        assert response.status_code == 200
+        content = response.content.decode()
+        assert "Voltar ao início" in content
+        url_home = reverse("home")
+        assert url_home in content
 
 
 class TestNotificationJsHardening:
