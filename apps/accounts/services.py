@@ -34,8 +34,17 @@ MENTION_TOKEN_RE = re.compile(r"(?<!\w)@([A-Za-z0-9_\.\-]{2,50})")
 Não captura @ que já faz parte de outro token (ex: email).
 """
 
-COMMUNICATION_MENTION_ROLES: set[str] = {"nir", "doctor", "scheduler", "manager", "admin"}
-"""Papéis reconhecidos como tokens de menção."""
+COMMUNICATION_MENTION_ROLE_ALIASES: dict[str, str] = {
+    "nir": "nir",
+    "doctor": "doctor",
+    "medico": "doctor",
+    "scheduler": "scheduler",
+    "chd": "scheduler",
+    "manager": "manager",
+    "supervisor": "manager",
+    "admin": "admin",
+}
+"""Aliases de menção de papel, normalizados para o nome canônico do Role."""
 
 
 @dataclass(frozen=True)
@@ -68,8 +77,9 @@ def parse_mentions(body: str) -> MentionParseResult:
 
     for token in matches:
         normalized = token.lower()
-        if normalized in COMMUNICATION_MENTION_ROLES:
-            role_tokens.add(normalized)
+        canonical_role = COMMUNICATION_MENTION_ROLE_ALIASES.get(normalized)
+        if canonical_role:
+            role_tokens.add(canonical_role)
         else:
             username_tokens.add(token)
 
