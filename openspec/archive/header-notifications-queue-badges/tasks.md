@@ -7,10 +7,10 @@
 
 ## Definition of Done do change
 
-- [ ] Header autenticado usa sino para notificações.
-- [ ] Sino preserva `id="notification-badge"`, `data-notifications-badge`, `data-unread-count-url`, `data-count` e `aria-label`.
-- [ ] Header não mostra mais `queue_count` ao lado do nome/avatar.
-- [ ] Página `Minhas Notificações` tem botão `Voltar ao início` sempre visível.
+- [x] Header autenticado usa sino para notificações.
+- [x] Sino preserva `id="notification-badge"`, `data-notifications-badge`, `data-unread-count-url`, `data-count` e `aria-label`.
+- [x] Header não mostra mais `queue_count` ao lado do nome/avatar.
+- [x] Página `Minhas Notificações` tem botão `Voltar ao início` sempre visível.
 - [x] `Pendentes` do médico mantém contador de ação.
 - [x] `Decididos Hoje` do médico mantém contador com classe/cor neutra.
 - [x] `Pendentes` do agendador mantém contador de ação.
@@ -23,5 +23,5 @@
   - [x] `uv run ruff format --check .`
   - [x] `uv run mypy .`
   - [x] `uv run pytest`
-- [ ] Relatório markdown temporário gerado para cada slice, com snippets antes/depois e evidências RED/GREEN.
-- [ ] Commit e push realizados após cada slice implementado.
+- [x] Relatório markdown temporário gerado para cada slice, com snippets antes/depois e evidências RED/GREEN.
+- [x] Commit e push realizados após cada slice implementado.
