@@ -208,8 +208,12 @@ class TestDoctorDecisionAttachmentDisplay:
         response = client.get(f"/doctor/{case.case_id}/")
         assert response.status_code == 200
         content = response.content.decode()
-        # Deve conter embed ou link para a rota protegida
+        # Deve conter embed/link para a rota protegida dentro de um collapse fechado por padrão
+        collapse_id = f"attachment-collapse-{att.attachment_id}"
         assert f"/doctor/cases/{case.case_id}/attachments/{att.attachment_id}/" in content
+        assert f'href="#{collapse_id}"' in content or f'data-bs-target="#{collapse_id}"' in content
+        assert f'id="{collapse_id}"' in content
+        assert 'data-bs-toggle="collapse"' in content
         assert "embed" in content.lower() or 'type="application/pdf"' in content.lower()
 
     def test_doctor_decision_embeds_image_attachment(self, client) -> None:
@@ -225,8 +229,12 @@ class TestDoctorDecisionAttachmentDisplay:
         response = client.get(f"/doctor/{case.case_id}/")
         assert response.status_code == 200
         content = response.content.decode()
-        # Deve conter <img> com src para a rota protegida
+        # Deve conter <img> com src para a rota protegida dentro de um collapse fechado por padrão
+        collapse_id = f"attachment-collapse-{att.attachment_id}"
         assert f"/doctor/cases/{case.case_id}/attachments/{att.attachment_id}/" in content
+        assert f'href="#{collapse_id}"' in content or f'data-bs-target="#{collapse_id}"' in content
+        assert f'id="{collapse_id}"' in content
+        assert 'data-bs-toggle="collapse"' in content
         assert "<img" in content.lower() or "img-fluid" in content.lower()
 
     def test_doctor_decision_does_not_show_suppressed_attachments(self, client) -> None:
