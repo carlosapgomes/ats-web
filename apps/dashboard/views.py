@@ -219,6 +219,10 @@ def _compute_result(case: Case) -> tuple[str, str]:
     if case.doctor_decision == "deny":
         return ("✗ Negado pelo Médico", "bg-danger")
 
+    # Appointment cancelled after post-schedule intercurrence
+    if case.appointment_status == "cancelled":
+        return ("↯ Agendamento cancelado após intercorrência", "bg-warning text-dark")
+
     # Appointment denied
     if case.appointment_status == "denied":
         return ("✗ Agendamento Negado", "bg-danger")
@@ -551,6 +555,14 @@ def dashboard_case_detail(request: HttpRequest, case_id: uuid.UUID) -> HttpRespo
             "support": SUPPORT_FLAG_MAP.get(case.doctor_support_flag, case.doctor_support_flag),
             "flow": ADMISSION_FLOW_MAP.get(case.doctor_admission_flow, case.doctor_admission_flow),
             "doctor_display": case.doctor_display,
+        }
+    elif result_info is None and case.appointment_status == "cancelled":
+        result_info = {
+            "type": "appt_cancelled",
+            "appointment_at": case.appointment_at,
+            "instructions": case.appointment_instructions or "",
+            "doctor_display": case.doctor_display,
+            "scheduler_display": case.scheduler_display,
         }
     elif result_info is None and (
         case.status == CaseStatus.APPT_DENIED or (terminal_with_result and case.appointment_status == "denied")

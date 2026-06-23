@@ -1691,6 +1691,77 @@ class TestDashboardAdministrativeClosure:
         assert "Encerrado administrativamente" in content
 
 
+# ── Dashboard: Post-schedule intercurrence presentation ──────────────────
+
+
+@pytest.mark.django_db
+class TestDashboardPostScheduleIntercurrencePresentation:
+    """Regressões de apresentação para intercorrência pós-agendamento."""
+
+    def _create_cleaned_scheduled_case(self, user, *, appointment_status: str, agency_record_number: str) -> Case:
+        """Cria caso terminal aceito em fluxo agendado com status de agendamento informado."""
+        case = _create_case(
+            created_by=user,
+            status=CaseStatus.CLEANED,
+            doctor_decision="accept",
+            doctor_admission_flow="scheduled",
+            appointment_status=appointment_status,
+            appointment_at=timezone.now() + timedelta(days=1),
+            appointment_instructions="jejum 6h",
+            agency_record_number=agency_record_number,
+        )
+        assert isinstance(case, Case)
+        return case
+
+    def test_dashboard_list_shows_cancelled_after_post_schedule_issue(self, client) -> None:
+        """Card gerencial mostra cancelamento pós-intercorrência, não pendência."""
+        user = _login_as(client, "manager")
+        self._create_cleaned_scheduled_case(
+            user,
+            appointment_status="cancelled",
+            agency_record_number="PSI-CANCEL-LIST",
+        )
+
+        response = client.get(reverse("dashboard:index"))
+
+        assert response.status_code == 200
+        content = response.content.decode()
+        assert "Agendamento cancelado após intercorrência" in content
+        assert "Aguardando Agendamento" not in content
+
+    def test_dashboard_detail_shows_cancelled_after_post_schedule_issue(self, client) -> None:
+        """Detalhe gerencial mostra cancelamento, não agendamento confirmado."""
+        user = _login_as(client, "manager")
+        case = self._create_cleaned_scheduled_case(
+            user,
+            appointment_status="cancelled",
+            agency_record_number="PSI-CANCEL-DETAIL",
+        )
+
+        response = client.get(reverse("dashboard:case_detail", args=[case.case_id]))
+
+        assert response.status_code == 200
+        content = response.content.decode()
+        assert "Agendamento cancelado após intercorrência" in content
+        assert "Agendamento Confirmado" not in content
+
+    def test_dashboard_detail_keeps_confirmed_after_reschedule_or_maintain(self, client) -> None:
+        """Caso confirmado pós-intercorrência continua aparecendo como confirmado."""
+        user = _login_as(client, "manager")
+        case = self._create_cleaned_scheduled_case(
+            user,
+            appointment_status="confirmed",
+            agency_record_number="PSI-CONFIRMED-DETAIL",
+        )
+
+        response = client.get(reverse("dashboard:case_detail", args=[case.case_id]))
+
+        assert response.status_code == 200
+        content = response.content.decode()
+        assert "Agendamento Confirmado" in content
+        assert "Agendamento cancelado após intercorrência" not in content
+
+
 # ── Dashboard: Attention Filter (Slice 002) ──────────────────────────────
 
 
