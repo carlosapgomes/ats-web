@@ -32,9 +32,15 @@ class DoctorDecisionForm(forms.Form):
     observation = forms.CharField(
         required=False,
         max_length=500,
-        widget=forms.Textarea(attrs={"rows": 2, "maxlength": 500}),
-        label="Observação Médica",
-        help_text="Visível para NIR, agendamento, supervisão e administração. Máx. 500 caracteres.",
+        widget=forms.Textarea(
+            attrs={
+                "rows": 2,
+                "maxlength": 500,
+                "placeholder": "Ex.: priorizar por anemia; agendar com anestesia; paciente deve trazer exames recentes...",
+            }
+        ),
+        label="Orientações para agendamento/execução",
+        help_text="Opcional. Use para orientações que devem acompanhar o aceite, como suporte, preparo, prioridade ou cuidados no agendamento/execução. Para pedir documentos ou avisar outra equipe, use a comunicação operacional. Máx. 500 caracteres.",
     )
 
     def clean(self) -> dict[str, Any]:
