@@ -726,8 +726,12 @@ class TestCaseDetailNirNavPreserved:
         assert response.status_code == 200
         content = response.content.decode()
 
-        # Deve conter referência à rota de anexo NIR
+        # Deve conter referência à rota de anexo NIR dentro de um collapse fechado por padrão
+        collapse_id = f"attachment-collapse-{att.attachment_id}"
         assert str(att.attachment_id) in content
+        assert f'data-bs-target="#{collapse_id}"' in content or f'href="#{collapse_id}"' in content
+        assert f'id="{collapse_id}"' in content
+        assert 'data-bs-toggle="collapse"' in content
         # Deve ter embed ou link
         assert "embed" in content or "Abrir em nova aba" in content
 
@@ -759,9 +763,13 @@ class TestCaseDetailNirNavPreserved:
         assert response.status_code == 200
         content = response.content.decode()
 
-        # Deve conter <img> com src para rota protegida
+        # Deve conter <img> com src para rota protegida dentro de um collapse fechado por padrão
+        collapse_id = f"attachment-collapse-{att.attachment_id}"
         assert "<img" in content or "img-fluid" in content.lower()
         assert str(att.attachment_id) in content
+        assert f'data-bs-target="#{collapse_id}"' in content or f'href="#{collapse_id}"' in content
+        assert f'id="{collapse_id}"' in content
+        assert 'data-bs-toggle="collapse"' in content
 
     def test_intake_attachment_view_serves_operational_case_attachment(self, client) -> None:
         """Rota NIR serve anexo de caso operacional."""

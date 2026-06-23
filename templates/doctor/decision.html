@@ -283,45 +283,50 @@
 
     {% for att in attachments %}
     <div class="card mb-3 border">
-      <div class="card-header py-2 d-flex justify-content-between align-items-center">
-        <span class="fw-semibold small">
+      <div class="card-header py-2 d-flex justify-content-between align-items-center gap-2">
+        <button class="btn btn-link text-decoration-none p-0 text-dark fw-semibold small collapsed text-start" type="button"
+                data-bs-toggle="collapse" data-bs-target="#attachment-collapse-{{ att.attachment_id }}"
+                aria-expanded="false" aria-controls="attachment-collapse-{{ att.attachment_id }}">
           {% if att.content_type == "application/pdf" %}📄{% elif "image" in att.content_type %}🖼️{% else %}📎{% endif %}
           {{ att.original_filename }}
-        </span>
-        <span class="d-flex align-items-center gap-2">
+          <small class="text-muted ms-2">(clique para expandir)</small>
+        </button>
+        <span class="d-flex align-items-center gap-2 flex-shrink-0">
           {% if att.upload_phase == "supplemental" %}
           <span class="badge bg-warning text-dark small">Adicionado após upload inicial</span>
           {% endif %}
           <span class="text-muted small">{{ att.size_bytes|filesizeformat }}</span>
         </span>
       </div>
-      <div class="card-body py-3">
-        {% if att.upload_phase == "supplemental" %}
-        <div class="alert alert-warning small py-1 px-2 mb-2">
-          <strong>📌</strong> Adicionado após upload inicial — não analisado automaticamente pelo sistema.
-          {% if att.note %}<br><em>Justificativa:</em> {{ att.note }}{% endif %}
-        </div>
-        {% endif %}
-        {% if att.content_type == "application/pdf" %}
-        <div class="ratio ratio-1x1" style="max-height: 70vh;">
-          <embed src="{% url 'doctor:serve_attachment' case.case_id att.attachment_id %}" type="application/pdf" style="width: 100%; height: 100%;">
-        </div>
-        {% elif "image" in att.content_type %}
-        <div class="text-center">
-          <img src="{% url 'doctor:serve_attachment' case.case_id att.attachment_id %}"
-               class="img-fluid"
-               alt="{{ att.original_filename }}"
-               style="max-height: 70vh;">
-        </div>
-        {% endif %}
+      <div class="collapse" id="attachment-collapse-{{ att.attachment_id }}">
+        <div class="card-body py-3">
+          {% if att.upload_phase == "supplemental" %}
+          <div class="alert alert-warning small py-1 px-2 mb-2">
+            <strong>📌</strong> Adicionado após upload inicial — não analisado automaticamente pelo sistema.
+            {% if att.note %}<br><em>Justificativa:</em> {{ att.note }}{% endif %}
+          </div>
+          {% endif %}
+          {% if att.content_type == "application/pdf" %}
+          <div class="ratio ratio-1x1" style="max-height: 70vh;">
+            <embed src="{% url 'doctor:serve_attachment' case.case_id att.attachment_id %}" type="application/pdf" style="width: 100%; height: 100%;">
+          </div>
+          {% elif "image" in att.content_type %}
+          <div class="text-center">
+            <img src="{% url 'doctor:serve_attachment' case.case_id att.attachment_id %}"
+                 class="img-fluid"
+                 alt="{{ att.original_filename }}"
+                 style="max-height: 70vh;">
+          </div>
+          {% endif %}
 
-        <div class="mt-2 d-flex justify-content-between align-items-center">
-          <span class="text-muted small">
-            {{ att.content_type }} · {{ att.created_at|date:"d/m/Y H:i" }}
-            {% if att.uploaded_by.get_full_name %} · {{ att.uploaded_by.get_full_name }}{% endif %}
-          </span>
-          <a href="{% url 'doctor:serve_attachment' case.case_id att.attachment_id %}"
-             class="btn btn-sm btn-hospital-outline" target="_blank">Abrir em nova aba</a>
+          <div class="mt-2 d-flex justify-content-between align-items-center">
+            <span class="text-muted small">
+              {{ att.content_type }} · {{ att.created_at|date:"d/m/Y H:i" }}
+              {% if att.uploaded_by.get_full_name %} · {{ att.uploaded_by.get_full_name }}{% endif %}
+            </span>
+            <a href="{% url 'doctor:serve_attachment' case.case_id att.attachment_id %}"
+               class="btn btn-sm btn-hospital-outline" target="_blank">Abrir em nova aba</a>
+          </div>
         </div>
       </div>
     </div>
