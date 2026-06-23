@@ -264,7 +264,7 @@ body.hospital-shell h6 {
   min-height: 2rem;
   padding: 0;
   border-radius: 999px;
-  color: var(--hospital-primary);
+  color: var(--bs-primary);
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -272,7 +272,7 @@ body.hospital-shell h6 {
 
 .notification-icon-btn:hover,
 .notification-icon-btn:focus {
-  color: var(--hospital-primary);
+  color: var(--bs-primary);
 }
 
 .notification-badge {
