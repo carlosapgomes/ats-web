@@ -2224,6 +2224,63 @@ class TestSchedulerQueueRegulationDays:
 
     # ── Immediate notice above WAIT_APPT test ───────────────────────────
 
+    def test_queue_nav_uses_action_and_neutral_count_badges(self, client) -> None:
+        """Pendentes uses action badge, Processados Hoje uses neutral badge."""
+        self._login_as(client, "scheduler")
+        response = client.get("/scheduler/")
+        assert response.status_code == 200
+        content = response.content.decode()
+
+        # Pendentes should have data-count and the action/danger class
+        assert "nav-count-badge--danger" in content, "Pendentes must use danger/action badge class"
+        # Processados Hoje should have data-count and the neutral class
+        assert "nav-count-badge--neutral" in content, "Processados Hoje must use neutral badge class"
+        # Processados Hoje link must NOT use .notif-badge
+        assert "notif-badge" not in content.split("Processados Hoje")[0][-300:], (
+            "Processados Hoje must not use .notif-badge"
+        )
+
+    def test_processed_today_nav_badge_uses_processed_today_count(self, client) -> None:
+        """Processados Hoje badge uses processed_today_count from context."""
+        self._login_as(client, "scheduler")
+        scheduler_user = User.objects.get(username="scheduler@regdays.test")
+
+        # Create a case processed today by this scheduler
+        nir_user = User.objects.create_user(username="nir_proc_count@test.com", password="testpass123")
+        nir_user.roles.add(self._create_role("nir"))
+        case = Case.objects.create(
+            created_by=nir_user,
+            status=CaseStatus.WAIT_R1_CLEANUP_THUMBS,
+            agency_record_number="PROC-COUNT-001",
+            doctor_decision="accept",
+            doctor_support_flag="anesthesist",
+            doctor_admission_flow="scheduled",
+            scheduler=scheduler_user,
+            appointment_status="confirmed",
+            appointment_decided_at=timezone.now(),
+            structured_data={
+                "patient": {
+                    "name": "Proc Count",
+                    "age": 50,
+                    "gender": "M",
+                },
+            },
+        )
+        case.save()
+
+        response = client.get("/scheduler/")
+        assert response.status_code == 200
+        content = response.content.decode()
+        # The Processados Hoje link should have data-count="1"
+        # Find the link containing Processados Hoje
+        processed_idx = content.find("Processados Hoje")
+        assert processed_idx > -1, "Processados Hoje not found"
+        # Look backwards for the <a tag opening
+        a_start = content.rfind("<a", 0, processed_idx)
+        assert a_start > -1, "Processados Hoje <a> tag not found"
+        a_tag = content[a_start : processed_idx + 50]
+        assert 'data-count="1"' in a_tag, "Processados Hoje link must have data-count=1, got: " + a_tag[:200]
+
     def test_immediate_notice_remains_above_wait_appt(self, client) -> None:
         """Vinda imediata continua aparecendo acima de WAIT_APPT com alto Dias em tela."""
         nir_user = User.objects.create_user(username="nir_immabv@test.com", password="testpass123")

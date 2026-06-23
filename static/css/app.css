@@ -287,6 +287,40 @@ body.hospital-shell h6 {
 
 /* ---------- Tab badge (operational queue counters) ---------- */
 
+.nav-count-badge {
+  position: relative;
+}
+
+.nav-count-badge::after {
+  content: attr(data-count);
+  position: absolute;
+  top: -6px;
+  right: -10px;
+  font-size: 0.7rem;
+  font-weight: 700;
+  min-width: 18px;
+  height: 18px;
+  line-height: 18px;
+  text-align: center;
+  border-radius: 999px;
+  padding: 0 4px;
+}
+
+.nav-count-badge--danger::after {
+  background: #e74c3c;
+  color: #fff;
+}
+
+.nav-count-badge--neutral::after {
+  background: #6c757d;
+  color: #fff;
+}
+
+.nav-count-badge:not([data-count])::after,
+.nav-count-badge[data-count="0"]::after {
+  display: none;
+}
+
 .notif-badge {
   position: relative;
 }
