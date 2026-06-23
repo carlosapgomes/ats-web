@@ -148,8 +148,13 @@ class TestQueueCounts:
 class TestQueueCountsTemplateBadge:
     """Tests that the queue_count badge renders correctly in templates."""
 
-    def test_badge_shows_when_queue_count_positive(self, client) -> None:
-        """Badge is rendered in the header when queue_count > 0."""
+    def test_badge_not_shown_in_header_when_queue_count_positive(self, client) -> None:
+        """Badge de queue_count NÃO é mais renderizado no header do perfil.
+
+        Slice 001 removeu o badge grudado no nome/avatar. O context processor
+        continua existindo (ainda usado por abas/outros contextos), mas o header
+        do perfil não exibe mais o número.
+        """
         from apps.accounts.models import Role
 
         user = User.objects.create_user(username="docbadge@test.com", password="testpass")
@@ -167,8 +172,9 @@ class TestQueueCountsTemplateBadge:
         response = client.get("/", follow=True)
         assert response.status_code == 200
         content = response.content.decode()
-        assert "badge bg-danger" in content
-        assert "1" in content  # queue_count == 1
+        # O badge do queue_count NÃO deve aparecer no perfil do header
+        # Verificamos que o padrão específico do span removido não está presente
+        assert 'class="badge bg-danger ms-1">1<' not in content
 
     def test_badge_hidden_when_queue_count_zero(self, client) -> None:
         """No badge rendered when there are no pending cases."""
