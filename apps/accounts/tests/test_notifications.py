@@ -136,6 +136,30 @@ class TestMentionParser:
         assert result.role_tokens == {"doctor", "scheduler"}
         assert result.username_tokens == {"maria"}
 
+    def test_portuguese_role_aliases_normalize_to_canonical_roles(self, db: Any) -> None:
+        """@medico @chd @supervisor viram papéis canônicos."""
+        from apps.accounts.services import parse_mentions
+
+        result = parse_mentions("@medico @chd @supervisor revisar fluxo")
+        assert result.role_tokens == {"doctor", "scheduler", "manager"}
+        assert result.username_tokens == set()
+
+    def test_portuguese_role_aliases_are_case_insensitive(self, db: Any) -> None:
+        """Aliases pt-BR aceitam maiúsculas/minúsculas."""
+        from apps.accounts.services import parse_mentions
+
+        result = parse_mentions("@Medico @CHD @Supervisor")
+        assert result.role_tokens == {"doctor", "scheduler", "manager"}
+        assert result.username_tokens == set()
+
+    def test_role_aliases_deduplicate_with_canonical_tokens(self, db: Any) -> None:
+        """@doctor @medico não duplica o papel doctor."""
+        from apps.accounts.services import parse_mentions
+
+        result = parse_mentions("@doctor @medico @scheduler @chd @manager @supervisor")
+        assert result.role_tokens == {"doctor", "scheduler", "manager"}
+        assert result.username_tokens == set()
+
     def test_unknown_mentions_are_ignored(self, db: Any) -> None:
         """@fantasma não quebra, apenas é ignorado."""
         from apps.accounts.services import parse_mentions
@@ -206,6 +230,32 @@ class TestNotificationCreationService:
         assert result.notification_count == 1
         assert "maria" in result.mentioned_usernames
         assert UserNotification.objects.filter(recipient=user_maria, case=case).count() == 1
+
+    def test_portuguese_role_aliases_create_notifications_for_canonical_role_users(
+        self,
+        db: Any,
+        case_factory: Any,
+        user: Any,
+        user_doctor: Any,
+        user_scheduler: Any,
+        role_manager: Role,
+    ) -> None:
+        """@medico/@chd/@supervisor notificam doctor/scheduler/manager."""
+        from apps.accounts.models import UserNotification
+        from apps.accounts.services import create_case_communication_notifications
+
+        manager = User.objects.create_user(username="manager1", password="testpass")
+        manager.roles.add(role_manager)
+
+        case = case_factory(user)
+        msg = _create_message_direct(case, user, "@medico @chd @supervisor favor avaliar")
+        result = create_case_communication_notifications(message=msg)
+
+        assert result.notification_count == 3
+        assert set(result.mentioned_roles) == {"doctor", "scheduler", "manager"}
+        assert UserNotification.objects.filter(recipient=user_doctor, case=case).count() == 1
+        assert UserNotification.objects.filter(recipient=user_scheduler, case=case).count() == 1
+        assert UserNotification.objects.filter(recipient=manager, case=case).count() == 1
 
     def test_inactive_or_blocked_users_do_not_receive_notifications(
         self, db: Any, case_factory: Any, user: Any, user_doctor: Any, inactive_user: Any, blocked_user: Any
@@ -293,6 +343,35 @@ class TestNotificationCreationService:
         )
 
         assert UserNotification.objects.filter(recipient=user_doctor, case=case).count() == 1
+
+    def test_communication_event_payload_uses_canonical_roles_for_aliases(
+        self,
+        db: Any,
+        case_factory: Any,
+        user: Any,
+        user_doctor: Any,
+        user_scheduler: Any,
+        role_manager: Role,
+    ) -> None:
+        """Payload audita papéis canônicos mesmo quando mensagem usa aliases."""
+        from apps.cases.models import CaseEvent
+        from apps.cases.services import post_case_communication_message
+
+        manager = User.objects.create_user(username="manager_payload", password="testpass")
+        manager.roles.add(role_manager)
+
+        case = case_factory(user)
+        post_case_communication_message(
+            case=case,
+            author=user,
+            author_role="nir",
+            body="@medico @chd @supervisor revisar aliases",
+        )
+
+        event = CaseEvent.objects.get(case=case, event_type="CASE_COMMUNICATION_MESSAGE_POSTED")
+        payload = event.payload or {}
+        assert set(payload.get("mentioned_roles", [])) == {"doctor", "scheduler", "manager"}
+        assert payload.get("notification_count") == 3
 
 
 # ── View tests ───────────────────────────────────────────────────────────

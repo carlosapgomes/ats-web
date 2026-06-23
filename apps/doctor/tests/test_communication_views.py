@@ -78,6 +78,20 @@ def test_doctor_decision_shows_communication_thread_title(client, db, doctor_cas
     assert "Comunicação operacional" in content
 
 
+def test_doctor_decision_shows_mention_alias_help(client, db, doctor_case):
+    """Thread orienta aliases de menção para equipes operacionais."""
+    _doctor_login(client)
+
+    url = reverse("doctor:decision", args=[doctor_case.case_id])
+    response = client.get(url)
+    content = response.content.decode("utf-8")
+
+    assert "@nir" in content
+    assert "@medico" in content
+    assert "@chd" in content
+    assert "@supervisor" in content
+
+
 def test_doctor_decision_has_post_form(client, db, doctor_case):
     """R18: formulário de post está presente na tela de decisão."""
     _doctor_login(client)
