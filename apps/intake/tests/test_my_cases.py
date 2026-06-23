@@ -302,5 +302,5 @@ class TestMyCasesList:
         assert "OBS-FILLED-001" in content
         assert "OBS-EMPTY-001" in content
         assert "OBS-SPACES-001" in content
-        assert content.count("Obs. médica") == 1
+        assert content.count("Orientação médica") == 1
         assert "Observação importante para logística" not in content
