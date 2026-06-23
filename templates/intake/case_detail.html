@@ -157,6 +157,31 @@
       </div>
       {% endif %}
     </div>
+  {% elif result_info.type == "appt_cancelled" %}
+    <div class="d-flex align-items-center gap-3 mb-3">
+      <span class="badge bg-warning text-dark fs-6 px-3 py-2">↯ Agendamento cancelado após intercorrência</span>
+    </div>
+    <p class="mb-3">O agendamento anterior foi cancelado após resposta de intercorrência pós-agendamento.</p>
+    {% if result_info.doctor_display %}
+    <div class="mb-3">
+      <p class="mb-1 text-muted small">Médico responsável</p>
+      <p class="mb-0 fw-medium">{{ result_info.doctor_display }}</p>
+    </div>
+    {% endif %}
+    <div class="row g-3">
+      {% if result_info.appointment_at %}
+      <div class="col-md-6">
+        <p class="mb-1 text-muted small">Agendamento anterior</p>
+        <p class="mb-0 fw-medium">{{ result_info.appointment_at|date:"d/m/Y H:i" }}</p>
+      </div>
+      {% endif %}
+      {% if result_info.instructions %}
+      <div class="col-12">
+        <p class="mb-1 text-muted small">Instruções anteriores</p>
+        <p class="mb-0 fw-medium">{{ result_info.instructions }}</p>
+      </div>
+      {% endif %}
+    </div>
   {% elif result_info.type == "appt_denied" %}
     <div class="d-flex align-items-center gap-3 mb-3">
       <span class="badge bg-danger fs-6 px-3 py-2">✗ Agendamento Negado</span>
