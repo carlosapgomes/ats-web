@@ -221,7 +221,7 @@ def resolve_notification_redirect_url(*, case: Any, user: Any, active_role: str)
     if active_role == "nir":
         if status != CaseStatus.CLEANED:
             return reverse("intake:case_detail", kwargs={"case_id": case.pk})
-        return reverse("intake:home")
+        return reverse("intake:closed_case_detail", kwargs={"case_id": case.pk})
 
     if active_role == "doctor":
         if status == CaseStatus.WAIT_DOCTOR:

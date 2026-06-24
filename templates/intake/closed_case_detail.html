@@ -1,0 +1,358 @@
+{% extends "base.html" %}
+{% load static %}
+
+{% block title %}Caso {{ case.agency_record_number|default:case.case_id|truncatechars:8 }} — {{ app_display_name }}{% endblock %}
+
+{% block subtitle %}Detalhes do caso encerrado{% endblock %}
+
+{% block nav %}
+<nav class="app-nav mt-3" aria-label="Navegação">
+  <ul class="nav nav-pills gap-2">
+    <li class="nav-item">
+      <a class="nav-link" href="{% url 'intake:home' %}">Novo Encaminhamento</a>
+    </li>
+    <li class="nav-item">
+      <a class="nav-link" href="{% url 'intake:my_cases' %}">Meus Casos</a>
+    </li>
+    <li class="nav-item">
+      <a class="nav-link" href="{% url 'intake:closed_cases_search' %}">Casos Encerrados</a>
+    </li>
+  </ul>
+</nav>
+{% endblock %}
+
+{% block content %}
+
+<!-- Top Info -->
+<div class="card p-4 mb-4">
+  <div class="row align-items-center">
+    <div class="col-md-6">
+      <h4 class="mb-1">
+        {% if patient_name %}
+          {{ patient_name }}
+        {% else %}
+          Caso {{ case.case_id|truncatechars:12 }}
+        {% endif %}
+      </h4>
+      <p class="text-muted mb-1">
+        Registro: <strong>{{ case.agency_record_number|default:"—" }}</strong>
+      </p>
+      {% if origin_unit %}
+      <p class="text-muted mb-1">
+        🏥 Unidade de origem: <strong>{{ origin_unit }}</strong>
+      </p>
+      {% endif %}
+      <p class="text-muted mb-0">
+        Enviado por: <strong>{{ case.created_by.get_full_name|default:case.created_by.username }}</strong>
+        em {{ case.created_at|date:"d/m/Y H:i" }}
+      </p>
+    </div>
+    <div class="col-md-6 text-md-end mt-3 mt-md-0">
+      <span class="status-badge {{ status_css }} fs-6">{{ status_label }}</span>
+      {% if case.post_schedule_issue_status == "opened" %}
+      <div class="mt-2"><span class="badge bg-warning text-dark px-3 py-2">⚠️ Intercorrência em avaliação</span></div>
+      {% elif case.post_schedule_issue_status == "responded" %}
+      <div class="mt-2"><span class="badge bg-info text-dark px-3 py-2">↻ Intercorrência respondida</span></div>
+      {% endif %}
+      {% if case.appointment_at %}
+      <div class="mt-2 text-muted small">
+        {% if case.appointment_status == "confirmed" %}
+        Agendado para {{ case.appointment_at|date:"d/m/Y H:i" }}
+        {% elif case.appointment_status == "cancelled" %}
+        Agendamento cancelado
+        {% elif case.appointment_status == "denied" %}
+        Agendamento negado
+        {% endif %}
+      </div>
+      {% endif %}
+    </div>
+  </div>
+</div>
+
+<!-- Status Stepper -->
+<div class="card p-4 mb-4">
+  <h5 class="mb-3">Progresso do Caso</h5>
+  <div class="steps-bar">
+    {% for step in steps %}
+      {% if forloop.counter0 < current_step_idx %}
+      <div class="step-item done">
+      {% elif forloop.counter0 == current_step_idx %}
+      <div class="step-item current">
+      {% else %}
+      <div class="step-item">
+      {% endif %}
+        <span class="step-icon">{{ step.icon }}</span> {{ step.label }}
+      </div>
+    {% endfor %}
+  </div>
+</div>
+
+<!-- Resultado Final -->
+{% if result_info %}
+<div class="card p-4 mb-4">
+  <h5 class="mb-3">📋 Resultado Final</h5>
+  {% if result_info.type == "accepted_scheduled" %}
+    <div class="d-flex align-items-center gap-3 mb-3">
+      <span class="badge bg-success fs-6 px-3 py-2">✓ Agendamento Confirmado</span>
+    </div>
+    {% if result_info.doctor_display %}
+    <div class="mb-3">
+      <p class="mb-1 text-muted small">Médico responsável</p>
+      <p class="mb-0 fw-medium">{{ result_info.doctor_display }}</p>
+    </div>
+    {% endif %}
+    <div class="row g-3">
+      <div class="col-md-6">
+        <p class="mb-1 text-muted small">Data/Hora</p>
+        <p class="mb-0 fw-medium">{{ result_info.appointment_at|date:"d/m/Y H:i" }}</p>
+      </div>
+      <div class="col-md-6">
+        <p class="mb-1 text-muted small">Suporte</p>
+        <p class="mb-0 fw-medium">{{ result_info.support }}</p>
+      </div>
+      {% if result_info.instructions %}
+      <div class="col-12">
+        <p class="mb-1 text-muted small">Instruções</p>
+        <p class="mb-0 fw-medium">{{ result_info.instructions }}</p>
+      </div>
+      {% endif %}
+    </div>
+  {% elif result_info.type == "doctor_denied" %}
+    <div class="d-flex align-items-center gap-3 mb-3">
+      <span class="badge bg-warning text-dark fs-6 px-3 py-2">✗ Recusado pelo Médico</span>
+    </div>
+    {% if result_info.doctor_display %}
+    <div class="mb-3">
+      <p class="mb-1 text-muted small">Médico responsável</p>
+      <p class="mb-0 fw-medium">{{ result_info.doctor_display }}</p>
+    </div>
+    {% endif %}
+    {% if result_info.reason %}
+    <p class="mb-0"><strong>Motivo:</strong> {{ result_info.reason }}</p>
+    {% endif %}
+  {% elif result_info.type == "accepted_immediate" %}
+    <div class="d-flex align-items-center gap-3 mb-3">
+      <span class="badge bg-success fs-6 px-3 py-2">✓ Vinda Imediata Autorizada</span>
+    </div>
+    <p class="mb-3">Caso aceito para vinda imediata.</p>
+    {% if result_info.doctor_display %}
+    <div class="mb-3">
+      <p class="mb-1 text-muted small">Médico responsável</p>
+      <p class="mb-0 fw-medium">{{ result_info.doctor_display }}</p>
+    </div>
+    {% endif %}
+  {% elif result_info.type == "appt_denied" %}
+    <div class="d-flex align-items-center gap-3 mb-3">
+      <span class="badge bg-danger fs-6 px-3 py-2">✗ Agendamento Negado</span>
+    </div>
+    {% if result_info.reason %}
+    <p class="mb-0"><strong>Motivo:</strong> {{ result_info.reason }}</p>
+    {% endif %}
+  {% elif result_info.type == "failed" %}
+    <div class="d-flex align-items-center gap-3 mb-3">
+      <span class="badge bg-danger fs-6 px-3 py-2">✗ Falha no Processamento</span>
+    </div>
+    <p class="mb-0 text-muted">Ocorreu uma falha durante o processamento deste caso.</p>
+  {% elif result_info.type == "post_schedule_issue_responded" %}
+    <div class="d-flex align-items-center gap-3 mb-3">
+      <span class="badge bg-info fs-6 px-3 py-2">↻ Intercorrência Pós-Agendamento</span>
+    </div>
+    <div class="card bg-light p-3 mb-3">
+      <div class="row g-3">
+        <div class="col-md-6">
+          <p class="mb-1 text-muted small">Motivo informado pelo NIR</p>
+          <p class="mb-0 fw-medium">{{ result_info.nir_reason_label }}</p>
+        </div>
+        {% if result_info.nir_message %}
+        <div class="col-md-6">
+          <p class="mb-1 text-muted small">Mensagem do NIR</p>
+          <p class="mb-0">{{ result_info.nir_message }}</p>
+        </div>
+        {% endif %}
+      </div>
+    </div>
+    <div class="mb-3">
+      <strong>Resposta do agendador:</strong> {{ result_info.response_action_label }}
+      {% if result_info.response_message %}
+      <p class="mt-1 mb-0">{{ result_info.response_message }}</p>
+      {% endif %}
+    </div>
+  {% endif %}
+</div>
+{% endif %}
+
+<!-- Intercorrência pós-agendamento -->
+<div class="card p-4 mb-4">
+  <h5 class="mb-3">Intercorrência Pós-Agendamento</h5>
+
+  {% if eligible %}
+    {% if form %}
+    <!-- Formulário de abertura de intercorrência -->
+    <div class="alert alert-info mb-4">
+      <strong>Paciente:</strong> {{ patient_name }}<br>
+      {% if case.agency_record_number %}
+      <strong>Registro:</strong> {{ case.agency_record_number }}<br>
+      {% endif %}
+      {% if case.appointment_at %}
+      <strong>Agendamento atual:</strong> {{ case.appointment_at|date:"d/m/Y H:i" }}<br>
+      {% endif %}
+    </div>
+
+    <form method="post" novalidate>
+      {% csrf_token %}
+
+      <div class="mb-3">
+        <label for="{{ form.reason.id_for_label }}" class="form-label">{{ form.reason.label }}</label>
+        {{ form.reason }}
+        {% if form.reason.errors %}
+        <div class="text-danger small mt-1">{{ form.reason.errors.0 }}</div>
+        {% endif %}
+      </div>
+
+      <div class="mb-3">
+        <label for="{{ form.message.id_for_label }}" class="form-label">{{ form.message.label }}</label>
+        {{ form.message }}
+        {% if form.message.errors %}
+        <div class="text-danger small mt-1">{{ form.message.errors.0 }}</div>
+        {% endif %}
+        <div class="form-text">
+          Descreva o motivo da intercorrência. Campo obrigatório para
+          <strong>sem condição clínica</strong>,
+          <strong>transporte indisponível</strong>,
+          <strong>solicitação de reagendamento</strong> e
+          <strong>outro</strong>.
+        </div>
+      </div>
+
+      <div class="d-flex gap-2">
+        <button type="submit" class="btn btn-hospital">
+          Registrar intercorrência
+        </button>
+        <a href="{% url 'intake:closed_cases_search' %}" class="btn btn-hospital-outline">
+          Cancelar
+        </a>
+      </div>
+    </form>
+    {% endif %}
+  {% else %}
+    <!-- Inelegível -->
+    <div class="text-center py-3">
+      <div class="mb-2" style="font-size: 2rem;">🚫</div>
+      <p class="text-muted mb-2">{{ ineligibility_reason }}</p>
+    </div>
+  {% endif %}
+</div>
+
+<!-- PDF Viewer -->
+{% if pdf_url %}
+<div class="card p-4 mb-4">
+  <h5 class="mb-3">
+    <button class="btn btn-link text-decoration-none p-0 text-dark" type="button" data-bs-toggle="collapse" data-bs-target="#pdf-collapse" aria-expanded="false" aria-controls="pdf-collapse">
+      📄 Visualizar PDF <small class="text-muted ms-2">(clique para expandir)</small>
+    </button>
+  </h5>
+  <div class="collapse" id="pdf-collapse">
+    <div class="ratio ratio-1x1" style="max-height: 80vh;">
+      <embed src="{{ pdf_url }}" type="application/pdf" style="width: 100%; height: 100%;">
+    </div>
+    <div class="mt-2 text-end">
+      <a href="{{ pdf_url }}" class="btn btn-sm btn-hospital-outline" target="_blank">Abrir em nova aba</a>
+    </div>
+  </div>
+</div>
+{% endif %}
+
+<!-- Anexos -->
+{% if attachments %}
+<div class="card p-4 mb-4">
+  <h5 class="mb-3">📎 Anexos Clínicos</h5>
+  {% for att in attachments %}
+  <div class="card mb-3 border">
+    <div class="card-header py-2 d-flex justify-content-between align-items-center gap-2">
+      <button class="btn btn-link text-decoration-none p-0 text-dark fw-semibold small collapsed text-start" type="button"
+              data-bs-toggle="collapse" data-bs-target="#attachment-collapse-{{ att.attachment_id }}"
+              aria-expanded="false" aria-controls="attachment-collapse-{{ att.attachment_id }}">
+        {% if att.content_type == "application/pdf" %}📄{% elif "image" in att.content_type %}🖼️{% else %}📎{% endif %}
+        {{ att.original_filename }}
+        <small class="text-muted ms-2">(clique para expandir)</small>
+      </button>
+      <span class="d-flex align-items-center gap-2 flex-shrink-0">
+        {% if att.upload_phase == "supplemental" %}
+        <span class="badge bg-warning text-dark small">Adicionado após upload inicial</span>
+        {% endif %}
+        <span class="text-muted small">{{ att.size_bytes|filesizeformat }}</span>
+      </span>
+    </div>
+    <div class="collapse" id="attachment-collapse-{{ att.attachment_id }}">
+      <div class="card-body py-3">
+        {% if att.content_type == "application/pdf" %}
+        <div class="ratio ratio-1x1" style="max-height: 70vh;">
+          <embed src="{% url 'intake:serve_attachment' case.case_id att.attachment_id %}" type="application/pdf" style="width: 100%; height: 100%;">
+        </div>
+        {% elif "image" in att.content_type %}
+        <div class="text-center">
+          <img src="{% url 'intake:serve_attachment' case.case_id att.attachment_id %}"
+               class="img-fluid"
+               alt="{{ att.original_filename }}"
+               style="max-height: 70vh;">
+        </div>
+        {% endif %}
+        <div class="mt-2 d-flex justify-content-between align-items-center">
+          <span class="text-muted small">
+            {{ att.content_type }} · {{ att.created_at|date:"d/m/Y H:i" }}
+            {% if att.uploaded_by.get_full_name %} · {{ att.uploaded_by.get_full_name }}{% endif %}
+          </span>
+          <a href="{% url 'intake:serve_attachment' case.case_id att.attachment_id %}"
+             class="btn btn-sm btn-hospital-outline" target="_blank">Abrir em nova aba</a>
+        </div>
+      </div>
+    </div>
+  </div>
+  {% endfor %}
+</div>
+{% endif %}
+
+<!-- Comunicação Operacional -->
+{% include "cases/_communication_thread.html" %}
+
+<!-- Timeline -->
+<div class="card p-4 mb-4">
+  <h5 class="mb-3">
+    <button class="btn btn-link text-decoration-none p-0 text-dark" type="button" data-bs-toggle="collapse" data-bs-target="#timeline-collapse" aria-expanded="false" aria-controls="timeline-collapse">
+      Linha do Tempo<small class="text-muted ms-2">(clique para expandir)</small>
+    </button>
+  </h5>
+  <div class="collapse" id="timeline-collapse">
+    {% if events %}
+        {% for item in events %}
+        <div class="timeline-event">
+        <div class="timeline-event__dot {{ item.dot_css }}"></div>
+        <div class="timeline-event__content">
+            <div class="timeline-event__title">{{ item.label }}</div>
+            <div class="timeline-event__time">
+            {{ item.event.timestamp|date:"d/m/Y H:i" }}
+            ·
+            {% if item.event.actor %}
+                {{ item.event.actor.get_full_name|default:item.event.actor.username }}
+            {% else %}
+                Sistema
+            {% endif %}
+            </div>
+        </div>
+        </div>
+        {% endfor %}
+    {% else %}
+    <p class="text-muted mb-0">Nenhum evento registrado.</p>
+    {% endif %}
+  </div>
+</div>
+
+<!-- Ações -->
+<div class="card p-4 mb-4">
+  <div class="d-flex gap-2">
+    <a href="{{ back_url }}" class="btn btn-hospital-outline">{{ back_label }}</a>
+    <a href="{% url 'intake:home' %}" class="btn btn-outline-secondary">Novo Encaminhamento</a>
+  </div>
+</div>
+
+{% endblock %}
