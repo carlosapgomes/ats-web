@@ -7,19 +7,19 @@
 
 ## Definition of Done do change
 
-- [ ] Campo visual de `doctor_observation` deixa de ser apresentado como observação médica genérica.
-- [ ] Tela de decisão médica usa label `Orientações para agendamento/execução` ou equivalente explícito.
-- [ ] Campo de orientação fica associado ao fluxo de aceite.
-- [ ] UI orienta que pedido de documentos/dados deve usar comunicação operacional, não negativa.
-- [ ] Botão de saída da decisão médica passa de `Cancelar` para `Voltar sem decidir`.
-- [ ] Submissão `accept` continua aceitando orientação vazia.
-- [ ] Submissão `accept` persiste orientação de até 500 caracteres.
-- [ ] Submissão com orientação acima de 500 caracteres continua inválida.
-- [ ] Submissão `deny` exige motivo da negativa.
-- [ ] Submissão `deny` não persiste orientação médica enviada no POST; `doctor_observation` fica vazio para novas negativas.
+- [x] Campo visual de `doctor_observation` deixa de ser apresentado como observação médica genérica.
+- [x] Tela de decisão médica usa label `Orientações para agendamento/execução` ou equivalente explícito.
+- [x] Campo de orientação fica associado ao fluxo de aceite.
+- [x] UI orienta que pedido de documentos/dados deve usar comunicação operacional, não negativa.
+- [x] Botão de saída da decisão médica passa de `Cancelar` para `Voltar sem decidir`.
+- [x] Submissão `accept` continua aceitando orientação vazia.
+- [x] Submissão `accept` persiste orientação de até 500 caracteres.
+- [x] Submissão com orientação acima de 500 caracteres continua inválida.
+- [x] Submissão `deny` exige motivo da negativa.
+- [x] Submissão `deny` não persiste orientação médica enviada no POST; `doctor_observation` fica vazio para novas negativas.
 - [x] Downstream troca nomenclatura visível de `Observação Médica`/`Obs. médica` para `Orientação médica`/`Orientações médicas`.
-- [ ] Nenhuma migration é criada sem justificativa explícita.
-- [ ] FSM, eventos estruturados, comunicação operacional e notificações permanecem inalterados.
+- [x] Nenhuma migration é criada sem justificativa explícita.
+- [x] FSM, eventos estruturados, comunicação operacional e notificações permanecem inalterados.
 - [x] Testes relevantes adicionados/ajustados antes da implementação passar.
 - [x] Quality gate do AGENTS.md executado:
   - [x] `uv run ruff check .`
