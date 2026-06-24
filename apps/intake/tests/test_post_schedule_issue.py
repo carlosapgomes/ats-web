@@ -183,15 +183,16 @@ class TestClosedCasesSearchResults:
         assert "Registrar intercorrência" not in content
         assert "foi aceito" in content.lower() or "recusado" in content.lower()
 
-    def test_caso_elegivel_mostra_botao(self, client, case_factory, advance_to) -> None:
-        """Caso elegível mostra botão Registrar intercorrência."""
+    def test_caso_elegivel_mostra_botao_detalhes(self, client, case_factory, advance_to) -> None:
+        """Caso elegível mostra botão Detalhes (não mais botão direto de intercorrência)."""
         client, user = _nir_client(client)
         _build_cleaned_confirmed(case_factory, advance_to, user)
 
         response = client.get(self.SEARCH_URL, {"q": "OCOR-2026-001"})
         assert response.status_code == 200
         content = response.content.decode()
-        assert "Registrar intercorrência" in content
+        assert "Detalhes" in content
+        assert "Registrar intercorrência" not in content
 
     def test_pagina_sem_query_carrega_sem_erros(self, client) -> None:
         """Página de busca sem query carrega sem erros."""

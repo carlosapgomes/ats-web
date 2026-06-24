@@ -730,9 +730,9 @@ class TestNotificationRedirectResolution:
         url_mgr = resolve_notification_redirect_url(case=case, user=user_scheduler, active_role="manager")
         assert url_mgr == reverse("dashboard:index")
 
-        # Fallback nir CLEANED → reverse('intake:home')
+        # Fallback nir CLEANED → reverse('intake:closed_case_detail')
         url_nir = resolve_notification_redirect_url(case=case, user=user_scheduler, active_role="nir")
-        assert url_nir == reverse("intake:home")
+        assert url_nir == reverse("intake:closed_case_detail", kwargs={"case_id": case.pk})
 
 
 class TestMentionResolutionHardening:

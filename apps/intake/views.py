@@ -1156,6 +1156,298 @@ def closed_cases_search(request: HttpRequest) -> HttpResponse:
     )
 
 
+HISTORICAL_ALLOWED_STATUSES = frozenset(
+    {
+        CaseStatus.CLEANED,
+    }
+)
+"""Status permitidos na rota histórica NIR."""
+
+
+def _is_historical_scope_nir(case: Case) -> bool:
+    """Verifica se o caso está no escopo histórico NIR.
+
+    Permite:
+    - Casos CLEANED
+    - Casos com intercorrência ativa/respondida (qualquer status)
+    """
+    if case.status == CaseStatus.CLEANED:
+        return True
+    return bool(case.post_schedule_issue_status in ("opened", "responded"))
+
+
+def _closed_detail_communication_context(case: Case, request: HttpRequest) -> dict[str, object]:
+    """Monta contexto de comunicação para o detalhe histórico."""
+    return {
+        "communication_messages": case.communication_messages.select_related("author").all(),
+        "can_post_communication": False,  # Read-only em CLEANED neste slice
+        "communication_post_url": "",
+        "communication_next_url": request.get_full_path() + "#case-communication",
+        "communication_max_length": CASE_COMMUNICATION_MAX_LENGTH,
+    }
+
+
+@login_required
+@role_required("nir")
+def closed_case_detail(request: HttpRequest, case_id: uuid.UUID) -> HttpResponse:
+    """Detalhe histórico NIR de caso encerrado (read-only + intercorrência).
+
+    GET: Exibe contexto do caso, timeline, comunicação e, se elegível,
+         formulário de intercorrência.
+    POST: Abre intercorrência via serviço existente.
+
+    Não adquire lock. Não altera FSM em GET.
+    """
+    from apps.cases.services import (
+        get_post_schedule_issue_ineligibility_reason,
+        is_post_schedule_issue_eligible,
+        open_post_schedule_issue,
+    )
+
+    from .forms import PostScheduleIssueForm
+
+    case = get_object_or_404(
+        Case.objects.select_related("created_by", "doctor"),
+        case_id=case_id,
+    )
+
+    # Validar escopo histórico NIR
+    if not _is_historical_scope_nir(case):
+        raise Http404("Caso não está no escopo histórico NIR.")
+
+    # Processar POST de abertura de intercorrência
+    if request.method == "POST":
+        if not is_post_schedule_issue_eligible(case):
+            messages.warning(request, get_post_schedule_issue_ineligibility_reason(case))
+            return redirect("intake:closed_case_detail", case_id=case.case_id)
+
+        form = PostScheduleIssueForm(request.POST)
+        if form.is_valid():
+            reason = form.cleaned_data["reason"]
+            message = form.cleaned_data.get("message", "")
+            try:
+                open_post_schedule_issue(
+                    case=case,
+                    user=request.user,
+                    reason=reason,
+                    message=message,
+                )
+                messages.success(
+                    request,
+                    "Intercorrência registrada com sucesso. O caso foi enviado para o agendador.",
+                )
+                return redirect("intake:closed_case_detail", case_id=case.case_id)
+            except ValueError as exc:
+                messages.warning(request, str(exc))
+        # Form inválido — cai no GET abaixo com form errors
+
+    # ── GET: montar contexto ──────────────────────────────────
+
+    # Re-fetch após possível POST (garantir dados frescos)
+    if request.method == "POST":
+        case = Case.objects.select_related("created_by", "doctor").get(pk=case.case_id)
+
+    events = case.events.all()
+
+    # Stepper
+    current_step_idx = STEP_STATUS_INDEX.get(case.status, 0)
+    steps = STEPS
+    terminal_without_scheduling = case.status in (
+        CaseStatus.WAIT_R1_CLEANUP_THUMBS,
+        CaseStatus.CLEANED,
+    ) and (case.doctor_decision == "deny" or case.doctor_admission_flow == "immediate")
+    if terminal_without_scheduling:
+        steps = [step for step in STEPS if step["label"] != "Agendamento"]
+        current_step_idx = len(steps) - 1
+
+    # Enriquecer eventos
+    enriched_events = []
+    for e in events:
+        enriched_events.append(
+            {
+                "event": e,
+                "label": EVENT_LABELS.get(e.event_type, e.event_type),
+                "dot_css": EVENT_DOT_CSS.get(e.event_type, "system"),
+            }
+        )
+
+    # Elegibilidade para intercorrência
+    eligible = is_post_schedule_issue_eligible(case)
+    ineligibility_reason = "" if eligible else get_post_schedule_issue_ineligibility_reason(case)
+
+    # Formulário (se elegível e GET, ou form inválido após POST)
+    detail_form: PostScheduleIssueForm | None = None
+    if request.method == "POST" and eligible:
+        # Form já foi validado acima; mantém form com erros
+        pass
+    elif not request.method == "POST" and eligible:
+        detail_form = PostScheduleIssueForm()
+
+    # Result info simplificado para histórico
+    result_info = _build_historical_result_info(case)
+
+    # Patient name
+    patient_name = ""
+    if case.structured_data and isinstance(case.structured_data, dict):
+        patient = case.structured_data.get("patient", {})
+        if isinstance(patient, dict):
+            patient_name = patient.get("name", "")
+
+    # Origin unit
+    origin_unit = case.get_origin_unit_display(compact=True)
+
+    # Attachments (não suprimidos)
+    active_attachments = list(case.attachments.filter(is_suppressed=False).order_by("created_at"))
+
+    context: dict[str, object] = {
+        "case": case,
+        "events": enriched_events,
+        "steps": steps,
+        "current_step_idx": current_step_idx,
+        "status_label": STATUS_LABELS.get(case.status, case.get_status_display()),
+        "status_css": STATUS_CSS_CLASS.get(case.status, "status-pending"),
+        "result_info": result_info,
+        "patient_name": patient_name,
+        "origin_unit": origin_unit,
+        # Comunicação operacional (read-only)
+        **_closed_detail_communication_context(case, request),
+        # Intercorrência
+        "eligible": eligible,
+        "ineligibility_reason": ineligibility_reason,
+        "form": detail_form,
+        # PDF / Attachments
+        "pdf_url": reverse("intake:closed_case_pdf", args=[case.case_id]) if case.pdf_file else "",
+        "attachments": active_attachments,
+        # Navegação
+        "back_url": reverse("intake:closed_cases_search"),
+        "back_label": "← Voltar para busca de casos encerrados",
+    }
+
+    response = render(request, "intake/closed_case_detail.html", context)
+    return response
+
+
+def _build_historical_result_info(case: Case) -> dict[str, object] | None:
+    """Monta result_info para o detalhe histórico NIR."""
+    from typing import Any as _Any
+
+    from apps.cases.services import get_post_schedule_issue_reason_label
+
+    suggested_action: _Any = case.suggested_action or {}
+
+    terminal_with_result = case.status in (
+        CaseStatus.WAIT_R1_CLEANUP_THUMBS,
+        CaseStatus.CLEANED,
+    )
+    is_doctor_denied_final = terminal_with_result and case.doctor_decision == "deny"
+    is_immediate_final = terminal_with_result and case.doctor_admission_flow == "immediate"
+
+    # Scope-gated manual review
+    is_scope_gated = isinstance(suggested_action, dict) and suggested_action.get("decision") == "manual_review_required"
+
+    result_info = None
+
+    if is_scope_gated:
+        result_info = {
+            "type": "manual_review_required",
+            "reason_code": suggested_action.get("reason_code", ""),
+            "reason_text": suggested_action.get("reason_text", ""),
+        }
+    elif is_doctor_denied_final:
+        result_info = {
+            "type": "doctor_denied",
+            "reason": case.doctor_reason,
+            "doctor_display": case.doctor_display,
+        }
+    elif is_immediate_final:
+        result_info = {
+            "type": "accepted_immediate",
+            "support": SUPPORT_FLAG_MAP.get(case.doctor_support_flag, case.doctor_support_flag),
+            "flow": ADMISSION_FLOW_MAP.get(case.doctor_admission_flow, case.doctor_admission_flow),
+            "doctor_display": case.doctor_display,
+        }
+    elif case.status == CaseStatus.APPT_DENIED or (terminal_with_result and case.appointment_status == "denied"):
+        result_info = {
+            "type": "appt_denied",
+            "reason": case.appointment_reason,
+            "doctor_display": case.doctor_display,
+            "scheduler_display": case.scheduler_display,
+        }
+    elif case.status == CaseStatus.APPT_CONFIRMED or terminal_with_result:
+        result_info = {
+            "type": "accepted_scheduled",
+            "appointment_at": case.appointment_at,
+            "support": SUPPORT_FLAG_MAP.get(case.doctor_support_flag, case.doctor_support_flag),
+            "flow": ADMISSION_FLOW_MAP.get(case.doctor_admission_flow, case.doctor_admission_flow),
+            "instructions": case.appointment_instructions or "",
+            "doctor_display": case.doctor_display,
+        }
+    elif case.status == CaseStatus.FAILED:
+        result_info = {"type": "failed"}
+
+    # Post-schedule intercurrence responded override
+    if case.status == CaseStatus.WAIT_R1_CLEANUP_THUMBS and case.post_schedule_issue_status == "responded":
+        issue_action_labels = {
+            "cancel": "Cancelado",
+            "reschedule": "Reagendado",
+            "maintain": "Mantido",
+            "deny": "Solicitação Negada",
+        }
+        result_info = {
+            "type": "post_schedule_issue_responded",
+            "nir_reason_code": case.post_schedule_issue_reason,
+            "nir_reason_label": get_post_schedule_issue_reason_label(case.post_schedule_issue_reason),
+            "nir_message": case.post_schedule_issue_message,
+            "response_action": case.post_schedule_issue_response_action,
+            "response_action_label": issue_action_labels.get(
+                case.post_schedule_issue_response_action, case.post_schedule_issue_response_action
+            ),
+            "response_message": case.post_schedule_issue_response_message,
+            "appointment_at": case.appointment_at,
+            "appointment_location": case.appointment_location,
+            "appointment_instructions": case.appointment_instructions,
+            "appointment_status": case.appointment_status,
+        }
+
+    if case.status == CaseStatus.CLEANED and not result_info:
+        # Fallback para CLEANED sem resultado específico
+        result_info = {
+            "type": "accepted_scheduled",
+            "appointment_at": case.appointment_at,
+            "support": SUPPORT_FLAG_MAP.get(case.doctor_support_flag, case.doctor_support_flag),
+            "flow": ADMISSION_FLOW_MAP.get(case.doctor_admission_flow, case.doctor_admission_flow),
+            "instructions": case.appointment_instructions or "",
+            "doctor_display": case.doctor_display,
+        }
+
+    return result_info
+
+
+@login_required
+@role_required("nir")
+@xframe_options_sameorigin
+def closed_case_pdf(request: HttpRequest, case_id: uuid.UUID) -> HttpResponseBase:
+    """Serve o PDF de um caso encerrado para NIR.
+
+    Acesso permitido apenas para escopo histórico NIR.
+    """
+    case = get_object_or_404(
+        Case.objects.select_related("created_by"),
+        case_id=case_id,
+    )
+
+    if not _is_historical_scope_nir(case):
+        raise Http404("PDF não disponível para este caso.")
+
+    if not case.pdf_file:
+        raise Http404("PDF não encontrado para este caso.")
+
+    return FileResponse(
+        case.pdf_file.open("rb"),
+        content_type="application/pdf",
+    )
+
+
 @login_required
 @role_required("nir")
 def post_schedule_issue_open(request: HttpRequest, case_id: uuid.UUID) -> HttpResponse:

@@ -27,6 +27,8 @@ urlpatterns = [
     path("<uuid:case_id>/lock/release/", views.nir_lock_release, name="nir_lock_release"),
     # Post-schedule intercurrence
     path("closed-cases/", views.closed_cases_search, name="closed_cases_search"),
+    path("closed-cases/<uuid:case_id>/", views.closed_case_detail, name="closed_case_detail"),
+    path("closed-cases/<uuid:case_id>/pdf/", views.closed_case_pdf, name="closed_case_pdf"),
     path("closed-cases/<uuid:case_id>/issue/", views.post_schedule_issue_open, name="post_schedule_issue_open"),
     path("<uuid:case_id>/communication/", views.post_case_communication, name="post_case_communication"),
 ]
