@@ -1215,6 +1215,9 @@ def closed_case_detail(request: HttpRequest, case_id: uuid.UUID) -> HttpResponse
     if not _is_historical_scope_nir(case):
         raise Http404("Caso não está no escopo histórico NIR.")
 
+    # Armazena formulário bound (com erros) para re-renderizar em POST inválido
+    detail_form: PostScheduleIssueForm | None = None
+
     # Processar POST de abertura de intercorrência
     if request.method == "POST":
         if not is_post_schedule_issue_eligible(case):
@@ -1239,7 +1242,8 @@ def closed_case_detail(request: HttpRequest, case_id: uuid.UUID) -> HttpResponse
                 return redirect("intake:closed_case_detail", case_id=case.case_id)
             except ValueError as exc:
                 messages.warning(request, str(exc))
-        # Form inválido — cai no GET abaixo com form errors
+        # Form inválido — manter bound com erros para re-renderizar
+        detail_form = form
 
     # ── GET: montar contexto ──────────────────────────────────
 
@@ -1275,12 +1279,8 @@ def closed_case_detail(request: HttpRequest, case_id: uuid.UUID) -> HttpResponse
     eligible = is_post_schedule_issue_eligible(case)
     ineligibility_reason = "" if eligible else get_post_schedule_issue_ineligibility_reason(case)
 
-    # Formulário (se elegível e GET, ou form inválido após POST)
-    detail_form: PostScheduleIssueForm | None = None
-    if request.method == "POST" and eligible:
-        # Form já foi validado acima; mantém form com erros
-        pass
-    elif not request.method == "POST" and eligible:
+    # Formulário (se elegível e GET, criar form vazio; POST inválido mantém detail_form do POST)
+    if not request.method == "POST" and eligible:
         detail_form = PostScheduleIssueForm()
 
     # Result info simplificado para histórico

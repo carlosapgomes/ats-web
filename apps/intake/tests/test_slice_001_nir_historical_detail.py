@@ -307,6 +307,49 @@ class TestIntercurrenceInsideDetail:
 # ── Test R5: Comunicação no detalhe ──────────────────────────────────────
 
 
+class TestInvalidPostHandling:
+    """Hardening: POST inválido deve re-renderizar form com erros."""
+
+    def test_closed_case_detail_invalid_post_rerenders_bound_form_with_errors(
+        self, client: Any, case_factory: Any, advance_to: Any
+    ) -> None:
+        """POST inválido retorna 200, mostra erros, não altera status, não cria evento."""
+        client, user = _nir_client(client)
+        case = _build_cleaned_confirmed(case_factory, advance_to, user)
+
+        detail_url = reverse("intake:closed_case_detail", kwargs={"case_id": case.case_id})
+
+        # POST com motivo que exige mensagem, mas mensagem vazia
+        response = client.post(
+            detail_url,
+            {
+                "reason": "clinical_condition",
+                "message": "",
+            },
+        )
+
+        # 1. Status 200 (não redireciona)
+        assert response.status_code == 200
+
+        content = response.content.decode("utf-8")
+
+        # 2. Formulário ainda visível (título "Intercorrência Pós-Agendamento")
+        assert "Intercorrência Pós-Agendamento" in content
+        # 3. Botão "Registrar intercorrência" ainda visível
+        assert "Registrar intercorrência" in content
+        # 4. Mensagem de erro do form visível
+        # O campo message tem erro: "Mensagem é obrigatória para o motivo selecionado."
+        assert "obrigatória" in content or "Obrigatória" in content or " mensagem" in content.lower()
+
+        # 5. Caso permanece CLEANED (não alterado)
+        fresh_case = Case.objects.get(pk=case.pk)
+        assert fresh_case.status == CaseStatus.CLEANED
+        assert fresh_case.post_schedule_issue_status == ""
+
+        # 6. Nenhum evento POST_SCHEDULE_ISSUE_OPENED criado
+        assert not CaseEvent.objects.filter(case=case, event_type="POST_SCHEDULE_ISSUE_OPENED").exists()
+
+
 class TestCommunicationInDetail:
     """R5: Detalhe histórico mostra thread de comunicação."""
 
