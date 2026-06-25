@@ -2624,3 +2624,466 @@ class TestSchedulerContextDetail:
         notif2.refresh_from_db()
         assert notif1.read_at is None, "First notification must remain unread"
         assert notif2.read_at is None, "Second notification must remain unread"
+
+
+@pytest.mark.django_db
+class TestSchedulerHistoricalSearch:
+    """Tests for scheduler historical search view."""
+
+    def _create_role(self, name: str):
+        role, _ = Role.objects.get_or_create(name=name)
+        return role
+
+    def _login_as(self, client, role_name: str, username: str = "sched_hist") -> None:
+        user = User.objects.create_user(username=username, password="testpass123")
+        user.roles.add(self._create_role(role_name))
+        client.force_login(user)
+        session = client.session
+        session["active_role"] = role_name
+        session.save()
+
+    def _make_historical_case(self, user, agency_record_number="HIST-001", patient_name="Maria Historica"):
+        """Cria caso histórico elegível: accept + scheduled + confirmed + CLEANED."""
+
+        case = Case.objects.create(
+            created_by=user,
+            status=CaseStatus.CLEANED,
+            agency_record_number=agency_record_number,
+            doctor_decision="accept",
+            doctor_admission_flow="scheduled",
+            appointment_status="confirmed",
+            structured_data={
+                "patient": {"name": patient_name, "age": 60, "gender": "F"},
+            },
+        )
+        return case
+
+    # ── Authentication ─────────────────────────────────────────────────
+
+    def test_scheduler_historical_search_requires_scheduler_role(self, client):
+        """Usuário sem papel scheduler não acessa."""
+        nir_user = User.objects.create_user(username="nir_nosched")
+        nir_user.roles.add(self._create_role("nir"))
+        client.force_login(nir_user)
+        session = client.session
+        session["active_role"] = "nir"
+        session.save()
+
+        response = client.get("/scheduler/historical/")
+        assert response.status_code == 302
+
+    # ── Search tests ───────────────────────────────────────────────────
+
+    def test_scheduler_historical_search_by_agency_record_number(self, client):
+        """Encontra caso histórico por ocorrência."""
+        self._login_as(client, "scheduler", username="sched_search1")
+        nir_user = User.objects.create_user(username="nir_search1")
+        nir_user.roles.add(self._create_role("nir"))
+        self._make_historical_case(nir_user, agency_record_number="HIST-SEARCH-001")
+
+        response = client.get("/scheduler/historical/?q=HIST-SEARCH-001")
+        assert response.status_code == 200
+        content = response.content.decode()
+        assert "HIST-SEARCH-001" in content
+
+    def test_scheduler_historical_search_by_patient_name(self, client):
+        """Encontra caso histórico por nome do paciente."""
+        self._login_as(client, "scheduler", username="sched_search2")
+        nir_user = User.objects.create_user(username="nir_search2")
+        nir_user.roles.add(self._create_role("nir"))
+        self._make_historical_case(nir_user, patient_name="Paciente Especial")
+
+        response = client.get("/scheduler/historical/?q=Paciente Especial")
+        assert response.status_code == 200
+        content = response.content.decode()
+        assert "Paciente Especial" in content
+
+    def test_scheduler_historical_search_excludes_non_scheduled_acceptance(self, client):
+        """Exclui vinda imediata, negado médico ou sem agendamento processado."""
+        self._login_as(client, "scheduler", username="sched_search3")
+        nir_user = User.objects.create_user(username="nir_search3")
+        nir_user.roles.add(self._create_role("nir"))
+
+        # In scope
+        self._make_historical_case(nir_user, agency_record_number="IN-SCOPE", patient_name="In Scope")
+
+        # Out of scope: immediate admission
+        Case.objects.create(
+            created_by=nir_user,
+            status=CaseStatus.WAIT_R1_CLEANUP_THUMBS,
+            doctor_decision="accept",
+            doctor_admission_flow="immediate",
+            structured_data={"patient": {"name": "Immediate Out"}},
+        )
+
+        # Out of scope: doctor denied
+        Case.objects.create(
+            created_by=nir_user,
+            status=CaseStatus.CLEANED,
+            doctor_decision="deny",
+            structured_data={"patient": {"name": "Denied Out"}},
+        )
+
+        response = client.get("/scheduler/historical/?q=Scope")
+        assert response.status_code == 200
+        content = response.content.decode()
+        assert "IN-SCOPE" in content
+        assert "Immediate Out" not in content
+        assert "Denied Out" not in content
+
+    def test_scheduler_historical_search_not_limited_to_today_or_current_scheduler(self, client):
+        """Caso antigo e/ou processado por outro scheduler aparece."""
+        self._login_as(client, "scheduler", username="sched_search4")
+        other_scheduler = User.objects.create_user(username="sched_other_hist")
+        other_scheduler.roles.add(self._create_role("scheduler"))
+        nir_user = User.objects.create_user(username="nir_search4")
+        nir_user.roles.add(self._create_role("nir"))
+
+        _ = Case.objects.create(
+            created_by=nir_user,
+            status=CaseStatus.CLEANED,
+            agency_record_number="OLD-HIST-999",
+            doctor_decision="accept",
+            doctor_admission_flow="scheduled",
+            appointment_status="confirmed",
+            scheduler=other_scheduler,
+            structured_data={"patient": {"name": "Old Patient", "age": 80, "gender": "M"}},
+        )
+
+        response = client.get("/scheduler/historical/?q=OLD-HIST-999")
+        assert response.status_code == 200
+        content = response.content.decode()
+        assert "OLD-HIST-999" in content
+
+    def test_scheduler_historical_cards_have_details_link(self, client):
+        """Cards apontam para detalhe read-only."""
+        self._login_as(client, "scheduler", username="sched_search5")
+        nir_user = User.objects.create_user(username="nir_search5")
+        nir_user.roles.add(self._create_role("nir"))
+        case = self._make_historical_case(nir_user)
+
+        response = client.get("/scheduler/historical/?q=HIST-001")
+        assert response.status_code == 200
+        content = response.content.decode()
+        detail_url = f"/scheduler/context/{case.case_id}/"
+        assert detail_url in content
+
+
+@pytest.mark.django_db
+class TestSchedulerHistoricalContextDetail:
+    """Tests for scheduler context_detail for historical cases."""
+
+    def _create_role(self, name: str):
+        role, _ = Role.objects.get_or_create(name=name)
+        return role
+
+    def _login_as(self, client, role_name: str, username: str = "sched_hist_detail") -> None:
+        user = User.objects.create_user(username=username, password="testpass123")
+        user.roles.add(self._create_role(role_name))
+        client.force_login(user)
+        session = client.session
+        session["active_role"] = role_name
+        session.save()
+
+    def _make_historical_case(self, user, **kwargs):
+        case = Case.objects.create(
+            created_by=user,
+            status=CaseStatus.CLEANED,
+            doctor_decision="accept",
+            doctor_admission_flow="scheduled",
+            appointment_status="confirmed",
+            structured_data={"patient": {"name": "Hist Patient", "age": 55, "gender": "M"}},
+            **kwargs,
+        )
+        return case
+
+    def test_scheduler_context_detail_allows_historical_case_without_notification(self, client):
+        """Caso histórico em escopo abre sem notificação prévia."""
+        self._login_as(client, "scheduler", username="sched_hist_allowed")
+        nir_user = User.objects.create_user(username="nir_hist_allowed")
+        nir_user.roles.add(self._create_role("nir"))
+        case = self._make_historical_case(nir_user)
+
+        response = client.get(f"/scheduler/context/{case.case_id}/")
+        assert response.status_code == 200
+
+    def test_scheduler_context_detail_blocks_non_historical_case_without_notification(self, client):
+        """Caso fora do escopo e sem notificação não abre."""
+        self._login_as(client, "scheduler", username="sched_hist_block")
+        nir_user = User.objects.create_user(username="nir_hist_block")
+        nir_user.roles.add(self._create_role("nir"))
+
+        # Non-historical case (doctor denied, no scheduling)
+        case = Case.objects.create(
+            created_by=nir_user,
+            status=CaseStatus.CLEANED,
+            doctor_decision="deny",
+            structured_data={"patient": {"name": "Denied", "age": 50, "gender": "F"}},
+        )
+
+        response = client.get(f"/scheduler/context/{case.case_id}/")
+        assert response.status_code == 404
+
+    def test_scheduler_historical_detail_hides_workflow_actions(self, client):
+        """Sem lock, sem formulário de agendamento/intercorrência."""
+        self._login_as(client, "scheduler", username="sched_hist_noaction")
+        nir_user = User.objects.create_user(username="nir_hist_noaction")
+        nir_user.roles.add(self._create_role("nir"))
+        case = self._make_historical_case(nir_user)
+
+        response = client.get(f"/scheduler/context/{case.case_id}/")
+        assert response.status_code == 200
+        content = response.content.decode()
+
+        # Must NOT contain workflow action indicators
+        assert "Confirmar Agendamento" not in content
+        assert "Negar Agendamento" not in content
+        assert "lock_token" not in content
+        assert "scheduler:submit" not in content
+        assert "SchedulerDecisionForm" not in content
+
+
+@pytest.mark.django_db
+class TestSchedulerHistoricalMessageNir:
+    """Tests for scheduler historical message to NIR endpoint."""
+
+    def _create_role(self, name: str):
+        role, _ = Role.objects.get_or_create(name=name)
+        return role
+
+    def _login_as(self, client, role_name: str, username: str = "sched_msg") -> None:
+        user = User.objects.create_user(username=username, password="testpass123")
+        user.roles.add(self._create_role(role_name))
+        client.force_login(user)
+        session = client.session
+        session["active_role"] = role_name
+        session.save()
+        self._last_user = user
+
+    def _get_last_user(self):
+        return self._last_user
+
+    def _make_historical_case(self, user, **kwargs):
+        case = Case.objects.create(
+            created_by=user,
+            status=CaseStatus.CLEANED,
+            doctor_decision="accept",
+            doctor_admission_flow="scheduled",
+            appointment_status="confirmed",
+            structured_data={"patient": {"name": "Msg Patient", "age": 55, "gender": "M"}},
+            **kwargs,
+        )
+        return case
+
+    def test_scheduler_historical_message_requires_post(self, client):
+        """GET não executa ação."""
+        self._login_as(client, "scheduler", username="sched_msg_get")
+        nir_user = User.objects.create_user(username="nir_msg_get")
+        nir_user.roles.add(self._create_role("nir"))
+        case = self._make_historical_case(nir_user)
+
+        response = client.get(f"/scheduler/historical/{case.case_id}/message-nir/")
+        # Should redirect or return method-not-allowed; we expect redirect
+        assert response.status_code in (302, 405)
+
+    def test_scheduler_historical_message_requires_historical_scope(self, client):
+        """Não posta em caso fora do escopo."""
+        self._login_as(client, "scheduler", username="sched_msg_scope")
+        nir_user = User.objects.create_user(username="nir_msg_scope")
+        nir_user.roles.add(self._create_role("nir"))
+
+        # Non-historical: doctor denied
+        case = Case.objects.create(
+            created_by=nir_user,
+            status=CaseStatus.CLEANED,
+            doctor_decision="deny",
+            structured_data={"patient": {"name": "No Scope"}},
+        )
+
+        response = client.post(
+            f"/scheduler/historical/{case.case_id}/message-nir/",
+            {"body": "Mensagem de teste"},
+        )
+        assert response.status_code in (302, 404)
+
+    def test_scheduler_historical_message_requires_body(self, client):
+        """Body vazio não cria mensagem."""
+        self._login_as(client, "scheduler", username="sched_msg_empty")
+        nir_user = User.objects.create_user(username="nir_msg_empty")
+        nir_user.roles.add(self._create_role("nir"))
+        case = self._make_historical_case(nir_user)
+
+        client.post(
+            f"/scheduler/historical/{case.case_id}/message-nir/",
+            {"body": "   "},
+        )
+        # Test message was NOT created
+        assert CaseCommunicationMessage.objects.filter(case=case).count() == 0
+
+    def test_scheduler_historical_message_creates_case_communication_message(self, client):
+        """Mensagem é criada na thread do caso."""
+        self._login_as(client, "scheduler", username="sched_msg_create")
+        nir_user = User.objects.create_user(username="nir_msg_create")
+        nir_user.roles.add(self._create_role("nir"))
+        case = self._make_historical_case(nir_user)
+
+        response = client.post(
+            f"/scheduler/historical/{case.case_id}/message-nir/",
+            {"body": "Precisamos de ajuda com este caso."},
+        )
+        assert response.status_code == 302
+        assert CaseCommunicationMessage.objects.filter(case=case).count() == 1
+
+    def test_scheduler_historical_message_adds_nir_mention_when_missing(self, client):
+        """Body salvo contém @nir ou notificação NIR é criada mesmo sem o usuário digitar."""
+        from apps.accounts.models import UserNotification
+
+        self._login_as(client, "scheduler", username="sched_msg_nir")
+        nir_user = User.objects.create_user(username="nir_msg_nir")
+        nir_user.roles.add(self._create_role("nir"))
+        case = self._make_historical_case(nir_user)
+
+        # NIR user must be active for notification to be created
+        # (nir_user already is active by default)
+
+        response = client.post(
+            f"/scheduler/historical/{case.case_id}/message-nir/",
+            {"body": "Precisamos de ajuda com este caso."},
+        )
+        assert response.status_code == 302
+
+        # The notification should exist for nir_user since @nir should be added
+        msg = CaseCommunicationMessage.objects.get(case=case)
+        assert "@nir" in msg.body, "@nir should be in the saved body"
+
+        # A UserNotification should exist (for nir_user via @nir role)
+        notifs = UserNotification.objects.filter(case=case, recipient__roles__name="nir")
+        assert notifs.count() >= 1
+
+    def test_scheduler_historical_message_preserves_additional_mentions(self, client):
+        """Menções adicionais permanecem no corpo salvo."""
+        self._login_as(client, "scheduler", username="sched_msg_mentions")
+        nir_user = User.objects.create_user(username="nir_msg_mentions")
+        nir_user.roles.add(self._create_role("nir"))
+
+        doctor_user = User.objects.create_user(username="doutor.plantao")
+        doctor_user.roles.add(self._create_role("doctor"))
+
+        case = self._make_historical_case(nir_user)
+
+        response = client.post(
+            f"/scheduler/historical/{case.case_id}/message-nir/",
+            {"body": "@doutor.plantao e @medico favor verificar."},
+        )
+        assert response.status_code == 302
+
+        msg = CaseCommunicationMessage.objects.get(case=case)
+        # The body should still contain @doutor.plantao and @medico
+        # Additionally, @nir should have been prepended
+        assert "@doutor.plantao" in msg.body, "Username mention should be preserved"
+        assert "@medico" in msg.body, "Role mention @medico should be preserved"
+        assert "@nir" in msg.body, "@nir should also be present"
+
+    def test_scheduler_historical_message_creates_nir_notification(self, client):
+        """NIR ativo recebe UserNotification."""
+        from apps.accounts.models import UserNotification
+
+        self._login_as(client, "scheduler", username="sched_msg_notif")
+        nir_user = User.objects.create_user(username="nir_msg_notif")
+        nir_user.roles.add(self._create_role("nir"))
+        case = self._make_historical_case(nir_user)
+
+        client.post(
+            f"/scheduler/historical/{case.case_id}/message-nir/",
+            {"body": "Teste de notificação."},
+        )
+
+        msg = CaseCommunicationMessage.objects.get(case=case)
+        notifs = UserNotification.objects.filter(case=case, communication_message=msg)
+        assert len(notifs) >= 1
+        # The NIR user should be among the recipients
+        assert any(n.recipient == nir_user for n in notifs)
+
+    def test_scheduler_historical_message_notifies_additional_mentioned_recipient(self, client):
+        """Médico/usuário adicional mencionado recebe UserNotification."""
+        from apps.accounts.models import UserNotification
+
+        self._login_as(client, "scheduler", username="sched_msg_add")
+        nir_user = User.objects.create_user(username="nir_msg_add")
+        nir_user.roles.add(self._create_role("nir"))
+
+        doctor_user = User.objects.create_user(username="dr_msg_add")
+        doctor_user.roles.add(self._create_role("doctor"))
+
+        case = self._make_historical_case(nir_user)
+
+        client.post(
+            f"/scheduler/historical/{case.case_id}/message-nir/",
+            {"body": "@nir e @doctor por favor verifiquem."},
+        )
+
+        doctor_notifs = UserNotification.objects.filter(case=case, recipient=doctor_user)
+        assert len(doctor_notifs) >= 1, "Doctor should receive a notification"
+
+    def test_scheduler_historical_message_does_not_change_case_status(self, client):
+        """Caso CLEANED permanece CLEANED após mensagem."""
+        self._login_as(client, "scheduler", username="sched_msg_status")
+        nir_user = User.objects.create_user(username="nir_msg_status")
+        nir_user.roles.add(self._create_role("nir"))
+        case = self._make_historical_case(nir_user)
+        before_status = case.status
+
+        client.post(
+            f"/scheduler/historical/{case.case_id}/message-nir/",
+            {"body": "Mensagem sem mudar status."},
+        )
+
+        # Use get() instead of refresh_from_db() to avoid FSM direct-set error
+        reloaded = Case.objects.get(pk=case.pk)
+        assert reloaded.status == before_status
+        assert reloaded.status == CaseStatus.CLEANED
+
+
+@pytest.mark.django_db
+class TestPostCaseCommunicationAllowCleaned:
+    """Tests for allow_cleaned opt-in in post_case_communication_message."""
+
+    def test_post_case_communication_cleaned_still_blocked_by_default(self, db, case_factory, advance_to):
+        """Chamada padrão em CLEANED continua levantando CaseCommunicationError."""
+        from django.contrib.auth import get_user_model
+
+        from apps.cases.services import CaseCommunicationError, post_case_communication_message
+
+        u_model = get_user_model()
+        user = u_model.objects.create_user(username="test_cleaned_block")
+        case = case_factory(user)
+        case = advance_to(case, CaseStatus.CLEANED)
+
+        with pytest.raises(CaseCommunicationError, match="encerrado|CLEANED|finalizado"):
+            post_case_communication_message(
+                case=case,
+                author=user,
+                author_role="scheduler",
+                body="Teste sem opt-in.",
+            )
+
+    def test_post_case_communication_cleaned_allowed_only_with_explicit_opt_in(self, db, case_factory, advance_to):
+        """Chamada com allow_cleaned=True funciona."""
+        from django.contrib.auth import get_user_model
+
+        from apps.cases.services import post_case_communication_message
+
+        u_model = get_user_model()
+        user = u_model.objects.create_user(username="test_cleaned_optin")
+        case = case_factory(user)
+        case = advance_to(case, CaseStatus.CLEANED)
+
+        msg = post_case_communication_message(
+            case=case,
+            author=user,
+            author_role="scheduler",
+            body="Teste com opt-in explícito.",
+            allow_cleaned=True,
+        )
+        assert msg is not None
+        assert msg.body == "Teste com opt-in explícito."

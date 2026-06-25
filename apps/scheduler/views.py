@@ -1,11 +1,13 @@
 """Views for the scheduler app."""
 
+import logging
 import uuid
 from datetime import date, datetime, time, timedelta
 from typing import Any
 
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
+from django.db import models
 from django.db.models import F, QuerySet
 from django.http import FileResponse, Http404, HttpRequest, HttpResponse, HttpResponseBase, JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
@@ -16,11 +18,13 @@ from apps.accounts.decorators import role_required
 from apps.cases.models import Case, CaseStatus
 from apps.cases.services import (
     CASE_COMMUNICATION_MAX_LENGTH,
+    CaseCommunicationError,
     assert_case_lock,
     claim_case_lock,
     compute_lock_display,
     expire_stale_locks_for_statuses,
     get_post_schedule_issue_reason_label,
+    post_case_communication_message,
 )
 from apps.cases.services import (
     release_case_lock as release_lock_service,
@@ -448,6 +452,37 @@ def _scheduler_has_context_notification(user: Any, case: Case) -> bool:
     ).exists()
 
 
+def _is_scheduler_historical_case(case: Case) -> bool:
+    """Verifica se o caso está no escopo histórico do scheduler.
+
+    Critério:
+    - doctor_decision == 'accept'
+    - doctor_admission_flow == 'scheduled'
+    - appointment_status in ('confirmed', 'denied', 'cancelled')
+
+    Inclui CLEANED e casos finais pós-agendamento.
+    """
+    if case.doctor_decision != "accept":
+        return False
+    if case.doctor_admission_flow != "scheduled":
+        return False
+    if case.appointment_status not in ("confirmed", "denied", "cancelled"):
+        return False
+    return True
+
+
+def _scheduler_historical_queryset() -> QuerySet[Case]:
+    """Retorna QuerySet de casos no escopo histórico do scheduler.
+
+    Usado por busca histórica e validação de acesso.
+    """
+    return Case.objects.filter(
+        doctor_decision="accept",
+        doctor_admission_flow="scheduled",
+        appointment_status__in=["confirmed", "denied", "cancelled"],
+    )
+
+
 @login_required
 @role_required("scheduler")
 def scheduler_context_detail(request: HttpRequest, case_id: uuid.UUID) -> HttpResponse:
@@ -471,9 +506,10 @@ def scheduler_context_detail(request: HttpRequest, case_id: uuid.UUID) -> HttpRe
         case_id=case_id,
     )
 
-    # Autorização: deve existir UserNotification para o usuário + caso
+    # Autorização: deve existir UserNotification para o usuário + caso,
+    # OU o caso deve estar no escopo histórico do scheduler (Slice 003).
     # A marcação como lida é feita exclusivamente por notification_open em accounts.
-    if not _scheduler_has_context_notification(request.user, case):
+    if not _scheduler_has_context_notification(request.user, case) and not _is_scheduler_historical_case(case):
         raise Http404("Nenhuma notificação encontrada para este caso.")
 
     # ── Build context ────────────────────────────────────────────────────
@@ -528,6 +564,9 @@ def scheduler_context_detail(request: HttpRequest, case_id: uuid.UUID) -> HttpRe
     }.get(case.doctor_admission_flow, case.doctor_admission_flow)
 
     # Communication thread context (shared pattern)
+    # Para casos históricos (CLEANED), comunicação é read-only via este template.
+    # Mensagens em CLEANED são enviadas pelo endpoint scheduler_historical_message_nir.
+    is_historical = _is_scheduler_historical_case(case)
     can_post_communication = case.status != CaseStatus.CLEANED
     communication_post_url = reverse("intake:post_case_communication", args=[case.case_id])
     communication_next_url = request.get_full_path() + "#case-communication"
@@ -565,6 +604,12 @@ def scheduler_context_detail(request: HttpRequest, case_id: uuid.UUID) -> HttpRe
         "show_intake_nav": False,
         "back_url": request.META.get("HTTP_REFERER", reverse("scheduler:queue")),
         "back_label": "← Voltar",
+        # Historical flags (Slice 003)
+        "is_historical_scheduler": is_historical,
+        "show_historical_message_nir": is_historical and case.status == CaseStatus.CLEANED,
+        "historical_message_nir_url": reverse("scheduler:historical_message_nir", args=[case.case_id])
+        if is_historical and case.status == CaseStatus.CLEANED
+        else "",
     }
 
     return render(request, "scheduler/context_detail.html", context)
@@ -913,3 +958,119 @@ def scheduler_lock_release(request: HttpRequest, case_id: uuid.UUID) -> HttpResp
     )
 
     return JsonResponse({"success": released})
+
+
+# ── Historical search ───────────────────────────────────────────────────────
+
+
+@login_required
+@role_required("scheduler")
+def scheduler_historical_search(request: HttpRequest) -> HttpResponse:
+    """Busca histórica Scheduler: casos aceitos/agendados/processados.
+
+    Pesquisa por agency_record_number ou nome do paciente.
+    Não limitada a processados hoje ou ao scheduler logado.
+    """
+    query = request.GET.get("q", "").strip()
+    results: list[dict[str, Any]] = []
+
+    if query:
+        qs = (
+            _scheduler_historical_queryset()
+            .filter(
+                models.Q(agency_record_number__icontains=query)
+                | models.Q(structured_data__patient__name__icontains=query)
+            )
+            .order_by("-created_at")[:50]
+        )
+
+        for case in qs:
+            results.append(
+                {
+                    "case": case,
+                    "patient_name": _get_patient_name(case),
+                    "patient_age": _get_patient_age(case),
+                    "patient_gender": _get_patient_gender(case),
+                    "diagnosis": _get_diagnosis(case),
+                    "agency_record_number": case.agency_record_number or "",
+                    "origin_unit": case.get_origin_unit_display(compact=True),
+                    "status_label": case.get_status_display(),
+                    "appointment_status_label": "Confirmado"
+                    if case.appointment_status == "confirmed"
+                    else ("Negado" if case.appointment_status == "denied" else "Cancelado"),
+                    "appointment_at": case.appointment_at,
+                    "doctor_display": case.doctor_display,
+                }
+            )
+
+    return render(
+        request,
+        "scheduler/historical_search.html",
+        {
+            "query": query,
+            "results": results,
+        },
+    )
+
+
+# ── Historical message to NIR ───────────────────────────────────────────────
+
+
+@login_required
+@role_required("scheduler")
+def scheduler_historical_message_nir(request: HttpRequest, case_id: uuid.UUID) -> HttpResponse:
+    """POST: scheduler envia mensagem operacional ao NIR em caso histórico.
+
+    Regras:
+    - Aceita apenas POST.
+    - Valida que o caso está no escopo histórico scheduler.
+    - Body obrigatório, strip, limite CASE_COMMUNICATION_MAX_LENGTH.
+    - Garante menção a @nir para notificar NIR.
+    - Preserva menções adicionais do agendador.
+    - Chama post_case_communication_message com allow_cleaned=True.
+    - Não altera Case.status.
+    """
+    if request.method != "POST":
+        messages.warning(request, "Método não permitido.")
+        return redirect("scheduler:historical_search")
+
+    case = get_object_or_404(
+        Case.objects.select_related("created_by"),
+        case_id=case_id,
+    )
+
+    # Validar escopo histórico
+    if not _is_scheduler_historical_case(case):
+        raise Http404("Caso não está no escopo histórico do scheduler.")
+
+    body_raw = request.POST.get("body", "").strip()
+    if not body_raw:
+        messages.warning(request, "A mensagem não pode estar vazia.")
+        return redirect("scheduler:context_detail", case_id=case.case_id)
+
+    # Garantir menção a @nir
+    from apps.accounts.services import parse_mentions
+
+    parsed = parse_mentions(body_raw)
+    if "nir" not in parsed.role_tokens:
+        body_raw = f"@nir {body_raw}"
+
+    active_role = request.session.get("active_role", "scheduler")
+
+    try:
+        post_case_communication_message(
+            case=case,
+            author=request.user,
+            author_role=active_role,
+            body=body_raw,
+            allow_cleaned=True,
+        )
+        messages.success(request, "Mensagem enviada ao NIR com sucesso.")
+    except CaseCommunicationError as exc:
+        messages.warning(request, str(exc))
+    except Exception:
+        logger = logging.getLogger(__name__)
+        logger.exception("Erro inesperado ao enviar mensagem histórica ao NIR.")
+        messages.warning(request, "Erro inesperado ao enviar mensagem.")
+
+    return redirect(f"{reverse('scheduler:context_detail', args=[case.case_id])}#case-communication")

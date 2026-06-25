@@ -707,6 +707,7 @@ def post_case_communication_message(
     author: Any,
     author_role: str,
     body: str,
+    allow_cleaned: bool = False,
 ) -> CaseCommunicationMessage:
     """Cria uma mensagem de comunicação operacional em um Case.
 
@@ -715,7 +716,7 @@ def post_case_communication_message(
     2. body não pode ser vazio/apenas espaços.
     3. body é normalizado com strip().
     4. body não pode exceder CASE_COMMUNICATION_MAX_LENGTH.
-    5. Caso CLEANED rejeita post no MVP.
+    5. Caso CLEANED rejeita post, a menos que allow_cleaned=True (opt-in explícito).
 
     Em caso de sucesso:
     - Cria CaseCommunicationMessage.
@@ -737,8 +738,8 @@ def post_case_communication_message(
     if len(stripped_body) > CASE_COMMUNICATION_MAX_LENGTH:
         raise CaseCommunicationError(f"A mensagem excede o limite de {CASE_COMMUNICATION_MAX_LENGTH} caracteres.")
 
-    # Validação 5: caso CLEANED bloqueia post no MVP
-    if case.status == CaseStatus.CLEANED:
+    # Validação 5: caso CLEANED bloqueia post a menos que allow_cleaned=True
+    if case.status == CaseStatus.CLEANED and not allow_cleaned:
         raise CaseCommunicationError("Não é possível enviar mensagens em um caso encerrado (CLEANED).")
 
     # Criar a mensagem

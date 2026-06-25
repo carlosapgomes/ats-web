@@ -1,0 +1,83 @@
+{% extends "base.html" %}
+{% load static %}
+
+{% block title %}Busca Histórica — Agendador · {{ app_display_name }}{% endblock %}
+
+{% block subtitle %}Buscar casos processados/agendados{% endblock %}
+
+{% block content %}
+
+<div class="card p-4 mb-4">
+  <form method="get" action="{% url 'scheduler:historical_search' %}" class="row g-2 align-items-end">
+    <div class="col-md-8">
+      <label for="search-input" class="form-label">Pesquisar por ocorrência ou nome do paciente</label>
+      <div class="input-group">
+        <input type="text" id="search-input" name="q" class="form-control"
+               placeholder="Digite a ocorrência ou nome do paciente..."
+               value="{{ query }}" autofocus>
+        <button type="submit" class="btn btn-hospital">Buscar</button>
+      </div>
+    </div>
+    <div class="col-md-4 d-flex gap-2">
+      <a href="{% url 'scheduler:queue' %}" class="btn btn-hospital-outline">← Voltar para fila</a>
+    </div>
+  </form>
+</div>
+
+{% if query %}
+  {% if results %}
+    <p class="text-muted mb-3">{{ results|length }} caso(s) encontrado(s).</p>
+    <div class="row">
+      {% for item in results %}
+      <div class="col-md-6 mb-3">
+        <div class="card h-100">
+          <div class="card-body">
+            <div class="d-flex justify-content-between align-items-start mb-2">
+              <h5 class="card-title mb-0">{{ item.patient_name|default:"Paciente" }}</h5>
+              <span class="badge bg-secondary">{{ item.status_label }}</span>
+            </div>
+            <p class="card-text mb-1">
+              <small class="text-muted">Registro:</small>
+              <strong>{{ item.agency_record_number|default:"—" }}</strong>
+            </p>
+            {% if item.origin_unit %}
+            <p class="card-text mb-1">
+              <small class="text-muted">Unidade:</small> {{ item.origin_unit }}
+            </p>
+            {% endif %}
+            {% if item.doctor_display %}
+            <p class="card-text mb-1">
+              <small class="text-muted">Médico:</small> {{ item.doctor_display }}
+            </p>
+            {% endif %}
+            <p class="card-text mb-1">
+              <small class="text-muted">Agendamento:</small>
+              <span class="badge {% if item.appointment_status_label == 'Confirmado' %}bg-success{% elif item.appointment_status_label == 'Negado' %}bg-danger{% else %}bg-warning text-dark{% endif %}">
+                {{ item.appointment_status_label }}
+              </span>
+              {% if item.appointment_at %}
+                · {{ item.appointment_at|date:"d/m/Y H:i" }}
+              {% endif %}
+            </p>
+            <div class="mt-2">
+              <a href="{% url 'scheduler:context_detail' case_id=item.case.case_id %}" class="btn btn-sm btn-hospital">
+                Detalhes
+              </a>
+            </div>
+          </div>
+        </div>
+      </div>
+      {% endfor %}
+    </div>
+  {% else %}
+    <div class="alert alert-info">
+      Nenhum caso encontrado para "{{ query }}".
+    </div>
+  {% endif %}
+{% else %}
+  <div class="text-center text-muted py-5">
+    <p>Digite uma ocorrência ou nome do paciente para buscar casos históricos.</p>
+  </div>
+{% endif %}
+
+{% endblock %}
