@@ -2546,3 +2546,81 @@ class TestSchedulerContextDetail:
         # Should show that communication is not possible
         assert "Comunicação operacional" in content, "Communication section should be present"
         assert "Não é possível enviar mensagens" in content, "Should show read-only communication message"
+
+    # ── Notification read marking hardening ───────────────────────────────
+
+    def test_scheduler_context_detail_direct_access_does_not_mark_notification_read(self, client) -> None:
+        """Acesso direto ao context detail não marca notificação como lida."""
+        from apps.accounts.models import UserNotification
+
+        self._login_as(client, "scheduler", username="sched_read_harden")
+        nir_user = User.objects.create_user(username="nir_read_harden")
+        nir_user.roles.add(self._create_role("nir"))
+        case = Case.objects.create(
+            created_by=nir_user,
+            status=CaseStatus.DOCTOR_ACCEPTED,
+            structured_data={"patient": {"name": "Read Harden", "age": 40, "gender": "M"}},
+        )
+        self._create_notification(self._get_last_user(), case)
+
+        notif = UserNotification.objects.get(
+            recipient=self._get_last_user(),
+            case=case,
+        )
+        assert notif.read_at is None, "Notification should start unread"
+
+        response = client.get(f"/scheduler/context/{case.case_id}/")
+        assert response.status_code == 200
+
+        notif.refresh_from_db()
+        assert notif.read_at is None, "Direct context detail access must NOT mark the notification as read"
+
+    def test_scheduler_context_detail_does_not_mark_notification_read_with_multiple_unread(self, client) -> None:
+        """Acesso direto com múltiplas notificações não lidas não marca nenhuma."""
+        from apps.accounts.models import UserNotification
+        from apps.cases.models import CaseCommunicationMessage
+
+        self._login_as(client, "scheduler", username="sched_multi_harden")
+        nir_user = User.objects.create_user(username="nir_multi_harden")
+        nir_user.roles.add(self._create_role("nir"))
+        case = Case.objects.create(
+            created_by=nir_user,
+            status=CaseStatus.DOCTOR_ACCEPTED,
+            structured_data={"patient": {"name": "Multi Harden", "age": 50, "gender": "M"}},
+        )
+
+        # Create two different messages that trigger notifications
+        msg1 = CaseCommunicationMessage.objects.create(
+            case=case, author=nir_user, author_role="nir", body="Primeira menção @scheduler"
+        )
+        msg2 = CaseCommunicationMessage.objects.create(
+            case=case, author=nir_user, author_role="nir", body="Segunda menção @scheduler"
+        )
+        notif1 = UserNotification.objects.create(
+            recipient=self._get_last_user(),
+            case=case,
+            communication_message=msg1,
+            triggered_by=nir_user,
+            notification_type="case_communication_mention",
+            title="Menção 1",
+            body_preview="Primeira menção",
+        )
+        notif2 = UserNotification.objects.create(
+            recipient=self._get_last_user(),
+            case=case,
+            communication_message=msg2,
+            triggered_by=nir_user,
+            notification_type="case_communication_mention",
+            title="Menção 2",
+            body_preview="Segunda menção",
+        )
+        assert notif1.read_at is None
+        assert notif2.read_at is None
+
+        response = client.get(f"/scheduler/context/{case.case_id}/")
+        assert response.status_code == 200
+
+        notif1.refresh_from_db()
+        notif2.refresh_from_db()
+        assert notif1.read_at is None, "First notification must remain unread"
+        assert notif2.read_at is None, "Second notification must remain unread"

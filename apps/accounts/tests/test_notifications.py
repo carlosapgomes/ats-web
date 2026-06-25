@@ -775,6 +775,34 @@ class TestNotificationRedirectResolution:
         url_nir = resolve_notification_redirect_url(case=case, user=user_scheduler, active_role="nir")
         assert url_nir == reverse("intake:closed_case_detail", kwargs={"case_id": case.pk})
 
+    def test_notification_open_still_marks_and_redirects_scheduler_non_wait_appt(
+        self, db: Any, case_factory: Any, user: Any, user_scheduler: Any, advance_to: Any
+    ) -> None:
+        """notification_open marca como lida e redireciona scheduler não-WAIT_APPT para context_detail."""
+        from apps.accounts.models import UserNotification
+        from apps.cases.services import post_case_communication_message
+
+        case = case_factory(user)
+        # Caso DOCTOR_ACCEPTED (não WAIT_APPT)
+        case = advance_to(case, CaseStatus.DOCTOR_ACCEPTED)
+
+        # @scheduler cria notificação
+        post_case_communication_message(case=case, author=user, author_role="nir", body="@scheduler avalie")
+        notif = UserNotification.objects.get(recipient=user_scheduler, case=case)
+
+        assert notif.read_at is None, "Notification should start unread"
+
+        client_scheduler = _get_client(user_scheduler)
+        response = client_scheduler.get(reverse("notification_open", kwargs={"notification_id": notif.notification_id}))
+        assert response.status_code == 302
+
+        # Deve redirecionar para context_detail
+        expected_url = reverse("scheduler:context_detail", kwargs={"case_id": case.pk})
+        assert response.url == expected_url, f"Expected {expected_url}, got {response.url}"
+
+        notif.refresh_from_db()
+        assert notif.read_at is not None, "Notification must be marked as read via notification_open"
+
 
 class TestMentionResolutionHardening:
     """Hardening: case-insensitive username, unknown tokens, count preciso."""

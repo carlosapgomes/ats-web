@@ -457,7 +457,6 @@ def scheduler_context_detail(request: HttpRequest, case_id: uuid.UUID) -> HttpRe
     Não adquire lock, não altera FSM, não mostra ações de workflow.
     Permite resposta na comunicação se case.status != CLEANED.
     """
-    from apps.accounts.models import UserNotification
     from apps.intake.views import (
         EVENT_DOT_CSS,
         EVENT_LABELS,
@@ -473,19 +472,9 @@ def scheduler_context_detail(request: HttpRequest, case_id: uuid.UUID) -> HttpRe
     )
 
     # Autorização: deve existir UserNotification para o usuário + caso
-    assert request.user.is_authenticated  # guaranteed by @login_required
+    # A marcação como lida é feita exclusivamente por notification_open em accounts.
     if not _scheduler_has_context_notification(request.user, case):
         raise Http404("Nenhuma notificação encontrada para este caso.")
-
-    # ── Mark notification as read ────────────────────────────────────────
-    # Any unread notification for this user/case gets marked as read.
-    now = timezone.now()
-    assert request.user.is_authenticated  # guaranteed by @login_required
-    UserNotification.objects.filter(
-        recipient=request.user,
-        case=case,
-        read_at__isnull=True,
-    ).update(read_at=now)
 
     # ── Build context ────────────────────────────────────────────────────
     events = case.events.all()
