@@ -9,7 +9,7 @@ from django.contrib.auth import get_user_model
 from django.utils import timezone
 
 from apps.accounts.models import Role
-from apps.cases.models import Case, CaseEvent, CaseStatus
+from apps.cases.models import Case, CaseCommunicationMessage, CaseEvent, CaseStatus
 
 User = get_user_model()
 
@@ -2323,3 +2323,226 @@ class TestSchedulerQueueRegulationDays:
         pos_immediate = content.index("Vinda imediata autorizada")
         pos_wait_appt = content.index("WAIT_APPT Alto Score")
         assert pos_immediate < pos_wait_appt, "Immediate notice should appear before WAIT_APPT cases"
+
+
+@pytest.mark.django_db
+class TestSchedulerContextDetail:
+    """Tests for scheduler context detail view (read-only)."""
+
+    def setup_method(self, method: Any = None) -> None:
+        self._last_user = None
+
+    def _create_role(self, name: str):
+        role, _ = Role.objects.get_or_create(name=name)
+        return role
+
+    def _login_as(self, client, role_name: str, username: str = "sched_ctx") -> None:
+        """Create user with given role, login, and set active_role in session."""
+        user = User.objects.create_user(username=username, password="testpass123")
+        user.roles.add(self._create_role(role_name))
+        client.force_login(user)
+        session = client.session
+        session["active_role"] = role_name
+        session.save()
+        self._last_user = user
+
+    def _get_last_user(self) -> Any:
+        """Return the last created user from _login_as."""
+        return self._last_user
+
+    def _create_notification(self, user, case):
+        """Create a UserNotification for the user/case pair."""
+        from apps.accounts.models import UserNotification
+
+        msg = CaseCommunicationMessage.objects.create(
+            case=case,
+            author=user,
+            author_role="nir",
+            body="Teste de menção @scheduler",
+        )
+        notif = UserNotification.objects.create(
+            recipient=user,
+            case=case,
+            communication_message=msg,
+            triggered_by=user,
+            notification_type="case_communication_mention",
+            title="Você foi mencionado",
+            body_preview="Teste de menção @scheduler",
+        )
+        return notif
+
+    # ── Authentication tests ──────────────────────────────────────────────
+
+    def test_scheduler_context_detail_requires_login(self, client) -> None:
+        """GET /scheduler/context/<uuid>/ without auth redirects to login."""
+        from apps.cases.models import Case
+
+        case = Case.objects.create(created_by=User.objects.create_user(username="ctx_owner"))
+        response = client.get(f"/scheduler/context/{case.case_id}/")
+        assert response.status_code == 302
+        assert "/login/" in response.url
+
+    def test_scheduler_context_detail_requires_scheduler_role(self, client) -> None:
+        """Usuário sem papel ativo scheduler não acessa."""
+        nir_user = User.objects.create_user(username="nir_ctx_no_role")
+        nir_user.roles.add(self._create_role("nir"))
+        client.force_login(nir_user)
+        session = client.session
+        session["active_role"] = "nir"
+        session.save()
+
+        case = Case.objects.create(created_by=nir_user)
+        response = client.get(f"/scheduler/context/{case.case_id}/")
+        assert response.status_code == 302
+
+    # ── Authorization tests ────────────────────────────────────────────────
+
+    def test_scheduler_context_detail_requires_notification_for_user(self, client) -> None:
+        """Scheduler sem notificação para o caso não acessa."""
+        self._login_as(client, "scheduler", username="sched_no_notif")
+        nir_user = User.objects.create_user(username="ctx_nir_no_notif")
+        nir_user.roles.add(self._create_role("nir"))
+        case = Case.objects.create(created_by=nir_user)
+        response = client.get(f"/scheduler/context/{case.case_id}/")
+        assert response.status_code == 404
+
+    def test_scheduler_context_detail_allows_recipient_notification(self, client) -> None:
+        """Scheduler com UserNotification para o caso acessa."""
+        self._login_as(client, "scheduler", username="sched_allowed")
+        nir_user = User.objects.create_user(username="ctx_nir_allowed")
+        nir_user.roles.add(self._create_role("nir"))
+        case = Case.objects.create(
+            created_by=nir_user,
+            structured_data={"patient": {"name": "Paciente Teste", "age": 45, "gender": "M"}},
+        )
+        self._create_notification(self._get_last_user(), case)
+        response = client.get(f"/scheduler/context/{case.case_id}/")
+        assert response.status_code == 200
+
+    def test_scheduler_context_detail_does_not_allow_other_scheduler_notification(self, client) -> None:
+        """Notificação de outro scheduler não autoriza o usuário atual."""
+        self._login_as(client, "scheduler", username="sched_other_notif")
+        other_scheduler = User.objects.create_user(username="sched_other_user")
+        other_scheduler.roles.add(self._create_role("scheduler"))
+
+        nir_user = User.objects.create_user(username="ctx_nir_other")
+        nir_user.roles.add(self._create_role("nir"))
+        case = Case.objects.create(created_by=nir_user)
+        # Notification for other_scheduler, not for user
+        self._create_notification(other_scheduler, case)
+        response = client.get(f"/scheduler/context/{case.case_id}/")
+        assert response.status_code == 404
+
+    # ── Content tests ─────────────────────────────────────────────────────
+
+    def test_scheduler_context_detail_renders_readonly_case_context(self, client) -> None:
+        """Mostra paciente/ocorrência/status/thread."""
+        self._login_as(client, "scheduler", username="sched_content")
+        nir_user = User.objects.create_user(username="ctx_nir_content")
+        nir_user.roles.add(self._create_role("nir"))
+        case = Case.objects.create(
+            created_by=nir_user,
+            agency_record_number="REC-001",
+            structured_data={
+                "patient": {"name": "Maria Souza", "age": 35, "gender": "F"},
+                "eda": {"indication_category": "Cirurgia Geral"},
+            },
+        )
+        self._create_notification(self._get_last_user(), case)
+        response = client.get(f"/scheduler/context/{case.case_id}/")
+        assert response.status_code == 200
+        content = response.content.decode()
+        assert "Maria Souza" in content
+        assert "REC-001" in content
+        assert "Cirurgia Geral" in content
+        # Should show status label
+        assert any(label in content for label in ["Novo", "New", case.status])
+
+    def test_scheduler_context_detail_hides_workflow_actions(self, client) -> None:
+        """Não contém botões de confirmar/negar agendamento, lock token ou submit estruturado."""
+        self._login_as(client, "scheduler", username="sched_noactions")
+        nir_user = User.objects.create_user(username="ctx_nir_noactions")
+        nir_user.roles.add(self._create_role("nir"))
+        case = Case.objects.create(
+            created_by=nir_user,
+            status=CaseStatus.DOCTOR_ACCEPTED,
+            doctor_decision="accept",
+            doctor_admission_flow="scheduled",
+            structured_data={"patient": {"name": "João", "age": 50, "gender": "M"}},
+        )
+        self._create_notification(self._get_last_user(), case)
+        response = client.get(f"/scheduler/context/{case.case_id}/")
+        assert response.status_code == 200
+        content = response.content.decode()
+
+        # Must NOT contain workflow action indicators
+        assert "Confirmar Agendamento" not in content
+        assert "Negar Agendamento" not in content
+        assert "lock_token" not in content
+        assert "lock-renew" not in content
+        assert "scheduler:submit" not in content
+        assert "work-lock-config" not in content
+        assert "SchedulerDecisionForm" not in content
+
+    # ── Communication tests ─────────────────────────────────────────────────
+
+    def test_scheduler_context_detail_allows_communication_reply_when_not_cleaned(self, client) -> None:
+        """Formulário de comunicação aparece quando caso não CLEANED."""
+        self._login_as(client, "scheduler", username="sched_comm_allowed")
+        nir_user = User.objects.create_user(username="ctx_nir_comm_allowed")
+        nir_user.roles.add(self._create_role("nir"))
+        case = Case.objects.create(
+            created_by=nir_user,
+            status=CaseStatus.DOCTOR_ACCEPTED,
+            structured_data={"patient": {"name": "Comm Test", "age": 30, "gender": "M"}},
+        )
+        self._create_notification(self._get_last_user(), case)
+        response = client.get(f"/scheduler/context/{case.case_id}/")
+        assert response.status_code == 200
+        content = response.content.decode()
+        # Communication form should be present
+        assert "Comunicação operacional" in content, "Communication section should be present"
+        assert "Enviar mensagem" in content, "Submit button should be present"
+
+    def test_scheduler_context_detail_post_reply_creates_message(self, client) -> None:
+        """POST via endpoint existente como scheduler cria CaseCommunicationMessage."""
+        self._login_as(client, "scheduler", username="sched_comm_post")
+        nir_user = User.objects.create_user(username="ctx_nir_comm_post")
+        nir_user.roles.add(self._create_role("nir"))
+        case = Case.objects.create(
+            created_by=nir_user,
+            status=CaseStatus.WAIT_DOCTOR,
+            structured_data={"patient": {"name": "Post Test", "age": 40, "gender": "M"}},
+        )
+        self._create_notification(self._get_last_user(), case)
+
+        # POST to the existing communication endpoint (under /cases/ prefix)
+        response = client.post(
+            f"/cases/{case.case_id}/communication/",
+            {"body": "Resposta do scheduler sobre o caso", "next": f"/scheduler/context/{case.case_id}/"},
+        )
+        assert response.status_code == 302
+        # Message should exist
+        assert CaseCommunicationMessage.objects.filter(
+            case=case,
+            author=self._get_last_user(),
+            body="Resposta do scheduler sobre o caso",
+        ).exists()
+
+    def test_scheduler_context_detail_cleaned_is_readonly_for_communication(self, client) -> None:
+        """Se caso CLEANED, não renderiza form de post."""
+        self._login_as(client, "scheduler", username="sched_comm_cleaned")
+        nir_user = User.objects.create_user(username="ctx_nir_comm_cleaned")
+        nir_user.roles.add(self._create_role("nir"))
+        case = Case.objects.create(
+            created_by=nir_user,
+            status=CaseStatus.CLEANED,
+            structured_data={"patient": {"name": "Cleaned Test", "age": 60, "gender": "M"}},
+        )
+        self._create_notification(self._get_last_user(), case)
+        response = client.get(f"/scheduler/context/{case.case_id}/")
+        assert response.status_code == 200
+        content = response.content.decode()
+        # Should show that communication is not possible
+        assert "Comunicação operacional" in content, "Communication section should be present"
+        assert "Não é possível enviar mensagens" in content, "Should show read-only communication message"

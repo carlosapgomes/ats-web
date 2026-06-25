@@ -713,18 +713,59 @@ class TestNotificationRedirectResolution:
         url = resolve_notification_redirect_url(case=case, user=user_scheduler, active_role="scheduler")
         assert url == reverse("scheduler:confirm", kwargs={"case_id": case.pk})
 
-    def test_redirect_urls_are_reversed_not_hardcoded(self, db: Any, case_factory: Any, user_scheduler: Any) -> None:
+    def test_scheduler_notification_for_wait_appt_still_redirects_to_confirm(
+        self, db: Any, case_factory: Any, user_scheduler: Any
+    ) -> None:
+        """Caso WAIT_APPT continua indo para scheduler:confirm."""
+        from apps.accounts.services import resolve_notification_redirect_url
+        from apps.cases.models import Case, CaseStatus
+
+        case = case_factory(user_scheduler)
+        Case.objects.filter(pk=case.pk).update(status=CaseStatus.WAIT_APPT)
+        case = Case.objects.get(pk=case.pk)
+
+        url = resolve_notification_redirect_url(case=case, user=user_scheduler, active_role="scheduler")
+        assert url == reverse("scheduler:confirm", kwargs={"case_id": case.pk})
+
+    def test_scheduler_notification_for_non_wait_appt_redirects_to_context_detail(
+        self, db: Any, case_factory: Any, user_scheduler: Any
+    ) -> None:
+        """Caso fora de WAIT_APPT vai para scheduler:context_detail."""
+        from apps.accounts.services import resolve_notification_redirect_url
+        from apps.cases.models import Case, CaseStatus
+
+        case = case_factory(user_scheduler)
+        # Caso CLEANED (não WAIT_APPT)
+        Case.objects.filter(pk=case.pk).update(status=CaseStatus.CLEANED)
+        case = Case.objects.get(pk=case.pk)
+
+        url = resolve_notification_redirect_url(case=case, user=user_scheduler, active_role="scheduler")
+        assert url == reverse("scheduler:context_detail", kwargs={"case_id": case.pk})
+
+    def test_scheduler_notification_for_doctor_accepted_redirects_to_context_detail(
+        self, db: Any, case_factory: Any, user_scheduler: Any
+    ) -> None:
+        """Caso DOCTOR_ACCEPTED (não WAIT_APPT) vai para scheduler:context_detail."""
+        from apps.accounts.services import resolve_notification_redirect_url
+        from apps.cases.models import Case, CaseStatus
+
+        case = case_factory(user_scheduler)
+        Case.objects.filter(pk=case.pk).update(status=CaseStatus.DOCTOR_ACCEPTED)
+        case = Case.objects.get(pk=case.pk)
+
+        url = resolve_notification_redirect_url(case=case, user=user_scheduler, active_role="scheduler")
+        assert url == reverse("scheduler:context_detail", kwargs={"case_id": case.pk})
+
+    def test_redirect_urls_are_reversed_not_hardcoded_for_non_scheduler(
+        self, db: Any, case_factory: Any, user_scheduler: Any
+    ) -> None:
         """URLs de redirect devem vir de reverse(), não ser paths hardcoded."""
         from apps.accounts.services import resolve_notification_redirect_url
         from apps.cases.models import Case, CaseStatus
 
         case = case_factory(user_scheduler)
-        # Fallback scheduler (não WAIT_APPT) → reverse('scheduler:queue')
         Case.objects.filter(pk=case.pk).update(status=CaseStatus.CLEANED)
         case = Case.objects.get(pk=case.pk)
-
-        url = resolve_notification_redirect_url(case=case, user=user_scheduler, active_role="scheduler")
-        assert url == reverse("scheduler:queue")
 
         # Fallback manager → reverse('dashboard:index')
         url_mgr = resolve_notification_redirect_url(case=case, user=user_scheduler, active_role="manager")

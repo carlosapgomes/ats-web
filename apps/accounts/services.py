@@ -234,7 +234,10 @@ def resolve_notification_redirect_url(*, case: Any, user: Any, active_role: str)
     if active_role == "scheduler":
         if status == CaseStatus.WAIT_APPT:
             return reverse("scheduler:confirm", kwargs={"case_id": case.pk})
-        return reverse("scheduler:queue")
+        # Redireciona para detalhe contextual read-only (ex: menção @scheduler
+        # em caso que ainda não está em WAIT_APPT ou já foi processado).
+        # A view context_detail valida se o usuário realmente tem notificação.
+        return reverse("scheduler:context_detail", kwargs={"case_id": case.pk})
 
     # manager / admin / fallback
     return reverse("dashboard:index")

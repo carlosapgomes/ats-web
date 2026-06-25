@@ -430,6 +430,157 @@ def scheduler_processed_pdf(request: HttpRequest, case_id: uuid.UUID) -> HttpRes
     )
 
 
+# ── Context detail (read-only, by mention) ─────────────────────────────────
+
+NOTIFICATION_TITLE_FOR_CONTEXT = "Você foi mencionado em um caso"
+
+
+def _scheduler_has_context_notification(user: Any, case: Case) -> bool:
+    """Verifica se o scheduler possui UserNotification vinculada ao caso.
+
+    Não faz render/redirect; apenas responde True/False para autorização.
+    """
+    from apps.accounts.models import UserNotification
+
+    return UserNotification.objects.filter(
+        recipient=user,
+        case=case,
+    ).exists()
+
+
+@login_required
+@role_required("scheduler")
+def scheduler_context_detail(request: HttpRequest, case_id: uuid.UUID) -> HttpResponse:
+    """GET: Detalhe contextual read-only para scheduler mencionado.
+
+    Exige que o usuário logado possua UserNotification vinculada ao caso.
+    Não adquire lock, não altera FSM, não mostra ações de workflow.
+    Permite resposta na comunicação se case.status != CLEANED.
+    """
+    from apps.accounts.models import UserNotification
+    from apps.intake.views import (
+        EVENT_DOT_CSS,
+        EVENT_LABELS,
+        STATUS_CSS_CLASS,
+        STATUS_LABELS,
+        STEP_STATUS_INDEX,
+        STEPS,
+    )
+
+    case = get_object_or_404(
+        Case.objects.select_related("created_by", "doctor"),
+        case_id=case_id,
+    )
+
+    # Autorização: deve existir UserNotification para o usuário + caso
+    assert request.user.is_authenticated  # guaranteed by @login_required
+    if not _scheduler_has_context_notification(request.user, case):
+        raise Http404("Nenhuma notificação encontrada para este caso.")
+
+    # ── Mark notification as read ────────────────────────────────────────
+    # Any unread notification for this user/case gets marked as read.
+    now = timezone.now()
+    assert request.user.is_authenticated  # guaranteed by @login_required
+    UserNotification.objects.filter(
+        recipient=request.user,
+        case=case,
+        read_at__isnull=True,
+    ).update(read_at=now)
+
+    # ── Build context ────────────────────────────────────────────────────
+    events = case.events.all()
+
+    current_step_idx = STEP_STATUS_INDEX.get(case.status, 0)
+    steps = STEPS
+
+    enriched_events = []
+    for e in events:
+        enriched_events.append(
+            {
+                "event": e,
+                "label": EVENT_LABELS.get(e.event_type, e.event_type),
+                "dot_css": EVENT_DOT_CSS.get(e.event_type, "system"),
+            }
+        )
+
+    # Extract patient info
+    patient_name = ""
+    patient_age = ""
+    patient_gender = ""
+    diagnosis = ""
+    if case.structured_data and isinstance(case.structured_data, dict):
+        patient = case.structured_data.get("patient", {})
+        if isinstance(patient, dict):
+            patient_name = str(patient.get("name", ""))
+            patient_age = str(patient.get("age", ""))
+            patient_gender = str(patient.get("gender", ""))
+        eda = case.structured_data.get("eda", {})
+        if isinstance(eda, dict):
+            indication = eda.get("indication_category", "")
+            if indication:
+                diagnosis = str(indication)
+    if not diagnosis and case.summary_text:
+        diagnosis = case.summary_text
+
+    doctor_decision_display = {
+        "accept": "ACEITAR",
+        "deny": "NEGAR",
+    }.get(case.doctor_decision, "")
+
+    support_flag_display = {
+        "none": "Nenhum",
+        "anesthesist": "Anestesista",
+        "anesthesist_icu": "Anestesista + UTI",
+    }.get(case.doctor_support_flag, case.doctor_support_flag)
+
+    admission_flow_display = {
+        "scheduled": "Agendamento",
+        "immediate": "Vinda Imediata",
+    }.get(case.doctor_admission_flow, case.doctor_admission_flow)
+
+    # Communication thread context (shared pattern)
+    can_post_communication = case.status != CaseStatus.CLEANED
+    communication_post_url = reverse("intake:post_case_communication", args=[case.case_id])
+    communication_next_url = request.get_full_path() + "#case-communication"
+
+    context: dict[str, Any] = {
+        "case": case,
+        "patient_name": patient_name,
+        "patient_age": patient_age,
+        "patient_gender": patient_gender,
+        "diagnosis": diagnosis,
+        "agency_record_number": case.agency_record_number or "",
+        "origin_unit": case.get_origin_unit_display(compact=False),
+        "doctor_decision_display": doctor_decision_display,
+        "doctor_display": case.doctor_display,
+        "support_flag_display": support_flag_display,
+        "admission_flow_display": admission_flow_display,
+        "has_doctor_observation": case.has_doctor_observation,
+        "doctor_observation": case.doctor_observation,
+        "created_by_display": case.created_by.get_full_name() or str(case.created_by.username),
+        "created_at": case.created_at,
+        "status_label": STATUS_LABELS.get(case.status, case.get_status_display()),
+        "status_css": STATUS_CSS_CLASS.get(case.status, "status-pending"),
+        # Timeline
+        "events": enriched_events,
+        "steps": steps,
+        "current_step_idx": current_step_idx,
+        # Communication
+        "communication_messages": case.communication_messages.select_related("author").all(),
+        "can_post_communication": can_post_communication,
+        "communication_post_url": communication_post_url,
+        "communication_next_url": communication_next_url,
+        "communication_max_length": CASE_COMMUNICATION_MAX_LENGTH,
+        # Read-only detail flags
+        "is_context_detail": True,
+        "show_intake_nav": False,
+        "back_url": request.META.get("HTTP_REFERER", reverse("scheduler:queue")),
+        "back_label": "← Voltar",
+    }
+
+    return render(request, "scheduler/context_detail.html", context)
+
+
 # ── Immediate admission acknowledgement ────────────────────────────────────
 
 
