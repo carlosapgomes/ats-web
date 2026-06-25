@@ -17,4 +17,11 @@ urlpatterns = [
     path("<uuid:case_id>/submit/", views.scheduler_submit, name="submit"),
     path("<uuid:case_id>/lock/renew/", views.scheduler_lock_renew, name="lock_renew"),
     path("<uuid:case_id>/lock/release/", views.scheduler_lock_release, name="lock_release"),
+    # ── Historical ────────────────────────────────────────────────────────
+    path("historical/", views.scheduler_historical_search, name="historical_search"),
+    path(
+        "historical/<uuid:case_id>/message-nir/",
+        views.scheduler_historical_message_nir,
+        name="historical_message_nir",
+    ),
 ]

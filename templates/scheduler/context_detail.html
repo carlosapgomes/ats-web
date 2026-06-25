@@ -171,6 +171,28 @@
 <!-- Communication Thread -->
 {% include "cases/_communication_thread.html" %}
 
+<!-- Historical: Message to NIR -->
+{% if show_historical_message_nir %}
+<div class="card p-4 mb-4 border-primary">
+  <h5 class="mb-3">📩 Comunicar NIR</h5>
+  <p class="text-muted small mb-3">
+    Este caso já está encerrado. Use este formulário para enviar uma mensagem
+    operacional ao NIR. O sistema adicionará automaticamente a menção
+    <strong>@nir</strong> para notificar a equipe NIR.
+  </p>
+  <form method="post" action="{{ historical_message_nir_url }}">
+    {% csrf_token %}
+    <div class="mb-2">
+      <textarea name="body" class="form-control" rows="3"
+                placeholder="Descreva o motivo do contato com o NIR..."
+                maxlength="{{ communication_max_length }}" required></textarea>
+      <div class="form-text">Máximo de {{ communication_max_length }} caracteres.</div>
+    </div>
+    <button type="submit" class="btn btn-hospital">Enviar mensagem ao NIR</button>
+  </form>
+</div>
+{% endif %}
+
 <!-- Timeline -->
 <div class="card p-4 mb-4">
   <h5 class="mb-3">
