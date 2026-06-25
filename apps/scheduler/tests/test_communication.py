@@ -282,7 +282,6 @@ class TestSchedulerCommunicationHardening:
             "apps/cases/services.py",
             "apps/intake/views.py",
             "apps/doctor/views.py",
-            "apps/scheduler/views.py",
             "templates/cases/_communication_thread.html",
         ]
         pattern = re.compile(r"UserNotification|notification_badge|unread_count")

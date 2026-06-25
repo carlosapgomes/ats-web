@@ -1,0 +1,211 @@
+{% extends "base.html" %}
+{% load static %}
+
+{% block title %}Contexto — {{ patient_name|default:case.agency_record_number|default:case.case_id|truncatechars:12 }} · {{ app_display_name }}{% endblock %}
+
+{% block subtitle %}Contexto do caso{% endblock %}
+
+{% block content %}
+
+<!-- Top Info -->
+<div class="card p-4 mb-4">
+  <div class="row align-items-center">
+    <div class="col-md-6">
+      <h4 class="mb-1">
+        {% if patient_name %}
+          {{ patient_name }}
+        {% elif case.extracted_text %}
+          {{ case.extracted_text|truncatechars:60 }}
+        {% else %}
+          Caso {{ case.case_id|truncatechars:12 }}
+        {% endif %}
+      </h4>
+      <p class="text-muted mb-1">
+        Registro: <strong>{{ agency_record_number|default:"—" }}</strong>
+      </p>
+      {% if origin_unit %}
+      <p class="text-muted mb-1">
+        🏥 Unidade de origem: <strong>{{ origin_unit }}</strong>
+      </p>
+      {% endif %}
+      <p class="text-muted mb-0">
+        Enviado por: <strong>{{ created_by_display }}</strong>
+        em {{ created_at|date:"d/m/Y H:i" }}
+      </p>
+    </div>
+    <div class="col-md-6 text-md-end mt-3 mt-md-0">
+      <span class="status-badge {{ status_css }} fs-6">{{ status_label }}</span>
+    </div>
+  </div>
+</div>
+
+<!-- Status Stepper -->
+<div class="card p-4 mb-4">
+  <h5 class="mb-3">Progresso do Caso</h5>
+  <div class="steps-bar">
+    {% for step in steps %}
+      {% if forloop.counter0 < current_step_idx %}
+      <div class="step-item done">
+      {% elif forloop.counter0 == current_step_idx %}
+      <div class="step-item current">
+      {% else %}
+      <div class="step-item">
+      {% endif %}
+        <span class="step-icon">{{ step.icon }}</span> {{ step.label }}
+      </div>
+    {% endfor %}
+  </div>
+</div>
+
+<!-- Case Data -->
+<div class="card p-4 mb-4">
+  <h5 class="mb-3">📋 Dados do Caso</h5>
+  <table class="table table-sm mb-0">
+    <tr><td class="text-muted" style="width:35%;">Paciente</td><td><strong>{{ patient_name|default:"—" }}</strong></td></tr>
+    <tr><td class="text-muted">Idade</td><td>{% if patient_age %}{{ patient_age }} anos{% else %}—{% endif %}</td></tr>
+    <tr><td class="text-muted">Sexo</td><td>{{ patient_gender|default:"—" }}</td></tr>
+    <tr><td class="text-muted">Diagnóstico</td><td>{{ diagnosis|default:"—" }}</td></tr>
+    <tr><td class="text-muted">Enviado em</td><td>{{ created_at|date:"d/m/Y H:i" }}</td></tr>
+  </table>
+</div>
+
+<!-- Doctor Decision -->
+{% if doctor_display or doctor_decision_display %}
+<div class="card p-4 mb-4">
+  <h5 class="mb-3">🩺 Decisão Médica</h5>
+  {% if doctor_decision_display %}
+  <div class="summary-box mb-3">
+    <div class="summary-label">Decisão</div>
+    <div class="summary-value">
+      <span class="status-badge status-accepted">{{ doctor_decision_display }}</span>
+    </div>
+  </div>
+  {% endif %}
+  {% if doctor_display %}
+  <div class="summary-box mb-3">
+    <div class="summary-label">Médico responsável</div>
+    <div class="summary-value">{{ doctor_display }}</div>
+  </div>
+  {% endif %}
+  {% if support_flag_display %}
+  <div class="summary-box mb-3">
+    <div class="summary-label">Suporte Necessário</div>
+    <div class="summary-value">{{ support_flag_display }}</div>
+  </div>
+  {% endif %}
+  {% if admission_flow_display %}
+  <div class="summary-box">
+    <div class="summary-label">Fluxo</div>
+    <div class="summary-value">{{ admission_flow_display }}</div>
+  </div>
+  {% endif %}
+  {% if has_doctor_observation %}
+  <div class="summary-box mt-3 border-info">
+    <div class="summary-label">Orientações médicas</div>
+    <div class="summary-value" style="white-space: pre-wrap;">{{ doctor_observation }}</div>
+  </div>
+  {% endif %}
+</div>
+{% endif %}
+
+<!-- Scheduling Data -->
+{% if case.appointment_at or case.appointment_status %}
+<div class="card p-4 mb-4">
+  <h5 class="mb-3">📅 Agendamento</h5>
+  <table class="table table-sm mb-0">
+    {% if case.appointment_status %}
+    <tr><td class="text-muted" style="width:35%;">Status</td>
+      <td>
+        {% if case.appointment_status == "confirmed" %}
+          <span class="badge bg-success">Confirmado</span>
+        {% elif case.appointment_status == "denied" %}
+          <span class="badge bg-danger">Negado</span>
+        {% elif case.appointment_status == "cancelled" %}
+          <span class="badge bg-warning text-dark">Cancelado</span>
+        {% else %}
+          {{ case.appointment_status }}
+        {% endif %}
+      </td>
+    </tr>
+    {% endif %}
+    {% if case.appointment_at %}
+    <tr><td class="text-muted">Data/Hora</td><td>{{ case.appointment_at|date:"d/m/Y H:i" }}</td></tr>
+    {% endif %}
+    {% if case.appointment_location %}
+    <tr><td class="text-muted">Local</td><td>{{ case.appointment_location }}</td></tr>
+    {% endif %}
+    {% if case.appointment_instructions %}
+    <tr><td class="text-muted">Instruções</td><td>{{ case.appointment_instructions }}</td></tr>
+    {% endif %}
+    {% if case.scheduler_display %}
+    <tr><td class="text-muted">Agendador</td><td>{{ case.scheduler_display }}</td></tr>
+    {% endif %}
+  </table>
+</div>
+{% endif %}
+
+<!-- Post-Schedule Issue Data (read-only) -->
+{% if case.post_schedule_issue_status == "opened" or case.post_schedule_issue_status == "responded" %}
+<div class="card p-4 mb-4 border-warning">
+  <h5 class="mb-3">⚠️ Intercorrência Pós-Agendamento</h5>
+  <table class="table table-sm mb-0">
+    <tr><td class="text-muted" style="width:35%;">Status</td>
+      <td>
+        {% if case.post_schedule_issue_status == "opened" %}
+          <span class="badge bg-warning text-dark">Em avaliação</span>
+        {% elif case.post_schedule_issue_status == "responded" %}
+          <span class="badge bg-info text-dark">Respondida</span>
+        {% endif %}
+      </td>
+    </tr>
+    {% if case.post_schedule_issue_reason %}
+    <tr><td class="text-muted">Motivo</td><td>{{ case.get_post_schedule_issue_reason_display|default:case.post_schedule_issue_reason }}</td></tr>
+    {% endif %}
+    {% if case.post_schedule_issue_message %}
+    <tr><td class="text-muted">Mensagem</td><td style="white-space: pre-wrap;">{{ case.post_schedule_issue_message }}</td></tr>
+    {% endif %}
+  </table>
+</div>
+{% endif %}
+
+<!-- Communication Thread -->
+{% include "cases/_communication_thread.html" %}
+
+<!-- Timeline -->
+<div class="card p-4 mb-4">
+  <h5 class="mb-3">
+    <button class="btn btn-link text-decoration-none p-0 text-dark" type="button" data-bs-toggle="collapse" data-bs-target="#timeline-collapse" aria-expanded="false" aria-controls="timeline-collapse">
+      Linha do Tempo<small class="text-muted ms-2">(clique para expandir)</small>
+    </button>
+  </h5>
+  <div class="collapse" id="timeline-collapse">
+    {% if events %}
+        {% for item in events %}
+        <div class="timeline-event">
+        <div class="timeline-event__dot {{ item.dot_css }}"></div>
+        <div class="timeline-event__content">
+            <div class="timeline-event__title">{{ item.label }}</div>
+            <div class="timeline-event__time">
+            {{ item.event.timestamp|date:"d/m/Y H:i" }}
+            ·
+            {% if item.event.actor %}
+                {{ item.event.actor.get_full_name|default:item.event.actor.username }}
+            {% else %}
+                Sistema
+            {% endif %}
+            </div>
+        </div>
+        </div>
+        {% endfor %}
+    {% else %}
+    <p class="text-muted mb-0">Nenhum evento registrado.</p>
+    {% endif %}
+  </div>
+</div>
+
+<!-- Back link -->
+<div class="d-flex gap-2 mb-4">
+  <a href="{{ back_url }}" class="btn btn-hospital-outline">{{ back_label }}</a>
+</div>
+
+{% endblock %}
