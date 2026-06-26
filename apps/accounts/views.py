@@ -188,10 +188,37 @@ def notifications_mark_all_read(request):  # type: ignore[no-untyped-def]
 
 @login_required
 @require_GET
+def user_manual_view(request):  # type: ignore[no-untyped-def]
+    """Renderiza o manual de usuario a partir do Markdown oficial.
+
+    Exige login. Qualquer papel autenticado pode acessar.
+    """
+    from .manual import read_user_manual_markdown, render_manual_markdown_to_html
+
+    try:
+        markdown_text = read_user_manual_markdown()
+    except FileNotFoundError:
+        error_html = '<div class="alert alert-danger">Manual nao encontrado. Contate o administrador.</div>'
+        return render(
+            request,
+            "accounts/manual.html",
+            {"manual_html": error_html},
+        )
+
+    manual_html = render_manual_markdown_to_html(markdown_text)
+    return render(
+        request,
+        "accounts/manual.html",
+        {"manual_html": manual_html},
+    )
+
+
+@login_required
+@require_GET
 def notifications_unread_count(request):  # type: ignore[no-untyped-def]
-    """Retorna JSON com a contagem de notificações não lidas do usuário autenticado.
+    """Retorna JSON com a contagem de notificacoes nao lidas do usuario autenticado.
 
     Resposta: {"unread_count": N}
-    Não expõe lista de notificações, PHI ou dados de outros usuários.
+    Nao expoe lista de notificacoes, PHI ou dados de outros usuarios.
     """
     return JsonResponse({"unread_count": get_unread_notification_count(request.user)})

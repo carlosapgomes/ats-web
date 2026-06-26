@@ -17,6 +17,8 @@ urlpatterns = [
     path("login/", views.login_view, name="login"),
     path("logout/", views.logout_view, name="logout"),
     path("switch-role/", views.switch_role_view, name="switch_role"),
+    # User manual
+    path("manual/", views.user_manual_view, name="user_manual"),
     # Notifications
     path("notifications/", views.notifications_list, name="notifications"),
     path(
