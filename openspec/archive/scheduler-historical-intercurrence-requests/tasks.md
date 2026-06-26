@@ -40,9 +40,14 @@
   - [x] `uv run ruff format --check .`
   - [x] `uv run mypy .`
   - [x] `uv run pytest`
-- [ ] Relatório markdown temporário criado por cada slice com snippets antes/depois e evidências.
+- [x] Relatório markdown temporário criado por cada slice com snippets antes/depois e evidências.
 - [x] Cada slice atualiza este `tasks.md` ao concluir.
-- [ ] Commit e push realizados após cada slice.
+- [x] Commit e push realizados após cada slice.
+
+> Nota de arquivamento: relatórios temporários dos slices 002, 002-hardening e 003
+> foram preservados em `reports/`. Os relatórios temporários do slice 001 (e seu
+> hardening) já não estavam em `/tmp` no momento do arquivamento; a evidência de
+> RED/GREEN e quality gate permanece registrada nos commits `1fe6490` e `68acf6b`.
 
 ## Notas para implementadores
 
@@ -56,4 +61,7 @@
 
 ## Status final do change
 
-Slice 003 implementado. Todos os 3 slices verticais concluídos.
+Concluído. Todos os 3 slices verticais implementados e validados (TDD RED → GREEN
+→ REFACTOR), com 2 hardening follow-ups. Quality gate final: ruff ✓, mypy ✓,
+1559 testes ✓. Nenhuma migration, nenhum novo estado FSM, nenhum novo modelo.
+Change arquivado em `openspec/archive/scheduler-historical-intercurrence-requests/`.
