@@ -145,3 +145,36 @@ class TestBuildUserManualPdf:
         assert "not found" in error_msg or "does not exist" in error_msg or "não encontrado" in error_msg, (
             f"Error message does not clearly explain missing input:\n{result.stderr}"
         )
+
+    def test_build_user_manual_pdf_contains_toc_section(  # noqa: PLR6301
+        self,
+        tmp_path: Path,
+    ) -> None:
+        """Generated PDF must include an 'Índice' section listing manual sections."""
+        import fitz
+
+        output_pdf = tmp_path / "toc-output.pdf"
+        result = subprocess.run(
+            [
+                sys.executable,
+                str(SCRIPT_PATH),
+                "--input",
+                str(MANUAL_PATH),
+                "--output",
+                str(output_pdf),
+            ],
+            capture_output=True,
+            text=True,
+            cwd=PROJECT_ROOT,
+        )
+        assert result.returncode == 0, f"Script failed:\n{result.stderr}"
+
+        doc = fitz.open(str(output_pdf))
+        try:
+            text = "\n".join(page.get_text() for page in doc)
+        finally:
+            doc.close()
+
+        assert "Índice" in text, "PDF does not contain an 'Índice' section"
+        # At least one known section title should be listed in the TOC
+        assert "Ações do usuário NIR" in text
