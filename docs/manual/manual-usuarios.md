@@ -160,7 +160,7 @@ Exemplos:
 - `@scheduler` — também funciona, mas prefira `@chd` no uso diário;
 - `@supervisor` ou `@manager` — notifica supervisores/gestores;
 - `@admin` — notifica administradores;
-- `@nome.de.usuario` — notifica um usuário específico.
+- `@nome.de.usuario` — notifica um usuário específico pelo seu nome de login (ex.: `@maria`, `@joao.silva`). O nome de login é o mesmo usado para entrar no sistema; você pode conferi-lo na página **Perfil**.
 
 Exemplo de mensagem:
 
