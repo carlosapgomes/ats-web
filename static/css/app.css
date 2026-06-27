@@ -837,3 +837,63 @@ body.hospital-shell h6 {
     min-width: 60px;
   }
 }
+
+/* ---------- User manual page: TOC + anchor scroll ---------- */
+
+.user-manual-content h1,
+.user-manual-content h2,
+.user-manual-content h3 {
+  scroll-margin-top: 6rem;
+}
+
+html {
+  scroll-behavior: smooth;
+}
+
+.manual-toc {
+  background: var(--bs-light, #f8f9fa);
+  border: 1px solid #dee2e6;
+  border-radius: 0.5rem;
+  padding: 0.75rem 1rem 1rem;
+  margin-bottom: 1.5rem;
+}
+
+.manual-toc__summary {
+  font-weight: 600;
+  font-size: 1.05rem;
+  cursor: pointer;
+  list-style-position: inside;
+}
+
+.manual-toc__list {
+  list-style: none;
+  padding-left: 0;
+  margin: 0.5rem 0 0;
+  column-count: 2;
+  column-gap: 1.5rem;
+}
+
+.manual-toc__item {
+  margin-bottom: 0.15rem;
+  break-inside: avoid;
+}
+
+.manual-toc__item a {
+  text-decoration: none;
+  color: var(--bs-primary, #0d6efd);
+}
+
+.manual-toc__item a:hover {
+  text-decoration: underline;
+}
+
+.manual-toc__item--l2 {
+  padding-left: 1.25rem;
+  font-size: 0.92em;
+}
+
+@media (max-width: 575.98px) {
+  .manual-toc__list {
+    column-count: 1;
+  }
+}

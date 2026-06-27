@@ -253,6 +253,20 @@ class PdfDocument:
 
         self._y = y
 
+    def add_toc(self, entries: list[tuple[int, str]]) -> None:
+        """Render an 'Índice' section listing headings (level 1 and 2)."""
+        self.add_heading(1, "Índice")
+        indent_base = MARGIN_LEFT + 10
+        for level, text in entries:
+            indent = indent_base + (level - 1) * 16
+            width = PAGE_WIDTH - indent - MARGIN_RIGHT
+            # Strip Markdown bold markers for cleaner TOC text
+            clean = re.sub(r"\*\*", "", text)
+            self._y = self._word_wrap_render(clean, FONT_SIZE_BODY, indent, width, fontname=FONT_REGULAR)
+        # Spacing after TOC
+        self._check_overflow(FONT_SIZE_BODY * 1.4)
+        self._y += FONT_SIZE_BODY
+
     def add_table(self, headers: list[str], rows: list[list[str]]) -> None:
         """Render a simple table."""
         col_count = len(headers)
@@ -488,8 +502,27 @@ def build_pdf(markdown_content: str, output_path: Path) -> None:
     output_path.parent.mkdir(parents=True, exist_ok=True)
 
     pdf = PdfDocument()
+    headings = _extract_toc_headings(markdown_content)
+    if headings:
+        pdf.add_toc(headings)
     _parse_and_render(pdf, markdown_content)
     pdf.save(output_path)
+
+
+def _extract_toc_headings(markdown: str) -> list[tuple[int, str]]:
+    """Extract (level, text) for headings of level 1 and 2, skipping code blocks."""
+    entries: list[tuple[int, str]] = []
+    in_code_block = False
+    for line in markdown.split("\n"):
+        if line.strip().startswith("```"):
+            in_code_block = not in_code_block
+            continue
+        if in_code_block:
+            continue
+        m = re.match(r"^(#{1,2})\s+(.+?)(?:\s+#+)?$", line)
+        if m:
+            entries.append((len(m.group(1)), m.group(2).strip()))
+    return entries
 
 
 def main(argv: list[str] | None = None) -> None:

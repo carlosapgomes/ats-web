@@ -1,6 +1,7 @@
 """Helper functions for reading and safely rendering the user manual Markdown."""
 
 import re
+import unicodedata
 from pathlib import Path
 
 from django.conf import settings
@@ -32,7 +33,8 @@ def render_manual_markdown_to_html(markdown_text: str) -> str:
     """Render Markdown text to safe HTML.
 
     Supports:
-    - Headings (# through ######)
+    - Headings (# through ######) with stable ASCII slug ids
+    - An auto-generated table of contents (levels 1 and 2) at the top
     - Paragraphs
     - Unordered lists (- / *)
     - Ordered lists (1. / 2. ...)
@@ -46,15 +48,60 @@ def render_manual_markdown_to_html(markdown_text: str) -> str:
     All raw HTML in the input is escaped before rendering Markdown
     constructs, ensuring XSS safety.
     """
-    # First, escape all raw HTML in the input
+    # Keep raw lines aligned with escaped lines so we can derive slugs
+    # from the original (unescaped) heading text. Escaping never adds or
+    # removes newlines, so indices stay aligned.
+    raw_lines = markdown_text.split("\n")
     safe_text = _escape_html(markdown_text)
-    return _render_markdown_to_html(safe_text)
+    body_html, toc_entries = _render_markdown_to_html(safe_text, raw_lines)
+    toc_html = _build_toc_html(toc_entries)
+    return toc_html + body_html
 
 
-def _render_markdown_to_html(safe_text: str) -> str:
-    """Render pre-escaped Markdown text to HTML."""
+def _slugify(text: str) -> str:
+    """Convert heading text to an ASCII, URL-safe slug."""
+    # Strip Markdown inline markers before slugifying
+    cleaned = re.sub(r"[`*_~\[\]()]", "", text).strip()
+    # Remove accents: decompose and drop combining marks
+    decomposed = unicodedata.normalize("NFKD", cleaned)
+    ascii_only = "".join(c for c in decomposed if not unicodedata.combining(c))
+    lowered = ascii_only.lower()
+    slug = re.sub(r"[^a-z0-9]+", "-", lowered).strip("-")
+    return slug or "secao"
+
+
+def _build_toc_html(entries: list[tuple[int, str, str]]) -> str:
+    """Build a collapsible table of contents from collected heading entries.
+
+    Each entry is (level, slug, title_html_escaped).
+    """
+    if not entries:
+        return ""
+    items: list[str] = []
+    for level, slug, title in entries:
+        items.append(f'<li class="manual-toc__item manual-toc__item--l{level}"><a href="#{slug}">{title}</a></li>')
+    return (
+        '<details open class="manual-toc">'
+        '<summary class="manual-toc__summary">Índice</summary>'
+        '<ul class="manual-toc__list">' + "\n".join(items) + "</ul>"
+        "</details>"
+    )
+
+
+def _render_markdown_to_html(
+    safe_text: str, raw_lines: list[str] | None = None
+) -> tuple[str, list[tuple[int, str, str]]]:
+    """Render pre-escaped Markdown text to HTML.
+
+    Returns (body_html, toc_entries) where toc_entries is a list of
+    (level, slug, escaped_title) for headings of level <= 2.
+    """
+    if raw_lines is None:
+        raw_lines = safe_text.split("\n")
     lines = safe_text.split("\n")
     html_parts: list[str] = []
+    toc_entries: list[tuple[int, str, str]] = []
+    used_slugs: set[str] = set()
     i = 0
     n = len(lines)
 
@@ -121,8 +168,19 @@ def _render_markdown_to_html(safe_text: str) -> str:
         heading_match = re.match(r"^(#{1,6})\s+(.+)$", line)
         if heading_match:
             level = len(heading_match.group(1))
-            text = _render_inline(heading_match.group(2))
-            html_parts.append(f"<h{level}>{text}</h{level}>")
+            inline_text = _render_inline(heading_match.group(2))
+            # Derive slug from the raw (unescaped) line for clean ASCII ids
+            raw_heading = re.sub(r"^#{1,6}\s+", "", raw_lines[i])
+            base_slug = _slugify(raw_heading)
+            slug = base_slug
+            counter = 2
+            while slug in used_slugs:
+                slug = f"{base_slug}-{counter}"
+                counter += 1
+            used_slugs.add(slug)
+            if level <= 2:
+                toc_entries.append((level, slug, heading_match.group(2)))
+            html_parts.append(f'<h{level} id="{slug}">{inline_text}</h{level}>')
             i += 1
             continue
 
@@ -147,6 +205,8 @@ def _render_markdown_to_html(safe_text: str) -> str:
         if para_text:
             html_parts.append(f"<p>{para_text}</p>")
         continue
+
+    return "\n".join(html_parts), toc_entries
 
     return "\n".join(html_parts)
 
