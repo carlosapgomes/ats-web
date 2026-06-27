@@ -2177,7 +2177,7 @@ class TestSchedulerProcessedTodayTab:
     # ── Follow-up: PDF link ────────────────────────────────────────────────
 
     def test_scheduler_processed_detail_shows_processed_pdf_link(self, client) -> None:
-        """Processados Hoje detail exibe link para PDF original."""
+        """Processados Hoje detail exibe visualizador de PDF (padrão collapsible do projeto)."""
         scheduler_user = self._login_as(client, "scheduler")
         case = self._create_case(
             scheduler_user=scheduler_user,
@@ -2188,8 +2188,12 @@ class TestSchedulerProcessedTodayTab:
         response = client.get(f"/scheduler/processed/{case.case_id}/")
         assert response.status_code == 200
         content = response.content.decode()
+        # Visualização inline (collapsible + embed) seguindo o padrão do projeto
         assert f"processed/{case.case_id}/pdf/" in content
-        assert "PDF original" in content or "Abrir PDF" in content
+        assert "Visualizar PDF" in content
+        assert "#pdf-collapse" in content
+        assert "<embed" in content
+        assert "Abrir em nova aba" in content
 
     def test_scheduler_processed_detail_message_nir_copy_is_status_neutral(self, client) -> None:
         """Microcopy de Comunicar NIR é neutra, sem afirmar que caso está encerrado."""

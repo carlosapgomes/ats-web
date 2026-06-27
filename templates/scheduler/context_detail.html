@@ -108,13 +108,22 @@
 </div>
 {% endif %}
 
-<!-- PDF original -->
+<!-- PDF Viewer -->
 {% if pdf_url %}
 <div class="card p-4 mb-4">
-  <h5 class="mb-3">📄 PDF original</h5>
-  <a href="{{ pdf_url }}" class="btn btn-sm btn-hospital-outline" target="_blank" rel="noopener">
-    Abrir PDF em nova aba
-  </a>
+  <h5 class="mb-3">
+    <button class="btn btn-link text-decoration-none p-0 text-dark" type="button" data-bs-toggle="collapse" data-bs-target="#pdf-collapse" aria-expanded="false" aria-controls="pdf-collapse">
+      📄 Visualizar PDF <small class="text-muted ms-2">(clique para expandir)</small>
+    </button>
+  </h5>
+  <div class="collapse" id="pdf-collapse">
+    <div class="ratio ratio-1x1" style="max-height: 80vh;">
+      <embed src="{{ pdf_url }}" type="application/pdf" style="width: 100%; height: 100%;">
+    </div>
+    <div class="mt-2 text-end">
+      <a href="{{ pdf_url }}" class="btn btn-sm btn-hospital-outline" target="_blank" rel="noopener">Abrir em nova aba</a>
+    </div>
+  </div>
 </div>
 {% endif %}
 
