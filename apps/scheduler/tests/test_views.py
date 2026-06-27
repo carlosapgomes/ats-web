@@ -1889,8 +1889,9 @@ class TestSchedulerProcessedTodayTab:
         role, _ = Role.objects.get_or_create(name=name)
         return role
 
-    def _login_as(self, client, role_name: str) -> Any:
-        user = User.objects.create_user(username=f"{role_name}@proctab.test", password="testpass123")
+    def _login_as(self, client, role_name: str, username: str | None = None) -> Any:
+        final_username = username or f"{role_name}@proctab.test"
+        user = User.objects.create_user(username=final_username, password="testpass123")
         user.roles.add(self._create_role(role_name))
         client.force_login(user)
         session = client.session
@@ -2058,6 +2059,93 @@ class TestSchedulerProcessedTodayTab:
         )
         response = client.get(f"/scheduler/processed/{case.case_id}/pdf/")
         assert response.status_code == 404
+
+    # ── Detail view: scheduler template, not NIR ────────────────────────────
+
+    def test_scheduler_processed_detail_uses_scheduler_template_not_nir_actions(self, client) -> None:
+        """Processados Hoje detail usa template scheduler, sem ações NIR."""
+        scheduler_user = self._login_as(client, "scheduler")
+        case = self._create_case(
+            scheduler_user=scheduler_user,
+            appointment_status="confirmed",
+            appointment_decided_at=timezone.now(),
+            agency_record_number="NIR-NO-001",
+        )
+        response = client.get(f"/scheduler/processed/{case.case_id}/")
+        assert response.status_code == 200
+        content = response.content.decode()
+        # Deve conter elementos do detalhe scheduler
+        assert "Contexto do caso" in content or "Comunicação operacional" in content
+        # NÃO deve conter ações do NIR
+        assert "Reenviar caso corrigido" not in content
+        assert "Confirmar Recebimento" not in content
+
+    def test_scheduler_processed_detail_shows_message_nir_cta(self, client) -> None:
+        """Processados Hoje detail mostra Comunicar NIR para caso em escopo."""
+        scheduler_user = self._login_as(client, "scheduler")
+        case = self._create_case(
+            scheduler_user=scheduler_user,
+            appointment_status="confirmed",
+            appointment_decided_at=timezone.now(),
+            agency_record_number="MSG-NIR-001",
+        )
+        response = client.get(f"/scheduler/processed/{case.case_id}/")
+        assert response.status_code == 200
+        content = response.content.decode()
+        assert "Comunicar NIR" in content
+        assert "Enviar mensagem ao NIR" in content
+
+    def test_scheduler_processed_detail_message_nir_creates_message_without_status_change(self, client) -> None:
+        """POST historical_message_nir cria CaseCommunicationMessage sem mudar Case.status."""
+        scheduler_user = self._login_as(client, "scheduler", username="sched_msg_nostat")
+        case = self._create_case(
+            scheduler_user=scheduler_user,
+            appointment_status="confirmed",
+            appointment_decided_at=timezone.now(),
+            agency_record_number="NO-STATUS",
+            status=CaseStatus.WAIT_R1_CLEANUP_THUMBS,
+        )
+        before_status = Case.objects.get(pk=case.pk).status
+
+        response = client.post(
+            f"/scheduler/historical/{case.case_id}/message-nir/",
+            {"body": "Precisamos de uma informação adicional."},
+        )
+        assert response.status_code == 302
+
+        # Mensagem criada
+        msgs = CaseCommunicationMessage.objects.filter(case=case)
+        assert msgs.count() == 1
+        msg = msgs.first()
+        assert msg is not None
+        assert "@nir" in msg.body, "Mensagem deve conter @nir"
+
+        # Status não mudou
+        after_status = Case.objects.get(pk=case.pk).status
+        assert after_status == before_status
+
+    def test_scheduler_processed_detail_message_nir_preserves_additional_mentions(self, client) -> None:
+        """Menções adicionais permanecem no corpo salvo."""
+        scheduler_user = self._login_as(client, "scheduler", username="sched_msg_add_ment")
+        case = self._create_case(
+            scheduler_user=scheduler_user,
+            appointment_status="confirmed",
+            appointment_decided_at=timezone.now(),
+            agency_record_number="MENTION-001",
+        )
+
+        # Create a doctor user to be mentioned
+        User.objects.create_user(username="medico.plantao").roles.add(self._create_role("doctor"))
+
+        response = client.post(
+            f"/scheduler/historical/{case.case_id}/message-nir/",
+            {"body": "@medico favor verificar pendência."},
+        )
+        assert response.status_code == 302
+
+        msg = CaseCommunicationMessage.objects.get(case=case)
+        assert "@medico" in msg.body, "Mention @medico should be preserved"
+        assert "@nir" in msg.body, "@nir should be present"
 
     def test_queue_partial_preserves_processed_tab(self, client) -> None:
         """HTMX partial for tab=processed returns processed content, not pending."""
@@ -2280,6 +2368,8 @@ class TestSchedulerQueueRegulationDays:
         assert a_start > -1, "Processados Hoje <a> tag not found"
         a_tag = content[a_start : processed_idx + 50]
         assert 'data-count="1"' in a_tag, "Processados Hoje link must have data-count=1, got: " + a_tag[:200]
+
+    # ── Detail view: scheduler template, not NIR ────────────────────────────
 
     def test_immediate_notice_remains_above_wait_appt(self, client) -> None:
         """Vinda imediata continua aparecendo acima de WAIT_APPT com alto Dias em tela."""
@@ -2624,6 +2714,55 @@ class TestSchedulerContextDetail:
         notif2.refresh_from_db()
         assert notif1.read_at is None, "First notification must remain unread"
         assert notif2.read_at is None, "Second notification must remain unread"
+
+    # ── Non-historical cases: generic reply still works ────────────────
+
+    def test_scheduler_context_detail_for_notification_still_allows_generic_reply_when_not_historical(
+        self, client
+    ) -> None:
+        """Detalhe contextual por notificação ainda permite reply genérico quando não histórico."""
+        from apps.accounts.models import UserNotification
+
+        self._login_as(client, "scheduler", username="sched_gen_reply")
+        scheduler_user = self._get_last_user()
+        nir_user = User.objects.create_user(username="nir_gen_reply")
+        nir_user.roles.add(self._create_role("nir"))
+
+        # Non-historical: doctor accepted but no appointment_status
+        case = Case.objects.create(
+            created_by=nir_user,
+            status=CaseStatus.DOCTOR_ACCEPTED,
+            doctor_decision="accept",
+            doctor_admission_flow="scheduled",
+            structured_data={"patient": {"name": "Generic Reply", "age": 40, "gender": "M"}},
+        )
+
+        # Create notification so context_detail is accessible
+        msg = CaseCommunicationMessage.objects.create(
+            case=case,
+            author=nir_user,
+            author_role="nir",
+            body="Teste @scheduler",
+        )
+        UserNotification.objects.create(
+            recipient=scheduler_user,
+            case=case,
+            communication_message=msg,
+            triggered_by=nir_user,
+            notification_type="case_communication_mention",
+            title="Test",
+            body_preview="Teste @scheduler",
+        )
+
+        response = client.get(f"/scheduler/context/{case.case_id}/")
+        assert response.status_code == 200
+        content = response.content.decode()
+
+        # Must show generic communication form (Enviar mensagem)
+        assert "Comunicação operacional" in content
+        assert "Enviar mensagem" in content
+        # Must NOT show Comunicar NIR (not historical)
+        assert "Comunicar NIR" not in content
 
 
 @pytest.mark.django_db

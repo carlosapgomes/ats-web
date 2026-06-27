@@ -291,19 +291,9 @@ def scheduler_queue_partial(request: HttpRequest) -> HttpResponse:
 def scheduler_processed_detail(request: HttpRequest, case_id: uuid.UUID) -> HttpResponse:
     """Read-only detail of a case processed by the logged-in scheduler.
 
-    Uses the same template as supervisor/admin dashboard case detail.
+    Uses the scheduler detail template (context_detail.html), matching the
+    same read-only experience as historical/contextual case detail.
     """
-    from apps.intake.views import (
-        ADMISSION_FLOW_MAP,
-        EVENT_DOT_CSS,
-        EVENT_LABELS,
-        STATUS_CSS_CLASS,
-        STATUS_LABELS,
-        STEP_STATUS_INDEX,
-        STEPS,
-        SUPPORT_FLAG_MAP,
-    )
-
     case = get_object_or_404(
         Case.objects.select_related("created_by"),
         case_id=case_id,
@@ -311,109 +301,17 @@ def scheduler_processed_detail(request: HttpRequest, case_id: uuid.UUID) -> Http
         appointment_status__in=["confirmed", "denied"],
     )
 
-    events = case.events.all()
+    back_url = reverse("scheduler:queue") + "?tab=processed"
+    back_label = "← Voltar aos processados hoje"
 
-    current_step_idx = STEP_STATUS_INDEX.get(case.status, 0)
-    steps = STEPS
-    terminal_without_scheduling = case.status in (
-        CaseStatus.WAIT_R1_CLEANUP_THUMBS,
-        CaseStatus.CLEANED,
-    ) and (case.doctor_decision == "deny" or case.doctor_admission_flow == "immediate")
-    is_doctor_denied_final = terminal_without_scheduling and case.doctor_decision == "deny"
-    is_immediate_final = terminal_without_scheduling and case.doctor_admission_flow == "immediate"
-    if terminal_without_scheduling:
-        steps = [step for step in STEPS if step["label"] != "Agendamento"]
-        current_step_idx = len(steps) - 1
-
-    enriched_events = []
-    for e in events:
-        enriched_events.append(
-            {
-                "event": e,
-                "label": EVENT_LABELS.get(e.event_type, e.event_type),
-                "dot_css": EVENT_DOT_CSS.get(e.event_type, "system"),
-            }
-        )
-
-    result_info = None
-    terminal_with_result = case.status in (
-        CaseStatus.WAIT_R1_CLEANUP_THUMBS,
-        CaseStatus.CLEANED,
+    context = _build_scheduler_detail_context(
+        request=request,
+        case=case,
+        back_url=back_url,
+        back_label=back_label,
     )
-    # Scope-gated manual review takes priority for WAIT_R1_CLEANUP_THUMBS
-    is_scope_gated = (
-        case.suggested_action
-        and isinstance(case.suggested_action, dict)
-        and case.suggested_action.get("decision") == "manual_review_required"
-    )
-    if is_scope_gated:
-        reason_code = case.suggested_action.get("reason_code", "") if isinstance(case.suggested_action, dict) else ""
-        reason_text = case.suggested_action.get("reason_text", "") if isinstance(case.suggested_action, dict) else ""
-        result_info = {
-            "type": "manual_review_required",
-            "reason_code": reason_code,
-            "reason_text": reason_text,
-        }
-    elif is_doctor_denied_final or case.status == CaseStatus.DOCTOR_DENIED:
-        result_info = {
-            "type": "doctor_denied",
-            "reason": case.doctor_reason,
-            "doctor_display": case.doctor_display,
-        }
-    elif is_immediate_final:
-        result_info = {
-            "type": "accepted_immediate",
-            "support": SUPPORT_FLAG_MAP.get(case.doctor_support_flag, case.doctor_support_flag),
-            "flow": ADMISSION_FLOW_MAP.get(case.doctor_admission_flow, case.doctor_admission_flow),
-            "doctor_display": case.doctor_display,
-        }
-    elif case.status == CaseStatus.APPT_DENIED or (terminal_with_result and case.appointment_status == "denied"):
-        result_info = {
-            "type": "appt_denied",
-            "reason": case.appointment_reason,
-            "doctor_display": case.doctor_display,
-            "scheduler_display": case.scheduler_display,
-        }
-    elif case.status == CaseStatus.APPT_CONFIRMED or terminal_with_result:
-        result_info = {
-            "type": "accepted_scheduled",
-            "appointment_at": case.appointment_at,
-            "support": SUPPORT_FLAG_MAP.get(case.doctor_support_flag, case.doctor_support_flag),
-            "flow": ADMISSION_FLOW_MAP.get(case.doctor_admission_flow, case.doctor_admission_flow),
-            "instructions": case.appointment_instructions or "",
-            "doctor_display": case.doctor_display,
-        }
-    elif case.status == CaseStatus.FAILED:
-        result_info = {"type": "failed"}
 
-    patient_name = ""
-    if case.structured_data and isinstance(case.structured_data, dict):
-        patient = case.structured_data.get("patient", {})
-        if isinstance(patient, dict):
-            patient_name = patient.get("name", "")
-
-    origin_unit = case.get_origin_unit_display(compact=False)
-
-    return render(
-        request,
-        "intake/case_detail.html",
-        {
-            "case": case,
-            "events": enriched_events,
-            "steps": steps,
-            "current_step_idx": current_step_idx,
-            "status_label": STATUS_LABELS.get(case.status, case.get_status_display()),
-            "status_css": STATUS_CSS_CLASS.get(case.status, "status-pending"),
-            "can_confirm_receipt": False,
-            "result_info": result_info,
-            "patient_name": patient_name,
-            "origin_unit": origin_unit,
-            "show_intake_nav": False,
-            "back_url": reverse("scheduler:queue") + "?tab=processed",
-            "back_label": "← Voltar aos processados hoje",
-            "pdf_url": reverse("scheduler:processed_pdf", args=[case.case_id]),
-        },
-    )
+    return render(request, "scheduler/context_detail.html", context)
 
 
 @login_required
@@ -483,14 +381,23 @@ def _scheduler_historical_queryset() -> QuerySet[Case]:
     )
 
 
-@login_required
-@role_required("scheduler")
-def scheduler_context_detail(request: HttpRequest, case_id: uuid.UUID) -> HttpResponse:
-    """GET: Detalhe contextual read-only para scheduler mencionado.
+# ── Shared helper for scheduler detail context ─────────────────────────
 
-    Exige que o usuário logado possua UserNotification vinculada ao caso.
+
+def _build_scheduler_detail_context(
+    *,
+    request: HttpRequest,
+    case: Case,
+    back_url: str,
+    back_label: str,
+) -> dict[str, Any]:
+    """Build context for scheduler case detail template (context_detail.html).
+
+    Centraliza a montagem de contexto compartilhado entre:
+    - scheduler_context_detail (detalhe por notificação/busca histórica)
+    - scheduler_processed_detail (detalhe de processados hoje)
+
     Não adquire lock, não altera FSM, não mostra ações de workflow.
-    Permite resposta na comunicação se case.status != CLEANED.
     """
     from apps.intake.views import (
         EVENT_DOT_CSS,
@@ -501,24 +408,12 @@ def scheduler_context_detail(request: HttpRequest, case_id: uuid.UUID) -> HttpRe
         STEPS,
     )
 
-    case = get_object_or_404(
-        Case.objects.select_related("created_by", "doctor"),
-        case_id=case_id,
-    )
-
-    # Autorização: deve existir UserNotification para o usuário + caso,
-    # OU o caso deve estar no escopo histórico do scheduler (Slice 003).
-    # A marcação como lida é feita exclusivamente por notification_open em accounts.
-    if not _scheduler_has_context_notification(request.user, case) and not _is_scheduler_historical_case(case):
-        raise Http404("Nenhuma notificação encontrada para este caso.")
-
-    # ── Build context ────────────────────────────────────────────────────
     events = case.events.all()
 
     current_step_idx = STEP_STATUS_INDEX.get(case.status, 0)
     steps = STEPS
 
-    enriched_events = []
+    enriched_events: list[dict[str, Any]] = []
     for e in events:
         enriched_events.append(
             {
@@ -547,27 +442,17 @@ def scheduler_context_detail(request: HttpRequest, case_id: uuid.UUID) -> HttpRe
     if not diagnosis and case.summary_text:
         diagnosis = case.summary_text
 
-    doctor_decision_display = {
-        "accept": "ACEITAR",
-        "deny": "NEGAR",
-    }.get(case.doctor_decision, "")
+    doctor_decision_display = DOCTOR_DECISION_MAP.get(case.doctor_decision, "")
+    support_flag_display = SUPPORT_FLAG_MAP.get(case.doctor_support_flag, case.doctor_support_flag)
+    admission_flow_display = ADMISSION_FLOW_MAP.get(case.doctor_admission_flow, case.doctor_admission_flow)
 
-    support_flag_display = {
-        "none": "Nenhum",
-        "anesthesist": "Anestesista",
-        "anesthesist_icu": "Anestesista + UTI",
-    }.get(case.doctor_support_flag, case.doctor_support_flag)
-
-    admission_flow_display = {
-        "scheduled": "Agendamento",
-        "immediate": "Vinda Imediata",
-    }.get(case.doctor_admission_flow, case.doctor_admission_flow)
-
-    # Communication thread context (shared pattern)
-    # Para casos históricos (CLEANED), comunicação é read-only via este template.
-    # Mensagens em CLEANED são enviadas pelo endpoint scheduler_historical_message_nir.
+    # Communication context
+    # Para casos históricos/processados, comunicação ao NIR usa endpoint específico.
     is_historical = _is_scheduler_historical_case(case)
-    can_post_communication = case.status != CaseStatus.CLEANED
+    can_message_nir = is_historical
+    # Formulário genérico fica oculto quando o CTA Comunicar NIR está visível
+    can_post_communication = case.status != CaseStatus.CLEANED and not can_message_nir
+
     communication_post_url = reverse("intake:post_case_communication", args=[case.case_id])
     communication_next_url = request.get_full_path() + "#case-communication"
 
@@ -602,15 +487,47 @@ def scheduler_context_detail(request: HttpRequest, case_id: uuid.UUID) -> HttpRe
         # Read-only detail flags
         "is_context_detail": True,
         "show_intake_nav": False,
-        "back_url": request.META.get("HTTP_REFERER", reverse("scheduler:queue")),
-        "back_label": "← Voltar",
-        # Historical flags (Slice 003)
+        "back_url": back_url,
+        "back_label": back_label,
+        # Historical flags
         "is_historical_scheduler": is_historical,
-        "show_historical_message_nir": is_historical and case.status == CaseStatus.CLEANED,
+        "show_historical_message_nir": can_message_nir,
         "historical_message_nir_url": reverse("scheduler:historical_message_nir", args=[case.case_id])
-        if is_historical and case.status == CaseStatus.CLEANED
+        if is_historical
         else "",
     }
+
+    return context
+
+
+@login_required
+@role_required("scheduler")
+def scheduler_context_detail(request: HttpRequest, case_id: uuid.UUID) -> HttpResponse:
+    """GET: Detalhe contextual read-only para scheduler mencionado.
+
+    Exige que o usuário logado possua UserNotification vinculada ao caso
+    OU que o caso esteja no escopo histórico do scheduler.
+    Não adquire lock, não altera FSM, não mostra ações de workflow.
+    """
+    case = get_object_or_404(
+        Case.objects.select_related("created_by", "doctor"),
+        case_id=case_id,
+    )
+
+    # Autorização: deve existir UserNotification para o usuário + caso,
+    # OU o caso deve estar no escopo histórico do scheduler.
+    if not _scheduler_has_context_notification(request.user, case) and not _is_scheduler_historical_case(case):
+        raise Http404("Nenhuma notificação encontrada para este caso.")
+
+    back_url = request.META.get("HTTP_REFERER", reverse("scheduler:queue"))
+    back_label = "← Voltar"
+
+    context = _build_scheduler_detail_context(
+        request=request,
+        case=case,
+        back_url=back_url,
+        back_label=back_label,
+    )
 
     return render(request, "scheduler/context_detail.html", context)
 
