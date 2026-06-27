@@ -15,9 +15,12 @@ node_modules
 staticfiles/
 openspec/
 demo-reference/
-docs/
+docs/*
+!docs/manual/
+docs/manual/*
 .pi/
 tmp/
 *.md
 !README.md
+!docs/manual/manual-usuarios.md
 LICENSE
