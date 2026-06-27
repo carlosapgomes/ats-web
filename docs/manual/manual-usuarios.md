@@ -737,24 +737,7 @@ Ele continua registrado para auditoria e pode ser localizado em **Casos Encerrad
 
 # 7. Observações finais
 
-## 7.1 Manual em PDF
-
-Este manual pode ser divulgado em PDF para treinamento e consulta rápida da equipe.
-
-Para facilitar o uso em PDF, as instruções foram escritas em formato direto, com passos numerados por tipo de usuário.
-
-## 7.2 Possível página dentro do sistema
-
-Também é uma boa ideia transformar este conteúdo em uma página de ajuda dentro do próprio sistema.
-
-Sugestão:
-
-- criar uma página **Ajuda / Manual de Uso**;
-- deixar o conteúdo organizado por papel: NIR, Médico e CHD;
-- incluir uma versão curta de consulta rápida;
-- manter o PDF como material de treinamento e impressão.
-
-## 7.3 Padronização de termos
+## 7.1 Padronização de termos
 
 Neste manual:
 
