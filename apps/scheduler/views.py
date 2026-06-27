@@ -13,6 +13,7 @@ from django.http import FileResponse, Http404, HttpRequest, HttpResponse, HttpRe
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
 from django.utils import timezone
+from django.views.decorators.clickjacking import xframe_options_sameorigin
 
 from apps.accounts.decorators import role_required
 from apps.cases.models import Case, CaseStatus
@@ -317,6 +318,7 @@ def scheduler_processed_detail(request: HttpRequest, case_id: uuid.UUID) -> Http
 
 @login_required
 @role_required("scheduler")
+@xframe_options_sameorigin
 def scheduler_processed_pdf(request: HttpRequest, case_id: uuid.UUID) -> HttpResponseBase:
     """Serve PDF for a case processed by the logged-in scheduler."""
     case = get_object_or_404(
