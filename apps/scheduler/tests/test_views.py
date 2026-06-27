@@ -2147,6 +2147,39 @@ class TestSchedulerProcessedTodayTab:
         assert "@medico" in msg.body, "Mention @medico should be preserved"
         assert "@nir" in msg.body, "@nir should be present"
 
+    # ── Follow-up: PDF link ────────────────────────────────────────────────
+
+    def test_scheduler_processed_detail_shows_processed_pdf_link(self, client) -> None:
+        """Processados Hoje detail exibe link para PDF original."""
+        scheduler_user = self._login_as(client, "scheduler")
+        case = self._create_case(
+            scheduler_user=scheduler_user,
+            appointment_status="confirmed",
+            appointment_decided_at=timezone.now(),
+            agency_record_number="PDF-LINK-001",
+        )
+        response = client.get(f"/scheduler/processed/{case.case_id}/")
+        assert response.status_code == 200
+        content = response.content.decode()
+        assert f"processed/{case.case_id}/pdf/" in content
+        assert "PDF original" in content or "Abrir PDF" in content
+
+    def test_scheduler_processed_detail_message_nir_copy_is_status_neutral(self, client) -> None:
+        """Microcopy de Comunicar NIR é neutra, sem afirmar que caso está encerrado."""
+        scheduler_user = self._login_as(client, "scheduler")
+        case = self._create_case(
+            scheduler_user=scheduler_user,
+            appointment_status="confirmed",
+            appointment_decided_at=timezone.now(),
+            agency_record_number="NEUTRAL-MSG",
+            status=CaseStatus.WAIT_R1_CLEANUP_THUMBS,
+        )
+        response = client.get(f"/scheduler/processed/{case.case_id}/")
+        assert response.status_code == 200
+        content = response.content.decode()
+        assert "mensagem operacional ao NIR sobre este caso" in content
+        assert "Este caso já está encerrado" not in content
+
     def test_queue_partial_preserves_processed_tab(self, client) -> None:
         """HTMX partial for tab=processed returns processed content, not pending."""
         scheduler_user = self._login_as(client, "scheduler")
