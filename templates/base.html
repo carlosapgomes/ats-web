@@ -47,7 +47,12 @@
             </svg>
             <span class="visually-hidden">Notificações</span>
           </a>
-          <a href="{% url 'user_manual' %}" target="_blank" rel="noopener" class="btn btn-sm btn-outline-light">Manual</a>
+          <a href="{% url 'user_manual' %}" target="_blank" rel="noopener"
+             class="btn btn-sm btn-light notification-icon-btn fw-bold"
+             aria-label="Manual do usuário (abre em nova aba)"
+             title="Manual do usuário">
+            <span aria-hidden="true">?</span>
+          </a>
           <a href="{% url 'profile' %}" class="text-white text-decoration-none d-flex align-items-center gap-2">
             <span class="rounded-circle bg-light text-dark d-inline-flex align-items-center justify-content-center" style="width:2rem;height:2rem;">👤</span>
             <p class="app-session-meta mb-0">
