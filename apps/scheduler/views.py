@@ -309,6 +309,7 @@ def scheduler_processed_detail(request: HttpRequest, case_id: uuid.UUID) -> Http
         case=case,
         back_url=back_url,
         back_label=back_label,
+        pdf_url=reverse("scheduler:processed_pdf", args=[case.case_id]),
     )
 
     return render(request, "scheduler/context_detail.html", context)
@@ -390,6 +391,7 @@ def _build_scheduler_detail_context(
     case: Case,
     back_url: str,
     back_label: str,
+    pdf_url: str | None = None,
 ) -> dict[str, Any]:
     """Build context for scheduler case detail template (context_detail.html).
 
@@ -495,6 +497,8 @@ def _build_scheduler_detail_context(
         "historical_message_nir_url": reverse("scheduler:historical_message_nir", args=[case.case_id])
         if is_historical
         else "",
+        # PDF link (only for processes hoje — never for historical/contextual)
+        "pdf_url": pdf_url,
     }
 
     return context
