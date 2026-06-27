@@ -6,6 +6,7 @@ from typing import Any
 
 import pytest
 from django.contrib.auth import get_user_model
+from django.core.files.uploadedfile import SimpleUploadedFile
 from django.utils import timezone
 
 from apps.accounts.models import Role
@@ -2086,6 +2087,24 @@ class TestSchedulerProcessedTodayTab:
         )
         response = client.get(f"/scheduler/processed/{case.case_id}/pdf/")
         assert response.status_code == 404
+
+    def test_scheduler_processed_pdf_allows_inline_embed_sameorigin(self, client) -> None:
+        """PDF endpoint permite <embed> inline via X-Frame-Options: SAMEORIGIN.
+
+        Sem isso, X_FRAME_OPTIONS=DENY (prod) bloqueia o collapsible de PDF no
+        detalhe do scheduler, exibindo 'conexão recusada' no navegador.
+        """
+        scheduler_user = self._login_as(client, "scheduler")
+        case = self._create_case(
+            scheduler_user=scheduler_user,
+            appointment_status="confirmed",
+            appointment_decided_at=timezone.now(),
+            agency_record_number="PDF-XFO-001",
+            pdf_file=SimpleUploadedFile("test.pdf", b"%PDF-1.4 test", content_type="application/pdf"),
+        )
+        response = client.get(f"/scheduler/processed/{case.case_id}/pdf/")
+        assert response.status_code == 200
+        assert response.headers.get("X-Frame-Options") == "SAMEORIGIN"
 
     # ── Detail view: scheduler template, not NIR ────────────────────────────
 
