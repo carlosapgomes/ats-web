@@ -20,16 +20,16 @@ Justificativa:
 
 ## Definition of Done do change
 
-- [ ] `scheduler_processed_detail` não renderiza mais `templates/intake/case_detail.html`.
-- [ ] `Processados Hoje` e busca histórica/contextual usam um único template de detalhe do scheduler.
-- [ ] Detalhe do scheduler aberto por `Processados Hoje` não mostra `Reenviar caso corrigido`.
-- [ ] Detalhe do scheduler aberto por `Processados Hoje` não mostra `Confirmar Recebimento`.
-- [ ] Detalhe do scheduler aberto por `Processados Hoje` mostra `Comunicar NIR` para casos em escopo scheduler.
+- [x] `scheduler_processed_detail` não renderiza mais `templates/intake/case_detail.html`.
+- [x] `Processados Hoje` e busca histórica/contextual usam um único template de detalhe do scheduler.
+- [x] Detalhe do scheduler aberto por `Processados Hoje` não mostra `Reenviar caso corrigido`.
+- [x] Detalhe do scheduler aberto por `Processados Hoje` não mostra `Confirmar Recebimento`.
+- [x] Detalhe do scheduler aberto por `Processados Hoje` mostra `Comunicar NIR` para casos em escopo scheduler.
 - [x] Microcopy de `Comunicar NIR` é neutra e não afirma que caso recém-processado já está encerrado.
 - [x] Detalhe do scheduler aberto por `Processados Hoje` mostra link/atalho para PDF original via `scheduler:processed_pdf`.
-- [ ] Agendador consegue enviar mensagem ao NIR a partir de caso processado hoje.
-- [ ] Mensagem ao NIR preserva menções adicionais e não altera `Case.status`.
-- [ ] Detalhe contextual por notificação continua funcionando e sem ações de workflow.
+- [x] Agendador consegue enviar mensagem ao NIR a partir de caso processado hoje.
+- [x] Mensagem ao NIR preserva menções adicionais e não altera `Case.status`.
+- [x] Detalhe contextual por notificação continua funcionando e sem ações de workflow.
 - [x] Navegação principal do agendador mostra `Pendentes`, `Processados Hoje` e `Buscar caso antigo`.
 - [x] Botão pequeno separado `🔍 Buscar histórico` removido de `scheduler/queue.html`.
 - [x] Página de busca histórica mostra a aba `Buscar caso antigo` ativa.
@@ -46,7 +46,7 @@ Justificativa:
   - [x] `uv run pytest`
 - [x] Cada slice gera relatório markdown temporário com snippets antes/depois e evidências.
 - [x] Cada implementação responde com `REPORT_PATH=<arquivo-temporario>`.
-- [ ] Commit e push realizados após cada slice implementado.
+- [x] Commit e push realizados após cada slice implementado.
 
 ## Nota para implementadores
 
