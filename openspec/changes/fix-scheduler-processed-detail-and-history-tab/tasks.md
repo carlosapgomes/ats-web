@@ -16,7 +16,7 @@ Justificativa:
 
 - [x] Slice 001 — Detalhe único do scheduler + mensagem ao NIR em `Processados Hoje` (`slices/slice-001-unified-scheduler-detail-message-nir.md`)
 - [x] Follow-up Slice 001 — Microcopy e link de PDF no detalhe scheduler (`slices/follow-up-slice-001-copy-and-pdf-hardening.md`)
-- [ ] Slice 002 — `Buscar caso antigo` como terceira aba do agendador (`slices/slice-002-historical-search-as-tab.md`)
+- [x] Slice 002 — `Buscar caso antigo` como terceira aba do agendador (`slices/slice-002-historical-search-as-tab.md`)
 
 ## Definition of Done do change
 
@@ -30,9 +30,9 @@ Justificativa:
 - [ ] Agendador consegue enviar mensagem ao NIR a partir de caso processado hoje.
 - [ ] Mensagem ao NIR preserva menções adicionais e não altera `Case.status`.
 - [ ] Detalhe contextual por notificação continua funcionando e sem ações de workflow.
-- [ ] Navegação principal do agendador mostra `Pendentes`, `Processados Hoje` e `Buscar caso antigo`.
-- [ ] Botão pequeno separado `🔍 Buscar histórico` removido de `scheduler/queue.html`.
-- [ ] Página de busca histórica mostra a aba `Buscar caso antigo` ativa.
+- [x] Navegação principal do agendador mostra `Pendentes`, `Processados Hoje` e `Buscar caso antigo`.
+- [x] Botão pequeno separado `🔍 Buscar histórico` removido de `scheduler/queue.html`.
+- [x] Página de busca histórica mostra a aba `Buscar caso antigo` ativa.
 - [x] Nenhuma migration criada.
 - [x] Nenhum estado FSM criado/alterado.
 - [x] Testes relevantes escritos/ajustados antes da implementação passar (TDD RED → GREEN → REFACTOR).

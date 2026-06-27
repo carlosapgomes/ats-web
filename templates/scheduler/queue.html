@@ -5,25 +5,7 @@
 {% block subtitle %}Solicitações de agendamento aguardando confirmação{% endblock %}
 
 {% block nav %}
-<nav class="app-nav mt-3" aria-label="Navegação">
-  <ul class="nav nav-pills gap-2">
-    <li class="nav-item">
-      <a class="nav-link {% if active_tab == 'pending' %}active{% endif %} nav-count-badge nav-count-badge--danger"
-         data-count="{{ total_notice_count }}" style="position:relative;"
-         href="{% url 'scheduler:queue' %}?tab=pending">Pendentes</a>
-    </li>
-    <li class="nav-item">
-      <a class="nav-link {% if active_tab == 'processed' %}active{% endif %} nav-count-badge nav-count-badge--neutral"
-         data-count="{{ processed_today_count }}" style="position:relative;"
-         href="{% url 'scheduler:queue' %}?tab=processed">Processados Hoje</a>
-    </li>
-  </ul>
-</nav>
-<div class="mt-2 mb-3">
-  <a href="{% url 'scheduler:historical_search' %}" class="btn btn-sm btn-hospital-outline">
-    🔍 Buscar histórico
-  </a>
-</div>
+{% include "scheduler/_nav.html" %}
 {% endblock %}
 
 {% block content %}

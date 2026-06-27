@@ -1937,6 +1937,33 @@ class TestSchedulerProcessedTodayTab:
         assert "Histórico" not in content
         assert "Confirmados Hoje" not in content
 
+    # ── Historical search tab test ───────────────────────────────────────
+
+    def test_scheduler_queue_nav_has_historical_search_tab(self, client) -> None:
+        """GET /scheduler/ contém Buscar caso antigo como aba principal."""
+        self._login_as(client, "scheduler")
+        response = client.get("/scheduler/")
+        assert response.status_code == 200
+        content = response.content.decode()
+        # Deve conter o texto da aba
+        assert "Buscar caso antigo" in content
+        # Deve conter link para /scheduler/historical/
+        assert "/scheduler/historical/" in content
+        # Deve vir junto com as outras abas
+        assert "Pendentes" in content
+        assert "Processados Hoje" in content
+
+    def test_scheduler_queue_no_small_standalone_historical_button(self, client) -> None:
+        """GET /scheduler/ não contém botão isolado 🔍 Buscar histórico."""
+        self._login_as(client, "scheduler")
+        response = client.get("/scheduler/")
+        assert response.status_code == 200
+        content = response.content.decode()
+        # O botão pequeno separado não deve existir
+        assert "🔍 Buscar histórico" not in content
+        # O novo texto da aba deve estar presente
+        assert "Buscar caso antigo" in content
+
     # ── Query tests ────────────────────────────────────────────────────
 
     def test_processed_today_tab_uses_appointment_decided_at_not_status(self, client) -> None:
@@ -2360,6 +2387,18 @@ class TestSchedulerQueueRegulationDays:
         assert "notif-badge" not in content.split("Processados Hoje")[0][-300:], (
             "Processados Hoje must not use .notif-badge"
         )
+        # Buscar caso antigo must NOT have nav-count-badge class
+        # Find the opening <a> tag around Buscar caso antigo
+        buscar_idx = content.find("Buscar caso antigo")
+        if buscar_idx > -1:
+            # Find the preceding <a tag for the Buscar link
+            a_start = content.rfind("<a", 0, buscar_idx)
+            if a_start > -1:
+                # Get text from <a ...>Buscar caso antigo</a>
+                a_close = content.find("</a>", buscar_idx)
+                if a_close > -1:
+                    a_tag = content[a_start:a_close]
+                    assert "nav-count-badge" not in a_tag, "Buscar caso antigo link must NOT have badge class"
 
     def test_processed_today_nav_badge_uses_processed_today_count(self, client) -> None:
         """Processados Hoje badge uses processed_today_count from context."""
@@ -2939,6 +2978,47 @@ class TestSchedulerHistoricalSearch:
         content = response.content.decode()
         detail_url = f"/scheduler/context/{case.case_id}/"
         assert detail_url in content
+
+    # ── Navigation tab tests ───────────────────────────────────────────
+
+    def test_scheduler_historical_search_nav_marks_historical_active(self, client):
+        """GET /scheduler/historical/ contém Buscar caso antigo como aba ativa."""
+        self._login_as(client, "scheduler", username="sched_nav_hist")
+        nir_user = User.objects.create_user(username="nir_nav_hist")
+        nir_user.roles.add(self._create_role("nir"))
+        self._make_historical_case(nir_user)
+
+        response = client.get("/scheduler/historical/")
+        assert response.status_code == 200
+        content = response.content.decode()
+        # Deve conter o texto da aba
+        assert "Buscar caso antigo" in content
+        # O link/aba histórica deve ter classe active ou indicador equivalente
+        # Procuramos por um link apontando para /scheduler/historical/ com classe active
+        assert 'href="/scheduler/historical/"' in content
+        # A aba ativa deve ter classe "active"
+        # Vamos verificar se existe algum elemento com active perto do texto
+        # Buscamos em torno do link histórico
+        hist_link_idx = content.find('href="/scheduler/historical/"')
+        if hist_link_idx > -1:
+            # Procura por active antes ou depois do link
+            around = content[hist_link_idx - 200 : hist_link_idx + 200]
+            assert "active" in around, (
+                f"A aba Buscar caso antigo deve estar ativa, mas não encontrou 'active' no fragmento: {around[:100]}..."
+            )
+
+    def test_scheduler_historical_search_form_still_works(self, client):
+        """Busca histórica continua funcionando após adicionar navegação."""
+        self._login_as(client, "scheduler", username="sched_form_ok")
+        nir_user = User.objects.create_user(username="nir_form_ok")
+        nir_user.roles.add(self._create_role("nir"))
+        self._make_historical_case(nir_user, agency_record_number="FORM-TEST-001")
+
+        response = client.get("/scheduler/historical/?q=FORM-TEST-001")
+        assert response.status_code == 200
+        content = response.content.decode()
+        assert "FORM-TEST-001" in content
+        assert "Detalhes" in content
 
 
 @pytest.mark.django_db
