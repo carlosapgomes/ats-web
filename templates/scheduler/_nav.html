@@ -1,0 +1,32 @@
+{% comment %}
+Partial de navegação do agendador com três abas.
+
+Contexto:
+  active_tab: "pending" | "processed" | "historical"
+  total_notice_count: int (opcional, para badge de Pendentes)
+  processed_today_count: int (opcional, para badge de Processados Hoje)
+
+Uso:
+  {% include "scheduler/_nav.html" %}
+{% endcomment %}
+<nav class="app-nav mt-3" aria-label="Navegação">
+  <ul class="nav nav-pills gap-2">
+    <li class="nav-item">
+      <a class="nav-link {% if active_tab == 'pending' %}active{% endif %} nav-count-badge nav-count-badge--danger"
+         {% if total_notice_count is not None %}data-count="{{ total_notice_count }}"{% endif %}
+         style="position:relative;"
+         href="{% url 'scheduler:queue' %}?tab=pending">Pendentes</a>
+    </li>
+    <li class="nav-item">
+      <a class="nav-link {% if active_tab == 'processed' %}active{% endif %} nav-count-badge nav-count-badge--neutral"
+         {% if processed_today_count is not None %}data-count="{{ processed_today_count }}"{% endif %}
+         style="position:relative;"
+         href="{% url 'scheduler:queue' %}?tab=processed">Processados Hoje</a>
+    </li>
+    <li class="nav-item">
+      <a class="nav-link {% if active_tab == 'historical' %}active{% endif %}"
+         style="position:relative;"
+         href="{% url 'scheduler:historical_search' %}">Buscar caso antigo</a>
+    </li>
+  </ul>
+</nav>

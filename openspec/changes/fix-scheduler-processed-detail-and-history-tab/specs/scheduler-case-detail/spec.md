@@ -19,6 +19,12 @@ The scheduler processed-today detail SHALL use the scheduler read-only case deta
 - **THEN** it does not contain `Reenviar caso corrigido`
 - **AND** it does not contain `Confirmar Recebimento`
 
+#### Scenario: Scheduler processed detail links to original PDF
+- **GIVEN** a scheduler opens a case detail from `Processados Hoje`
+- **WHEN** the page is rendered
+- **THEN** it provides a visible link to the original PDF through the scheduler processed PDF route
+- **AND** the PDF route authorization remains restricted to cases processed by the logged-in scheduler
+
 ### Requirement: Scheduler shall communicate NIR from processed/historical scheduled cases
 
 The scheduler SHALL be able to send an operational message to NIR from the scheduler case detail for scheduled cases that have already been processed.
@@ -31,6 +37,12 @@ The scheduler SHALL be able to send an operational message to NIR from the sched
 - **AND** the saved message includes or generates a `@nir` mention
 - **AND** active NIR users receive in-app notification according to the existing mention service
 - **AND** `Case.status` is not changed
+
+#### Scenario: Communicate NIR microcopy is status-neutral
+- **GIVEN** a scheduler opens `Comunicar NIR` for a processed case that may not be `CLEANED`
+- **WHEN** the page is rendered
+- **THEN** the explanatory copy does not state that the case is already closed
+- **AND** it explains that the form sends an operational message to NIR about the case
 
 #### Scenario: Additional mentions are preserved
 - **GIVEN** a scheduler message to NIR includes another valid mention

@@ -930,6 +930,7 @@ def scheduler_historical_search(request: HttpRequest) -> HttpResponse:
         {
             "query": query,
             "results": results,
+            "active_tab": "historical",
         },
     )
 

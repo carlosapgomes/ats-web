@@ -217,6 +217,19 @@ Idealmente tocar:
 
 Evitar tocar URLs, models, services e templates do NIR.
 
+### Follow-up Slice 001 — microcopy e link de PDF
+
+Criado após avaliação do Slice 001 para corrigir duas observações antes de avançar:
+
+| Arquivo | Mudança |
+| --- | --- |
+| `apps/scheduler/views.py` | passar `pdf_url` somente em `scheduler_processed_detail` |
+| `templates/scheduler/context_detail.html` | microcopy neutra de `Comunicar NIR` + link condicional de PDF |
+| `apps/scheduler/tests/test_views.py` | regressões de copy e link de PDF |
+| `openspec/changes/fix-scheduler-processed-detail-and-history-tab/tasks.md` | marcar follow-up ao concluir |
+
+O follow-up não deve alterar autorização de PDF nem adicionar PDF à busca histórica institucional.
+
 ### Slice 002 — busca antiga como aba
 
 Idealmente tocar:
