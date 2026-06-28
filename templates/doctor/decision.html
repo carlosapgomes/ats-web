@@ -5,6 +5,10 @@
 
 {% block subtitle %}Caso {{ case.agency_record_number|default:case.case_id|truncatechars:16 }} · {{ patient_name }}{% endblock %}
 
+{% block nav %}
+{% include "doctor/_nav.html" %}
+{% endblock %}
+
 {% block content %}
 
 <div class="doctor-decision-layout">
