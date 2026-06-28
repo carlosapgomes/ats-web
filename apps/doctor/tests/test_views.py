@@ -1869,6 +1869,17 @@ class TestDoctorSubmitView:
         assert 'event.request.method !== "GET"' in sw
         assert "ats-cache-v2" in sw
 
+    def test_service_worker_bypasses_pdf_and_attachment_navigations(self) -> None:
+        """SW must not intercept target="_blank" navigations to PDF/attachment routes.
+
+        Chromium's native PDF viewer does not render when a navigation response
+        is delivered via respondWith, leaving the new tab blank. File-viewing
+        routes must bypass the SW so the browser fetches them natively.
+        """
+        sw = Path("static/js/sw.js").read_text()
+        assert 'endsWith("/pdf/")' in sw
+        assert 'includes("/attachments/")' in sw
+
     # ── Observation submit tests ──────────────────────────────────────────
 
     def test_submit_accept_with_observation_persists(self, client) -> None:

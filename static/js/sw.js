@@ -61,6 +61,12 @@ self.addEventListener("fetch", (event) => {
 
   // Network-first for HTML pages
   if (event.request.mode === "navigate") {
+    // Bypass for file-viewing routes (PDF/attachments): Chromium's native PDF
+    // viewer does not render when the navigation response is delivered via
+    // respondWith, leaving the new tab blank. Let the browser fetch natively.
+    if (url.pathname.endsWith("/pdf/") || url.pathname.includes("/attachments/")) {
+      return;
+    }
     event.respondWith(
       fetch(event.request).catch(() => {
         return caches.match("/");
