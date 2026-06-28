@@ -745,6 +745,41 @@ class TestDoctorQueueView:
             a_tag_section = content[a_tag_start : decided_pos + 50]
             assert "notif-badge" not in a_tag_section, "Decididos Hoje must not use .notif-badge"
 
+    def test_queue_page_title_pending_tab(self, client) -> None:
+        """?tab=pending shows 'Casos aguardando decisão' as page title."""
+        self._login_as(client, "doctor")
+        response = client.get("/doctor/?tab=pending")
+        assert response.status_code == 200
+        content = response.content.decode()
+        assert '<h1 class="page-title">Casos aguardando decisão</h1>' in content
+
+    def test_queue_page_title_default_tab(self, client) -> None:
+        """Default tab (no ?tab) shows the pending page title."""
+        self._login_as(client, "doctor")
+        response = client.get("/doctor/")
+        assert response.status_code == 200
+        content = response.content.decode()
+        assert '<h1 class="page-title">Casos aguardando decisão</h1>' in content
+
+    def test_queue_page_title_decided_tab(self, client) -> None:
+        """?tab=decided shows 'Casos decididos hoje' as page title."""
+        self._login_as(client, "doctor")
+        response = client.get("/doctor/?tab=decided")
+        assert response.status_code == 200
+        content = response.content.decode()
+        assert '<h1 class="page-title">Casos decididos hoje</h1>' in content
+        assert "Casos aguardando decisão</h1>" not in content
+
+    def test_queue_browser_title_reflects_active_tab(self, client) -> None:
+        """<title> tag reflects the active tab for both pending and decided."""
+        self._login_as(client, "doctor")
+
+        pending = client.get("/doctor/?tab=pending").content.decode()
+        assert "<title>Casos aguardando decisão — Médico" in pending
+
+        decided = client.get("/doctor/?tab=decided").content.decode()
+        assert "<title>Casos decididos hoje — Médico" in decided
+
     def test_queue_partial_preserves_decided_tab(self, client) -> None:
         """R3: HTMX partial for ?tab=decided returns only decided content."""
         doctor_user = User.objects.create_user(username="doc_partial@test.com", password="testpass123")
