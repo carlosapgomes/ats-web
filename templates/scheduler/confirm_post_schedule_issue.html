@@ -3,7 +3,7 @@
 
 {% block title %}Resolver Intercorrência · {{ app_display_name }}{% endblock %}
 
-{% block subtitle %}Caso {{ case.agency_record_number|default:case.case_id|truncatechars:16 }} · {{ patient_name }}{% endblock %}
+{% block page_title %}<h1 class="page-title">Caso {{ case.agency_record_number|default:case.case_id|truncatechars:16 }} · {{ patient_name }}</h1>{% endblock %}
 
 {% block content %}
 

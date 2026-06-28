@@ -3,7 +3,7 @@
 
 {% block title %}Contexto — {{ patient_name|default:case.agency_record_number|default:case.case_id|truncatechars:12 }} · {{ app_display_name }}{% endblock %}
 
-{% block subtitle %}Contexto do caso{% endblock %}
+{% block page_title %}<h1 class="page-title">Contexto do caso</h1>{% endblock %}
 
 {% block nav %}
 {% include "scheduler/_nav.html" %}
