@@ -20,6 +20,7 @@ def role_context(request):  # type: ignore[no-untyped-def]
     active_role = request.session.get("active_role", "")
     return {
         "active_role_display": ROLE_DISPLAY_NAMES.get(active_role, active_role),
+        "active_role": active_role,
     }
 
 

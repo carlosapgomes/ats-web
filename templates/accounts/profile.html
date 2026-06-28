@@ -2,6 +2,16 @@
 
 {% block title %}{{ app_display_name }} — Meu Perfil{% endblock %}
 
+{% block nav %}
+{% if active_role == "doctor" %}
+{% include "doctor/_nav.html" %}
+{% elif active_role == "scheduler" %}
+{% include "scheduler/_nav.html" %}
+{% elif active_role == "nir" %}
+{% include "intake/_nav.html" %}
+{% endif %}
+{% endblock %}
+
 {% block content %}
 <div class="row justify-content-center mt-4">
     <div class="col-md-6">
@@ -34,7 +44,7 @@
                 </dl>
             </div>
             <div class="card-footer d-flex justify-content-end gap-2">
-                <a href="{% url 'home' %}" class="btn btn-outline-secondary">Voltar ao início</a>
+                <a href="{% url 'home' %}" class="btn btn-outline-secondary" onclick="history.back(); return false;">← Voltar</a>
                 <a href="{% url 'password_change' %}" class="btn btn-hospital">
                     Alterar senha
                 </a>

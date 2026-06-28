@@ -992,7 +992,7 @@ class TestNotificationBadgeTemplate:
         assert ">Notificações\n" not in content
 
     def test_notifications_page_has_back_to_home_link_when_empty(self, db: Any, client: Any, user_doctor: Any) -> None:
-        """Página de notificações vazia tem botão Voltar ao início."""
+        """Página de notificações vazia tem botão Voltar."""
         client.force_login(user_doctor)
         session = client.session
         session["active_role"] = "doctor"
@@ -1001,14 +1001,14 @@ class TestNotificationBadgeTemplate:
         response = client.get(reverse("notifications"))
         assert response.status_code == 200
         content = response.content.decode()
-        assert "Voltar ao início" in content
+        assert "← Voltar" in content
         url_home = reverse("home")
         assert url_home in content
 
     def test_notifications_page_has_back_to_home_link_with_notifications(
         self, db: Any, client: Any, case_factory: Any, user: Any, user_doctor: Any
     ) -> None:
-        """Página de notificações com notificações tem botão Voltar ao início."""
+        """Página de notificações com notificações tem botão Voltar."""
         from apps.cases.services import post_case_communication_message
 
         case = case_factory(user)
@@ -1022,7 +1022,7 @@ class TestNotificationBadgeTemplate:
         response = client.get(reverse("notifications"))
         assert response.status_code == 200
         content = response.content.decode()
-        assert "Voltar ao início" in content
+        assert "← Voltar" in content
         url_home = reverse("home")
         assert url_home in content
 

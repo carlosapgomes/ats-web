@@ -159,7 +159,7 @@ class TestNavigationBackToHome:
         content = response.content.decode()
         # Distinct button label + link to home avoids a false positive: reverse('home')
         # is '/', which appears in every page (asset paths, etc.).
-        assert "Voltar ao início" in content, "profile must have a 'back to home' link"
+        assert "← Voltar" in content, "profile must have a 'back' link"
         assert 'href="' + reverse("home") + '"' in content or ('href="' + reverse("home") in content)
 
     def test_password_change_done_has_link_back_to_home(self, client) -> None:
