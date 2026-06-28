@@ -137,7 +137,7 @@
 
           <input type="hidden" name="lock_token" value="{{ lock_token|default:"" }}">
 
-          <div class="d-flex gap-2">
+          <div class="d-flex gap-2 btn-stack-mobile">
             <button type="submit" class="btn btn-hospital btn-lg flex-grow-1" id="btn-submit">Enviar Decisão</button>
             <a href="{% url 'doctor:queue' %}" class="btn btn-outline-secondary btn-lg">Voltar sem decidir</a>
           </div>
