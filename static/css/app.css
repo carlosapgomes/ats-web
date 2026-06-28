@@ -735,6 +735,17 @@ body.hospital-shell h6 {
   .app-header__title { font-size: 1rem; }
   .app-header__subtitle { font-size: 0.8rem; }
 
+  /* Touch targets >= 44px no header (WCAG 2.5.5) */
+  .app-header .notification-icon-btn,
+  .app-header .avatar-circle,
+  .app-header .navbar-toggler {
+    min-width: 44px;
+    min-height: 44px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+  }
+
   /* Cards */
   .hospital-shell .card { padding: 0.75rem !important; border-radius: 0.6rem; }
 
@@ -950,5 +961,15 @@ html {
 @media (max-width: 575.98px) {
   .manual-toc__list {
     column-count: 1;
+  }
+}
+
+/* ---------- Telas muito estreitas (<360px): flex-wrap defensivo no header ---------- */
+
+@media (max-width: 359.98px) {
+  /* Bloco sempre-visível (sino/avatar/toggler) pode quebrar de linha
+     sem gerar overflow horizontal em telas muito estreitas. */
+  .app-header.navbar > .container > .d-flex.order-lg-3 {
+    flex-wrap: wrap;
   }
 }
