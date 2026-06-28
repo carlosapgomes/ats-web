@@ -153,3 +153,31 @@ def test_app_nav_full_width_css() -> None:
     idx = css.index(".app-header .app-nav")
     block = css[idx : idx + 120]
     assert "flex-basis: 100%" in block, ".app-header .app-nav deve ter flex-basis: 100% para ocupar linha própria"
+
+
+# ── Slice 003: ajustes complementares mobile (toque 44px + flex-wrap) ──
+
+
+def test_touch_targets_css_present() -> None:
+    """No mobile (<lg), botões do header devem ter área de toque >= 44px (WCAG 2.5.5)."""
+    from pathlib import Path
+
+    css = (Path(__file__).resolve().parent.parent / "static" / "css" / "app.css").read_text()
+    # localiza um bloco mobile que afete notification-icon-btn/avatar-circle/navbar-toggler
+    needle = ".app-header .notification-icon-btn"
+    idx = css.index(needle)
+    # procura no máximo 400 chars adiante (deve estar dentro de uma media query)
+    block = css[idx : idx + 400]
+    assert "min-width: 44px" in block, "Falta min-width: 44px nos botões do header no mobile"
+    assert "min-height: 44px" in block, "Falta min-height: 44px nos botões do header no mobile"
+    assert "avatar-circle" in block, "avatar-circle deve estar junto dos alvos de toque"
+    assert "navbar-toggler" in block, "navbar-toggler deve estar junto dos alvos de toque"
+
+
+def test_flex_wrap_defensive_css_present() -> None:
+    """Em telas muito estreitas (<360px), o bloco sempre-visível deve flex-wrap."""
+    from pathlib import Path
+
+    css = (Path(__file__).resolve().parent.parent / "static" / "css" / "app.css").read_text()
+    assert "max-width: 359.98px" in css, "Falta media query max-width: 359.98px para flex-wrap defensivo"
+    assert "flex-wrap: wrap" in css, "Falta flex-wrap: wrap no bloco sempre-visível para telas muito estreitas"
