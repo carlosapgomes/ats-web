@@ -1,0 +1,27 @@
+{% comment %}
+Partial de navegação do médico com as abas Pendentes / Decididos Hoje.
+
+Contexto:
+  active_tab: "pending" | "decided" (opcional; nenhuma aba fica ativa se ausente)
+  pending_count: int (opcional, para badge de Pendentes)
+  decided_count: int (opcional, para badge de Decididos Hoje)
+
+Uso:
+  {% include "doctor/_nav.html" %}
+{% endcomment %}
+<nav class="app-nav mt-3" aria-label="Navegação">
+  <ul class="nav nav-pills gap-2">
+    <li class="nav-item">
+      <a class="nav-link {% if active_tab == 'pending' %}active{% endif %}{% if pending_count is not None %} nav-count-badge nav-count-badge--danger{% endif %}"
+         {% if pending_count is not None %}data-count="{{ pending_count }}"{% endif %}
+         style="position:relative;"
+         href="{% url 'doctor:queue' %}?tab=pending">Pendentes</a>
+    </li>
+    <li class="nav-item">
+      <a class="nav-link {% if active_tab == 'decided' %}active{% endif %}{% if decided_count is not None %} nav-count-badge nav-count-badge--neutral{% endif %}"
+         {% if decided_count is not None %}data-count="{{ decided_count }}"{% endif %}
+         style="position:relative;"
+         href="{% url 'doctor:queue' %}?tab=decided">Decididos Hoje</a>
+    </li>
+  </ul>
+</nav>
