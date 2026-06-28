@@ -119,3 +119,37 @@ def test_avatar_link_present(rf: RequestFactory) -> None:
     assert 'href="' in html  # avatar links to profile
     # Look for the avatar circle with initials
     assert "JOS" in html or "JO" in html or "J." in html  # initials from "José Silva"
+
+
+# ── Slice 002b: DOM order + subnav full-width ──
+
+
+def test_toggler_precedes_collapse_in_dom(rf: RequestFactory) -> None:
+    """O toggler deve aparecer ANTES do collapse no DOM (padrão Bootstrap canônico).
+
+    Garante que, ao expandir o menu no mobile, o bloco sempre-visível
+    (sino/avatar/toggler) permanece no topo em vez de cair abaixo do menu.
+    """
+    html = _render(rf)
+    i_toggler = html.index('class="navbar-toggler')
+    i_collapse = html.index('class="collapse navbar-collapse')
+    assert i_toggler < i_collapse, "navbar-toggler deve preceder o collapse navbar-collapse no DOM"
+
+
+def test_order_lg_utilities_present(rf: RequestFactory) -> None:
+    """order-lg-* devem estar presentes para reposicionar blocos no desktop."""
+    html = _render(rf)
+    assert "order-lg-2" in html, "Falta order-lg-2 no collapse"
+    assert "order-lg-3" in html, "Falta order-lg-3 no bloco sempre-visível"
+
+
+def test_app_nav_full_width_css() -> None:
+    """A subnav (app-nav) deve ocupar largura total dentro do navbar (linha própria)."""
+    from pathlib import Path
+
+    css = (Path(__file__).resolve().parent.parent / "static" / "css" / "app.css").read_text()
+    assert ".app-header .app-nav" in css, "Falta regra .app-header .app-nav em app.css"
+    # localiza o bloco da regra e verifica flex-basis: 100%
+    idx = css.index(".app-header .app-nav")
+    block = css[idx : idx + 120]
+    assert "flex-basis: 100%" in block, ".app-header .app-nav deve ter flex-basis: 100% para ocupar linha própria"

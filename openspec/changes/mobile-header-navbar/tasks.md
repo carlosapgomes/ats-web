@@ -4,7 +4,8 @@
 
 - [x] Slice 001 — Corrigir bug CSS do seletor `:has()` global (escopar a `.case-card`) (`slices/slice-001-scope-css-has.md`)
 - [x] Slice 001b — Remediação: restaurar empilhamento mobile das fileiras de ação de página via `.btn-stack-mobile` (`slices/slice-001b-action-rows-stacking.md`)
-- [ ] Slice 002 — Refatorar `<header>` para `navbar navbar-expand-lg` (Opção C: hambúrguer híbrido) (`slices/slice-002-navbar-refactor.md`)
+- [x] Slice 002 — Refatorar `<header>` para `navbar navbar-expand-lg` (Opção C: hambúrguer híbrido) (`slices/slice-002-navbar-refactor.md`)
+- [x] Slice 002b — Remediação: subnav full-width no navbar + ordem canônica do toggler (`slices/slice-002b-subnav-and-toggler-order.md`)
 - [ ] Slice 003 — Ajustes complementares mobile (avatar iniciais <576px, área de toque 44px) (`slices/slice-003-mobile-complements.md`)
 
 ## Definition of Done
