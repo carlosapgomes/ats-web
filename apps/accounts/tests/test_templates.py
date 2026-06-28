@@ -70,7 +70,7 @@ class TestBaseTemplate:
             }
         )
         assert "apple-touch-icon" in rendered
-        assert "icons/icon-192x192.png" in rendered
+        assert "icons/icon-192x192-contrast.png" in rendered
 
     def test_base_template_has_app_css(self) -> None:
         """base.html links to app.css static file."""
@@ -269,11 +269,11 @@ class TestPWAManifest:
         manifest = json.loads(Path("static/manifest.json").read_text())
         icons = {icon["src"]: icon for icon in manifest["icons"]}
 
-        assert icons["/static/icons/chd-base.svg"]["purpose"] == "any"
-        assert icons["/static/icons/icon-192x192.png"]["purpose"] == "any"
-        assert icons["/static/icons/icon-512x512.png"]["purpose"] == "any"
-        assert icons["/static/icons/maskable_icon_x192.png"]["purpose"] == "maskable"
-        assert icons["/static/icons/maskable_icon_x512.png"]["purpose"] == "maskable"
+        assert icons["/static/icons/chd-base-contrast.svg"]["purpose"] == "any"
+        assert icons["/static/icons/icon-192x192-contrast.png"]["purpose"] == "any"
+        assert icons["/static/icons/icon-512x512-contrast.png"]["purpose"] == "any"
+        assert icons["/static/icons/maskable_icon_x192-contrast.png"]["purpose"] == "maskable"
+        assert icons["/static/icons/maskable_icon_x512-contrast.png"]["purpose"] == "maskable"
 
 
 @pytest.mark.django_db
