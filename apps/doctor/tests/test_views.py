@@ -1902,7 +1902,7 @@ class TestDoctorSubmitView:
         """
         sw = Path("static/js/sw.js").read_text()
         assert 'event.request.method !== "GET"' in sw
-        assert "ats-cache-v3" in sw
+        assert "ats-cache-v4" in sw
 
     def test_service_worker_bypasses_pdf_and_attachment_navigations(self) -> None:
         """SW must not intercept target="_blank" navigations to PDF/attachment routes.

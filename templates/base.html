@@ -7,7 +7,8 @@
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
     <meta name="apple-mobile-web-app-title" content="{{ app_display_name }}">
-    <link rel="apple-touch-icon" href="{% static 'icons/icon-192.png' %}">
+    <link rel="icon" type="image/svg+xml" href="{% static 'icons/chd-base.svg' %}">
+    <link rel="apple-touch-icon" href="{% static 'icons/icon-192x192.png' %}">
     <title>{% block title %}{{ app_display_name }}{% endblock %}</title>
     <!-- Google Fonts: hospitalar -->
     <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -27,7 +28,7 @@
   <div class="container">
     <!-- Brand: logo + nome do app (sempre visível) -->
     <a href="/" class="navbar-brand d-flex align-items-center gap-2 text-white text-decoration-none">
-      <img src="{% static 'icons/icon-192.png' %}" width="32" height="32" alt="">
+      <img src="{% static 'icons/icon-192x192.png' %}" width="32" height="32" alt="">
       <span class="app-header__title">{{ app_display_name }}</span>
     </a>
     {% if user.is_authenticated %}

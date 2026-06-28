@@ -1,5 +1,6 @@
 """Tests for template rendering and structure."""
 
+import json
 from pathlib import Path
 
 import pytest
@@ -58,6 +59,18 @@ class TestBaseTemplate:
             }
         )
         assert "theme-color" in rendered.lower()
+
+    def test_base_template_uses_new_chd_icons(self) -> None:
+        """base.html uses the new CHD icon set for touch icon and brand."""
+        template = get_template("home.html")
+        rendered = template.render(
+            {
+                "active_role": "nir",
+                "active_role_display": "NIR",
+            }
+        )
+        assert "apple-touch-icon" in rendered
+        assert "icons/icon-192x192.png" in rendered
 
     def test_base_template_has_app_css(self) -> None:
         """base.html links to app.css static file."""
@@ -246,6 +259,21 @@ class TestBaseTemplate:
         template_files = glob.glob(str(Path(settings.BASE_DIR) / "templates" / "**" / "*.html"), recursive=True)
         offenders = [p for p in template_files if "🙈" in Path(p).read_text(encoding="utf-8")]
         assert not offenders, f"monkey emoji still present in templates: {offenders}"
+
+
+class TestPWAManifest:
+    """Tests for PWA manifest icon declarations."""
+
+    def test_manifest_declares_regular_and_maskable_chd_icons(self) -> None:
+        """manifest.json references the new regular and maskable icon assets."""
+        manifest = json.loads(Path("static/manifest.json").read_text())
+        icons = {icon["src"]: icon for icon in manifest["icons"]}
+
+        assert icons["/static/icons/chd-base.svg"]["purpose"] == "any"
+        assert icons["/static/icons/icon-192x192.png"]["purpose"] == "any"
+        assert icons["/static/icons/icon-512x512.png"]["purpose"] == "any"
+        assert icons["/static/icons/maskable_icon_x192.png"]["purpose"] == "maskable"
+        assert icons["/static/icons/maskable_icon_x512.png"]["purpose"] == "maskable"
 
 
 @pytest.mark.django_db
