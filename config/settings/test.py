@@ -93,7 +93,7 @@ PUBLIC_APP_BASE_URL = "https://public.test"
 INTERNAL_APP_BASE_URL = "https://internal.test"
 
 # UI: keep tests deterministic regardless of local .env
-APP_DISPLAY_NAME = "ATS"
+APP_DISPLAY_NAME = "Regulação"
 
 # LLM: Use StaticLlmClient in tests by default
 LLM_CLIENT_FACTORY = None  # type: ignore[assignment]

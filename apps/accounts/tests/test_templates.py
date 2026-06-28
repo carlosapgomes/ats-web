@@ -370,7 +370,7 @@ class TestLoginAndRolePages:
         content = response.content.decode()
         assert "hospital-shell" in content
         assert "app-header" in content
-        assert "ATS" in content
+        assert "Regulação" in content
 
     def test_switch_role_renders_correctly(self, client: Client) -> None:
         """Switch role page renders without errors when user has multiple roles."""

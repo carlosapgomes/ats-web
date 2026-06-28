@@ -58,7 +58,7 @@ def _render(
 
     ctx = {
         "user": user,
-        "app_display_name": "ATS CHD",
+        "app_display_name": "Regulação",
         "active_role_display": "Médico",
         "notification_unread_count": 0,
     }
@@ -93,7 +93,7 @@ def test_header_has_no_subtitle(rf: RequestFactory) -> None:
     html = _render(rf)
     assert "app-header__subtitle" not in html
     assert "Sistema de Regulação Hospitalar CHD" not in html
-    assert '<span class="app-header__title">ATS CHD</span>' in html
+    assert '<span class="app-header__title">Regulação</span>' in html
 
 
 def test_no_page_title_by_default(rf: RequestFactory) -> None:

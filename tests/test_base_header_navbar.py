@@ -52,7 +52,7 @@ def _render(rf: RequestFactory, authenticated: bool = True, multi_role: bool = T
 
     ctx = {
         "user": user,
-        "app_display_name": "ATS CHD",
+        "app_display_name": "Regulação",
         "active_role_display": "Médico",
         "notification_unread_count": 0,
     }
@@ -76,7 +76,7 @@ def test_navbar_brand_has_icon_and_name(rf: RequestFactory) -> None:
     html = _render(rf)
     assert "navbar-brand" in html
     assert "icons/icon-192x192.png" in html
-    assert "ATS CHD" in html
+    assert "Regulação" in html
 
 
 def test_navbar_toggler_targets_session_menu(rf: RequestFactory) -> None:

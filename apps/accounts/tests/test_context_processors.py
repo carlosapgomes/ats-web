@@ -204,12 +204,12 @@ class TestQueueCountsTemplateBadge:
 class TestAppDisplayName:
     """Tests for the app_display_name context processor."""
 
-    def test_returns_default_ats_when_not_configured(self, rf: RequestFactory) -> None:
-        """Retorna 'ATS' como default determinístico do ambiente de teste."""
+    def test_returns_default_display_name_when_not_configured(self, rf: RequestFactory) -> None:
+        """Retorna 'Regulação' como default determinístico do ambiente de teste."""
         request = rf.get("/")
-        with override_settings(APP_DISPLAY_NAME="ATS"):
+        with override_settings(APP_DISPLAY_NAME="Regulação"):
             result = app_display_name(request)
-        assert result == {"app_display_name": "ATS"}
+        assert result == {"app_display_name": "Regulação"}
 
     def test_returns_configured_name(self, rf: RequestFactory) -> None:
         """Retorna o valor configurado em APP_DISPLAY_NAME."""
@@ -238,8 +238,8 @@ class TestAppDisplayName:
         assert "<title>Hospital Teste" in content
 
     def test_template_renders_default_when_not_configured(self, client) -> None:
-        """Template renderiza 'ATS' quando APP_DISPLAY_NAME não está configurado."""
+        """Template renderiza 'Regulação' quando APP_DISPLAY_NAME não está configurado."""
         response = client.get("/login/")
         assert response.status_code == 200
         content = response.content.decode()
-        assert "ATS" in content
+        assert "Regulação" in content
