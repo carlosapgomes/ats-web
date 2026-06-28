@@ -252,11 +252,11 @@
     </button>
   </h5>
   <div class="collapse" id="pdf-collapse">
+    <div class="mb-2 text-end">
+      <a href="{{ pdf_url }}" class="btn btn-sm btn-hospital-outline" target="_blank" rel="noopener">Abrir em nova aba</a>
+    </div>
     <div class="ratio ratio-1x1" style="max-height: 80vh;">
       <embed src="{{ pdf_url }}" type="application/pdf" style="width: 100%; height: 100%;">
-    </div>
-    <div class="mt-2 text-end">
-      <a href="{{ pdf_url }}" class="btn btn-sm btn-hospital-outline" target="_blank">Abrir em nova aba</a>
     </div>
   </div>
 </div>
@@ -285,6 +285,14 @@
     </div>
     <div class="collapse" id="attachment-collapse-{{ att.attachment_id }}">
       <div class="card-body py-3">
+        <div class="mb-2 d-flex justify-content-between align-items-center">
+          <span class="text-muted small">
+            {{ att.content_type }} · {{ att.created_at|date:"d/m/Y H:i" }}
+            {% if att.uploaded_by.get_full_name %} · {{ att.uploaded_by.get_full_name }}{% endif %}
+          </span>
+          <a href="{% url 'intake:serve_attachment' case.case_id att.attachment_id %}"
+             class="btn btn-sm btn-hospital-outline" target="_blank" rel="noopener">Abrir em nova aba</a>
+        </div>
         {% if att.content_type == "application/pdf" %}
         <div class="ratio ratio-1x1" style="max-height: 70vh;">
           <embed src="{% url 'intake:serve_attachment' case.case_id att.attachment_id %}" type="application/pdf" style="width: 100%; height: 100%;">
@@ -297,14 +305,6 @@
                style="max-height: 70vh;">
         </div>
         {% endif %}
-        <div class="mt-2 d-flex justify-content-between align-items-center">
-          <span class="text-muted small">
-            {{ att.content_type }} · {{ att.created_at|date:"d/m/Y H:i" }}
-            {% if att.uploaded_by.get_full_name %} · {{ att.uploaded_by.get_full_name }}{% endif %}
-          </span>
-          <a href="{% url 'intake:serve_attachment' case.case_id att.attachment_id %}"
-             class="btn btn-sm btn-hospital-outline" target="_blank">Abrir em nova aba</a>
-        </div>
       </div>
     </div>
   </div>
