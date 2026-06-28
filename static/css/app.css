@@ -74,6 +74,13 @@ body.hospital-shell h6 {
   box-shadow: 0 0 0 0.15rem rgba(255, 255, 255, 0.35);
 }
 
+/* Subnav injetada via {% block nav %} ocupa linha própria dentro do navbar
+   (o .container do navbar é display:flex; sem isto, a subnav viraria
+   item flex na mesma linha da marca/sessão). */
+.app-header .app-nav {
+  flex-basis: 100%;
+}
+
 /* Avatar circle no header */
 .avatar-circle {
   display: inline-flex;
