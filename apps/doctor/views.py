@@ -726,6 +726,7 @@ def doctor_decided_detail(request: HttpRequest, case_id: uuid.UUID) -> HttpRespo
             "patient_name": patient_name,
             "origin_unit": origin_unit,
             "show_intake_nav": False,
+            "show_doctor_nav": True,
             "back_url": reverse("doctor:queue") + "?tab=decided",
             "back_label": "← Voltar aos decididos hoje",
             "pdf_url": reverse("doctor:serve_pdf", args=[case.case_id]),
