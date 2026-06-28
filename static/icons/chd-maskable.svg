@@ -1,0 +1,73 @@
+<?xml version="1.0" encoding="UTF-8" standalone="no"?>
+<svg
+   viewBox="0 0 512 512"
+   role="img"
+   aria-label="CHD dashboard icon"
+   version="1.1"
+   id="svg5"
+   sodipodi:docname="chd-base.svg"
+   inkscape:version="1.4 (e7c3feb100, 2024-10-09)"
+   xmlns:inkscape="http://www.inkscape.org/namespaces/inkscape"
+   xmlns:sodipodi="http://sodipodi.sourceforge.net/DTD/sodipodi-0.dtd"
+   xmlns="http://www.w3.org/2000/svg"
+   xmlns:svg="http://www.w3.org/2000/svg">
+  <sodipodi:namedview
+     id="namedview5"
+     pagecolor="#ffffff"
+     bordercolor="#000000"
+     borderopacity="0.25"
+     inkscape:showpageshadow="2"
+     inkscape:pageopacity="0.0"
+     inkscape:pagecheckerboard="0"
+     inkscape:deskcolor="#d1d1d1"
+     showgrid="false"
+     inkscape:zoom="1.6152344"
+     inkscape:cx="256"
+     inkscape:cy="256"
+     inkscape:window-width="1920"
+     inkscape:window-height="1030"
+     inkscape:window-x="0"
+     inkscape:window-y="27"
+     inkscape:window-maximized="1"
+     inkscape:current-layer="svg5" />
+  <defs
+     id="defs3">
+    <linearGradient
+       id="chd-bg"
+       x1="0%"
+       y1="0%"
+       x2="100%"
+       y2="100%">
+      <stop
+         offset="0%"
+         stop-color="#0b4263"
+         id="stop1" />
+      <stop
+         offset="62%"
+         stop-color="#1b5f78"
+         id="stop2" />
+      <stop
+         offset="100%"
+         stop-color="#2f8f9d"
+         id="stop3" />
+    </linearGradient>
+  </defs>
+  <rect
+     x="0"
+     y="0"
+     width="512"
+     height="512"
+     rx="0"
+     fill="url(#chd-bg)"
+     id="rect3" />
+  <text
+     x="261.57196"
+     y="308.4353"
+     text-anchor="middle"
+     font-family="'Merriweather Sans', Arial, sans-serif"
+     font-size="170px"
+     font-weight="700"
+     letter-spacing="10"
+     fill="#ffffff"
+     id="text4">CHD</text>
+</svg>
