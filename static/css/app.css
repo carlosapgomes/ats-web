@@ -747,8 +747,9 @@ body.hospital-shell h6 {
   /* Modal */
   .modal-dialog { margin: 0.5rem; }
 
-  /* Action button rows: stack vertically */
-  .d-flex.gap-2:has(> .btn) {
+  /* Action button rows: stack vertically (only inside case cards or explicit utility) */
+  .case-card .d-flex.gap-2:has(> .btn),
+  .btn-stack-mobile {
     flex-direction: column;
   }
 
