@@ -28,60 +28,75 @@
   </form>
 </div>
 
-{% if query %}
-  {% if results %}
-    <p class="text-muted mb-3">{{ results|length }} caso(s) encontrado(s).</p>
-    <div class="row">
-      {% for item in results %}
-      <div class="col-md-6 mb-3">
-        <div class="card h-100">
-          <div class="card-body">
-            <div class="d-flex justify-content-between align-items-start mb-2">
-              <h5 class="card-title mb-0">{{ item.patient_name|default:"Paciente" }}</h5>
-              <span class="badge bg-secondary">{{ item.status_label }}</span>
-            </div>
-            <p class="card-text mb-1">
-              <small class="text-muted">Registro:</small>
-              <strong>{{ item.agency_record_number|default:"—" }}</strong>
-            </p>
-            {% if item.origin_unit %}
-            <p class="card-text mb-1">
-              <small class="text-muted">Unidade:</small> {{ item.origin_unit }}
-            </p>
-            {% endif %}
-            {% if item.doctor_display %}
-            <p class="card-text mb-1">
-              <small class="text-muted">Médico:</small> {{ item.doctor_display }}
-            </p>
-            {% endif %}
-            <p class="card-text mb-1">
-              <small class="text-muted">Agendamento:</small>
-              <span class="badge {% if item.appointment_status_label == 'Confirmado' %}bg-success{% elif item.appointment_status_label == 'Negado' %}bg-danger{% else %}bg-warning text-dark{% endif %}">
-                {{ item.appointment_status_label }}
-              </span>
-              {% if item.appointment_at %}
-                · {{ item.appointment_at|date:"d/m/Y H:i" }}
-              {% endif %}
-            </p>
-            <div class="mt-2">
-              <a href="{% url 'scheduler:context_detail' case_id=item.case.case_id %}" class="btn btn-sm btn-hospital">
-                Detalhes
-              </a>
+<div class="card p-4">
+  {% if query %}
+    <div class="d-flex justify-content-between align-items-center mb-3">
+      <h3 class="mb-0">Resultados</h3>
+      <span class="badge-hospital-primary status-badge">{{ results|length }} caso{{ results|length|pluralize:"s" }}</span>
+    </div>
+
+    {% if results %}
+      <div class="row g-3">
+        {% for item in results %}
+        <div class="col-12">
+          <div class="case-card card p-3">
+            <div class="row align-items-center">
+              <div class="col-md-5">
+                <div class="patient-name">{{ item.patient_name|default:"Paciente" }}</div>
+                <div class="case-meta">
+                  {% if item.agency_record_number %}Reg. {{ item.agency_record_number }}{% endif %}
+                  {% if item.origin_unit %} · 🏥 {{ item.origin_unit }}{% endif %}
+                </div>
+                {% if item.doctor_display %}
+                <div class="case-meta small text-muted mt-1">
+                  👤 {{ item.doctor_display }}
+                </div>
+                {% endif %}
+              </div>
+              <div class="col-md-3">
+                <span class="status-badge {{ item.status_css|default:'badge-secondary' }}">
+                  {{ item.status_label }}
+                </span>
+                {% if item.appointment_status_label %}
+                <div class="mt-2">
+                  <span class="badge {% if item.appointment_status_label == 'Confirmado' %}bg-success{% elif item.appointment_status_label == 'Negado' %}bg-danger{% else %}bg-warning text-dark{% endif %}">
+                    {{ item.appointment_status_label }}
+                  </span>
+                  {% if item.appointment_at %}
+                    <span class="text-muted small d-block mt-1">{{ item.appointment_at|date:"d/m/Y H:i" }}</span>
+                  {% endif %}
+                </div>
+                {% endif %}
+              </div>
+              <div class="col-md-4 text-md-end mt-2 mt-md-0">
+                <a href="{% url 'scheduler:context_detail' case_id=item.case.case_id %}" class="btn btn-sm btn-hospital mb-1">
+                  Detalhes
+                </a>
+              </div>
             </div>
           </div>
         </div>
+        {% endfor %}
       </div>
-      {% endfor %}
-    </div>
+    {% else %}
+      <div class="text-center py-5">
+        <p class="text-muted mb-3 fs-5">Nenhum caso encontrado</p>
+        <p class="text-muted small">
+          Nenhum caso corresponde à busca "{{ query }}".
+          Tente um número de registro ou nome de paciente diferente.
+        </p>
+        <a href="{% url 'scheduler:historical_search' %}" class="btn btn-hospital-outline">Nova busca</a>
+      </div>
+    {% endif %}
   {% else %}
-    <div class="alert alert-info">
-      Nenhum caso encontrado para "{{ query }}".
+    <div class="text-center py-5">
+      <p class="text-muted mb-3 fs-5">Faça uma busca</p>
+      <p class="text-muted small">
+        Utilize o campo acima para pesquisar por número da ocorrência
+        ou nome do paciente em casos históricos.
+      </p>
     </div>
   {% endif %}
-{% else %}
-  <div class="text-center text-muted py-5">
-    <p>Digite uma ocorrência ou nome do paciente para buscar casos históricos.</p>
-  </div>
-{% endif %}
+</div>
 
 {% endblock %}
