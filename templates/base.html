@@ -66,7 +66,7 @@
         <div class="d-flex align-items-center gap-2 ms-lg-auto">
           <a href="{% url 'notifications' %}"
              id="notification-badge"
-             class="btn btn-sm btn-light notification-badge notification-icon-btn"
+             class="btn btn-sm btn-light notification-badge notification-icon-btn d-none d-lg-inline-flex"
              data-notifications-badge
              data-unread-count-url="{% url 'notifications_unread_count' %}"
              data-count="{{ notification_unread_count|default:0 }}"
