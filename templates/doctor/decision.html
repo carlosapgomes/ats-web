@@ -282,8 +282,6 @@
   </div>
   {% endif %}
 
-  {% include "cases/_communication_thread.html" %}
-
   <!-- Attachments section -->
   {% if attachments %}
   <div class="card p-4">
@@ -345,9 +343,9 @@
   </div>
   {% endif %}
 
-</div>
+  {% include "cases/_communication_thread.html" %}
 
-<!-- Confirmation Modal -->
+</div>
 <div class="modal fade" id="confirm-modal" tabindex="-1" aria-hidden="true">
   <div class="modal-dialog modal-dialog-centered">
     <div class="modal-content">
