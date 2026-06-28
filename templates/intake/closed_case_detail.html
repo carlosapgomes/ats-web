@@ -259,15 +259,24 @@
   <h5 class="mb-3">📎 Anexos Clínicos</h5>
   {% for att in attachments %}
   <div class="card mb-3 border">
-    <div class="card-header py-2 d-flex justify-content-between align-items-center gap-2">
-      <button class="btn btn-link text-decoration-none p-0 text-dark fw-semibold small collapsed text-start" type="button"
+    <div class="card-header py-2 d-flex flex-column flex-md-row justify-content-between align-items-start align-items-md-center gap-2">
+      <a href="{% url 'intake:serve_attachment' case.case_id att.attachment_id %}"
+         class="btn btn-link text-decoration-none p-0 text-dark fw-semibold small text-start d-flex d-md-none flex-column align-items-start gap-1 w-100"
+         target="_blank" rel="noopener" style="min-width: 0;">
+        <span class="d-flex align-items-start gap-1 w-100" style="min-width: 0;">
+          <span class="flex-shrink-0">{% if att.content_type == "application/pdf" %}📄{% elif "image" in att.content_type %}🖼️{% else %}📎{% endif %}</span>
+          <span class="text-break">{{ att.original_filename }}</span>
+        </span>
+        <small class="text-muted">(toque para abrir o anexo)</small>
+      </a>
+      <button class="btn btn-link text-decoration-none p-0 text-dark fw-semibold small collapsed text-start d-none d-md-inline-flex align-items-center gap-1 flex-wrap" type="button"
               data-bs-toggle="collapse" data-bs-target="#attachment-collapse-{{ att.attachment_id }}"
-              aria-expanded="false" aria-controls="attachment-collapse-{{ att.attachment_id }}">
-        {% if att.content_type == "application/pdf" %}📄{% elif "image" in att.content_type %}🖼️{% else %}📎{% endif %}
-        {{ att.original_filename }}
-        <small class="text-muted ms-2">(clique para expandir)</small>
+              aria-expanded="false" aria-controls="attachment-collapse-{{ att.attachment_id }}" style="min-width: 0;">
+        <span class="flex-shrink-0">{% if att.content_type == "application/pdf" %}📄{% elif "image" in att.content_type %}🖼️{% else %}📎{% endif %}</span>
+        <span class="text-break">{{ att.original_filename }}</span>
+        <small class="text-muted">(clique para expandir)</small>
       </button>
-      <span class="d-flex align-items-center gap-2 flex-shrink-0">
+      <span class="d-flex align-items-center gap-2 flex-wrap flex-shrink-0">
         {% if att.upload_phase == "supplemental" %}
         <span class="badge bg-warning text-dark small">Adicionado após upload inicial</span>
         {% endif %}
