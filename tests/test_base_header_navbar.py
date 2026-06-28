@@ -156,16 +156,29 @@ def test_mobile_always_visible_bell_present(rf: RequestFactory) -> None:
     assert "d-lg-none" in html, "Falta bloco sempre-visível do mobile (d-lg-none)"
 
 
+def test_navbar_container_allows_subnav_wrap_css() -> None:
+    """O container do navbar deve permitir wrap no desktop para a subnav quebrar linha."""
+    from pathlib import Path
+
+    css = (Path(__file__).resolve().parent.parent / "static" / "css" / "app.css").read_text()
+    selector = ".app-header.navbar > .container {"
+    assert selector in css, "Falta regra específica para o container do navbar"
+    idx = css.index(selector)
+    block = css[idx : css.index("}", idx) + 1]
+    assert "flex-wrap: wrap" in block, "Bootstrap navbar-expand-lg usa nowrap; é preciso permitir wrap"
+
+
 def test_app_nav_full_width_css() -> None:
     """A subnav (app-nav) deve ocupar largura total dentro do navbar (linha própria)."""
     from pathlib import Path
 
     css = (Path(__file__).resolve().parent.parent / "static" / "css" / "app.css").read_text()
     assert ".app-header .app-nav" in css, "Falta regra .app-header .app-nav em app.css"
-    # localiza o bloco da regra e verifica flex-basis: 100%
+    # localiza o bloco da regra e verifica largura/linha própria
     idx = css.index(".app-header .app-nav")
-    block = css[idx : idx + 120]
-    assert "flex-basis: 100%" in block, ".app-header .app-nav deve ter flex-basis: 100% para ocupar linha própria"
+    block = css[idx : css.index("}", idx) + 1]
+    assert "flex: 0 0 100%" in block, ".app-header .app-nav deve ocupar 100% da linha"
+    assert "width: 100%" in block, ".app-header .app-nav deve ter largura total"
 
 
 # ── Slice 003: ajustes complementares mobile (toque 44px + flex-wrap) ──

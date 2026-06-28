@@ -62,6 +62,10 @@ body.hospital-shell h6 {
   --bs-navbar-brand-hover-color: rgba(255, 255, 255, 0.9);
 }
 
+.app-header.navbar > .container {
+  flex-wrap: wrap;
+}
+
 .app-header .navbar-brand {
   max-width: 70%;
 }
@@ -79,7 +83,9 @@ body.hospital-shell h6 {
    de linha. border-top + padding-top criam uma faixa claramente separada
    da barra do app (logo/sessão), evitando confundir abas com o título. */
 .app-header .app-nav {
-  flex-basis: 100%;
+  order: 4;
+  flex: 0 0 100%;
+  width: 100%;
   padding-top: 0.75rem;
   border-top: 1px solid rgba(255, 255, 255, 0.18);
 }
@@ -975,7 +981,7 @@ html {
 @media (max-width: 359.98px) {
   /* Bloco sempre-visível (sino/avatar/toggler) pode quebrar de linha
      sem gerar overflow horizontal em telas muito estreitas. */
-  .app-header.navbar > .container > .d-flex.order-lg-3 {
+  .app-header .d-lg-none.ms-auto {
     flex-wrap: wrap;
   }
 }
