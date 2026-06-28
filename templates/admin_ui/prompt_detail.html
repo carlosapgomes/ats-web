@@ -2,7 +2,7 @@
 {% load static %}
 
 {% block title %}{{ prompt.name }} v{{ prompt.version }} — {{ app_display_name }}{% endblock %}
-{% block subtitle %}Detalhes da versão {{ prompt.version }} de {{ prompt.name }}{% endblock %}
+{% block page_title %}<h1 class="page-title">Detalhes da versão {{ prompt.version }} de {{ prompt.name }}</h1>{% endblock %}
 
 {% block nav %}
 <nav class="app-nav mt-3" aria-label="Navegação">
