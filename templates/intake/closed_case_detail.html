@@ -6,19 +6,7 @@
 {% block subtitle %}Detalhes do caso encerrado{% endblock %}
 
 {% block nav %}
-<nav class="app-nav mt-3" aria-label="Navegação">
-  <ul class="nav nav-pills gap-2">
-    <li class="nav-item">
-      <a class="nav-link" href="{% url 'intake:home' %}">Novo Encaminhamento</a>
-    </li>
-    <li class="nav-item">
-      <a class="nav-link" href="{% url 'intake:my_cases' %}">Meus Casos</a>
-    </li>
-    <li class="nav-item">
-      <a class="nav-link" href="{% url 'intake:closed_cases_search' %}">Casos Encerrados</a>
-    </li>
-  </ul>
-</nav>
+{% include "intake/_nav.html" %}
 {% endblock %}
 
 {% block content %}

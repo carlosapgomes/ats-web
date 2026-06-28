@@ -1,0 +1,26 @@
+{% comment %}
+Partial de navegação do NIR (intake) com três abas.
+
+Contexto:
+  active_tab: "home" | "my_cases" | "closed" (opcional; nenhuma aba fica
+  ativa se ausente).
+
+Uso:
+  {% include "intake/_nav.html" %}
+{% endcomment %}
+<nav class="app-nav mt-3" aria-label="Navegação">
+  <ul class="nav nav-pills gap-2">
+    <li class="nav-item">
+      <a class="nav-link {% if active_tab == 'home' %}active{% endif %}"
+         href="{% url 'intake:home' %}">Novo Encaminhamento</a>
+    </li>
+    <li class="nav-item">
+      <a class="nav-link {% if active_tab == 'my_cases' %}active{% endif %}"
+         href="{% url 'intake:my_cases' %}">Meus Casos</a>
+    </li>
+    <li class="nav-item">
+      <a class="nav-link {% if active_tab == 'closed' %}active{% endif %}"
+         href="{% url 'intake:closed_cases_search' %}">Casos Encerrados</a>
+    </li>
+  </ul>
+</nav>
