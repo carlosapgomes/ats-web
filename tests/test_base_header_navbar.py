@@ -156,6 +156,17 @@ def test_mobile_always_visible_bell_present(rf: RequestFactory) -> None:
     assert "d-lg-none" in html, "Falta bloco sempre-visível do mobile (d-lg-none)"
 
 
+def test_collapsible_bell_hidden_on_mobile(rf: RequestFactory) -> None:
+    """O bell dentro do menu colapsável é desktop-only para não duplicar sino no mobile."""
+    html = _render(rf)
+    desktop_bell_idx = html.index('id="notification-badge"')
+    tag_start = html.rfind("<a", 0, desktop_bell_idx)
+    tag_end = html.index(">", desktop_bell_idx)
+    desktop_bell_tag = html[tag_start:tag_end]
+    assert "d-none" in desktop_bell_tag
+    assert "d-lg-inline-flex" in desktop_bell_tag
+
+
 def test_navbar_container_allows_subnav_wrap_css() -> None:
     """O container do navbar deve permitir wrap no desktop para a subnav quebrar linha."""
     from pathlib import Path
