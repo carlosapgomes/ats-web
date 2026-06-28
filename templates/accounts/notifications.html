@@ -38,7 +38,9 @@
         </div>
         <p class="mb-1 text-muted small">{{ notification.body_preview|truncatechars:120 }}</p>
         <small class="text-muted">
-          Caso #{{ notification.case.protocol|default:notification.case.pk }} ·
+          {% with case=notification.case %}
+          {% if case.agency_record_number %}Reg. {{ case.agency_record_number }}{% else %}Caso #{{ case.pk|truncatechars:8 }}{% endif %}{% if case.patient_name %} · {{ case.patient_name }}{% endif %} ·
+          {% endwith %}
           {{ notification.created_at|date:"d/m/Y H:i" }}
           {% if notification.triggered_by %}
           · por {{ notification.triggered_by.display_name }}
