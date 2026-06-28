@@ -1,22 +1,22 @@
 /* ATS Web — Service Worker */
 
-const CACHE_NAME = "ats-cache-v4";
+const CACHE_NAME = "ats-cache-v5";
 const STATIC_ASSETS = [
   "/static/manifest.json",
   "/static/js/app.js",
   "/static/css/app.css",
-  "/static/icons/chd-base.svg",
-  "/static/icons/chd-maskable.svg",
-  "/static/icons/icon-72x72.png",
-  "/static/icons/icon-96x96.png",
-  "/static/icons/icon-128x128.png",
-  "/static/icons/icon-144x144.png",
-  "/static/icons/icon-152x152.png",
-  "/static/icons/icon-192x192.png",
-  "/static/icons/icon-384x384.png",
-  "/static/icons/icon-512x512.png",
-  "/static/icons/maskable_icon_x192.png",
-  "/static/icons/maskable_icon_x512.png",
+  "/static/icons/chd-base-contrast.svg",
+  "/static/icons/chd-maskable-contrast.svg",
+  "/static/icons/icon-72x72-contrast.png",
+  "/static/icons/icon-96x96-contrast.png",
+  "/static/icons/icon-128x128-contrast.png",
+  "/static/icons/icon-144x144-contrast.png",
+  "/static/icons/icon-152x152-contrast.png",
+  "/static/icons/icon-192x192-contrast.png",
+  "/static/icons/icon-384x384-contrast.png",
+  "/static/icons/icon-512x512-contrast.png",
+  "/static/icons/maskable_icon_x192-contrast.png",
+  "/static/icons/maskable_icon_x512-contrast.png",
 ];
 
 /* Install: pre-cache static assets */
