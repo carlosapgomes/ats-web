@@ -22,59 +22,62 @@
 </head>
 <body class="hospital-shell">
 
-<!-- Header hospitalar com gradiente -->
-<header class="app-header text-white py-3 mb-4">
+<!-- Header hospitalar com navbar Bootstrap -->
+<header class="app-header navbar navbar-expand-lg navbar-dark py-2 mb-4">
   <div class="container">
-    <div class="d-flex flex-column flex-lg-row justify-content-between gap-3 align-items-lg-start">
-      <div>
-        <h1 class="app-header__title">{{ app_display_name }}</h1>
-        <p class="app-header__subtitle">{% block subtitle %}Sistema de Regulação Hospitalar CHD{% endblock %}</p>
+    <!-- Brand: logo + nome + subtitle (sempre visível) -->
+    <a href="/" class="navbar-brand d-flex align-items-center gap-2 text-white text-decoration-none">
+      <img src="{% static 'icons/icon-192.png' %}" width="32" height="32" alt="">
+      <div class="d-flex flex-column">
+        <span class="app-header__title">{{ app_display_name }}</span>
+        <span class="app-header__subtitle">{% block subtitle %}Sistema de Regulação Hospitalar CHD{% endblock %}</span>
       </div>
-      {% if user.is_authenticated %}
-      <div class="text-lg-end">
-        <div class="d-flex align-items-center justify-content-lg-end gap-2 mb-2">
-          <div class="d-flex align-items-center gap-2">
-          <a href="{% url 'notifications' %}"
-             id="notification-badge"
-             class="btn btn-sm btn-light notification-badge notification-icon-btn"
-             data-notifications-badge
-             data-unread-count-url="{% url 'notifications_unread_count' %}"
-             data-count="{{ notification_unread_count|default:0 }}"
-             aria-label="Notificações: {{ notification_unread_count|default:0 }} não lidas"
-             title="Notificações">
-            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="currentColor" viewBox="0 0 16 16" aria-hidden="true">
-              <path d="M8 16a2 2 0 0 0 2-2H6a2 2 0 0 0 2 2zm.995-14.901a1 1 0 1 0-1.99 0A5.002 5.002 0 0 0 3 6c0 1.098-.5 6-2 7h14c-1.5-1-2-5.902-2-7 0-2.42-1.72-4.44-4.005-4.901z"/>
-            </svg>
-            <span class="visually-hidden">Notificações</span>
-          </a>
-          <a href="{% url 'user_manual' %}" target="_blank" rel="noopener"
-             class="btn btn-sm btn-light notification-icon-btn"
-             aria-label="Manual do usuário (abre em nova aba)"
-             title="Manual do usuário">
-            <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" fill="currentColor" class="bi bi-question-lg" viewBox="0 0 16 16" aria-hidden="true">
-              <path fill-rule="evenodd" d="M4.475 5.458c-.284 0-.514-.237-.47-.517C4.28 3.24 5.576 2 7.825 2c2.25 0 3.767 1.36 3.767 3.215 0 1.344-.665 2.288-1.79 2.973-1.1.659-1.414 1.118-1.414 2.01v.03a.5.5 0 0 1-.5.5h-.77a.5.5 0 0 1-.5-.495l-.003-.2c-.043-1.221.477-2.001 1.645-2.712 1.03-.632 1.397-1.135 1.397-2.028 0-.979-.758-1.698-1.926-1.698-1.009 0-1.71.529-1.938 1.402-.066.254-.278.461-.54.461h-.777ZM7.496 14c.622 0 1.095-.474 1.095-1.09 0-.618-.473-1.092-1.095-1.092-.606 0-1.087.474-1.087 1.091S6.89 14 7.496 14"/>
-            </svg>
-          </a>
-          <a href="{% url 'profile' %}" class="text-white text-decoration-none d-flex align-items-center gap-2">
-            <span class="rounded-circle bg-light text-dark d-inline-flex align-items-center justify-content-center" style="width:2rem;height:2rem;">👤</span>
-            <p class="app-session-meta mb-0">
-              {{ user.get_full_name|default:user.username }} · <strong>{{ active_role_display }}</strong>
-            </p>
-          </a>
-          </div>
-        </div>
-        <div class="d-flex gap-1 justify-content-lg-end">
-          {% if user.roles.count > 1 %}
-          <a href="/switch-role/" class="btn btn-sm btn-light">Trocar papel</a>
-          {% endif %}
-          <form method="post" action="/logout/" class="d-inline">
-            {% csrf_token %}
-            <button type="submit" class="btn btn-sm btn-light">Sair</button>
-          </form>
-        </div>
+    </a>
+    {% if user.is_authenticated %}
+    <!-- Menu de sessão: colapsável (<lg) / inline (≥lg) -->
+    <div class="collapse navbar-collapse" id="sessionMenu">
+      <div class="d-flex align-items-center gap-2 ms-auto">
+        <span class="app-session-meta">{{ user.get_full_name|default:user.username }} · <strong>{{ active_role_display }}</strong></span>
+        <a href="{% url 'user_manual' %}" target="_blank" rel="noopener"
+           class="btn btn-sm btn-light notification-icon-btn"
+           aria-label="Manual do usuário (abre em nova aba)"
+           title="Manual do usuário">
+          <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" fill="currentColor" class="bi bi-question-lg" viewBox="0 0 16 16" aria-hidden="true">
+            <path fill-rule="evenodd" d="M4.475 5.458c-.284 0-.514-.237-.47-.517C4.28 3.24 5.576 2 7.825 2c2.25 0 3.767 1.36 3.767 3.215 0 1.344-.665 2.288-1.79 2.973-1.1.659-1.414 1.118-1.414 2.01v.03a.5.5 0 0 1-.5.5h-.77a.5.5 0 0 1-.5-.495l-.003-.2c-.043-1.221.477-2.001 1.645-2.712 1.03-.632 1.397-1.135 1.397-2.028 0-.979-.758-1.698-1.926-1.698-1.009 0-1.71.529-1.938 1.402-.066.254-.278.461-.54.461h-.777ZM7.496 14c.622 0 1.095-.474 1.095-1.09 0-.618-.473-1.092-1.095-1.092-.606 0-1.087.474-1.087 1.091S6.89 14 7.496 14"/>
+          </svg>
+        </a>
+        {% if user.roles.count > 1 %}
+        <a href="/switch-role/" class="btn btn-sm btn-light">Trocar papel</a>
+        {% endif %}
+        <form method="post" action="/logout/" class="d-inline">
+          {% csrf_token %}
+          <button type="submit" class="btn btn-sm btn-light">Sair</button>
+        </form>
       </div>
-      {% endif %}
     </div>
+    <!-- Sempre visível: notificação + avatar + hambúrguer -->
+    <div class="d-flex align-items-center gap-2">
+      <a href="{% url 'notifications' %}"
+         id="notification-badge"
+         class="btn btn-sm btn-light notification-badge notification-icon-btn"
+         data-notifications-badge
+         data-unread-count-url="{% url 'notifications_unread_count' %}"
+         data-count="{{ notification_unread_count|default:0 }}"
+         aria-label="Notificações: {{ notification_unread_count|default:0 }} não lidas"
+         title="Notificações">
+        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="currentColor" viewBox="0 0 16 16" aria-hidden="true">
+          <path d="M8 16a2 2 0 0 0 2-2H6a2 2 0 0 0 2 2zm.995-14.901a1 1 0 1 0-1.99 0A5.002 5.002 0 0 0 3 6c0 1.098-.5 6-2 7h14c-1.5-1-2-5.902-2-7 0-2.42-1.72-4.44-4.005-4.901z"/>
+        </svg>
+        <span class="visually-hidden">Notificações</span>
+      </a>
+      <a href="{% url 'profile' %}" class="avatar-circle"
+         aria-label="Perfil">{{ user.get_full_name|default:user.username|slice:":2"|upper }}</a>
+      <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#sessionMenu"
+              aria-controls="sessionMenu" aria-expanded="false" aria-label="Menu da sessão">
+        <span class="navbar-toggler-icon"></span>
+      </button>
+    </div>
+    {% endif %}
     {% block nav %}{% endblock %}
   </div>
 </header>

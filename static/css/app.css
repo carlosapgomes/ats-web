@@ -53,16 +53,63 @@ body.hospital-shell h6 {
   background: linear-gradient(125deg, var(--hospital-primary), var(--hospital-secondary));
 }
 
+/* Navbar sobre o gradiente (Slice 002) */
+.app-header.navbar {
+  --bs-navbar-color: rgba(255, 255, 255, 0.9);
+  --bs-navbar-hover-color: #fff;
+  --bs-navbar-active-color: #fff;
+  --bs-navbar-brand-color: #fff;
+  --bs-navbar-brand-hover-color: rgba(255, 255, 255, 0.9);
+}
+
+.app-header .navbar-brand {
+  max-width: 70%;
+}
+
+.app-header .navbar-toggler {
+  border-color: rgba(255, 255, 255, 0.5);
+}
+
+.app-header .navbar-toggler:focus {
+  box-shadow: 0 0 0 0.15rem rgba(255, 255, 255, 0.35);
+}
+
+/* Avatar circle no header */
+.avatar-circle {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 2rem;
+  height: 2rem;
+  min-width: 2rem;
+  border-radius: 50%;
+  background: #fff;
+  color: var(--hospital-primary);
+  font-size: 0.78rem;
+  font-weight: 700;
+  text-decoration: none;
+  line-height: 1;
+}
+
+.avatar-circle:hover,
+.avatar-circle:focus {
+  color: var(--hospital-primary);
+  text-decoration: none;
+  background: rgba(255, 255, 255, 0.9);
+}
+
 .app-header__title {
   margin: 0;
   font-size: 1.2rem;
   font-weight: 700;
+  line-height: 1.25;
 }
 
 .app-header__subtitle {
-  margin: 0.15rem 0 0;
-  font-size: 0.92rem;
+  margin: 0.05rem 0 0;
+  font-size: 0.8rem;
   color: rgba(255, 255, 255, 0.86);
+  line-height: 1.25;
 }
 
 .app-nav .nav-link {

@@ -234,7 +234,7 @@ class TestAppDisplayName:
         content = response.content.decode()
         assert "Hospital Teste" in content
         # Verifica que o nome customizado aparece no header e no h3
-        assert '<h1 class="app-header__title">Hospital Teste</h1>' in content
+        assert '<span class="app-header__title">Hospital Teste</span>' in content
         assert "<title>Hospital Teste" in content
 
     def test_template_renders_default_when_not_configured(self, client) -> None:
