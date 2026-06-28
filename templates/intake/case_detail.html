@@ -3,7 +3,7 @@
 
 {% block title %}Caso {{ case.agency_record_number|default:case.case_id|truncatechars:8 }} — {{ app_display_name }}{% endblock %}
 
-{% block subtitle %}Detalhes do encaminhamento e linha do tempo{% endblock %}
+{% block page_title %}<h1 class="page-title">Detalhes do encaminhamento e linha do tempo</h1>{% endblock %}
 
 {% block nav %}
 {% if show_intake_nav %}

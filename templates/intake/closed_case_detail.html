@@ -3,7 +3,7 @@
 
 {% block title %}Caso {{ case.agency_record_number|default:case.case_id|truncatechars:8 }} — {{ app_display_name }}{% endblock %}
 
-{% block subtitle %}Detalhes do caso encerrado{% endblock %}
+{% block page_title %}<h1 class="page-title">Detalhes do caso encerrado</h1>{% endblock %}
 
 {% block nav %}
 {% include "intake/_nav.html" %}
