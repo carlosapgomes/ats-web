@@ -23,15 +23,12 @@
 <body class="hospital-shell">
 
 <!-- Header hospitalar com navbar Bootstrap -->
-<header class="app-header navbar navbar-expand-lg navbar-dark py-2 mb-4">
+<header class="app-header navbar navbar-expand-lg navbar-dark py-3 mb-4">
   <div class="container">
-    <!-- Brand: logo + nome + subtitle (sempre visível) -->
+    <!-- Brand: logo + nome do app (sempre visível) -->
     <a href="/" class="navbar-brand d-flex align-items-center gap-2 text-white text-decoration-none">
       <img src="{% static 'icons/icon-192.png' %}" width="32" height="32" alt="">
-      <div class="d-flex flex-column">
-        <span class="app-header__title">{{ app_display_name }}</span>
-        <span class="app-header__subtitle">Sistema de Regulação Hospitalar CHD</span>
-      </div>
+      <span class="app-header__title">{{ app_display_name }}</span>
     </a>
     {% if user.is_authenticated %}
     <!-- Sempre visível: notificação + avatar + hambúrguer (no desktop, à direita) -->
@@ -68,6 +65,8 @@
             <path fill-rule="evenodd" d="M4.475 5.458c-.284 0-.514-.237-.47-.517C4.28 3.24 5.576 2 7.825 2c2.25 0 3.767 1.36 3.767 3.215 0 1.344-.665 2.288-1.79 2.973-1.1.659-1.414 1.118-1.414 2.01v.03a.5.5 0 0 1-.5.5h-.77a.5.5 0 0 1-.5-.495l-.003-.2c-.043-1.221.477-2.001 1.645-2.712 1.03-.632 1.397-1.135 1.397-2.028 0-.979-.758-1.698-1.926-1.698-1.009 0-1.71.529-1.938 1.402-.066.254-.278.461-.54.461h-.777ZM7.496 14c.622 0 1.095-.474 1.095-1.09 0-.618-.473-1.092-1.095-1.092-.606 0-1.087.474-1.087 1.091S6.89 14 7.496 14"/>
           </svg>
         </a>
+        <!-- Divisor: separa identidade/manual das ações de conta (desktop) -->
+        <span class="vr text-white-50 d-none d-lg-inline-block"></span>
         {% if user.roles.count > 1 %}
         <a href="/switch-role/" class="btn btn-sm btn-light">Trocar papel</a>
         {% endif %}

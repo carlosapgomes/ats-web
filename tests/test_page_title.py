@@ -88,11 +88,12 @@ def _render(
 # ── Tests ──
 
 
-def test_header_has_constant_tagline_no_subtitle_block(rf: RequestFactory) -> None:
+def test_header_has_no_subtitle(rf: RequestFactory) -> None:
+    """O header não deve ter subtitle/tagline — só o nome do app (altura determinística)."""
     html = _render(rf)
-    assert "Sistema de Regulação Hospitalar CHD" in html
-    assert "{% block subtitle %}" not in html
-    assert '<span class="app-header__subtitle">Sistema de Regulação Hospitalar CHD</span>' in html
+    assert "app-header__subtitle" not in html
+    assert "Sistema de Regulação Hospitalar CHD" not in html
+    assert '<span class="app-header__title">ATS CHD</span>' in html
 
 
 def test_no_page_title_by_default(rf: RequestFactory) -> None:
