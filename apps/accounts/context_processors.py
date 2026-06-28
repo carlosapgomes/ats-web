@@ -28,10 +28,10 @@ def app_display_name(request):  # type: ignore[no-untyped-def]
     """Adiciona app_display_name ao contexto de todos os templates.
 
     Lê de settings.APP_DISPLAY_NAME (configurável via env var APP_DISPLAY_NAME).
-    Default: "ATS".
+    Default: "Regulação".
     """
     return {
-        "app_display_name": getattr(settings, "APP_DISPLAY_NAME", "ATS"),
+        "app_display_name": getattr(settings, "APP_DISPLAY_NAME", "Regulação"),
     }
 
 

@@ -124,7 +124,7 @@ CSRF_TRUSTED_ORIGINS = [
 ]
 
 # Nome do app exibido no cabeçalho, título da página e meta tags
-APP_DISPLAY_NAME = os.environ.get("APP_DISPLAY_NAME", "ATS")
+APP_DISPLAY_NAME = os.environ.get("APP_DISPLAY_NAME", "Regulação")
 
 # LLM Configuration
 LLM_CLIENT_FACTORY = "apps.pipeline.llm.create_openai_client"
