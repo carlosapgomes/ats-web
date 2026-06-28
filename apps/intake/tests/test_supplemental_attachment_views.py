@@ -265,7 +265,7 @@ class TestIntakeCaseDetailSupplementalForm:
 
         assert response.status_code == 200
         # Deve redirecionar para o detalhe do caso
-        assert "Detalhes do encaminhamento" in response.content.decode()
+        assert "Anexo complementar adicionado" in response.content.decode()
 
         # Anexo deve existir
         attachments = list(case.attachments.filter(is_suppressed=False, upload_phase="supplemental"))
