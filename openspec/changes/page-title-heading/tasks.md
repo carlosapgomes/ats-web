@@ -3,10 +3,10 @@
 ## Slices
 
 - [ ] Slice 0 — Infraestrutura: remover `{% block subtitle %}` do header, adicionar `{% block page_title %}` + `<h1 class="page-title">` no `<main>`, classe CSS `.page-title` (`slices/slice-000-infrastructure.md`)
-- [ ] Slice 1 — Migrar módulo `accounts` (`notifications.html`, `manual.html`) (`slices/slice-001-accounts.md`)
-- [ ] Slice 2 — Migrar módulo `intake` (7 templates) (`slices/slice-002-intake.md`)
-- [ ] Slice 3 — Migrar módulo `scheduler` (6 templates) (`slices/slice-003-scheduler.md`)
-- [ ] Slice 4 — Migrar módulos `doctor`, `dashboard`, `admin_ui` (7 templates) (`slices/slice-004-doctor-dashboard-admin.md`)
+- [x] Slice 1 — Migrar módulo `accounts` (`notifications.html`, `manual.html`) (`slices/slice-001-accounts.md`)
+- [x] Slice 2 — Migrar módulo `intake` (7 templates) (`slices/slice-002-intake.md`)
+- [x] Slice 3 — Migrar módulo `scheduler` (6 templates) (`slices/slice-003-scheduler.md`)
+- [x] Slice 4 — Migrar módulos `doctor`, `dashboard`, `admin_ui` (7 templates) (`slices/slice-004-doctor-dashboard-admin.md`)
 
 ## Definition of Done
 

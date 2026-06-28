@@ -2,7 +2,7 @@
 {% load static %}
 
 {% block title %}{% if is_create %}Novo Usuário{% else %}Editar Usuário{% endif %} — {{ app_display_name }}{% endblock %}
-{% block subtitle %}{% if is_create %}Criar novo usuário no sistema{% else %}Editar dados do usuário{% endif %}{% endblock %}
+{% block page_title %}<h1 class="page-title">{% if is_create %}Criar novo usuário no sistema{% else %}Editar dados do usuário{% endif %}</h1>{% endblock %}
 
 {% block nav %}
 <nav class="app-nav mt-3" aria-label="Navegação">
