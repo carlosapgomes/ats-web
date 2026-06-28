@@ -112,13 +112,6 @@ body.hospital-shell h6 {
   line-height: 1.25;
 }
 
-.app-header__subtitle {
-  margin: 0.05rem 0 0;
-  font-size: 0.8rem;
-  color: rgba(255, 255, 255, 0.86);
-  line-height: 1.25;
-}
-
 /* Título de página (<h1> no <main>) */
 .page-title {
   margin: 0 0 1rem;
@@ -743,7 +736,6 @@ body.hospital-shell h6 {
   /* Header */
   .app-header { padding-top: 0.75rem !important; padding-bottom: 0.75rem !important; }
   .app-header__title { font-size: 1rem; }
-  .app-header__subtitle { font-size: 0.8rem; }
   .page-title { font-size: 1.1rem; }
 
   /* Touch targets >= 44px no header (WCAG 2.5.5) */
@@ -876,8 +868,6 @@ body.hospital-shell h6 {
 
 @media (max-width: 575.98px) {
   .app-header__title { font-size: 0.95rem; }
-
-  .app-header__subtitle { font-size: 0.75rem; }
 
   .page-title { font-size: 1rem; margin-bottom: 0.75rem; }
 
