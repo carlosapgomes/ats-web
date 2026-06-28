@@ -266,7 +266,11 @@
   {% if case.pdf_file %}
   <div class="card p-4">
     <h5 class="mb-3">
-      <a data-bs-toggle="collapse" href="#pdf-collapse" role="button" aria-expanded="false" aria-controls="pdf-collapse" class="text-decoration-none d-flex align-items-center gap-2">
+      <a href="{% url 'doctor:serve_pdf' case.case_id %}" class="text-decoration-none d-flex d-md-none align-items-center gap-2" target="_blank" rel="noopener">
+        📄 Visualizar PDF Original
+        <span class="badge bg-secondary">toque para abrir o PDF</span>
+      </a>
+      <a data-bs-toggle="collapse" href="#pdf-collapse" role="button" aria-expanded="false" aria-controls="pdf-collapse" class="text-decoration-none d-none d-md-flex align-items-center gap-2">
         📄 Visualizar PDF Original
         <span class="badge bg-secondary">clique para expandir</span>
       </a>

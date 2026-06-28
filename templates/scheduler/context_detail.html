@@ -116,8 +116,11 @@
 {% if pdf_url %}
 <div class="card p-4 mb-4">
   <h5 class="mb-3">
-    <button class="btn btn-link text-decoration-none p-0 text-dark" type="button" data-bs-toggle="collapse" data-bs-target="#pdf-collapse" aria-expanded="false" aria-controls="pdf-collapse">
-      📄 Visualizar PDF <small class="text-muted ms-2">(clique para expandir)</small>
+    <a href="{{ pdf_url }}" class="btn btn-link text-decoration-none p-0 text-dark d-inline-flex d-md-none align-items-center gap-2" target="_blank" rel="noopener">
+      📄 Visualizar PDF <small class="text-muted">(toque para abrir o PDF)</small>
+    </a>
+    <button class="btn btn-link text-decoration-none p-0 text-dark d-none d-md-inline-flex align-items-center gap-2" type="button" data-bs-toggle="collapse" data-bs-target="#pdf-collapse" aria-expanded="false" aria-controls="pdf-collapse">
+      📄 Visualizar PDF <small class="text-muted">(clique para expandir)</small>
     </button>
   </h5>
   <div class="collapse" id="pdf-collapse">
