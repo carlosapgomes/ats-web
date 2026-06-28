@@ -6,12 +6,13 @@
   var MAX_INTERVAL_MS = 5 * 60 * 1000; // 5 minutes cap for backoff
   var BACKOFF_MULTIPLIER = 2;
 
-  var badgeEl = document.querySelector(BADGE_SELECTOR);
-  if (!badgeEl) {
+  var badges = document.querySelectorAll(BADGE_SELECTOR);
+  if (badges.length === 0) {
     return; // No badge on this page (anonymous, login, etc.)
   }
 
-  var unreadCountUrl = badgeEl.getAttribute("data-unread-count-url");
+  // Todos os badges compartilham a mesma URL (definida no template).
+  var unreadCountUrl = badges[0].getAttribute("data-unread-count-url");
   if (!unreadCountUrl) {
     return; // No polling URL configured
   }
@@ -52,14 +53,17 @@
    * @param {number} count - The unread count.
    */
   function updateBadge(count) {
-    badgeEl.setAttribute("data-count", String(count));
-
     // Update aria-label for accessibility
     var label =
       count > 0
         ? "Notificações: " + count + " não lidas"
         : "Notificações: nenhuma não lida";
-    badgeEl.setAttribute("aria-label", label);
+
+    // Sincroniza TODOS os badges (mobile sempre-visível + desktop no menu de ações).
+    badges.forEach(function (el) {
+      el.setAttribute("data-count", String(count));
+      el.setAttribute("aria-label", label);
+    });
   }
 
   /**

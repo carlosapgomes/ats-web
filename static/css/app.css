@@ -74,11 +74,14 @@ body.hospital-shell h6 {
   box-shadow: 0 0 0 0.15rem rgba(255, 255, 255, 0.35);
 }
 
-/* Subnav injetada via {% block nav %} ocupa linha própria dentro do navbar
-   (o .container do navbar é display:flex; sem isto, a subnav viraria
-   item flex na mesma linha da marca/sessão). */
+/* Subnav injetada via {% block nav %}: banda secundária do header.
+   O .container do navbar é display:flex; flex-basis:100% força a quebra
+   de linha. border-top + padding-top criam uma faixa claramente separada
+   da barra do app (logo/sessão), evitando confundir abas com o título. */
 .app-header .app-nav {
   flex-basis: 100%;
+  padding-top: 0.75rem;
+  border-top: 1px solid rgba(255, 255, 255, 0.18);
 }
 
 /* Avatar circle no header */
