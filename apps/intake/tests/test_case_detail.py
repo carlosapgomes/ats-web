@@ -732,8 +732,18 @@ class TestCaseDetailNirNavPreserved:
         assert f'data-bs-target="#{collapse_id}"' in content or f'href="#{collapse_id}"' in content
         assert f'id="{collapse_id}"' in content
         assert 'data-bs-toggle="collapse"' in content
-        # Deve ter embed ou link
-        assert "embed" in content or "Abrir em nova aba" in content
+        # Deve ter controles de ação antes do visualizador embutido do PDF.
+        attachment_url = reverse("intake:serve_attachment", args=[case.case_id, att.attachment_id])
+        collapse_idx = content.find(f'id="{collapse_id}"')
+        open_btn_idx = content.find("Abrir em nova aba", collapse_idx)
+        suppress_btn_idx = content.find("Suprimir anexo enviado incorretamente", collapse_idx)
+        embed_idx = content.find(f'<embed src="{attachment_url}"', collapse_idx)
+
+        assert open_btn_idx >= 0
+        assert suppress_btn_idx >= 0
+        assert embed_idx >= 0
+        assert open_btn_idx < embed_idx
+        assert suppress_btn_idx < embed_idx
 
     def test_intake_case_detail_embeds_image_attachment(self, client) -> None:
         """Anexo JPEG/PNG gera <img> no detalhe NIR."""
