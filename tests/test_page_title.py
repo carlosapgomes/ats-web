@@ -103,3 +103,107 @@ def test_no_page_title_by_default(rf: RequestFactory) -> None:
 def test_page_title_renders_h1_when_defined(rf: RequestFactory) -> None:
     html = _render(rf, page_title="Meus Casos")
     assert '<h1 class="page-title">Meus Casos</h1>' in html
+
+
+# ── Migração por módulo (Slices 1-4) ──
+
+from pathlib import Path  # noqa: E402
+
+
+def _has_page_title_block(template_rel: str) -> bool:
+    content = Path(template_rel).read_text()
+    return '{% block page_title %}<h1 class="page-title">' in content
+
+
+def _has_subtitle_block(template_rel: str) -> bool:
+    return "{% block subtitle %}" in Path(template_rel).read_text()
+
+
+ACCOUNTS_TEMPLATES = [
+    "templates/accounts/manual.html",
+    "templates/accounts/notifications.html",
+]
+
+
+@pytest.mark.parametrize("template_rel", ACCOUNTS_TEMPLATES)
+def test_accounts_template_uses_page_title_block(template_rel: str) -> None:
+    assert _has_page_title_block(template_rel), (
+        f"{template_rel} deve usar {{% block page_title %}} com <h1 class='page-title'>"
+    )
+    assert not _has_subtitle_block(template_rel), f"{template_rel} ainda contém {{% block subtitle %}}"
+
+
+INTAKE_TEMPLATES = [
+    "templates/intake/corrected_resubmission.html",
+    "templates/intake/my_cases.html",
+    "templates/intake/closed_cases_search.html",
+    "templates/intake/case_detail.html",
+    "templates/intake/closed_case_detail.html",
+    "templates/intake/post_schedule_issue_form.html",
+    "templates/intake/intake_home.html",
+]
+
+
+@pytest.mark.parametrize("template_rel", INTAKE_TEMPLATES)
+def test_intake_template_uses_page_title_block(template_rel: str) -> None:
+    assert _has_page_title_block(template_rel)
+    assert not _has_subtitle_block(template_rel)
+
+
+SCHEDULER_TEMPLATES = [
+    "templates/scheduler/confirm.html",
+    "templates/scheduler/confirm_post_schedule_issue.html",
+    "templates/scheduler/historical_search.html",
+    "templates/scheduler/context_detail.html",
+    "templates/scheduler/queue.html",
+]
+
+
+@pytest.mark.parametrize("template_rel", SCHEDULER_TEMPLATES)
+def test_scheduler_template_uses_page_title_block(template_rel: str) -> None:
+    assert _has_page_title_block(template_rel)
+    assert not _has_subtitle_block(template_rel)
+
+
+REMAINING_TEMPLATES = [
+    "templates/doctor/decision.html",
+    "templates/doctor/queue.html",
+    "templates/dashboard/index.html",
+    "templates/dashboard/summaries.html",
+    "templates/admin_ui/prompt_detail.html",
+    "templates/admin_ui/prompt_create.html",
+    "templates/admin_ui/user_form.html",
+    "templates/admin_ui/prompt_list.html",
+    "templates/admin_ui/user_list.html",
+]
+
+
+@pytest.mark.parametrize("template_rel", REMAINING_TEMPLATES)
+def test_remaining_template_uses_page_title_block(template_rel: str) -> None:
+    assert _has_page_title_block(template_rel)
+    assert not _has_subtitle_block(template_rel)
+
+
+def test_scheduler_confirm_preserves_case_variables() -> None:
+    content = Path("templates/scheduler/confirm.html").read_text()
+    assert "{{ case.agency_record_number|default:case.case_id|truncatechars:16 }}" in content
+    assert "{{ patient_name }}" in content
+
+
+def test_doctor_decision_preserves_case_variables() -> None:
+    content = Path("templates/doctor/decision.html").read_text()
+    assert "{{ case.agency_record_number|default:case.case_id|truncatechars:16 }}" in content
+    assert "{{ patient_name }}" in content
+
+
+def test_no_subtitle_block_remains_anywhere() -> None:
+    """Após todos os slices, nenhum template deve conter {% block subtitle %}."""
+    import os
+
+    for root, _dirs, files in os.walk("templates"):
+        for f in files:
+            if f.endswith(".html"):
+                path = os.path.join(root, f)
+                assert "{% block subtitle %}" not in Path(path).read_text(), (
+                    f"{path} ainda contém {{% block subtitle %}}"
+                )
