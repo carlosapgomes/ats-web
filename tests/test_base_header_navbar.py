@@ -125,10 +125,10 @@ def test_avatar_link_present(rf: RequestFactory) -> None:
 
 
 def test_toggler_precedes_collapse_in_dom(rf: RequestFactory) -> None:
-    """O toggler deve aparecer ANTES do collapse no DOM (padrão Bootstrap canônico).
+    """O toggler deve aparecer ANTES do collapse no DOM.
 
     Garante que, ao expandir o menu no mobile, o bloco sempre-visível
-    (sino/avatar/toggler) permanece no topo em vez de cair abaixo do menu.
+    (sino/avatar/toggler) permanece no topo.
     """
     html = _render(rf)
     i_toggler = html.index('class="navbar-toggler')
@@ -136,11 +136,24 @@ def test_toggler_precedes_collapse_in_dom(rf: RequestFactory) -> None:
     assert i_toggler < i_collapse, "navbar-toggler deve preceder o collapse navbar-collapse no DOM"
 
 
-def test_order_lg_utilities_present(rf: RequestFactory) -> None:
-    """order-lg-* devem estar presentes para reposicionar blocos no desktop."""
+def test_desktop_session_grouping(rf: RequestFactory) -> None:
+    """No desktop, o menu de sessão organiza identidade e ações em grupos separados."""
     html = _render(rf)
-    assert "order-lg-2" in html, "Falta order-lg-2 no collapse"
-    assert "order-lg-3" in html, "Falta order-lg-3 no bloco sempre-visível"
+    # grupo de identidade (primeiro nome + papel + avatar)
+    assert "app-session-meta" in html
+    # grupo de ações, com bell antes de manual/trocar papel/sair
+    i_bell = html.index('id="notification-badge"')
+    i_manual = html.index('aria-label="Manual do usuário')
+    i_logout = html.index('action="/logout/"')
+    assert i_bell < i_manual < i_logout, "Ordem das ações deve ser bell -> manual -> sair (sair por último)"
+
+
+def test_mobile_always_visible_bell_present(rf: RequestFactory) -> None:
+    """O bell sempre-visível no mobile (sem id) deve existir (Opção C preservada)."""
+    html = _render(rf)
+    # dois elementos com data-notifications-badge: mobile (sem id) + desktop (com id)
+    assert html.count("data-notifications-badge") >= 2
+    assert "d-lg-none" in html, "Falta bloco sempre-visível do mobile (d-lg-none)"
 
 
 def test_app_nav_full_width_css() -> None:
