@@ -1,6 +1,6 @@
 /* ATS Web — Service Worker */
 
-const CACHE_NAME = "ats-cache-v2";
+const CACHE_NAME = "ats-cache-v3";
 const STATIC_ASSETS = [
   "/static/manifest.json",
   "/static/js/app.js",
