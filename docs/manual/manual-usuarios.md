@@ -70,16 +70,33 @@ Quando o **Médico** precisa de documento ou informação complementar antes de 
 
 ### 1.6 Fluxo de reenvio corrigido
 
-Quando um caso anterior precisa ser corrigido, o **NIR** pode criar um novo caso vinculado ao anterior.
-
-Use esse fluxo quando houver, por exemplo:
+Use esse fluxo quando um caso anterior precisa ser corrigido e reenviado pelo **NIR**, por exemplo:
 
 - relatório errado;
 - documento incompleto;
 - anexo incorreto;
 - necessidade de reenviar o caso com informações corrigidas.
 
-O novo caso **não herda** PDF, anexos, decisões ou mensagens do caso anterior. O NIR deve enviar novamente os documentos corretos.
+Nesse caso:
+
+1. O **NIR** localiza o caso anterior em **Meus Casos** ou **Casos Encerrados**.
+2. O **NIR** abre os **Detalhes** do caso.
+3. O **NIR** clica em **Reenviar caso corrigido**.
+4. O **NIR** informa o motivo do reenvio.
+5. O **NIR** seleciona o novo PDF principal correto.
+6. Se houver anexos necessários, o **NIR** envia novamente os anexos corretos.
+7. O **NIR** confirma que está criando um novo envio corrigido.
+8. O sistema cria um **novo caso vinculado ao caso anterior**.
+9. O novo caso segue o fluxo normal de processamento e avaliação médica.
+10. O médico vê que aquele caso é um **reenvio corrigido**.
+
+O caso anterior **não é reaberto nem alterado**. Ele permanece registrado para auditoria.
+
+Atenção:
+
+- o novo caso **não herda** PDF, anexos, decisões ou mensagens do caso anterior;
+- o NIR deve enviar novamente todos os documentos necessários;
+- esse fluxo não deve ser usado apenas para complementar um caso ainda antes da decisão médica — nesse caso, use **Adicionar anexo complementar** ou **Comunicação operacional**.
 
 ### 1.7 Fluxo de intercorrência após agendamento aberta pelo NIR
 
