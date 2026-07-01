@@ -13,7 +13,7 @@
 
 <div class="doctor-decision-layout">
 
-  <!-- Top: patient context + decision form -->
+  <!-- Patient data + shortcut -->
   <div class="row g-4 align-items-start mb-4">
     <div class="col-xl-5 col-lg-6">
       <div class="card p-4 h-100">
@@ -30,118 +30,9 @@
     </div>
 
     <div class="col-xl-7 col-lg-6">
-      <div class="card p-4 doctor-decision-form-card">
-        <h5 class="mb-4">🩺 Formulário de Decisão</h5>
-
-        <!-- Work lock configuration (lido por work_lock.js) -->
-        <div id="work-lock-config"
-             data-work-lock-config
-             data-debug="true"
-             data-renew-url="{% url 'doctor:lock_renew' case.case_id %}"
-             data-release-url="{% url 'doctor:lock_release' case.case_id %}"
-             data-lock-token="{{ lock_token|default:'' }}"
-             data-heartbeat-ms="60000"
-             data-grace-ms="240000"
-             style="display:none;"></div>
-
-        <!-- Lock status warning -->
-        <div id="work-lock-warning" class="alert alert-warning mb-3" style="display:none;"></div>
-
-        <form id="decision-form" method="post" action="{% url 'doctor:submit' case.case_id %}" novalidate>
-          {% csrf_token %}
-
-          <div class="mb-4">
-            <label class="form-label">Decisão <span class="text-danger">*</span></label>
-            <p class="decision-hint small text-muted mb-3">Escolha Aceitar ou Negar para revelar os campos necessários.</p>
-            <div class="decision-radio-group">
-              <div class="decision-option decision-option--accept form-check">
-                <input class="form-check-input" type="radio" name="decision" id="decision-accept" value="accept" required{% if form.decision.value == "accept" %} checked{% endif %}>
-                <label class="form-check-label d-block" for="decision-accept">
-                  <strong>✓ Aceitar</strong>
-                  <div class="text-muted small">Encaminhar para agendamento ou vinda imediata</div>
-                </label>
-              </div>
-              <div class="decision-option decision-option--deny form-check">
-                <input class="form-check-input" type="radio" name="decision" id="decision-deny" value="deny"{% if form.decision.value == "deny" %} checked{% endif %}>
-                <label class="form-check-label d-block" for="decision-deny">
-                  <strong>✗ Negar</strong>
-                  <div class="text-muted small">Regulação não indicada para este caso</div>
-                </label>
-              </div>
-            </div>
-            {% if form.decision.errors %}
-            <div class="invalid-feedback d-block">{{ form.decision.errors.0 }}</div>
-            {% else %}
-            <div class="invalid-feedback" id="decision-error">Selecione uma decisão.</div>
-            {% endif %}
-          </div>
-
-          <div class="decision-section{% if form.decision.value == 'accept' %} active{% endif %}" id="accept-section">
-            <h6 class="text-muted fw-semibold mb-3">Dados para aceite</h6>
-            <div class="row g-3">
-              <div class="col-md-6">
-                <label for="support-flag" class="form-label">Suporte Necessário <span class="text-danger">*</span></label>
-                <select class="form-select{% if form.support_flag.errors %} is-invalid{% endif %}" id="support-flag" name="support_flag">
-                  <option value="" selected disabled>Selecione...</option>
-                  <option value="none"{% if form.support_flag.value == "none" %} selected{% endif %}>Nenhum</option>
-                  <option value="anesthesist"{% if form.support_flag.value == "anesthesist" %} selected{% endif %}>Anestesista</option>
-                  <option value="anesthesist_icu"{% if form.support_flag.value == "anesthesist_icu" %} selected{% endif %}>Anestesista + UTI</option>
-                </select>
-                {% if form.support_flag.errors %}<div class="invalid-feedback d-block">{{ form.support_flag.errors.0 }}</div>{% else %}<div class="invalid-feedback">Selecione o tipo de suporte.</div>{% endif %}
-              </div>
-
-              <div class="col-md-6">
-                <label for="admission-flow" class="form-label">Fluxo de Admissão <span class="text-danger">*</span></label>
-                <select class="form-select{% if form.admission_flow.errors %} is-invalid{% endif %}" id="admission-flow" name="admission_flow">
-                  <option value="" selected disabled>Selecione...</option>
-                  <option value="scheduled"{% if form.admission_flow.value == "scheduled" %} selected{% endif %}>Agendamento</option>
-                  <option value="immediate"{% if form.admission_flow.value == "immediate" %} selected{% endif %}>Vinda Imediata</option>
-                </select>
-                {% if form.admission_flow.errors %}<div class="invalid-feedback d-block">{{ form.admission_flow.errors.0 }}</div>{% else %}<div class="invalid-feedback">Selecione o fluxo de admissão.</div>{% endif %}
-              </div>
-            </div>
-            <div class="mb-3">
-              <label for="doctor-observation" class="form-label">{{ form.observation.label }}</label>
-              <textarea class="form-control{% if form.observation.errors %} is-invalid{% endif %}" id="doctor-observation" name="observation" rows="2" maxlength="500" placeholder="{{ form.observation.field.widget.attrs.placeholder }}">{{ form.observation.value|default:"" }}</textarea>
-              {% if form.observation.errors %}<div class="invalid-feedback d-block">{{ form.observation.errors.0 }}</div>{% endif %}
-              <div class="form-text">{{ form.observation.help_text }}</div>
-            </div>
-          </div>
-
-          <div class="decision-section{% if form.decision.value == 'deny' %} active{% endif %}" id="deny-section">
-            <h6 class="text-muted fw-semibold mb-3">Motivo da negativa</h6>
-            <div class="mb-3">
-              <label for="deny-reason" class="form-label">Motivo da Negativa <span class="text-danger">*</span></label>
-              <textarea class="form-control{% if form.reason.errors %} is-invalid{% endif %}" id="deny-reason" name="reason" rows="3" placeholder="Descreva o motivo pelo qual a regulação não se aplica a este caso...">{{ form.reason.value|default:"" }}</textarea>
-              {% if form.reason.errors %}<div class="invalid-feedback d-block">{{ form.reason.errors.0 }}</div>{% else %}<div class="invalid-feedback">Informe o motivo da negativa.</div>{% endif %}
-            </div>
-          </div>
-
-          <input type="hidden" name="case_id_hidden" value="{{ case.case_id }}">
-
-          <div class="alert alert-info small mb-4 py-2" role="alert">
-            💬 <strong>Precisa de mais informações?</strong>
-            Se faltam documentos ou dados para decidir, envie uma mensagem na
-            <strong>Comunicação operacional</strong> marcando o <strong>NIR</strong>
-            e <strong>volte sem decidir</strong>.
-            Não use negativa apenas para solicitar complemento.
-          </div>
-
-          {% if lock_error %}
-          <div class="alert alert-danger mb-3">
-            🔒 {{ lock_error }}
-            <a href="{% url 'doctor:queue' %}" class="alert-link">Voltar para fila</a>
-          </div>
-          {% endif %}
-
-          <input type="hidden" name="lock_token" value="{{ lock_token|default:"" }}">
-
-          <div class="d-flex gap-2 btn-stack-mobile">
-            <button type="submit" class="btn btn-hospital btn-lg flex-grow-1" id="btn-submit">Confirmar decisão</button>
-            <a href="{% url 'doctor:queue' %}" class="btn btn-outline-secondary btn-lg">Voltar sem decidir</a>
-          </div>
-        </form>
-      </div>
+      <a href="#doctor-decision-form" class="btn btn-hospital-outline btn-sm w-100 w-md-auto">
+        Decisão pendente · Ir para decisão
+      </a>
     </div>
   </div>
 
@@ -356,6 +247,120 @@
   {% endif %}
 
   {% include "cases/_communication_thread.html" %}
+
+  <!-- Decision form (moved to end of clinical review) -->
+  <div class="card p-4 mb-4 doctor-decision-form-card" id="doctor-decision-form">
+    <h5 class="mb-4">🩺 Formulário de Decisão</h5>
+
+    <!-- Work lock configuration (lido por work_lock.js) -->
+    <div id="work-lock-config"
+         data-work-lock-config
+         data-debug="true"
+         data-renew-url="{% url 'doctor:lock_renew' case.case_id %}"
+         data-release-url="{% url 'doctor:lock_release' case.case_id %}"
+         data-lock-token="{{ lock_token|default:'' }}"
+         data-heartbeat-ms="60000"
+         data-grace-ms="240000"
+         style="display:none;"></div>
+
+    <!-- Lock status warning -->
+    <div id="work-lock-warning" class="alert alert-warning mb-3" style="display:none;"></div>
+
+    <form id="decision-form" method="post" action="{% url 'doctor:submit' case.case_id %}" novalidate>
+      {% csrf_token %}
+
+      <div class="mb-4">
+        <label class="form-label">Decisão <span class="text-danger">*</span></label>
+        <p class="decision-hint small text-muted mb-3">Escolha Aceitar ou Negar para revelar os campos necessários.</p>
+        <div class="decision-radio-group">
+          <div class="decision-option decision-option--accept form-check">
+            <input class="form-check-input" type="radio" name="decision" id="decision-accept" value="accept" required{% if form.decision.value == "accept" %} checked{% endif %}>
+            <label class="form-check-label d-block" for="decision-accept">
+              <strong>✓ Aceitar</strong>
+              <div class="text-muted small">Encaminhar para agendamento ou vinda imediata</div>
+            </label>
+          </div>
+          <div class="decision-option decision-option--deny form-check">
+            <input class="form-check-input" type="radio" name="decision" id="decision-deny" value="deny"{% if form.decision.value == "deny" %} checked{% endif %}>
+            <label class="form-check-label d-block" for="decision-deny">
+              <strong>✗ Negar</strong>
+              <div class="text-muted small">Regulação não indicada para este caso</div>
+            </label>
+          </div>
+        </div>
+        {% if form.decision.errors %}
+        <div class="invalid-feedback d-block">{{ form.decision.errors.0 }}</div>
+        {% else %}
+        <div class="invalid-feedback" id="decision-error">Selecione uma decisão.</div>
+        {% endif %}
+      </div>
+
+      <div class="decision-section{% if form.decision.value == 'accept' %} active{% endif %}" id="accept-section">
+        <h6 class="text-muted fw-semibold mb-3">Dados para aceite</h6>
+        <div class="row g-3">
+          <div class="col-md-6">
+            <label for="support-flag" class="form-label">Suporte Necessário <span class="text-danger">*</span></label>
+            <select class="form-select{% if form.support_flag.errors %} is-invalid{% endif %}" id="support-flag" name="support_flag">
+              <option value="" selected disabled>Selecione...</option>
+              <option value="none"{% if form.support_flag.value == "none" %} selected{% endif %}>Nenhum</option>
+              <option value="anesthesist"{% if form.support_flag.value == "anesthesist" %} selected{% endif %}>Anestesista</option>
+              <option value="anesthesist_icu"{% if form.support_flag.value == "anesthesist_icu" %} selected{% endif %}>Anestesista + UTI</option>
+            </select>
+            {% if form.support_flag.errors %}<div class="invalid-feedback d-block">{{ form.support_flag.errors.0 }}</div>{% else %}<div class="invalid-feedback">Selecione o tipo de suporte.</div>{% endif %}
+          </div>
+
+          <div class="col-md-6">
+            <label for="admission-flow" class="form-label">Fluxo de Admissão <span class="text-danger">*</span></label>
+            <select class="form-select{% if form.admission_flow.errors %} is-invalid{% endif %}" id="admission-flow" name="admission_flow">
+              <option value="" selected disabled>Selecione...</option>
+              <option value="scheduled"{% if form.admission_flow.value == "scheduled" %} selected{% endif %}>Agendamento</option>
+              <option value="immediate"{% if form.admission_flow.value == "immediate" %} selected{% endif %}>Vinda Imediata</option>
+            </select>
+            {% if form.admission_flow.errors %}<div class="invalid-feedback d-block">{{ form.admission_flow.errors.0 }}</div>{% else %}<div class="invalid-feedback">Selecione o fluxo de admissão.</div>{% endif %}
+          </div>
+        </div>
+        <div class="mb-3">
+          <label for="doctor-observation" class="form-label">{{ form.observation.label }}</label>
+          <textarea class="form-control{% if form.observation.errors %} is-invalid{% endif %}" id="doctor-observation" name="observation" rows="2" maxlength="500" placeholder="{{ form.observation.field.widget.attrs.placeholder }}">{{ form.observation.value|default:"" }}</textarea>
+          {% if form.observation.errors %}<div class="invalid-feedback d-block">{{ form.observation.errors.0 }}</div>{% endif %}
+          <div class="form-text">{{ form.observation.help_text }}</div>
+        </div>
+      </div>
+
+      <div class="decision-section{% if form.decision.value == 'deny' %} active{% endif %}" id="deny-section">
+        <h6 class="text-muted fw-semibold mb-3">Motivo da negativa</h6>
+        <div class="mb-3">
+          <label for="deny-reason" class="form-label">Motivo da Negativa <span class="text-danger">*</span></label>
+          <textarea class="form-control{% if form.reason.errors %} is-invalid{% endif %}" id="deny-reason" name="reason" rows="3" placeholder="Descreva o motivo pelo qual a regulação não se aplica a este caso...">{{ form.reason.value|default:"" }}</textarea>
+          {% if form.reason.errors %}<div class="invalid-feedback d-block">{{ form.reason.errors.0 }}</div>{% else %}<div class="invalid-feedback">Informe o motivo da negativa.</div>{% endif %}
+        </div>
+      </div>
+
+      <input type="hidden" name="case_id_hidden" value="{{ case.case_id }}">
+
+      <div class="alert alert-info small mb-4 py-2" role="alert">
+        💬 <strong>Precisa de mais informações?</strong>
+        Se faltam documentos ou dados para decidir, envie uma mensagem na
+        <strong>Comunicação operacional</strong> marcando o <strong>NIR</strong>
+        e <strong>volte sem decidir</strong>.
+        Não use negativa apenas para solicitar complemento.
+      </div>
+
+      {% if lock_error %}
+      <div class="alert alert-danger mb-3">
+        🔒 {{ lock_error }}
+        <a href="{% url 'doctor:queue' %}" class="alert-link">Voltar para fila</a>
+      </div>
+      {% endif %}
+
+      <input type="hidden" name="lock_token" value="{{ lock_token|default:"" }}">
+
+      <div class="d-flex gap-2 btn-stack-mobile">
+        <button type="submit" class="btn btn-hospital btn-lg flex-grow-1" id="btn-submit">Confirmar decisão</button>
+        <a href="{% url 'doctor:queue' %}" class="btn btn-outline-secondary btn-lg">Voltar sem decidir</a>
+      </div>
+    </form>
+  </div>
 
 </div>
 <div class="modal fade" id="confirm-modal" tabindex="-1" aria-hidden="true">

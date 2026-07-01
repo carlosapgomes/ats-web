@@ -1175,6 +1175,107 @@ class TestDoctorDecisionView:
         assert "decision-option--accept" in content
         assert "decision-option--deny" in content
 
+    # ── Slice 002: Reading order and decision anchor ────────────────────────
+
+    def test_decision_page_has_form_after_report(self, client) -> None:
+        """'Relatório Automático da Regulação' appears before 'Formulário de Decisão'."""
+        case = self._create_case_in_status(CaseStatus.WAIT_DOCTOR)
+        case.summary_text = "Hérnia inguinal bilateral"
+        case.structured_data = {"patient": {"name": "Order Test", "age": 40, "gender": "Masculino"}}
+        case.suggested_action = {"suggestion": "accept", "support_recommendation": "anesthesist"}
+        case.save()
+        self._login_as(client, "doctor")
+        response = client.get(f"/doctor/{case.case_id}/")
+        assert response.status_code == 200
+        content = response.content.decode()
+        report_pos = content.index("Relatório Automático da Regulação")
+        form_pos = content.index("Formulário de Decisão")
+        assert report_pos < form_pos, (
+            f"'Relatório Automático da Regulação' at {report_pos} should come before "
+            f"'Formulário de Decisão' at {form_pos}"
+        )
+
+    def test_decision_page_has_form_after_communication(self, client) -> None:
+        """'Comunicação operacional' appears before 'Formulário de Decisão'."""
+        case = self._create_case_in_status(CaseStatus.WAIT_DOCTOR)
+        case.structured_data = {"patient": {"name": "Comm Order", "age": 35, "gender": "Feminino"}}
+        case.save()
+        self._login_as(client, "doctor")
+        response = client.get(f"/doctor/{case.case_id}/")
+        assert response.status_code == 200
+        content = response.content.decode()
+        comm_pos = content.index("Comunicação operacional")
+        form_pos = content.index("Formulário de Decisão")
+        assert comm_pos < form_pos, (
+            f"'Comunicação operacional' at {comm_pos} should come before 'Formulário de Decisão' at {form_pos}"
+        )
+
+    def test_decision_page_has_decision_form_anchor(self, client) -> None:
+        """The decision form card has id='doctor-decision-form'."""
+        case = self._create_case_in_status(CaseStatus.WAIT_DOCTOR)
+        case.structured_data = {"patient": {"name": "Anchor Test", "age": 30, "gender": "Masculino"}}
+        case.save()
+        self._login_as(client, "doctor")
+        response = client.get(f"/doctor/{case.case_id}/")
+        assert response.status_code == 200
+        content = response.content.decode()
+        assert 'id="doctor-decision-form"' in content, "Missing id='doctor-decision-form' on form card"
+
+    def test_decision_page_has_shortcut_link(self, client) -> None:
+        """Page has a shortcut link pointing to #doctor-decision-form."""
+        case = self._create_case_in_status(CaseStatus.WAIT_DOCTOR)
+        case.structured_data = {"patient": {"name": "Shortcut Test", "age": 45, "gender": "Feminino"}}
+        case.save()
+        self._login_as(client, "doctor")
+        response = client.get(f"/doctor/{case.case_id}/")
+        assert response.status_code == 200
+        content = response.content.decode()
+        assert 'href="#doctor-decision-form"' in content, "Missing shortcut link to #doctor-decision-form"
+
+    def test_decision_page_has_ir_para_decisao_text(self, client) -> None:
+        """Page contains 'Ir para decisão' text in the shortcut."""
+        case = self._create_case_in_status(CaseStatus.WAIT_DOCTOR)
+        case.structured_data = {"patient": {"name": "Shortcut Text", "age": 28, "gender": "Masculino"}}
+        case.save()
+        self._login_as(client, "doctor")
+        response = client.get(f"/doctor/{case.case_id}/")
+        assert response.status_code == 200
+        content = response.content.decode()
+        assert "Ir para decisão" in content, "Missing 'Ir para decisão' text"
+
+    def test_decision_page_preserves_decision_form_id(self, client) -> None:
+        """The form still has id='decision-form' after the move."""
+        case = self._create_case_in_status(CaseStatus.WAIT_DOCTOR)
+        case.structured_data = {"patient": {"name": "Preserve Form", "age": 33, "gender": "Feminino"}}
+        case.save()
+        self._login_as(client, "doctor")
+        response = client.get(f"/doctor/{case.case_id}/")
+        assert response.status_code == 200
+        content = response.content.decode()
+        assert 'id="decision-form"' in content, "Missing id='decision-form'"
+
+    def test_decision_page_preserves_work_lock_config(self, client) -> None:
+        """The work-lock-config div still exists after the move."""
+        case = self._create_case_in_status(CaseStatus.WAIT_DOCTOR)
+        case.structured_data = {"patient": {"name": "Lock Config", "age": 40, "gender": "Masculino"}}
+        case.save()
+        self._login_as(client, "doctor")
+        response = client.get(f"/doctor/{case.case_id}/")
+        assert response.status_code == 200
+        content = response.content.decode()
+        assert 'id="work-lock-config"' in content, "Missing id='work-lock-config'"
+
+    def test_decision_page_preserves_confirm_modal(self, client) -> None:
+        """The confirm-modal still exists after the move."""
+        case = self._create_case_in_status(CaseStatus.WAIT_DOCTOR)
+        case.structured_data = {"patient": {"name": "Modal Preserve", "age": 50, "gender": "Feminino"}}
+        case.save()
+        self._login_as(client, "doctor")
+        response = client.get(f"/doctor/{case.case_id}/")
+        assert response.status_code == 200
+        content = response.content.decode()
+        assert 'id="confirm-modal"' in content, "Missing id='confirm-modal'"
+
 
 # ── Prior case card tests ───────────────────────────────────────────────
 
