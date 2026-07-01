@@ -69,3 +69,47 @@ def test_closed_case_detail_has_two_action_rows_stacked() -> None:
     assert content.count("btn-stack-mobile") >= 2, (
         "closed_case_detail.html deve ter .btn-stack-mobile em ambas as fileiras de ação"
     )
+
+
+def test_decision_option_styles_exist() -> None:
+    """CSS must have .decision-option and .is-selected classes with hospital tokens."""
+    content = CSS.read_text()
+    assert ".decision-option" in content, "Classe .decision-option não encontrada em app.css"
+    assert ".is-selected" in content, "Classe .is-selected não encontrada em app.css"
+
+
+def test_decision_option_uses_hospital_tokens() -> None:
+    """Decision option styles must use --hospital-success and --hospital-danger."""
+    content = CSS.read_text()
+    # Find the decision-option block and check tokens
+    lines = content.splitlines()
+    in_block = False
+    found_success = False
+    found_danger = False
+    for line in lines:
+        if "decision-option" in line and "{" in line:
+            in_block = True
+            continue
+        if in_block:
+            if "--hospital-success" in line:
+                found_success = True
+            if "--hospital-danger" in line:
+                found_danger = True
+            if "}" in line:
+                in_block = False
+    # Also check the is-selected variants
+    in_block = False
+    for line in lines:
+        if "is-selected" in line and "decision-option--accept" in line:
+            in_block = True
+        if "is-selected" in line and "decision-option--deny" in line:
+            in_block = True
+        if in_block:
+            if "--hospital-success" in line:
+                found_success = True
+            if "--hospital-danger" in line:
+                found_danger = True
+            if "}" in line:
+                in_block = False
+    assert found_success, "--hospital-success não encontrado no bloco decision-option de app.css"
+    assert found_danger, "--hospital-danger não encontrado no bloco decision-option de app.css"
