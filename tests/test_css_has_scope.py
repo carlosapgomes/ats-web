@@ -113,3 +113,17 @@ def test_decision_option_uses_hospital_tokens() -> None:
                 in_block = False
     assert found_success, "--hospital-success não encontrado no bloco decision-option de app.css"
     assert found_danger, "--hospital-danger não encontrado no bloco decision-option de app.css"
+
+
+def test_decision_shortcut_width_is_responsive() -> None:
+    """O atalho 'Ir para decisão' deve ser full-width no mobile e auto no desktop.
+
+    O Bootstrap 5 não tem utilities de width responsivas, então precisamos de
+    uma regra escopada em .doctor-decision-layout .w-md-auto dentro de uma
+    media query min-width: 768px para sobrescrever o w-100 no desktop.
+    """
+    content = CSS.read_text()
+    assert ".doctor-decision-layout .w-md-auto" in content, (
+        "Falta regra escopada .doctor-decision-layout .w-md-auto em app.css"
+    )
+    assert "min-width: 768px" in content, "Falta media query min-width: 768px para o atalho de decisão"
