@@ -1138,6 +1138,43 @@ class TestDoctorDecisionView:
         # Context must appear
         assert "procedimento solicitado" in content.lower()
 
+    # ── Slice 001: Decision feedback and pending modal ────────────────────────
+
+    def test_decision_page_has_confirmar_decisao_button(self, client) -> None:
+        """Button text is 'Confirmar decisão', not 'Enviar Decisão'."""
+        case = self._create_case_in_status(CaseStatus.WAIT_DOCTOR)
+        case.structured_data = {"patient": {"name": "Btn Test", "age": 40, "gender": "Masculino"}}
+        case.save()
+        self._login_as(client, "doctor")
+        response = client.get(f"/doctor/{case.case_id}/")
+        assert response.status_code == 200
+        content = response.content.decode()
+        assert "Confirmar decisão" in content
+        assert "Enviar Decisão" not in content
+
+    def test_decision_page_does_not_show_case_id_label(self, client) -> None:
+        """The visible 'ID do Caso' label is removed from the form."""
+        case = self._create_case_in_status(CaseStatus.WAIT_DOCTOR)
+        case.structured_data = {"patient": {"name": "UUID Test", "age": 30, "gender": "Feminino"}}
+        case.save()
+        self._login_as(client, "doctor")
+        response = client.get(f"/doctor/{case.case_id}/")
+        assert response.status_code == 200
+        content = response.content.decode()
+        assert "ID do Caso" not in content
+
+    def test_decision_page_has_decision_option_classes(self, client) -> None:
+        """Template uses scoped decision-option--accept and decision-option--deny classes."""
+        case = self._create_case_in_status(CaseStatus.WAIT_DOCTOR)
+        case.structured_data = {"patient": {"name": "Class Test", "age": 35, "gender": "Masculino"}}
+        case.save()
+        self._login_as(client, "doctor")
+        response = client.get(f"/doctor/{case.case_id}/")
+        assert response.status_code == 200
+        content = response.content.decode()
+        assert "decision-option--accept" in content
+        assert "decision-option--deny" in content
+
 
 # ── Prior case card tests ───────────────────────────────────────────────
 
@@ -1880,6 +1917,19 @@ class TestDoctorSubmitView:
         assert events.filter(event_type="DOCTOR_DENY").exists()
         assert CaseEvent.objects.filter(case=case, event_type="FINAL_REPLY_POSTED").exists()
 
+    # ── Slice 001: Decision feedback and pending modal ────────────────────────
+
+    def test_decision_js_contains_pending_modal_references(self) -> None:
+        """decision.js must reference pending modal elements and strings."""
+        js = Path("static/js/decision.js").read_text()
+        assert "Decisão incompleta" in js
+        assert "btn-leave-without-decision" in js
+        assert "btn-back-to-form" in js
+        assert "form.requestSubmit()" in js
+        assert "collectMissingItems" in js
+        assert "showPendingModal" in js
+        assert "showFinalConfirmModal" in js
+
     def test_decision_js_uses_normal_submit_path_after_modal_confirmation(self) -> None:
         """Modal confirmation must not use bare form.submit() as the primary path.
 
@@ -1902,7 +1952,7 @@ class TestDoctorSubmitView:
         """
         sw = Path("static/js/sw.js").read_text()
         assert 'event.request.method !== "GET"' in sw
-        assert "ats-cache-v4" in sw
+        assert "ats-cache-v5" in sw
 
     def test_service_worker_bypasses_pdf_and_attachment_navigations(self) -> None:
         """SW must not intercept target="_blank" navigations to PDF/attachment routes.

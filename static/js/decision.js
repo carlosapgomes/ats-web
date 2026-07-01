@@ -11,8 +11,15 @@
     var form = document.getElementById('decision-form');
     var confirmModalEl = document.getElementById('confirm-modal');
     var confirmBody = document.getElementById('confirm-body');
+    var confirmModalTitle = document.getElementById('confirm-modal-title');
     var btnConfirmFinal = document.getElementById('btn-confirm-final');
+    var btnRevisar = document.getElementById('btn-revisar');
+    var btnBackToForm = document.getElementById('btn-back-to-form');
+    var btnLeaveWithoutDecision = document.getElementById('btn-leave-without-decision');
     var btnSubmit = document.getElementById('btn-submit');
+
+    var acceptOption = document.querySelector('.decision-option--accept');
+    var denyOption = document.querySelector('.decision-option--deny');
 
     if (!form) return;
 
@@ -20,6 +27,39 @@
     if (confirmModalEl) {
         confirmModal = new bootstrap.Modal(confirmModalEl);
     }
+
+    // ── Card selection highlight ──────────────────────────────────────
+
+    function updateDecisionCardHighlight() {
+        if (acceptOption) acceptOption.classList.remove('is-selected');
+        if (denyOption) denyOption.classList.remove('is-selected');
+        if (acceptRadio && acceptRadio.checked && acceptOption) {
+            acceptOption.classList.add('is-selected');
+        } else if (denyRadio && denyRadio.checked && denyOption) {
+            denyOption.classList.add('is-selected');
+        }
+    }
+
+    function onDecisionCardClick(decision) {
+        return function () {
+            if (decision === 'accept' && acceptRadio) {
+                acceptRadio.checked = true;
+            } else if (decision === 'deny' && denyRadio) {
+                denyRadio.checked = true;
+            }
+            toggleSections();
+            updateDecisionCardHighlight();
+        };
+    }
+
+    if (acceptOption) {
+        acceptOption.addEventListener('click', onDecisionCardClick('accept'));
+    }
+    if (denyOption) {
+        denyOption.addEventListener('click', onDecisionCardClick('deny'));
+    }
+
+    // ── Section toggling ──────────────────────────────────────────────
 
     function toggleSections() {
         if (acceptRadio && acceptRadio.checked) {
@@ -42,9 +82,18 @@
 
     // Initialize state on page load
     toggleSections();
+    updateDecisionCardHighlight();
 
-    if (acceptRadio) acceptRadio.addEventListener('change', toggleSections);
-    if (denyRadio) denyRadio.addEventListener('change', toggleSections);
+    if (acceptRadio) acceptRadio.addEventListener('change', function () {
+        toggleSections();
+        updateDecisionCardHighlight();
+    });
+    if (denyRadio) denyRadio.addEventListener('change', function () {
+        toggleSections();
+        updateDecisionCardHighlight();
+    });
+
+    // ── Helpers ───────────────────────────────────────────────────────
 
     function escapeHtml(str) {
         var div = document.createElement('div');
@@ -57,6 +106,82 @@
     if (admissionFlow) admissionFlow.addEventListener('change', function () { admissionFlow.classList.remove('is-invalid'); });
     if (denyReason) denyReason.addEventListener('input', function () { denyReason.classList.remove('is-invalid'); });
 
+    // ── Pending validation ────────────────────────────────────────────
+
+    function collectMissingItems() {
+        var items = [];
+
+        if (!acceptRadio.checked && !denyRadio.checked) {
+            items.push('Escolha Aceitar ou Negar.');
+            return items;
+        }
+
+        if (acceptRadio.checked) {
+            if (!supportFlag || !supportFlag.value) {
+                items.push('Selecione o Suporte Necessário.');
+            }
+            if (!admissionFlow || !admissionFlow.value) {
+                items.push('Selecione o Fluxo de Admissão.');
+            }
+        }
+
+        if (denyRadio.checked) {
+            var reason = denyReason ? denyReason.value.trim() : '';
+            if (!reason) {
+                items.push('Informe o Motivo da Negativa.');
+            }
+        }
+
+        return items;
+    }
+
+    function showPendingModal(items) {
+        var listHtml = '<ul class="mb-0">';
+        for (var i = 0; i < items.length; i++) {
+            listHtml += '<li>' + escapeHtml(items[i]) + '</li>';
+        }
+        listHtml += '</ul>';
+
+        confirmModalTitle.textContent = 'Decisão incompleta';
+        confirmBody.innerHTML =
+            '<div class="text-center mb-3"><span style="font-size:2rem;">&#9888;</span></div>' +
+            '<p class="text-center mb-2">Preencha os campos abaixo antes de confirmar:</p>' +
+            listHtml;
+
+        btnRevisar.style.display = 'none';
+        btnBackToForm.style.display = 'inline-block';
+        btnLeaveWithoutDecision.style.display = 'inline-block';
+        btnConfirmFinal.style.display = 'none';
+
+        confirmModal.show();
+    }
+
+    function showFinalConfirmModal(decision, supportText, flowText, reason) {
+        confirmModalTitle.textContent = 'Confirmar Decisão';
+
+        if (decision === 'accept') {
+            confirmBody.innerHTML =
+                '<div class="text-center mb-3"><span style="font-size:3rem;">&#10003;</span></div>' +
+                '<p class="text-center mb-1"><strong>ACEITAR</strong> &mdash; ' + escapeHtml(supportText) + ' &middot; ' + escapeHtml(flowText) + '</p>' +
+                '<div class="alert alert-info small mb-0 mt-3">O caso será encaminhado automaticamente para agendamento.</div>';
+        } else {
+            confirmBody.innerHTML =
+                '<div class="text-center mb-3"><span style="font-size:3rem;">&#10007;</span></div>' +
+                '<p class="text-center mb-1"><strong>NEGAR</strong></p>' +
+                '<div class="mt-3"><strong>Motivo:</strong> ' + escapeHtml(reason) + '</div>' +
+                '<div class="alert alert-warning small mb-0 mt-3">O resultado será comunicado à recepção.</div>';
+        }
+
+        btnRevisar.style.display = 'inline-block';
+        btnBackToForm.style.display = 'none';
+        btnLeaveWithoutDecision.style.display = 'none';
+        btnConfirmFinal.style.display = 'inline-block';
+
+        confirmModal.show();
+    }
+
+    // ── Submit handler ────────────────────────────────────────────────
+
     var finalSubmitConfirmed = false;
 
     if (form && confirmModal) {
@@ -65,15 +190,13 @@
 
             e.preventDefault();
 
-            // Validate decision selected
-            if (!acceptRadio.checked && !denyRadio.checked) {
-                var decisionError = document.getElementById('decision-error');
-                if (decisionError) decisionError.style.display = 'block';
+            var missingItems = collectMissingItems();
+            if (missingItems.length > 0) {
+                showPendingModal(missingItems);
                 return;
             }
-            var decisionError = document.getElementById('decision-error');
-            if (decisionError) decisionError.style.display = 'none';
 
+            // All valid — show final confirmation
             var decision = acceptRadio.checked ? 'accept' : 'deny';
             var supportText = supportFlag && supportFlag.selectedIndex >= 0
                 ? supportFlag.options[supportFlag.selectedIndex].text : '';
@@ -81,29 +204,7 @@
                 ? admissionFlow.options[admissionFlow.selectedIndex].text : '';
             var reason = denyReason ? denyReason.value.trim() : '';
 
-            if (decision === 'accept') {
-                if (!supportFlag || !supportFlag.value || !admissionFlow || !admissionFlow.value) {
-                    if (supportFlag && !supportFlag.value) supportFlag.classList.add('is-invalid');
-                    if (admissionFlow && !admissionFlow.value) admissionFlow.classList.add('is-invalid');
-                    return;
-                }
-                confirmBody.innerHTML =
-                    '<div class="text-center mb-3"><span style="font-size:3rem;">&#10003;</span></div>' +
-                    '<p class="text-center mb-1"><strong>ACEITAR</strong> &mdash; ' + escapeHtml(supportText) + ' &middot; ' + escapeHtml(flowText) + '</p>' +
-                    '<div class="alert alert-info small mb-0 mt-3">O caso será encaminhado automaticamente para agendamento.</div>';
-            } else {
-                if (!reason) {
-                    if (denyReason) denyReason.classList.add('is-invalid');
-                    return;
-                }
-                confirmBody.innerHTML =
-                    '<div class="text-center mb-3"><span style="font-size:3rem;">&#10007;</span></div>' +
-                    '<p class="text-center mb-1"><strong>NEGAR</strong></p>' +
-                    '<div class="mt-3"><strong>Motivo:</strong> ' + escapeHtml(reason) + '</div>' +
-                    '<div class="alert alert-warning small mb-0 mt-3">O resultado será comunicado à recepção.</div>';
-            }
-
-            confirmModal.show();
+            showFinalConfirmModal(decision, supportText, flowText, reason);
         });
     }
 

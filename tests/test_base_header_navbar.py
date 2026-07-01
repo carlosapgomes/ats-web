@@ -75,7 +75,7 @@ def test_header_uses_navbar(rf: RequestFactory) -> None:
 def test_navbar_brand_has_icon_and_name(rf: RequestFactory) -> None:
     html = _render(rf)
     assert "navbar-brand" in html
-    assert "icons/icon-192x192.png" in html
+    assert "icons/icon-192x192-contrast.png" in html
     assert "Regulação" in html
 
 

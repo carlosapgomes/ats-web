@@ -52,15 +52,16 @@
 
           <div class="mb-4">
             <label class="form-label">Decisão <span class="text-danger">*</span></label>
+            <p class="decision-hint small text-muted mb-3">Escolha Aceitar ou Negar para revelar os campos necessários.</p>
             <div class="decision-radio-group">
-              <div class="form-check">
+              <div class="decision-option decision-option--accept form-check">
                 <input class="form-check-input" type="radio" name="decision" id="decision-accept" value="accept" required{% if form.decision.value == "accept" %} checked{% endif %}>
                 <label class="form-check-label d-block" for="decision-accept">
                   <strong>✓ Aceitar</strong>
                   <div class="text-muted small">Encaminhar para agendamento ou vinda imediata</div>
                 </label>
               </div>
-              <div class="form-check">
+              <div class="decision-option decision-option--deny form-check">
                 <input class="form-check-input" type="radio" name="decision" id="decision-deny" value="deny"{% if form.decision.value == "deny" %} checked{% endif %}>
                 <label class="form-check-label d-block" for="decision-deny">
                   <strong>✗ Negar</strong>
@@ -76,6 +77,7 @@
           </div>
 
           <div class="decision-section{% if form.decision.value == 'accept' %} active{% endif %}" id="accept-section">
+            <h6 class="text-muted fw-semibold mb-3">Dados para aceite</h6>
             <div class="row g-3">
               <div class="col-md-6">
                 <label for="support-flag" class="form-label">Suporte Necessário <span class="text-danger">*</span></label>
@@ -107,6 +109,7 @@
           </div>
 
           <div class="decision-section{% if form.decision.value == 'deny' %} active{% endif %}" id="deny-section">
+            <h6 class="text-muted fw-semibold mb-3">Motivo da negativa</h6>
             <div class="mb-3">
               <label for="deny-reason" class="form-label">Motivo da Negativa <span class="text-danger">*</span></label>
               <textarea class="form-control{% if form.reason.errors %} is-invalid{% endif %}" id="deny-reason" name="reason" rows="3" placeholder="Descreva o motivo pelo qual a regulação não se aplica a este caso...">{{ form.reason.value|default:"" }}</textarea>
@@ -114,11 +117,7 @@
             </div>
           </div>
 
-          <div class="mb-4">
-            <label for="case-id-display" class="form-label">ID do Caso</label>
-            <input type="text" class="form-control" id="case-id-display" value="{{ case.case_id }}" readonly style="background:#f8f9fa;">
-            <div class="form-text">Preenchido automaticamente pelo sistema.</div>
-          </div>
+          <input type="hidden" name="case_id_hidden" value="{{ case.case_id }}">
 
           <div class="alert alert-info small mb-4 py-2" role="alert">
             💬 <strong>Precisa de mais informações?</strong>
@@ -138,7 +137,7 @@
           <input type="hidden" name="lock_token" value="{{ lock_token|default:"" }}">
 
           <div class="d-flex gap-2 btn-stack-mobile">
-            <button type="submit" class="btn btn-hospital btn-lg flex-grow-1" id="btn-submit">Enviar Decisão</button>
+            <button type="submit" class="btn btn-hospital btn-lg flex-grow-1" id="btn-submit">Confirmar decisão</button>
             <a href="{% url 'doctor:queue' %}" class="btn btn-outline-secondary btn-lg">Voltar sem decidir</a>
           </div>
         </form>
@@ -363,13 +362,15 @@
   <div class="modal-dialog modal-dialog-centered">
     <div class="modal-content">
       <div class="modal-header border-0">
-        <h5 class="modal-title">Confirmar Decisão</h5>
+        <h5 class="modal-title" id="confirm-modal-title">Confirmar Decisão</h5>
         <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Fechar"></button>
       </div>
       <div class="modal-body" id="confirm-body"></div>
-      <div class="modal-footer border-0">
-        <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Revisar</button>
-        <button type="button" class="btn btn-hospital" id="btn-confirm-final">Confirmar Decisão</button>
+      <div class="modal-footer border-0" id="confirm-modal-footer">
+        <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal" id="btn-revisar" style="display:none;">Revisar</button>
+        <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal" id="btn-back-to-form">Voltar ao formulário</button>
+        <a href="{% url 'doctor:queue' %}" class="btn btn-outline-danger" id="btn-leave-without-decision">Sair sem decidir</a>
+        <button type="button" class="btn btn-hospital" id="btn-confirm-final" style="display:none;">Confirmar Decisão</button>
       </div>
     </div>
   </div>
