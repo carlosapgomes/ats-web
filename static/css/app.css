@@ -697,6 +697,15 @@ body.hospital-shell h6 {
   border-top: 4px solid var(--hospital-primary);
 }
 
+/* Decision shortcut: full-width on mobile, auto on md+.
+   Bootstrap 5 has no responsive width utilities, so scope w-md-auto
+   to the decision layout to honour the original intent. */
+@media (min-width: 768px) {
+  .doctor-decision-layout .w-md-auto {
+    width: auto !important;
+  }
+}
+
 .doctor-report-card {
   border-left: 4px solid rgba(11, 66, 99, 0.18);
 }
