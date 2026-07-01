@@ -3,7 +3,7 @@
 ## Slices
 
 - [x] Slice 001 — Clareza imediata da decisão: feedback visual, pendências em modal, botão `Confirmar decisão`, ocultar UUID (`slices/slice-001-decision-feedback-and-pending-modal.md`)
-- [ ] Slice 002 — Fluxo de leitura clínica: mover formulário para o final e adicionar atalho `Ir para decisão` (`slices/slice-002-reading-order-and-decision-anchor.md`)
+- [x] Slice 002 — Fluxo de leitura clínica: mover formulário para o final e adicionar atalho `Ir para decisão` (`slices/slice-002-reading-order-and-decision-anchor.md`)
 
 ## Dimensionamento
 
