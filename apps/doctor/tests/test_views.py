@@ -1400,6 +1400,84 @@ class TestDoctorDecisionView:
         assert faltam_pos >= 0, "'Faltam informações?' deve estar presente"
         assert btn_stack_pos < faltam_pos, "Orientações 'Faltam informações?' devem aparecer depois do btn-stack-mobile"
 
+    # ── Slice 004: Compact acceptance orientation help text ───────────────────
+
+    def test_decision_page_has_compact_observation_help_text(self, client) -> None:
+        """Texto compacto do campo de orientações está presente."""
+        case = self._create_case_in_status(CaseStatus.WAIT_DOCTOR)
+        case.structured_data = {"patient": {"name": "Obs Help", "age": 40, "gender": "Feminino"}}
+        case.save()
+        self._login_as(client, "doctor")
+        response = client.get(f"/doctor/{case.case_id}/")
+        assert response.status_code == 200
+        content = response.content.decode()
+        assert "Opcional · Máx. 500 caracteres." in content, (
+            "Texto compacto 'Opcional · Máx. 500 caracteres.' deve estar presente"
+        )
+        assert "Para pedir documentos, use Comunicação operacional" in content, (
+            "Frase sobre documentos na Comunicação operacional deve estar presente"
+        )
+
+    def test_decision_page_has_observation_detalhes_and_collapse(self, client) -> None:
+        """Link 'Detalhes' e collapse id doctor-observation-help existem."""
+        case = self._create_case_in_status(CaseStatus.WAIT_DOCTOR)
+        case.structured_data = {"patient": {"name": "Detalhes Obs", "age": 35, "gender": "Masculino"}}
+        case.save()
+        self._login_as(client, "doctor")
+        response = client.get(f"/doctor/{case.case_id}/")
+        assert response.status_code == 200
+        content = response.content.decode()
+        assert "Detalhes" in content, "Link 'Detalhes' deve estar presente"
+        assert 'id="doctor-observation-help"' in content, "Collapse id doctor-observation-help deve existir"
+
+    def test_decision_page_has_observation_detail_examples(self, client) -> None:
+        """Exemplos detalhados do campo de orientações estão presentes (colapsáveis)."""
+        case = self._create_case_in_status(CaseStatus.WAIT_DOCTOR)
+        case.structured_data = {"patient": {"name": "Examples", "age": 30, "gender": "Feminino"}}
+        case.save()
+        self._login_as(client, "doctor")
+        response = client.get(f"/doctor/{case.case_id}/")
+        assert response.status_code == 200
+        content = response.content.decode()
+        assert "suporte, preparo, prioridade ou cuidados" in content, (
+            "Exemplos detalhados devem estar presentes (colapsáveis)"
+        )
+
+    def test_decision_page_no_long_observation_help_text(self, client) -> None:
+        """O texto longo antigo não aparece como form-text permanente único."""
+        case = self._create_case_in_status(CaseStatus.WAIT_DOCTOR)
+        case.structured_data = {"patient": {"name": "Long Help", "age": 28, "gender": "Masculino"}}
+        case.save()
+        self._login_as(client, "doctor")
+        response = client.get(f"/doctor/{case.case_id}/")
+        assert response.status_code == 200
+        content = response.content.decode()
+        # A string antiga completa não deve aparecer como texto contínuo não-colapsável
+        old_text = (
+            "Use para orientações que devem acompanhar o aceite, como suporte, preparo, "
+            "prioridade ou cuidados no agendamento/execução. Para pedir documentos ou avisar "
+            "outra equipe, use a comunicação operacional."
+        )
+        # Find the form-text div and check it doesn't contain the old long text
+        import re
+
+        form_text_matches = re.findall(r'<div class="form-text">(.*?)</div>', content, re.DOTALL)
+        found_long_in_form_text = any(old_text in ft for ft in form_text_matches)
+        assert not found_long_in_form_text, "O texto longo antigo não deve estar em um form-text permanente"
+
+    def test_decision_page_has_observation_label(self, client) -> None:
+        """Label 'Orientações para agendamento/execução' continua presente."""
+        case = self._create_case_in_status(CaseStatus.WAIT_DOCTOR)
+        case.structured_data = {"patient": {"name": "Label Check", "age": 32, "gender": "Feminino"}}
+        case.save()
+        self._login_as(client, "doctor")
+        response = client.get(f"/doctor/{case.case_id}/")
+        assert response.status_code == 200
+        content = response.content.decode()
+        assert "Orientações para agendamento/execução" in content, (
+            "Label 'Orientações para agendamento/execução' deve continuar presente"
+        )
+
 
 # ── Prior case card tests ───────────────────────────────────────────────
 
