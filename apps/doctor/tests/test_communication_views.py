@@ -221,3 +221,58 @@ def test_doctor_sees_author_and_role_in_messages(client, db, doctor_case, user):
     content = response.content.decode("utf-8")
 
     assert "nir" in content.lower() or "NIR" in content
+
+
+# ── Slice 003: Compact help text tests ────────────────────────────────────
+
+
+def test_communication_help_has_como_usar_trigger(client, db, doctor_case):
+    """Ajuda da comunicação operacional tem botão 'Como usar?'."""
+    _doctor_login(client)
+    url = reverse("doctor:decision", args=[doctor_case.case_id])
+    response = client.get(url)
+    assert response.status_code == 200
+    content = response.content.decode("utf-8")
+    assert "Como usar?" in content, "Botão 'Como usar?' deve estar presente na ajuda"
+
+
+def test_communication_help_uses_collapse_id(client, db, doctor_case):
+    """Ajuda usa collapse com id case-communication-help."""
+    _doctor_login(client)
+    url = reverse("doctor:decision", args=[doctor_case.case_id])
+    response = client.get(url)
+    assert response.status_code == 200
+    content = response.content.decode("utf-8")
+    assert 'id="case-communication-help"' in content, "Collapse id case-communication-help deve existir"
+
+
+def test_communication_help_full_text_present(client, db, doctor_case):
+    """Texto completo da ajuda operacional continua presente."""
+    _doctor_login(client)
+    url = reverse("doctor:decision", args=[doctor_case.case_id])
+    response = client.get(url)
+    assert response.status_code == 200
+    content = response.content.decode("utf-8")
+    assert "Decisões formais, agendamento e encerramento continuam nos fluxos estruturados" in content
+
+
+def test_communication_help_not_alert_alert_info(client, db, doctor_case):
+    """A ajuda fixa não usa mais alert alert-info."""
+    _doctor_login(client)
+    url = reverse("doctor:decision", args=[doctor_case.case_id])
+    response = client.get(url)
+    assert response.status_code == 200
+    content = response.content.decode("utf-8")
+    # The help text itself should not be inside a permanent alert-info
+    # Find the communication section
+    comm_idx = content.find("Comunicação operacional")
+    form_idx = content.find("Formulário de Decisão")
+    comm_section = (
+        content[comm_idx:form_idx] if comm_idx >= 0 and form_idx >= 0 else content[comm_idx : comm_idx + 2000]
+    )
+    # The help is collapsible, not in a permanent alert
+    # There may be other alert-info elements, but this specific help text shouldn't be in one
+    help_lines = [line for line in comm_section.split("\n") if "alert alert-info" in line]
+    # The old alert with "Use este espaço" should not be a permanent alert-info
+    alert_with_help = [line for line in help_lines if "esclarecimentos" in line or "coordenação" in line]
+    assert len(alert_with_help) == 0, "Ajuda da comunicação operacional não deve estar em alert alert-info permanente"

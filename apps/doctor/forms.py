@@ -40,7 +40,7 @@ class DoctorDecisionForm(forms.Form):
             }
         ),
         label="Orientações para agendamento/execução",
-        help_text="Opcional. Use para orientações que devem acompanhar o aceite, como suporte, preparo, prioridade ou cuidados no agendamento/execução. Para pedir documentos ou avisar outra equipe, use a comunicação operacional. Máx. 500 caracteres.",
+        help_text="Opcional · Máx. 500 caracteres. Para pedir documentos, use Comunicação operacional.",
     )
 
     def clean(self) -> dict[str, Any]:
