@@ -326,7 +326,7 @@
           <textarea class="form-control{% if form.observation.errors %} is-invalid{% endif %}" id="doctor-observation" name="observation" rows="2" maxlength="500" placeholder="{{ form.observation.field.widget.attrs.placeholder }}">{{ form.observation.value|default:"" }}</textarea>
           {% if form.observation.errors %}<div class="invalid-feedback d-block">{{ form.observation.errors.0 }}</div>{% endif %}
           <div class="form-text">
-            Opcional · Máx. 500 caracteres. Para pedir documentos, use Comunicação operacional.
+            {{ form.observation.help_text }}
             <a data-bs-toggle="collapse" href="#doctor-observation-help" role="button"
                aria-expanded="false" aria-controls="doctor-observation-help">
               Detalhes

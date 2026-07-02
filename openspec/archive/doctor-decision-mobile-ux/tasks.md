@@ -18,26 +18,30 @@ O change começou com 2 slices e recebeu follow-ups após validação de uso no 
 
 Evitar quebrar em slices horizontais por camada. Cada slice deve entregar uma melhoria perceptível end-to-end para o médico.
 
+## Status
+
+Change concluído e arquivado. Todos os 4 slices implementados, verificados, commitados e enviados para a branch `change/doctor-decision-mobile-ux`.
+
 ## Definition of Done do change
 
-- [ ] `Aceitar`/`Negar` têm estado selecionado inequívoco, coerente com a paleta hospitalar.
-- [ ] Campos condicionais continuam aparecendo apenas após decisão inicial.
-- [ ] Clique em `Confirmar decisão` com pendências abre feedback global com lista do que falta.
-- [ ] Clique em `Confirmar decisão` completo abre modal final de confirmação.
-- [ ] UUID técnico não aparece como campo visível ao médico.
-- [ ] Formulário de decisão fica depois do conteúdo clínico/operacional principal.
-- [ ] Existe atalho não bloqueante `Ir para decisão`.
-- [ ] Ajuda da comunicação operacional está disponível de forma compacta/colapsável, sem alerta permanente pesado.
-- [ ] Orientação “Faltam informações?” fica abaixo dos botões do formulário, com detalhes sob click/tap.
-- [ ] Radio buttons de `Aceitar`/`Negar` continuam no HTML, mas não aparecem visualmente como elemento protagonista.
-- [ ] Cards `Aceitar`/`Negar` selecionados têm feedback forte: borda mais grossa, fundo sutil, título colorido e badge/ícone `Selecionado`.
-- [ ] Texto de ajuda do campo `Orientações para agendamento/execução` é curto por padrão, com exemplos em `Detalhes` por click/tap.
-- [ ] CSS customizado mínimo e escopado; Bootstrap continua sendo a base.
-- [ ] Sem models/migrations/FSM.
-- [ ] Testes relevantes adicionados/atualizados.
-- [ ] Quality gate completo passa: `uv run ruff check . && uv run ruff format --check . && uv run mypy . && uv run pytest`.
-- [ ] Cada slice gera relatório temporário em markdown com snippets antes/depois, evidências e `REPORT_PATH`.
-- [ ] Cada slice tem commit e push rastreáveis.
+- [x] `Aceitar`/`Negar` têm estado selecionado inequívoco, coerente com a paleta hospitalar.
+- [x] Campos condicionais continuam aparecendo apenas após decisão inicial.
+- [x] Clique em `Confirmar decisão` com pendências abre feedback global com lista do que falta.
+- [x] Clique em `Confirmar decisão` completo abre modal final de confirmação.
+- [x] UUID técnico não aparece como campo visível ao médico.
+- [x] Formulário de decisão fica depois do conteúdo clínico/operacional principal.
+- [x] Existe atalho não bloqueante `Ir para decisão`.
+- [x] Ajuda da comunicação operacional está disponível de forma compacta/colapsável, sem alerta permanente pesado.
+- [x] Orientação “Faltam informações?” fica abaixo dos botões do formulário, com detalhes sob click/tap.
+- [x] Radio buttons de `Aceitar`/`Negar` continuam no HTML, mas não aparecem visualmente como elemento protagonista.
+- [x] Cards `Aceitar`/`Negar` selecionados têm feedback forte: borda mais grossa, fundo sutil, título colorido e badge/ícone `Selecionado`.
+- [x] Texto de ajuda do campo `Orientações para agendamento/execução` é curto por padrão, com exemplos em `Detalhes` por click/tap.
+- [x] CSS customizado mínimo e escopado; Bootstrap continua sendo a base.
+- [x] Sem models/migrations/FSM.
+- [x] Testes relevantes adicionados/atualizados.
+- [x] Quality gate completo passa: `uv run ruff check . && uv run ruff format --check . && uv run mypy . && uv run pytest`.
+- [x] Cada slice gera relatório temporário em markdown com snippets antes/depois, evidências e `REPORT_PATH`.
+- [x] Cada slice tem commit e push rastreáveis.
 
 ## Branch de implementação
 
