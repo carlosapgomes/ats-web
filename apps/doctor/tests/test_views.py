@@ -1138,6 +1138,346 @@ class TestDoctorDecisionView:
         # Context must appear
         assert "procedimento solicitado" in content.lower()
 
+    # ── Slice 001: Decision feedback and pending modal ────────────────────────
+
+    def test_decision_page_has_confirmar_decisao_button(self, client) -> None:
+        """Button text is 'Confirmar decisão', not 'Enviar Decisão'."""
+        case = self._create_case_in_status(CaseStatus.WAIT_DOCTOR)
+        case.structured_data = {"patient": {"name": "Btn Test", "age": 40, "gender": "Masculino"}}
+        case.save()
+        self._login_as(client, "doctor")
+        response = client.get(f"/doctor/{case.case_id}/")
+        assert response.status_code == 200
+        content = response.content.decode()
+        assert "Confirmar decisão" in content
+        assert "Enviar Decisão" not in content
+
+    def test_decision_page_does_not_show_case_id_label(self, client) -> None:
+        """The visible 'ID do Caso' label is removed from the form."""
+        case = self._create_case_in_status(CaseStatus.WAIT_DOCTOR)
+        case.structured_data = {"patient": {"name": "UUID Test", "age": 30, "gender": "Feminino"}}
+        case.save()
+        self._login_as(client, "doctor")
+        response = client.get(f"/doctor/{case.case_id}/")
+        assert response.status_code == 200
+        content = response.content.decode()
+        assert "ID do Caso" not in content
+
+    def test_decision_page_has_decision_option_classes(self, client) -> None:
+        """Template uses scoped decision-option--accept and decision-option--deny classes."""
+        case = self._create_case_in_status(CaseStatus.WAIT_DOCTOR)
+        case.structured_data = {"patient": {"name": "Class Test", "age": 35, "gender": "Masculino"}}
+        case.save()
+        self._login_as(client, "doctor")
+        response = client.get(f"/doctor/{case.case_id}/")
+        assert response.status_code == 200
+        content = response.content.decode()
+        assert "decision-option--accept" in content
+        assert "decision-option--deny" in content
+
+    # ── Slice 002: Reading order and decision anchor ────────────────────────
+
+    def test_decision_page_has_form_after_report(self, client) -> None:
+        """'Relatório Automático da Regulação' appears before 'Formulário de Decisão'."""
+        case = self._create_case_in_status(CaseStatus.WAIT_DOCTOR)
+        case.summary_text = "Hérnia inguinal bilateral"
+        case.structured_data = {"patient": {"name": "Order Test", "age": 40, "gender": "Masculino"}}
+        case.suggested_action = {"suggestion": "accept", "support_recommendation": "anesthesist"}
+        case.save()
+        self._login_as(client, "doctor")
+        response = client.get(f"/doctor/{case.case_id}/")
+        assert response.status_code == 200
+        content = response.content.decode()
+        report_pos = content.index("Relatório Automático da Regulação")
+        form_pos = content.index("Formulário de Decisão")
+        assert report_pos < form_pos, (
+            f"'Relatório Automático da Regulação' at {report_pos} should come before "
+            f"'Formulário de Decisão' at {form_pos}"
+        )
+
+    def test_decision_page_has_form_after_communication(self, client) -> None:
+        """'Comunicação operacional' appears before 'Formulário de Decisão'."""
+        case = self._create_case_in_status(CaseStatus.WAIT_DOCTOR)
+        case.structured_data = {"patient": {"name": "Comm Order", "age": 35, "gender": "Feminino"}}
+        case.save()
+        self._login_as(client, "doctor")
+        response = client.get(f"/doctor/{case.case_id}/")
+        assert response.status_code == 200
+        content = response.content.decode()
+        comm_pos = content.index("Comunicação operacional")
+        form_pos = content.index("Formulário de Decisão")
+        assert comm_pos < form_pos, (
+            f"'Comunicação operacional' at {comm_pos} should come before 'Formulário de Decisão' at {form_pos}"
+        )
+
+    def test_decision_page_has_decision_form_anchor(self, client) -> None:
+        """The decision form card has id='doctor-decision-form'."""
+        case = self._create_case_in_status(CaseStatus.WAIT_DOCTOR)
+        case.structured_data = {"patient": {"name": "Anchor Test", "age": 30, "gender": "Masculino"}}
+        case.save()
+        self._login_as(client, "doctor")
+        response = client.get(f"/doctor/{case.case_id}/")
+        assert response.status_code == 200
+        content = response.content.decode()
+        assert 'id="doctor-decision-form"' in content, "Missing id='doctor-decision-form' on form card"
+
+    def test_decision_page_has_shortcut_link(self, client) -> None:
+        """Page has a shortcut link pointing to #doctor-decision-form."""
+        case = self._create_case_in_status(CaseStatus.WAIT_DOCTOR)
+        case.structured_data = {"patient": {"name": "Shortcut Test", "age": 45, "gender": "Feminino"}}
+        case.save()
+        self._login_as(client, "doctor")
+        response = client.get(f"/doctor/{case.case_id}/")
+        assert response.status_code == 200
+        content = response.content.decode()
+        assert 'href="#doctor-decision-form"' in content, "Missing shortcut link to #doctor-decision-form"
+
+    def test_decision_page_has_ir_para_decisao_text(self, client) -> None:
+        """Page contains 'Ir para decisão' text in the shortcut."""
+        case = self._create_case_in_status(CaseStatus.WAIT_DOCTOR)
+        case.structured_data = {"patient": {"name": "Shortcut Text", "age": 28, "gender": "Masculino"}}
+        case.save()
+        self._login_as(client, "doctor")
+        response = client.get(f"/doctor/{case.case_id}/")
+        assert response.status_code == 200
+        content = response.content.decode()
+        assert "Ir para decisão" in content, "Missing 'Ir para decisão' text"
+
+    def test_decision_page_preserves_decision_form_id(self, client) -> None:
+        """The form still has id='decision-form' after the move."""
+        case = self._create_case_in_status(CaseStatus.WAIT_DOCTOR)
+        case.structured_data = {"patient": {"name": "Preserve Form", "age": 33, "gender": "Feminino"}}
+        case.save()
+        self._login_as(client, "doctor")
+        response = client.get(f"/doctor/{case.case_id}/")
+        assert response.status_code == 200
+        content = response.content.decode()
+        assert 'id="decision-form"' in content, "Missing id='decision-form'"
+
+    def test_decision_page_preserves_work_lock_config(self, client) -> None:
+        """The work-lock-config div still exists after the move."""
+        case = self._create_case_in_status(CaseStatus.WAIT_DOCTOR)
+        case.structured_data = {"patient": {"name": "Lock Config", "age": 40, "gender": "Masculino"}}
+        case.save()
+        self._login_as(client, "doctor")
+        response = client.get(f"/doctor/{case.case_id}/")
+        assert response.status_code == 200
+        content = response.content.decode()
+        assert 'id="work-lock-config"' in content, "Missing id='work-lock-config'"
+
+    def test_decision_page_preserves_confirm_modal(self, client) -> None:
+        """The confirm-modal still exists after the move."""
+        case = self._create_case_in_status(CaseStatus.WAIT_DOCTOR)
+        case.structured_data = {"patient": {"name": "Modal Preserve", "age": 50, "gender": "Feminino"}}
+        case.save()
+        self._login_as(client, "doctor")
+        response = client.get(f"/doctor/{case.case_id}/")
+        assert response.status_code == 200
+        content = response.content.decode()
+        assert 'id="confirm-modal"' in content, "Missing id='confirm-modal'"
+
+    # ── Slice 003: Compact help texts and card selection ─────────────────────
+
+    def test_decision_page_has_faltam_informacoes_text(self, client) -> None:
+        """Texto 'Faltam informações?' existe na página."""
+        case = self._create_case_in_status(CaseStatus.WAIT_DOCTOR)
+        case.structured_data = {"patient": {"name": "Info Help", "age": 40, "gender": "Feminino"}}
+        case.save()
+        self._login_as(client, "doctor")
+        response = client.get(f"/doctor/{case.case_id}/")
+        assert response.status_code == 200
+        content = response.content.decode()
+        assert "Faltam informações?" in content, "Texto 'Faltam informações?' deve estar presente"
+
+    def test_decision_page_has_detalhes_link_and_collapse(self, client) -> None:
+        """Link 'Detalhes' e collapse id missing-info-help existem."""
+        case = self._create_case_in_status(CaseStatus.WAIT_DOCTOR)
+        case.structured_data = {"patient": {"name": "Detalhes Link", "age": 35, "gender": "Masculino"}}
+        case.save()
+        self._login_as(client, "doctor")
+        response = client.get(f"/doctor/{case.case_id}/")
+        assert response.status_code == 200
+        content = response.content.decode()
+        assert "Detalhes" in content, "Link 'Detalhes' deve estar presente"
+        assert 'id="missing-info-help"' in content, "Collapse id missing-info-help deve existir"
+
+    def test_faltam_informacoes_appears_after_voltar_sem_decidir(self, client) -> None:
+        """'Faltam informações?' aparece depois de 'Voltar sem decidir' no HTML."""
+        case = self._create_case_in_status(CaseStatus.WAIT_DOCTOR)
+        case.structured_data = {"patient": {"name": "Position Test", "age": 30, "gender": "Feminino"}}
+        case.save()
+        self._login_as(client, "doctor")
+        response = client.get(f"/doctor/{case.case_id}/")
+        assert response.status_code == 200
+        content = response.content.decode()
+        voltar_pos = content.index("Voltar sem decidir")
+        faltam_pos = content.index("Faltam informações?")
+        assert voltar_pos < faltam_pos, (
+            f"'Voltar sem decidir' at {voltar_pos} deve vir antes de 'Faltam informações?' at {faltam_pos}"
+        )
+
+    def test_decision_page_has_complemento_text_in_collapse(self, client) -> None:
+        """'Não use negativa apenas para solicitar complemento' está presente (collapse)."""
+        case = self._create_case_in_status(CaseStatus.WAIT_DOCTOR)
+        case.structured_data = {"patient": {"name": "Complemento", "age": 28, "gender": "Masculino"}}
+        case.save()
+        self._login_as(client, "doctor")
+        response = client.get(f"/doctor/{case.case_id}/")
+        assert response.status_code == 200
+        content = response.content.decode()
+        assert "Não use negativa apenas para solicitar complemento" in content
+
+    def test_decision_page_no_old_precisa_mais_info_alert(self, client) -> None:
+        """O antigo alerta fixo 'Precisa de mais informações?' não existe como alert-info."""
+        case = self._create_case_in_status(CaseStatus.WAIT_DOCTOR)
+        case.structured_data = {"patient": {"name": "Old Alert", "age": 32, "gender": "Feminino"}}
+        case.save()
+        self._login_as(client, "doctor")
+        response = client.get(f"/doctor/{case.case_id}/")
+        assert response.status_code == 200
+        content = response.content.decode()
+        # The old title "Precisa de mais informações?" should not appear
+        assert "Precisa de mais informações?" not in content, (
+            "Antigo alerta 'Precisa de mais informações?' não deve mais existir"
+        )
+
+    def test_decision_radio_has_visually_hidden_class(self, client) -> None:
+        """Radios de decisão têm classe visually-hidden."""
+        case = self._create_case_in_status(CaseStatus.WAIT_DOCTOR)
+        case.structured_data = {"patient": {"name": "Visually Hidden", "age": 45, "gender": "Masculino"}}
+        case.save()
+        self._login_as(client, "doctor")
+        response = client.get(f"/doctor/{case.case_id}/")
+        assert response.status_code == 200
+        content = response.content.decode()
+        # Radio inputs with name="decision" should have visually-hidden class
+        import re
+
+        radio_matches = re.findall(r'<input[^>]*type="radio"[^>]*name="decision"[^>]*>', content)
+        assert len(radio_matches) >= 2, "Devem existir pelo menos 2 radio inputs com name='decision'"
+        for radio in radio_matches:
+            assert "visually-hidden" in radio or "visually-hidden" in radio.lower(), (
+                f"Radio deve ter classe visually-hidden: {radio[:100]}"
+            )
+
+    def test_decision_radio_present_with_type_radio_and_name_decision(self, client) -> None:
+        """Radios continuam presentes com type='radio' e name='decision'."""
+        case = self._create_case_in_status(CaseStatus.WAIT_DOCTOR)
+        case.structured_data = {"patient": {"name": "Radio Present", "age": 38, "gender": "Feminino"}}
+        case.save()
+        self._login_as(client, "doctor")
+        response = client.get(f"/doctor/{case.case_id}/")
+        assert response.status_code == 200
+        content = response.content.decode()
+        import re
+
+        radio_matches = re.findall(r'<input[^>]*type="radio"[^>]*name="decision"[^>]*>', content)
+        assert len(radio_matches) >= 2, "Devem existir pelo menos 2 radio inputs type='radio' name='decision'"
+
+    def test_decision_cards_have_selecionado_indicator(self, client) -> None:
+        """Cards Aceitar/Negar têm indicador 'Selecionado' no markup."""
+        case = self._create_case_in_status(CaseStatus.WAIT_DOCTOR)
+        case.structured_data = {"patient": {"name": "Selecionado", "age": 42, "gender": "Masculino"}}
+        case.save()
+        self._login_as(client, "doctor")
+        response = client.get(f"/doctor/{case.case_id}/")
+        assert response.status_code == 200
+        content = response.content.decode()
+        assert "Selecionado" in content, "Indicador 'Selecionado' deve estar presente no markup"
+
+    def test_decision_page_has_btn_stack_mobile_below_buttons(self, client) -> None:
+        """Verifica que a orientação compacta está abaixo do btn-stack-mobile."""
+        case = self._create_case_in_status(CaseStatus.WAIT_DOCTOR)
+        case.structured_data = {"patient": {"name": "Stack Order", "age": 33, "gender": "Feminino"}}
+        case.save()
+        self._login_as(client, "doctor")
+        response = client.get(f"/doctor/{case.case_id}/")
+        assert response.status_code == 200
+        content = response.content.decode()
+        btn_stack_pos = content.rfind("btn-stack-mobile")
+        faltam_pos = content.find("Faltam informações?")
+        assert btn_stack_pos >= 0, "btn-stack-mobile deve estar presente"
+        assert faltam_pos >= 0, "'Faltam informações?' deve estar presente"
+        assert btn_stack_pos < faltam_pos, "Orientações 'Faltam informações?' devem aparecer depois do btn-stack-mobile"
+
+    # ── Slice 004: Compact acceptance orientation help text ───────────────────
+
+    def test_decision_page_has_compact_observation_help_text(self, client) -> None:
+        """Texto compacto do campo de orientações está presente."""
+        case = self._create_case_in_status(CaseStatus.WAIT_DOCTOR)
+        case.structured_data = {"patient": {"name": "Obs Help", "age": 40, "gender": "Feminino"}}
+        case.save()
+        self._login_as(client, "doctor")
+        response = client.get(f"/doctor/{case.case_id}/")
+        assert response.status_code == 200
+        content = response.content.decode()
+        assert "Opcional · Máx. 500 caracteres." in content, (
+            "Texto compacto 'Opcional · Máx. 500 caracteres.' deve estar presente"
+        )
+        assert "Para pedir documentos, use Comunicação operacional" in content, (
+            "Frase sobre documentos na Comunicação operacional deve estar presente"
+        )
+
+    def test_decision_page_has_observation_detalhes_and_collapse(self, client) -> None:
+        """Link 'Detalhes' e collapse id doctor-observation-help existem."""
+        case = self._create_case_in_status(CaseStatus.WAIT_DOCTOR)
+        case.structured_data = {"patient": {"name": "Detalhes Obs", "age": 35, "gender": "Masculino"}}
+        case.save()
+        self._login_as(client, "doctor")
+        response = client.get(f"/doctor/{case.case_id}/")
+        assert response.status_code == 200
+        content = response.content.decode()
+        assert "Detalhes" in content, "Link 'Detalhes' deve estar presente"
+        assert 'id="doctor-observation-help"' in content, "Collapse id doctor-observation-help deve existir"
+
+    def test_decision_page_has_observation_detail_examples(self, client) -> None:
+        """Exemplos detalhados do campo de orientações estão presentes (colapsáveis)."""
+        case = self._create_case_in_status(CaseStatus.WAIT_DOCTOR)
+        case.structured_data = {"patient": {"name": "Examples", "age": 30, "gender": "Feminino"}}
+        case.save()
+        self._login_as(client, "doctor")
+        response = client.get(f"/doctor/{case.case_id}/")
+        assert response.status_code == 200
+        content = response.content.decode()
+        assert "suporte, preparo, prioridade ou cuidados" in content, (
+            "Exemplos detalhados devem estar presentes (colapsáveis)"
+        )
+
+    def test_decision_page_no_long_observation_help_text(self, client) -> None:
+        """O texto longo antigo não aparece como form-text permanente único."""
+        case = self._create_case_in_status(CaseStatus.WAIT_DOCTOR)
+        case.structured_data = {"patient": {"name": "Long Help", "age": 28, "gender": "Masculino"}}
+        case.save()
+        self._login_as(client, "doctor")
+        response = client.get(f"/doctor/{case.case_id}/")
+        assert response.status_code == 200
+        content = response.content.decode()
+        # A string antiga completa não deve aparecer como texto contínuo não-colapsável
+        old_text = (
+            "Use para orientações que devem acompanhar o aceite, como suporte, preparo, "
+            "prioridade ou cuidados no agendamento/execução. Para pedir documentos ou avisar "
+            "outra equipe, use a comunicação operacional."
+        )
+        # Find the form-text div and check it doesn't contain the old long text
+        import re
+
+        form_text_matches = re.findall(r'<div class="form-text">(.*?)</div>', content, re.DOTALL)
+        found_long_in_form_text = any(old_text in ft for ft in form_text_matches)
+        assert not found_long_in_form_text, "O texto longo antigo não deve estar em um form-text permanente"
+
+    def test_decision_page_has_observation_label(self, client) -> None:
+        """Label 'Orientações para agendamento/execução' continua presente."""
+        case = self._create_case_in_status(CaseStatus.WAIT_DOCTOR)
+        case.structured_data = {"patient": {"name": "Label Check", "age": 32, "gender": "Feminino"}}
+        case.save()
+        self._login_as(client, "doctor")
+        response = client.get(f"/doctor/{case.case_id}/")
+        assert response.status_code == 200
+        content = response.content.decode()
+        assert "Orientações para agendamento/execução" in content, (
+            "Label 'Orientações para agendamento/execução' deve continuar presente"
+        )
+
 
 # ── Prior case card tests ───────────────────────────────────────────────
 
@@ -1880,6 +2220,19 @@ class TestDoctorSubmitView:
         assert events.filter(event_type="DOCTOR_DENY").exists()
         assert CaseEvent.objects.filter(case=case, event_type="FINAL_REPLY_POSTED").exists()
 
+    # ── Slice 001: Decision feedback and pending modal ────────────────────────
+
+    def test_decision_js_contains_pending_modal_references(self) -> None:
+        """decision.js must reference pending modal elements and strings."""
+        js = Path("static/js/decision.js").read_text()
+        assert "Decisão incompleta" in js
+        assert "btn-leave-without-decision" in js
+        assert "btn-back-to-form" in js
+        assert "form.requestSubmit()" in js
+        assert "collectMissingItems" in js
+        assert "showPendingModal" in js
+        assert "showFinalConfirmModal" in js
+
     def test_decision_js_uses_normal_submit_path_after_modal_confirmation(self) -> None:
         """Modal confirmation must not use bare form.submit() as the primary path.
 
@@ -1902,7 +2255,7 @@ class TestDoctorSubmitView:
         """
         sw = Path("static/js/sw.js").read_text()
         assert 'event.request.method !== "GET"' in sw
-        assert "ats-cache-v4" in sw
+        assert "ats-cache-v5" in sw
 
     def test_service_worker_bypasses_pdf_and_attachment_navigations(self) -> None:
         """SW must not intercept target="_blank" navigations to PDF/attachment routes.

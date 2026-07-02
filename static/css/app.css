@@ -613,22 +613,46 @@ body.hospital-shell h6 {
   display: block;
 }
 
-.decision-radio-group .form-check {
+.decision-option {
   padding: 0.75rem 1rem;
-  border: 1px solid var(--hospital-border);
+  border: 2px solid var(--hospital-border);
   border-radius: 0.6rem;
   margin-bottom: 0.5rem;
-  transition: border-color 0.2s, background 0.2s;
+  transition: border-color 0.2s, background 0.2s, box-shadow 0.2s;
+  cursor: pointer;
 }
 
-.decision-radio-group .form-check:hover {
+.decision-option:hover {
   border-color: var(--hospital-accent);
   background: rgba(47, 143, 157, 0.04);
 }
 
-.decision-radio-group .form-check-input:checked + .form-check-label {
-  font-weight: 700;
-  color: var(--hospital-primary);
+.decision-option.is-selected {
+  border-width: 2px;
+}
+
+.decision-option.is-selected .decision-selected-badge {
+  display: inline-block !important;
+}
+
+.decision-option--accept.is-selected {
+  border-color: var(--hospital-success);
+  background: rgba(27, 122, 74, 0.08);
+  box-shadow: 0 0 0 3px rgba(27, 122, 74, 0.15);
+}
+
+.decision-option--accept.is-selected .decision-title {
+  color: var(--hospital-success);
+}
+
+.decision-option--deny.is-selected {
+  border-color: var(--hospital-danger);
+  background: rgba(181, 53, 53, 0.08);
+  box-shadow: 0 0 0 3px rgba(181, 53, 53, 0.15);
+}
+
+.decision-option--deny.is-selected .decision-title {
+  color: var(--hospital-danger);
 }
 
 /* ---------- Summary box ---------- */
@@ -678,6 +702,15 @@ body.hospital-shell h6 {
 
 .doctor-decision-form-card {
   border-top: 4px solid var(--hospital-primary);
+}
+
+/* Decision shortcut: full-width on mobile, auto on md+.
+   Bootstrap 5 has no responsive width utilities, so scope w-md-auto
+   to the decision layout to honour the original intent. */
+@media (min-width: 768px) {
+  .doctor-decision-layout .w-md-auto {
+    width: auto !important;
+  }
 }
 
 .doctor-report-card {
