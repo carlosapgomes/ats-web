@@ -35,6 +35,7 @@ Melhorar a condução da decisão médica no mobile mantendo o estilo atual do a
 - Reaproveitar o modal existente de confirmação final.
 - Adicionar feedback global de pendências quando o médico clicar em confirmar com itens incompletos.
 - Reposicionar o formulário de decisão como desfecho natural da análise clínica, com atalho mobile/desktop para chegar à decisão sem bloquear usuários experientes.
+- Compactar textos de ajuda permanentes que consomem espaço vertical, mantendo o conteúdo disponível por click/tap.
 - Testes de regressão HTML/JS/CSS suficientes para proteger a UX proposta.
 
 ### Fora
@@ -66,6 +67,7 @@ Implementar este change em branch separado, por exemplo `change/doctor-decision-
 - UUID técnico (`case.case_id`) não aparece como campo visível no formulário médico.
 - Campos condicionais continuam aparecendo apenas após `Aceitar` ou `Negar`.
 - O formulário de decisão fica depois do conteúdo clínico principal, com atalho para decisão.
+- Textos de ajuda longos não aparecem como alertas permanentes pesados no fluxo mobile; ficam disponíveis de forma discreta e acessível por click/tap.
 - Sem regressão no backend: validação server-side continua soberana.
 - Sem alterações em models/migrations/FSM.
 - Quality gate do projeto passa: `uv run ruff check . && uv run ruff format --check . && uv run mypy . && uv run pytest`.

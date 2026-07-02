@@ -631,21 +631,28 @@ body.hospital-shell h6 {
   border-width: 2px;
 }
 
+.decision-option.is-selected .decision-selected-badge {
+  display: inline-block !important;
+}
+
 .decision-option--accept.is-selected {
   border-color: var(--hospital-success);
-  background: rgba(27, 122, 74, 0.06);
+  background: rgba(27, 122, 74, 0.08);
   box-shadow: 0 0 0 3px rgba(27, 122, 74, 0.15);
+}
+
+.decision-option--accept.is-selected .decision-title {
+  color: var(--hospital-success);
 }
 
 .decision-option--deny.is-selected {
   border-color: var(--hospital-danger);
-  background: rgba(181, 53, 53, 0.06);
+  background: rgba(181, 53, 53, 0.08);
   box-shadow: 0 0 0 3px rgba(181, 53, 53, 0.15);
 }
 
-.decision-option .form-check-input:checked + .form-check-label {
-  font-weight: 700;
-  color: var(--hospital-primary);
+.decision-option--deny.is-selected .decision-title {
+  color: var(--hospital-danger);
 }
 
 /* ---------- Summary box ---------- */
