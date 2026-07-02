@@ -1276,6 +1276,130 @@ class TestDoctorDecisionView:
         content = response.content.decode()
         assert 'id="confirm-modal"' in content, "Missing id='confirm-modal'"
 
+    # ── Slice 003: Compact help texts and card selection ─────────────────────
+
+    def test_decision_page_has_faltam_informacoes_text(self, client) -> None:
+        """Texto 'Faltam informações?' existe na página."""
+        case = self._create_case_in_status(CaseStatus.WAIT_DOCTOR)
+        case.structured_data = {"patient": {"name": "Info Help", "age": 40, "gender": "Feminino"}}
+        case.save()
+        self._login_as(client, "doctor")
+        response = client.get(f"/doctor/{case.case_id}/")
+        assert response.status_code == 200
+        content = response.content.decode()
+        assert "Faltam informações?" in content, "Texto 'Faltam informações?' deve estar presente"
+
+    def test_decision_page_has_detalhes_link_and_collapse(self, client) -> None:
+        """Link 'Detalhes' e collapse id missing-info-help existem."""
+        case = self._create_case_in_status(CaseStatus.WAIT_DOCTOR)
+        case.structured_data = {"patient": {"name": "Detalhes Link", "age": 35, "gender": "Masculino"}}
+        case.save()
+        self._login_as(client, "doctor")
+        response = client.get(f"/doctor/{case.case_id}/")
+        assert response.status_code == 200
+        content = response.content.decode()
+        assert "Detalhes" in content, "Link 'Detalhes' deve estar presente"
+        assert 'id="missing-info-help"' in content, "Collapse id missing-info-help deve existir"
+
+    def test_faltam_informacoes_appears_after_voltar_sem_decidir(self, client) -> None:
+        """'Faltam informações?' aparece depois de 'Voltar sem decidir' no HTML."""
+        case = self._create_case_in_status(CaseStatus.WAIT_DOCTOR)
+        case.structured_data = {"patient": {"name": "Position Test", "age": 30, "gender": "Feminino"}}
+        case.save()
+        self._login_as(client, "doctor")
+        response = client.get(f"/doctor/{case.case_id}/")
+        assert response.status_code == 200
+        content = response.content.decode()
+        voltar_pos = content.index("Voltar sem decidir")
+        faltam_pos = content.index("Faltam informações?")
+        assert voltar_pos < faltam_pos, (
+            f"'Voltar sem decidir' at {voltar_pos} deve vir antes de 'Faltam informações?' at {faltam_pos}"
+        )
+
+    def test_decision_page_has_complemento_text_in_collapse(self, client) -> None:
+        """'Não use negativa apenas para solicitar complemento' está presente (collapse)."""
+        case = self._create_case_in_status(CaseStatus.WAIT_DOCTOR)
+        case.structured_data = {"patient": {"name": "Complemento", "age": 28, "gender": "Masculino"}}
+        case.save()
+        self._login_as(client, "doctor")
+        response = client.get(f"/doctor/{case.case_id}/")
+        assert response.status_code == 200
+        content = response.content.decode()
+        assert "Não use negativa apenas para solicitar complemento" in content
+
+    def test_decision_page_no_old_precisa_mais_info_alert(self, client) -> None:
+        """O antigo alerta fixo 'Precisa de mais informações?' não existe como alert-info."""
+        case = self._create_case_in_status(CaseStatus.WAIT_DOCTOR)
+        case.structured_data = {"patient": {"name": "Old Alert", "age": 32, "gender": "Feminino"}}
+        case.save()
+        self._login_as(client, "doctor")
+        response = client.get(f"/doctor/{case.case_id}/")
+        assert response.status_code == 200
+        content = response.content.decode()
+        # The old title "Precisa de mais informações?" should not appear
+        assert "Precisa de mais informações?" not in content, (
+            "Antigo alerta 'Precisa de mais informações?' não deve mais existir"
+        )
+
+    def test_decision_radio_has_visually_hidden_class(self, client) -> None:
+        """Radios de decisão têm classe visually-hidden."""
+        case = self._create_case_in_status(CaseStatus.WAIT_DOCTOR)
+        case.structured_data = {"patient": {"name": "Visually Hidden", "age": 45, "gender": "Masculino"}}
+        case.save()
+        self._login_as(client, "doctor")
+        response = client.get(f"/doctor/{case.case_id}/")
+        assert response.status_code == 200
+        content = response.content.decode()
+        # Radio inputs with name="decision" should have visually-hidden class
+        import re
+
+        radio_matches = re.findall(r'<input[^>]*type="radio"[^>]*name="decision"[^>]*>', content)
+        assert len(radio_matches) >= 2, "Devem existir pelo menos 2 radio inputs com name='decision'"
+        for radio in radio_matches:
+            assert "visually-hidden" in radio or "visually-hidden" in radio.lower(), (
+                f"Radio deve ter classe visually-hidden: {radio[:100]}"
+            )
+
+    def test_decision_radio_present_with_type_radio_and_name_decision(self, client) -> None:
+        """Radios continuam presentes com type='radio' e name='decision'."""
+        case = self._create_case_in_status(CaseStatus.WAIT_DOCTOR)
+        case.structured_data = {"patient": {"name": "Radio Present", "age": 38, "gender": "Feminino"}}
+        case.save()
+        self._login_as(client, "doctor")
+        response = client.get(f"/doctor/{case.case_id}/")
+        assert response.status_code == 200
+        content = response.content.decode()
+        import re
+
+        radio_matches = re.findall(r'<input[^>]*type="radio"[^>]*name="decision"[^>]*>', content)
+        assert len(radio_matches) >= 2, "Devem existir pelo menos 2 radio inputs type='radio' name='decision'"
+
+    def test_decision_cards_have_selecionado_indicator(self, client) -> None:
+        """Cards Aceitar/Negar têm indicador 'Selecionado' no markup."""
+        case = self._create_case_in_status(CaseStatus.WAIT_DOCTOR)
+        case.structured_data = {"patient": {"name": "Selecionado", "age": 42, "gender": "Masculino"}}
+        case.save()
+        self._login_as(client, "doctor")
+        response = client.get(f"/doctor/{case.case_id}/")
+        assert response.status_code == 200
+        content = response.content.decode()
+        assert "Selecionado" in content, "Indicador 'Selecionado' deve estar presente no markup"
+
+    def test_decision_page_has_btn_stack_mobile_below_buttons(self, client) -> None:
+        """Verifica que a orientação compacta está abaixo do btn-stack-mobile."""
+        case = self._create_case_in_status(CaseStatus.WAIT_DOCTOR)
+        case.structured_data = {"patient": {"name": "Stack Order", "age": 33, "gender": "Feminino"}}
+        case.save()
+        self._login_as(client, "doctor")
+        response = client.get(f"/doctor/{case.case_id}/")
+        assert response.status_code == 200
+        content = response.content.decode()
+        btn_stack_pos = content.rfind("btn-stack-mobile")
+        faltam_pos = content.find("Faltam informações?")
+        assert btn_stack_pos >= 0, "btn-stack-mobile deve estar presente"
+        assert faltam_pos >= 0, "'Faltam informações?' deve estar presente"
+        assert btn_stack_pos < faltam_pos, "Orientações 'Faltam informações?' devem aparecer depois do btn-stack-mobile"
+
 
 # ── Prior case card tests ───────────────────────────────────────────────
 

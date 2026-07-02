@@ -274,16 +274,18 @@
         <p class="decision-hint small text-muted mb-3">Escolha Aceitar ou Negar para revelar os campos necessários.</p>
         <div class="decision-radio-group">
           <div class="decision-option decision-option--accept form-check">
-            <input class="form-check-input" type="radio" name="decision" id="decision-accept" value="accept" required{% if form.decision.value == "accept" %} checked{% endif %}>
+            <input class="form-check-input visually-hidden" type="radio" name="decision" id="decision-accept" value="accept" required{% if form.decision.value == "accept" %} checked{% endif %}>
             <label class="form-check-label d-block" for="decision-accept">
-              <strong>✓ Aceitar</strong>
+              <strong class="decision-title">✓ Aceitar</strong>
+              <span class="decision-selected-badge badge bg-success d-none">Selecionado</span>
               <div class="text-muted small">Encaminhar para agendamento ou vinda imediata</div>
             </label>
           </div>
           <div class="decision-option decision-option--deny form-check">
-            <input class="form-check-input" type="radio" name="decision" id="decision-deny" value="deny"{% if form.decision.value == "deny" %} checked{% endif %}>
+            <input class="form-check-input visually-hidden" type="radio" name="decision" id="decision-deny" value="deny"{% if form.decision.value == "deny" %} checked{% endif %}>
             <label class="form-check-label d-block" for="decision-deny">
-              <strong>✗ Negar</strong>
+              <strong class="decision-title">✗ Negar</strong>
+              <span class="decision-selected-badge badge bg-danger d-none">Selecionado</span>
               <div class="text-muted small">Regulação não indicada para este caso</div>
             </label>
           </div>
@@ -338,14 +340,6 @@
 
       <input type="hidden" name="case_id_hidden" value="{{ case.case_id }}">
 
-      <div class="alert alert-info small mb-4 py-2" role="alert">
-        💬 <strong>Precisa de mais informações?</strong>
-        Se faltam documentos ou dados para decidir, envie uma mensagem na
-        <strong>Comunicação operacional</strong> marcando o <strong>NIR</strong>
-        e <strong>volte sem decidir</strong>.
-        Não use negativa apenas para solicitar complemento.
-      </div>
-
       {% if lock_error %}
       <div class="alert alert-danger mb-3">
         🔒 {{ lock_error }}
@@ -358,6 +352,20 @@
       <div class="d-flex gap-2 btn-stack-mobile">
         <button type="submit" class="btn btn-hospital btn-lg flex-grow-1" id="btn-submit">Confirmar decisão</button>
         <a href="{% url 'doctor:queue' %}" class="btn btn-outline-secondary btn-lg">Voltar sem decidir</a>
+      </div>
+
+      <div class="small text-muted mt-2">
+        💬 Faltam informações? Use a Comunicação operacional e volte sem decidir.
+        <a data-bs-toggle="collapse" href="#missing-info-help" role="button"
+           aria-expanded="false" aria-controls="missing-info-help">
+          Detalhes
+        </a>
+        <div class="collapse mt-2" id="missing-info-help">
+          <div class="text-muted small">
+            Se faltam documentos ou dados para decidir, envie uma mensagem na Comunicação operacional
+            marcando o NIR e volte sem decidir. Não use negativa apenas para solicitar complemento.
+          </div>
+        </div>
       </div>
     </form>
   </div>

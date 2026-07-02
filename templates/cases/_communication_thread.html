@@ -9,11 +9,20 @@ Contexto esperado:
   communication_max_length — int
 {% endcomment %}
 <div class="card p-4 mb-4" id="case-communication">
-  <h5 class="mb-2">💬 Comunicação operacional</h5>
-  <div class="alert alert-info small mb-3 py-2">
-    Use este espaço para esclarecimentos e coordenação sobre este caso.
-    Decisões formais, agendamento e encerramento continuam nos fluxos estruturados.
-    Use <strong>@nir</strong>, <strong>@medico</strong>, <strong>@chd</strong>, <strong>@supervisor</strong> ou <strong>@admin</strong> para notificar equipes.
+  <div class="d-flex justify-content-between align-items-start gap-2 mb-3">
+    <h5 class="mb-0">💬 Comunicação operacional</h5>
+    <button class="btn btn-link btn-sm p-0 text-decoration-none" type="button"
+            data-bs-toggle="collapse" data-bs-target="#case-communication-help"
+            aria-expanded="false" aria-controls="case-communication-help">
+      Como usar?
+    </button>
+  </div>
+  <div class="collapse" id="case-communication-help">
+    <div class="text-muted small mb-3">
+      Use este espaço para esclarecimentos e coordenação sobre este caso.
+      Decisões formais, agendamento e encerramento continuam nos fluxos estruturados.
+      Use <strong>@nir</strong>, <strong>@medico</strong>, <strong>@chd</strong>, <strong>@supervisor</strong> ou <strong>@admin</strong> para notificar equipes.
+    </div>
   </div>
 
   {% if communication_messages %}

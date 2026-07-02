@@ -24,7 +24,7 @@ Arquivos relevantes observados:
 
 ## Estratégia
 
-Implementar em 2 slices para manter verticalidade e baixo risco:
+Implementar em slices verticais para manter baixo risco:
 
 1. **Slice 001 — Clareza imediata do ato decisório.**
    - Reforça feedback visual dos cards.
@@ -37,6 +37,13 @@ Implementar em 2 slices para manter verticalidade e baixo risco:
    - Move o formulário para o final do conteúdo clínico/operacional.
    - Adiciona atalho para decisão.
    - Mantém a implementação funcional do Slice 001.
+
+3. **Slice 003 — Refinos finais de UX mobile.**
+   - Compacta a ajuda fixa da comunicação operacional.
+   - Move a orientação `Faltam informações?` para abaixo dos botões do formulário.
+   - Oculta visualmente os radio buttons mantendo-os no HTML.
+   - Reforça o estado selecionado dos cards `Aceitar`/`Negar` com borda mais grossa, fundo sutil, título colorido e indicador `Selecionado`.
+   - Mantém textos completos disponíveis por click/tap, sem depender de hover.
 
 ## Design visual
 
@@ -165,6 +172,64 @@ Adicionar atalho próximo ao topo, preferencialmente após dados do paciente:
 
 Usar âncora local, sem JS obrigatório.
 
+## Refinos finais de UX mobile
+
+Após Slices 001 e 002, reduzir dois alertas permanentes que ocupam espaço vertical no mobile e reforçar a seleção dos cards de decisão.
+
+### Comunicação operacional
+
+O partial `templates/cases/_communication_thread.html` hoje mostra um `alert alert-info` fixo explicando como usar a thread. A orientação é útil, mas não precisa ocupar espaço permanente.
+
+Substituir por acionador discreto, preferencialmente Bootstrap collapse:
+
+```text
+💬 Comunicação operacional                         Como usar?
+```
+
+Ao tocar/clicar em `Como usar?`, mostrar o texto completo:
+
+```text
+Use este espaço para esclarecimentos e coordenação sobre este caso.
+Decisões formais, agendamento e encerramento continuam nos fluxos estruturados.
+Use @nir, @medico, @chd, @supervisor ou @admin para notificar equipes.
+```
+
+Não usar hover como mecanismo principal, pois a experiência alvo é mobile.
+
+### Faltam informações?
+
+O alerta `Precisa de mais informações?` no formulário de decisão é importante para evitar negativa indevida apenas para solicitar complemento, mas deve sair do meio do formulário.
+
+Posição alvo: **abaixo dos botões** `Confirmar decisão` e `Voltar sem decidir`.
+
+Formato alvo:
+
+```text
+💬 Faltam informações? Use a Comunicação operacional e volte sem decidir. Detalhes
+```
+
+`Detalhes` abre conteúdo colapsável com a orientação completa:
+
+```text
+Se faltam documentos ou dados para decidir, envie uma mensagem na Comunicação operacional marcando o NIR e volte sem decidir. Não use negativa apenas para solicitar complemento.
+```
+
+Usar Bootstrap/HTML nativo; evitar CSS customizado.
+
+### Cards Aceitar/Negar
+
+O radio button não deve ser protagonista visual. Manter o `<input type="radio">` no DOM para semântica, acessibilidade e submissão, mas ocultá-lo visualmente com `visually-hidden` ou equivalente acessível.
+
+O card inteiro deve comunicar seleção:
+
+- borda mais grossa no estado `.is-selected`;
+- fundo verde/vermelho muito claro conforme decisão;
+- título na cor da decisão;
+- badge ou texto `Selecionado` visível no card selecionado;
+- clique/toque no card inteiro preservado via label/input.
+
+Não usar `display:none` para remover o radio se isso prejudicar acessibilidade. Não criar novo componente ou JS pesado.
+
 ## Testabilidade
 
 ### Testes sugeridos para Slice 001
@@ -180,6 +245,16 @@ Usar âncora local, sem JS obrigatório.
 - No HTML renderizado, `Relatório Automático da Regulação` aparece antes de `Formulário de Decisão`.
 - Existe âncora `id="doctor-decision-form"`.
 - Existe link/atalho `href="#doctor-decision-form"` com texto `Ir para decisão`.
+
+### Testes sugeridos para Slice 003
+
+- Ajuda operacional contém acionador `Como usar?` e collapse `case-communication-help` ou equivalente.
+- Texto completo da ajuda operacional continua presente, mas não dentro de `alert alert-info` permanente.
+- Orientação `Faltam informações?` existe abaixo de `Voltar sem decidir` no HTML.
+- Detalhes `Não use negativa apenas para solicitar complemento` continuam presentes em collapse `missing-info-help` ou equivalente.
+- Radios `decision` continuam presentes no HTML, mas com `visually-hidden` ou equivalente acessível.
+- Markup/CSS dos cards contém indicador `Selecionado` e estado `.decision-option.is-selected` com feedback visual forte.
+- Não há dependência de tooltip/hover.
 
 ## Riscos e mitigação
 

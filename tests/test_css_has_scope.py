@@ -127,3 +127,61 @@ def test_decision_shortcut_width_is_responsive() -> None:
         "Falta regra escopada .doctor-decision-layout .w-md-auto em app.css"
     )
     assert "min-width: 768px" in content, "Falta media query min-width: 768px para o atalho de decisão"
+
+
+# ── Slice 003: Decision card selection styles ────────────────────────────
+
+
+def test_decision_option_is_selected_has_border_width_2px() -> None:
+    ".decision-option.is-selected deve ter border-width: 2px ou regra equivalente."
+    content = CSS.read_text()
+    lines = content.splitlines()
+    in_block = False
+    has_border_width = False
+    for line in lines:
+        if ".decision-option.is-selected" in line and "{" in line:
+            in_block = True
+            continue
+        if in_block:
+            if "border-width" in line or "border" in line and "2px" in line:
+                has_border_width = True
+            if "}" in line:
+                break
+    assert has_border_width, ".decision-option.is-selected deve ter border-width definido"
+
+
+def test_decision_option_selected_uses_rgba_background() -> None:
+    ".decision-option--accept.is-selected e --deny.is-selected usam rgba para fundo."
+    content = CSS.read_text()
+    lines = content.splitlines()
+    # Check accept variant
+    in_block = False
+    has_rgba = False
+    for line in lines:
+        if "decision-option--accept.is-selected" in line and "{" in line:
+            in_block = True
+            continue
+        if in_block:
+            if "rgba" in line:
+                has_rgba = True
+            if "}" in line and has_rgba:
+                break
+            if "}" in line:
+                break
+    assert has_rgba, ".decision-option--accept.is-selected deve usar rgba para fundo"
+
+    # Check deny variant
+    in_block = False
+    has_rgba = False
+    for line in lines:
+        if "decision-option--deny.is-selected" in line and "{" in line:
+            in_block = True
+            continue
+        if in_block:
+            if "rgba" in line:
+                has_rgba = True
+            if "}" in line and has_rgba:
+                break
+            if "}" in line:
+                break
+    assert has_rgba, ".decision-option--deny.is-selected deve usar rgba para fundo"
