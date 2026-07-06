@@ -723,6 +723,63 @@ class TestDoctorQueueView:
         pos_new = content.index("New (created later)")
         assert pos_old < pos_new, "Older case should appear before newer when tie"
 
+    # ── Slice 001: Pending queue search/filter controls ────────────────
+
+    def test_pending_queue_renders_search_controls(self, client) -> None:
+        """Pending tab renders search input, label, clear button, and JS."""
+        self._login_as(client, "doctor")
+        response = client.get("/doctor/?tab=pending")
+        assert response.status_code == 200
+        content = response.content.decode()
+        assert "Buscar por nome ou ocorrência" in content
+        assert "data-doctor-queue-search" in content
+        assert "data-doctor-queue-clear" in content
+        assert "doctor_queue_filter.js" in content
+
+    def test_decided_tab_does_not_render_pending_search_controls(self, client) -> None:
+        """Decided tab does NOT render pending search controls."""
+        self._login_as(client, "doctor")
+        response = client.get("/doctor/?tab=decided")
+        assert response.status_code == 200
+        content = response.content.decode()
+        assert "data-doctor-queue-search" not in content
+        assert "Buscar por nome ou ocorrência" not in content
+
+    def test_pending_cards_expose_search_data_attributes(self, client) -> None:
+        """Pending WAIT_DOCTOR cards expose data-patient-name and data-agency-record-number."""
+        nir_user = User.objects.create_user(username="nir_sa@test.com", password="testpass123")
+        nir_user.roles.add(self._create_role("nir"))
+
+        case = Case.objects.create(
+            created_by=nir_user,
+            status=CaseStatus.WAIT_DOCTOR,
+            agency_record_number="123456",
+            structured_data={
+                "patient": {
+                    "name": "João da Silva",
+                    "age": 45,
+                    "gender": "Masculino",
+                },
+            },
+        )
+        case.save()
+
+        self._login_as(client, "doctor")
+        response = client.get("/doctor/?tab=pending")
+        assert response.status_code == 200
+        content = response.content.decode()
+        assert "data-doctor-queue-card" in content
+        assert 'data-patient-name="João da Silva"' in content
+        assert 'data-agency-record-number="123456"' in content
+
+    def test_queue_hx_get_preserves_active_tab_with_search_controls(self, client) -> None:
+        """Queue page has hx-get pointing to queue_partial with active tab."""
+        self._login_as(client, "doctor")
+        response = client.get("/doctor/?tab=pending")
+        assert response.status_code == 200
+        content = response.content.decode()
+        assert 'hx-get="/doctor/partials/queue/?tab=pending"' in content
+
     def test_queue_nav_uses_action_and_neutral_count_badges(self, client) -> None:
         """R1: Pendentes uses action badge, Decididos Hoje uses neutral badge."""
         self._login_as(client, "doctor")

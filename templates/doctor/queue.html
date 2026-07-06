@@ -9,6 +9,50 @@
 {% endblock %}
 
 {% block content %}
+{% if active_tab == 'pending' %}
+<div class="mb-3" id="doctor-queue-search-bar">
+  <label for="doctor-queue-search-input" class="form-label fw-semibold">
+    Buscar por nome ou ocorrência
+  </label>
+  <div class="input-group">
+    <input
+      type="search"
+      id="doctor-queue-search-input"
+      class="form-control"
+      placeholder="Digite nome do paciente ou nº da ocorrência"
+      data-doctor-queue-search
+      aria-describedby="doctor-queue-search-clear"
+    >
+    <button
+      type="button"
+      class="btn btn-outline-secondary"
+      id="doctor-queue-search-clear"
+      data-doctor-queue-clear
+      style="display: none;"
+    >
+      Limpar
+    </button>
+  </div>
+  <div
+    data-doctor-queue-filter-status
+    class="mt-2 text-muted small"
+    aria-live="polite"
+  >
+    {% if pending_count > 0 %}
+      Mostrando todos os {{ pending_count }} paciente{{ pending_count|pluralize:"s" }} pendentes.
+    {% endif %}
+  </div>
+  <div
+    data-doctor-queue-no-results
+    class="alert alert-info mt-2 mb-0"
+    role="status"
+    style="display: none;"
+  >
+    Nenhum paciente encontrado com o termo informado.
+  </div>
+</div>
+{% endif %}
+
 <div
   id="doctor-queue-content"
   hx-get="{% url 'doctor:queue_partial' %}?tab={{ active_tab }}"
@@ -17,4 +61,8 @@
 >
   {% include "doctor/_queue_content.html" %}
 </div>
+{% endblock %}
+
+{% block extra_js %}
+<script src="/static/js/doctor_queue_filter.js"></script>
 {% endblock %}

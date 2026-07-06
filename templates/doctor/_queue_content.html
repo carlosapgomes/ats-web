@@ -16,7 +16,7 @@
 {% if pending_cases %}
 <div class="row g-3">
   {% for c in pending_cases %}
-  <div class="col-12">
+  <div class="col-12" data-doctor-queue-card data-patient-name="{{ c.patient_name }}" data-agency-record-number="{{ c.agency_record_number }}">
     <div class="case-card card p-3">
       <div class="row">
         <div class="col-lg-8">
