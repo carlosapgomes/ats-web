@@ -351,7 +351,7 @@ class TestAssertCaseLock:
             )
 
     def test_assert_fails_for_expired_lock(self):
-        """assert_case_lock raises for an expired lock."""
+        """assert_case_lock raises actionable message for an expired lock."""
         from apps.cases.services import assert_case_lock, claim_case_lock
 
         user = self._doctor_user()
@@ -370,8 +370,74 @@ class TestAssertCaseLock:
         Case.objects.filter(case_id=case.case_id).update(locked_until=timezone.now() - timedelta(seconds=1))
 
         assert result.token is not None
-        with pytest.raises(PermissionError, match="Lock expirou"):
+        with pytest.raises(PermissionError, match="A reserva desta tela expirou"):
             case = Case.objects.get(pk=case.case_id)
+            assert_case_lock(
+                case=case,
+                user=user,
+                token=result.token,
+                context="doctor_decision",
+            )
+
+    def test_assert_fails_for_missing_lock_with_actionable_message(self):
+        """assert_case_lock raises actionable message when case has no lock."""
+        from apps.cases.services import assert_case_lock, claim_case_lock, release_case_lock
+
+        user = self._doctor_user()
+        case = self._make_case_wait_doctor(user)
+        # Acquire and release — so case has no lock
+        result = claim_case_lock(
+            case_id=case.case_id,
+            user=user,
+            expected_status=CaseStatus.WAIT_DOCTOR,
+            context="doctor_decision",
+            role="doctor",
+        )
+        assert result.acquired is True
+        assert result.token is not None
+
+        released = release_case_lock(
+            case_id=case.case_id,
+            user=user,
+            token=result.token,
+            context="doctor_decision",
+        )
+        assert released is True
+
+        case = Case.objects.get(pk=case.case_id)
+        assert case.locked_by is None
+
+        with pytest.raises(PermissionError, match="A reserva desta tela expirou ou foi liberada antes do envio"):
+            assert_case_lock(
+                case=case,
+                user=user,
+                token=uuid.uuid4(),
+                context="doctor_decision",
+            )
+
+    def test_assert_fails_for_expired_lock_with_actionable_message(self):
+        """assert_case_lock raises actionable message for expired lock."""
+        from apps.cases.services import assert_case_lock, claim_case_lock
+
+        user = self._doctor_user()
+        case = self._make_case_wait_doctor(user)
+
+        result = claim_case_lock(
+            case_id=case.case_id,
+            user=user,
+            expected_status=CaseStatus.WAIT_DOCTOR,
+            context="doctor_decision",
+            role="doctor",
+            lease_seconds=0,
+        )
+        assert result.acquired is True
+        assert result.token is not None
+
+        # Force expiration
+        Case.objects.filter(case_id=case.case_id).update(locked_until=timezone.now() - timedelta(seconds=1))
+
+        case = Case.objects.get(pk=case.case_id)
+        with pytest.raises(PermissionError, match="A reserva desta tela expirou ou foi liberada antes do envio"):
             assert_case_lock(
                 case=case,
                 user=user,

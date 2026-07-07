@@ -210,6 +210,14 @@ def claim_case_lock(
     )
 
 
+# ── Lock lost user message ────────────────────────────────────────────
+
+
+LOCK_LOST_USER_MESSAGE = (
+    "A reserva desta tela expirou ou foi liberada antes do envio. Volte à fila e abra o caso novamente."
+)
+
+
 def assert_case_lock(
     *,
     case: Case,
@@ -225,11 +233,14 @@ def assert_case_lock(
     - The lock token does not match.
     - The lock context does not match.
     - The lock has expired.
+
+    For missing or expired locks, the message is LOCK_LOST_USER_MESSAGE
+    (actionable instruction: go back and reopen the case).
     """
     now = timezone.now()
 
     if case.locked_by is None:
-        raise PermissionError("Caso não possui reserva ativa.")
+        raise PermissionError(LOCK_LOST_USER_MESSAGE)
 
     if case.locked_by_id != user.pk:
         raise PermissionError(f"Lock pertence a outro usuário: {case.locked_by.display_name}")
@@ -241,7 +252,7 @@ def assert_case_lock(
         raise PermissionError(f"Contexto de lock inválido: esperado '{context}', obtido '{case.lock_context}'")
 
     if case.locked_until is None or case.locked_until <= now:
-        raise PermissionError("Lock expirou.")
+        raise PermissionError(LOCK_LOST_USER_MESSAGE)
 
 
 def release_case_lock(
