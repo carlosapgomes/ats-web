@@ -2,8 +2,13 @@
  *
  * Monitors human activity on the page and periodically renews the
  * work-leasing lock while the user is actively interacting.
- * On navigation away (link click, pagehide, visibilitychange),
- * attempts an explicit release (best-effort).
+ * On navigation away (link click, pagehide), attempts an explicit
+ * release (best-effort).
+ *
+ * Protected submit guard: when a form containing the current lock_token
+ * is submitted, a flag prevents sendRelease() from firing. This avoids
+ * a race condition where pagehide/visibilitychange could release the lock
+ * before the main POST completes.
  *
  * Configuration is read from <meta name="work-lock-config"> or a
  * script with id="work-lock-config" containing data attributes:
@@ -31,6 +36,34 @@
     var graceMs     = parseInt(configEl.getAttribute('data-grace-ms'), 10) || 240000;
 
     if (!renewUrl || !releaseUrl || !lockToken) return;
+
+    /* ── Protected submit guard ─────────────────────────────────────── */
+
+    var protectedSubmitInProgress = false;
+
+    function isProtectedSubmitInProgress() {
+        return protectedSubmitInProgress || window.ATS_WORK_LOCK_SUBMITTING === true;
+    }
+
+    /* Listen for form submits with our lock_token.
+     * Uses bubble phase so a modal/validation can call preventDefault() first.
+     * Only marks as protected if the submit was NOT cancelled and the form
+     * contains an input[name="lock_token"] with value === current lockToken.
+     * This intentionally excludes forms without lock_token (e.g. operational
+     * communication, attachments, administrative closure). */
+    document.addEventListener('submit', function (event) {
+        if (event.defaultPrevented) return;
+
+        var form = event.target;
+        if (!form || !form.querySelector) return;
+
+        var tokenInput = form.querySelector('input[name="lock_token"]');
+        if (tokenInput && tokenInput.value === lockToken) {
+            protectedSubmitInProgress = true;
+            window.ATS_WORK_LOCK_SUBMITTING = true;
+            log('protected submit detected — suppressing release');
+        }
+    });
 
     /* ── Debug logging ────────────────────────────────────────────── */
 
@@ -135,6 +168,9 @@
     var released = false;
 
     function sendRelease() {
+        /* Do not release during a protected submit */
+        if (isProtectedSubmitInProgress()) return;
+
         if (released) return;
         released = true;
 
@@ -185,14 +221,6 @@
     window.addEventListener('pagehide', function () {
         log('pagehide — sending release');
         sendRelease();
-    });
-
-    /* 3. visibilitychange — fires when tab goes hidden (switch tab, minimize) */
-    document.addEventListener('visibilitychange', function () {
-        if (document.visibilityState === 'hidden') {
-            log('visibilitychange hidden — sending release');
-            sendRelease();
-        }
     });
 
     /* ── Start periodic heartbeat ─────────────────────────────────── */

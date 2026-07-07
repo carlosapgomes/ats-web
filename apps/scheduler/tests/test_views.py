@@ -959,6 +959,56 @@ class TestSchedulerSubmitView:
         response = client.get(f"/scheduler/{case.case_id}/submit/")
         assert response.status_code == 404
 
+    def test_submit_after_lock_released_before_post_shows_actionable_message(self, client) -> None:
+        """
+        RED test: reproduz race onde lock é liberado antes do POST submit.
+        Deve mostrar mensagem acionável e NÃO alterar status/FSM do caso.
+        """
+        from apps.cases.services import release_case_lock
+
+        self._login_as(client, "scheduler")
+        case = self._create_waited_case()
+        scheduler_user = User.objects.get(username="scheduler@submit.test")
+        token_str = self._claim_lock(case.case_id, scheduler_user)
+        token_uuid = uuid.UUID(token_str)
+
+        # Simula release antes do POST (como se o JS tivesse chamado /lock/release/)
+        released = release_case_lock(
+            case_id=case.case_id,
+            user=scheduler_user,
+            token=token_uuid,
+            context="scheduler_confirm",
+        )
+        assert released is True
+
+        case = Case.objects.get(pk=case.case_id)
+        assert case.locked_by is None
+
+        # POST submit com token antigo (string, como viria do form)
+        response = client.post(
+            f"/scheduler/{case.case_id}/submit/",
+            {
+                "decision": "confirm",
+                "appointment_date": "2026-06-15",
+                "appointment_time": "14:30",
+                "notes": "",
+                "reason": "",
+                "lock_token": token_str,
+            },
+        )
+        assert response.status_code == 200
+        content = response.content.decode()
+        assert "A reserva desta tela expirou ou foi liberada antes do envio" in content
+        assert "Volte à fila e abra o caso novamente" in content
+
+        # Caso não foi alterado
+        case = Case.objects.get(pk=case.case_id)
+        assert case.status == CaseStatus.WAIT_APPT
+        assert case.appointment_status == ""
+        assert case.appointment_at is None
+        assert not CaseEvent.objects.filter(case=case, event_type="APPT_CONFIRMED").exists()
+        assert not CaseEvent.objects.filter(case=case, event_type="FINAL_REPLY_POSTED").exists()
+
 
 @pytest.mark.django_db
 class TestSchedulerConfirmLock:

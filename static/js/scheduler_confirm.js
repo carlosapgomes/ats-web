@@ -125,6 +125,11 @@
                 btnSubmit.disabled = true;
             }
 
+            // Signal the work_lock guard that a protected submit is in progress.
+            // HTMLFormElement.submit() does NOT fire the submit event, so the
+            // guard in work_lock.js cannot intercept this path via addEventListener.
+            window.ATS_WORK_LOCK_SUBMITTING = true;
+
             // Submit the form to the server
             setTimeout(function () {
                 form.submit();
