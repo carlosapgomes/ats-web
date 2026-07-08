@@ -136,10 +136,26 @@ def _compute_admission_flow() -> dict[str, int]:
 
 
 def _fmt_duration(td: timedelta | None) -> str:
-    """Formata timedelta para minutos."""
-    if td:
-        return f"{int(td.total_seconds() // 60)} min"
-    return "—"
+    """Formata timedelta para minutos ou horas/minutos.
+
+    Retorna:
+        valor ausente    → "—"
+        < 60 min         → "N min"
+        60 min           → "1 h"
+        65 min           → "1 h 05 min"
+        1100 min         → "18 h 20 min"
+        timedelta(0)     → "0 min"
+    """
+    if td is None:
+        return "—"
+    total_minutes = int(td.total_seconds() // 60)
+    if total_minutes < 60:
+        return f"{total_minutes} min"
+    hours = total_minutes // 60
+    minutes = total_minutes % 60
+    if minutes == 0:
+        return f"{hours} h"
+    return f"{hours} h {minutes:02d} min"
 
 
 def _compute_average_times() -> dict[str, str]:

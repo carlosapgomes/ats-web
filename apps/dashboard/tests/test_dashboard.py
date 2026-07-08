@@ -1924,3 +1924,82 @@ class TestDashboardAttentionFilter:
         content = response.content.decode()
         # Links de paginação devem conter attention=1
         assert "attention=1" in content
+
+
+# ── Dashboard: _fmt_duration slice 001 polish UX ──────────────────────────
+
+
+@pytest.mark.django_db
+class TestDashboardFmtDuration:
+    """Testes para _fmt_duration do polimento de UX."""
+
+    def test_fmt_duration_none_returns_dash(self) -> None:
+        """_fmt_duration(None) retorna —."""
+        from apps.dashboard.views import _fmt_duration
+
+        result = _fmt_duration(None)
+        assert result == "—"
+
+    def test_fmt_duration_59_min(self) -> None:
+        """_fmt_duration(timedelta(minutes=59)) retorna '59 min'."""
+        from apps.dashboard.views import _fmt_duration
+
+        result = _fmt_duration(timedelta(minutes=59))
+        assert result == "59 min"
+
+    def test_fmt_duration_60_min(self) -> None:
+        """_fmt_duration(timedelta(minutes=60)) retorna '1 h'."""
+        from apps.dashboard.views import _fmt_duration
+
+        result = _fmt_duration(timedelta(minutes=60))
+        assert result == "1 h"
+
+    def test_fmt_duration_65_min(self) -> None:
+        """_fmt_duration(timedelta(minutes=65)) retorna '1 h 05 min'."""
+        from apps.dashboard.views import _fmt_duration
+
+        result = _fmt_duration(timedelta(minutes=65))
+        assert result == "1 h 05 min"
+
+    def test_fmt_duration_1100_min(self) -> None:
+        """_fmt_duration(timedelta(minutes=1100)) retorna '18 h 20 min'."""
+        from apps.dashboard.views import _fmt_duration
+
+        result = _fmt_duration(timedelta(minutes=1100))
+        assert result == "18 h 20 min"
+
+    def test_fmt_duration_zero(self) -> None:
+        """_fmt_duration(timedelta(0)) retorna '0 min', não —."""
+        from apps.dashboard.views import _fmt_duration
+
+        result = _fmt_duration(timedelta(0))
+        assert result == "0 min"
+
+
+# ── Dashboard: Date labels slice 001 polish UX ──────────────────────────
+
+
+@pytest.mark.django_db
+class TestDashboardDateLabels:
+    """Testes para labels visíveis de date_from e date_to."""
+
+    def test_dashboard_has_visible_date_labels(self, client) -> None:
+        """GET /dashboard/ como manager contém labels 'Data inicial' e 'Data final'."""
+        _login_as(client, "manager")
+        response = client.get(reverse("dashboard:index"))
+        assert response.status_code == 200
+        content = response.content.decode()
+        assert "Data inicial" in content
+        assert "Data final" in content
+
+    def test_dashboard_date_labels_have_for_and_id(self, client) -> None:
+        """Labels de data usam for/id para associar com inputs."""
+        _login_as(client, "manager")
+        response = client.get(reverse("dashboard:index"))
+        assert response.status_code == 200
+        content = response.content.decode()
+        # Verifica que o label Data inicial tem for apontando para id certo
+        assert 'for="date_from"' in content or 'for="id_date_from"' in content
+        assert 'id="date_from"' in content or 'id="id_date_from"' in content
+        assert 'for="date_to"' in content or 'for="id_date_to"' in content
+        assert 'id="date_to"' in content or 'id="id_date_to"' in content
