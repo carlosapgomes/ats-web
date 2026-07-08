@@ -55,7 +55,7 @@ def _local_day_bounds(day: date | None = None) -> tuple[datetime, datetime]:
     return start, end
 
 
-def _compute_summary() -> dict[str, int]:
+def _compute_summary(day: date | None = None) -> dict[str, int]:
     """Computa métricas resumidas do dashboard.
 
     Usa campos de decisão imutáveis (doctor_decision, appointment_status)
@@ -67,8 +67,11 @@ def _compute_summary() -> dict[str, int]:
 
     Usa _local_day_bounds() para filtrar casos do dia local em vez de
     timezone.now().date() que retorna data UTC.
+
+    Se day for fornecido (ex: metrics_date), as métricas refletem
+    aquele dia em vez de hoje.
     """
-    start, end = _local_day_bounds()
+    start, end = _local_day_bounds(day)
     today_cases = Case.objects.filter(created_at__gte=start, created_at__lt=end)
 
     total_today = today_cases.count()
@@ -117,13 +120,16 @@ def _compute_stage_waiting() -> dict[str, int]:
     }
 
 
-def _compute_admission_flow() -> dict[str, int]:
-    """Fluxo de admissão (agendado vs imediato) para casos aceitos hoje.
+def _compute_admission_flow(day: date | None = None) -> dict[str, int]:
+    """Fluxo de admissão (agendado vs imediato) para casos aceitos no dia.
 
     Usa _local_day_bounds() em vez de timezone.now().date() para
     consistência com _compute_summary() na definição do dia local.
+
+    Se day for fornecido (ex: metrics_date), o fluxo reflete
+    aquele dia em vez de hoje.
     """
-    start, end = _local_day_bounds()
+    start, end = _local_day_bounds(day)
     base = Case.objects.filter(
         created_at__gte=start,
         created_at__lt=end,
@@ -158,13 +164,20 @@ def _fmt_duration(td: timedelta | None) -> str:
     return f"{hours} h {minutes:02d} min"
 
 
-def _compute_average_times() -> dict[str, str]:
+def _compute_average_times(day: date | None = None) -> dict[str, str]:
     """Tempos médios do fluxo.
 
     Calcula médias apenas quando há dados suficientes.
+    Se day for fornecido (ex: metrics_date), filtra casos criados
+    naquele dia.
     """
+    cases_qs = Case.objects.all()
+    if day is not None:
+        start, end = _local_day_bounds(day)
+        cases_qs = cases_qs.filter(created_at__gte=start, created_at__lt=end)
+
     # Upload → Decisão Médica
-    decided_qs = Case.objects.exclude(doctor_decided_at=None).annotate(
+    decided_qs = cases_qs.exclude(doctor_decided_at=None).annotate(
         decision_time=ExpressionWrapper(
             F("doctor_decided_at") - F("created_at"),
             output_field=DurationField(),
@@ -173,7 +186,7 @@ def _compute_average_times() -> dict[str, str]:
     avg_decision = decided_qs.aggregate(avg=Avg("decision_time"))["avg"]
 
     # Decisão → Agendamento
-    scheduled_qs = Case.objects.filter(
+    scheduled_qs = cases_qs.filter(
         appointment_decided_at__isnull=False,
         doctor_decided_at__isnull=False,
     ).annotate(
@@ -185,7 +198,7 @@ def _compute_average_times() -> dict[str, str]:
     avg_sched = scheduled_qs.aggregate(avg=Avg("sched_time"))["avg"]
 
     # Ciclo Total
-    completed_qs = Case.objects.exclude(cleanup_completed_at=None).annotate(
+    completed_qs = cases_qs.exclude(cleanup_completed_at=None).annotate(
         cycle_time=ExpressionWrapper(
             F("cleanup_completed_at") - F("created_at"),
             output_field=DurationField(),
@@ -367,10 +380,27 @@ def _enrich_case(case: Case, *, now: datetime | None = None, attention_filter: b
 @role_required("manager", "admin")
 def dashboard_index(request: HttpRequest) -> HttpResponse:
     """Dashboard com métricas e tabela de todos os casos."""
-    summary = _compute_summary()
+    # Data das métricas — usa query string metrics_date, padrão hoje
+    raw_metrics_date = request.GET.get("metrics_date", "")
+    metrics_date: date | None = None
+    metrics_date_str = ""
+    if raw_metrics_date:
+        try:
+            metrics_date = date.fromisoformat(raw_metrics_date)
+            metrics_date_str = raw_metrics_date
+        except (ValueError, TypeError):
+            metrics_date = None  # inválido → cai para hoje
+
+    summary = _compute_summary(day=metrics_date)
     stage_waiting = _compute_stage_waiting()
-    admission_flow = _compute_admission_flow()
-    avg_times = _compute_average_times()
+    admission_flow = _compute_admission_flow(day=metrics_date)
+    avg_times = _compute_average_times(day=metrics_date)
+
+    # Label para o card de total
+    if metrics_date is not None:
+        total_label = f"Total em {metrics_date.strftime('%d/%m/%Y')}"
+    else:
+        total_label = "Total Hoje"
 
     now = timezone.now()
 
@@ -433,6 +463,8 @@ def dashboard_index(request: HttpRequest) -> HttpResponse:
             "latest_summary": latest_summary,
             "attention_filter": attention_filter,
             "attention_count": attention_count,
+            "metrics_date": metrics_date_str,
+            "total_label": total_label,
         },
     )
 

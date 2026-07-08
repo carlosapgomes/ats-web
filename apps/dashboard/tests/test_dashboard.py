@@ -1,6 +1,6 @@
 """Testes do dashboard — Slice 1: App dashboard + view + template + case detail admin."""
 
-from datetime import datetime, timedelta
+from datetime import datetime, time, timedelta
 
 import pytest
 from django.contrib.auth import get_user_model
@@ -2003,3 +2003,247 @@ class TestDashboardDateLabels:
         assert 'id="date_from"' in content or 'id="id_date_from"' in content
         assert 'for="date_to"' in content or 'for="id_date_to"' in content
         assert 'id="date_to"' in content or 'id="id_date_to"' in content
+
+
+# ── Dashboard: metrics_date slice 002 ────────────────────────────────────
+
+
+@pytest.mark.django_db
+class TestDashboardMetricsDate:
+    """Testes para o seletor de data das métricas (metrics_date)."""
+
+    from datetime import date as date_type
+
+    def test_default_metrics_date_uses_today(self, client) -> None:
+        """Sem metrics_date, dashboard usa o dia local atual."""
+        from apps.dashboard.views import _compute_summary
+
+        user = _login_as(client, "manager")
+        Case.objects.all().delete()
+
+        today = timezone.localdate()
+        yesterday = today - timedelta(days=1)
+
+        # Caso criado hoje
+        today_case = _create_case(
+            created_by=user,
+            status=CaseStatus.WAIT_DOCTOR,
+            agency_record_number="MD-TODAY",
+        )
+        Case.objects.filter(pk=today_case.pk).update(
+            created_at=timezone.make_aware(
+                datetime.combine(today, datetime.min.time()),
+                timezone.get_current_timezone(),
+            )
+        )
+
+        # Caso criado ontem
+        yesterday_case = _create_case(
+            created_by=user,
+            status=CaseStatus.WAIT_DOCTOR,
+            agency_record_number="MD-YESTERDAY",
+        )
+        Case.objects.filter(pk=yesterday_case.pk).update(
+            created_at=timezone.make_aware(
+                datetime.combine(yesterday, datetime.min.time()),
+                timezone.get_current_timezone(),
+            )
+        )
+
+        # Sem metrics_date → usa today
+        result = _compute_summary()
+        assert result["total_today"] == 1, f"Sem metrics_date, total deve ser 1 (hoje), obtido {result['total_today']}"
+
+    def test_metrics_date_yesterday_counts_only_yesterday(self, client) -> None:
+        """Com metrics_date=ontem, summary conta casos criados ontem e exclui hoje."""
+        from apps.dashboard.views import _compute_summary
+
+        user = _login_as(client, "manager")
+        Case.objects.all().delete()
+
+        today = timezone.localdate()
+        yesterday = today - timedelta(days=1)
+
+        # Caso criado ontem
+        yesterday_case = _create_case(
+            created_by=user,
+            status=CaseStatus.WAIT_DOCTOR,
+            agency_record_number="MD-YEST-ONLY",
+        )
+        Case.objects.filter(pk=yesterday_case.pk).update(
+            created_at=timezone.make_aware(
+                datetime.combine(yesterday, time(8, 0)),
+                timezone.get_current_timezone(),
+            )
+        )
+
+        # Caso criado hoje (não deve contar)
+        today_case = _create_case(
+            created_by=user,
+            status=CaseStatus.WAIT_DOCTOR,
+            agency_record_number="MD-TODAY-EXCL",
+        )
+        Case.objects.filter(pk=today_case.pk).update(
+            created_at=timezone.make_aware(
+                datetime.combine(today, time(8, 0)),
+                timezone.get_current_timezone(),
+            )
+        )
+
+        result = _compute_summary(day=yesterday)
+        assert result["total_today"] == 1, (
+            f"metrics_date=ontem, total deve ser 1 (ontem), obtido {result['total_today']}"
+        )
+
+    def test_metrics_date_admission_flow_uses_selected_date(self, client) -> None:
+        """Com metrics_date, fluxo de admissão usa apenas casos criados naquela data."""
+        from apps.dashboard.views import _compute_admission_flow
+
+        user = _login_as(client, "manager")
+        Case.objects.all().delete()
+
+        today = timezone.localdate()
+        yesterday = today - timedelta(days=1)
+
+        # Caso aceito ontem com fluxo agendado
+        case_yesterday = _create_case(
+            created_by=user,
+            status=CaseStatus.APPT_CONFIRMED,
+            doctor_decision="accept",
+            doctor_admission_flow="scheduled",
+            agency_record_number="MD-FLOW-YEST",
+        )
+        Case.objects.filter(pk=case_yesterday.pk).update(
+            created_at=timezone.make_aware(
+                datetime.combine(yesterday, time(8, 0)),
+                timezone.get_current_timezone(),
+            )
+        )
+
+        # Caso aceito hoje com fluxo imediato
+        case_today = _create_case(
+            created_by=user,
+            status=CaseStatus.DOCTOR_ACCEPTED,
+            doctor_decision="accept",
+            doctor_admission_flow="immediate",
+            agency_record_number="MD-FLOW-TODAY",
+        )
+        Case.objects.filter(pk=case_today.pk).update(
+            created_at=timezone.make_aware(
+                datetime.combine(today, time(8, 0)),
+                timezone.get_current_timezone(),
+            )
+        )
+
+        # Fluxo para ontem: só deve contar o caso agendado
+        flow = _compute_admission_flow(day=yesterday)
+        assert flow["scheduled"] == 1, f"scheduled deve ser 1 para ontem, obtido {flow['scheduled']}"
+        assert flow["immediate"] == 0, f"immediate deve ser 0 para ontem, obtido {flow['immediate']}"
+
+    def test_metrics_date_average_times_uses_selected_date(self, client) -> None:
+        """Com metrics_date, tempos médios usam apenas casos criados naquela data."""
+        from apps.dashboard.views import _compute_average_times
+
+        user = _login_as(client, "manager")
+        # Criar médico
+        doctor = User.objects.create_user(username="doc.metrics@test.com", password="pass123")
+        doctor.professional_council = "CRM"
+        doctor.professional_council_number = "99999"
+        doctor.save()
+
+        Case.objects.all().delete()
+
+        today = timezone.localdate()
+        yesterday = today - timedelta(days=1)
+
+        # Caso de ontem – já decidido
+        case_yest = _create_case(
+            created_by=user,
+            status=CaseStatus.DOCTOR_ACCEPTED,
+            doctor_decision="accept",
+            agency_record_number="MD-AVG-YEST",
+        )
+        created_yest = timezone.make_aware(
+            datetime.combine(yesterday, time(8, 0)),
+            timezone.get_current_timezone(),
+        )
+        decided_yest = timezone.make_aware(
+            datetime.combine(yesterday, time(10, 0)),
+            timezone.get_current_timezone(),
+        )
+        Case.objects.filter(pk=case_yest.pk).update(
+            created_at=created_yest,
+            doctor=doctor,
+            doctor_decided_at=decided_yest,
+        )
+
+        # Caso de hoje – já decidido
+        case_today = _create_case(
+            created_by=user,
+            status=CaseStatus.DOCTOR_ACCEPTED,
+            doctor_decision="accept",
+            agency_record_number="MD-AVG-TODAY",
+        )
+        created_today = timezone.make_aware(
+            datetime.combine(today, time(8, 0)),
+            timezone.get_current_timezone(),
+        )
+        decided_today = timezone.make_aware(
+            datetime.combine(today, time(9, 0)),
+            timezone.get_current_timezone(),
+        )
+        Case.objects.filter(pk=case_today.pk).update(
+            created_at=created_today,
+            doctor=doctor,
+            doctor_decided_at=decided_today,
+        )
+
+        # Tempos médios para ontem: só o caso de ontem
+        avg = _compute_average_times(day=yesterday)
+        # upload_to_decision para ontem = 2h = "2 h"
+        assert avg["upload_to_decision"] == "2 h", (
+            f"upload_to_decision para ontem deve ser '2 h', obtido '{avg['upload_to_decision']}'"
+        )
+
+    def test_invalid_metrics_date_does_not_break(self, client) -> None:
+        """Data inválida não retorna 500 e volta para o padrão."""
+        _login_as(client, "manager")
+        response = client.get(reverse("dashboard:index") + "?metrics_date=invalid-date")
+        assert response.status_code == 200, "Data inválida não deve retornar 500"
+
+    def test_template_has_metrics_date_form(self, client) -> None:
+        """Template contém label 'Data das métricas' e input name='metrics_date'."""
+        _login_as(client, "manager")
+        response = client.get(reverse("dashboard:index"))
+        assert response.status_code == 200
+        content = response.content.decode()
+        assert "Data das métricas" in content, "Label 'Data das métricas' deve estar no template"
+        assert 'name="metrics_date"' in content, "Input 'metrics_date' deve estar no template"
+
+    def test_template_shows_stage_waiting_as_current(self, client) -> None:
+        """Template deixa claro que 'Aguardando por etapa' é snapshot atual."""
+        _login_as(client, "manager")
+        response = client.get(reverse("dashboard:index"))
+        assert response.status_code == 200
+        content = response.content.decode()
+        assert "ATUAL" in content, "Template deve indicar que a fila é snapshot atual"
+
+    def test_case_filter_form_preserves_metrics_date(self, client) -> None:
+        """Formulário de filtros de casos preserva metrics_date via hidden input."""
+        _login_as(client, "manager")
+        response = client.get(reverse("dashboard:index") + "?metrics_date=2026-07-01")
+        assert response.status_code == 200
+        content = response.content.decode()
+        assert 'name="metrics_date"' in content
+        assert 'value="2026-07-01"' in content, "Hidden input deve preservar o valor de metrics_date"
+
+    def test_metrics_date_view_invalid_falls_back_silently(self, client) -> None:
+        """Data inválida no metrics_date cai de volta para o dia atual sem erro."""
+        _login_as(client, "manager")
+        # Página com data inválida carrega sem mensagem de erro
+        response = client.get(reverse("dashboard:index") + "?metrics_date=not-a-date")
+        assert response.status_code == 200
+        # Não deve conter mensagem de erro do Django
+        content = response.content.decode()
+        # A página renderiza normalmente
+        assert "Total no dia" in content or "Total Hoje" in content or "Aguardando" in content
