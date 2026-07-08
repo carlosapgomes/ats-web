@@ -26,6 +26,25 @@
 
 {% block content %}
 
+<!-- Formulário de data das métricas -->
+<div class="row g-3 mb-3">
+  <div class="col-12">
+    <form method="get" class="d-flex gap-2 align-items-center flex-wrap">
+      <label for="metrics_date" class="form-label mb-0 small fw-semibold">Data das métricas</label>
+      <input type="date" name="metrics_date" id="metrics_date" class="form-control form-control-sm" style="width:auto;"
+             value="{{ metrics_date }}">
+      <button type="submit" class="btn btn-sm btn-hospital-outline">Aplicar</button>
+      {% if metrics_date %}
+      <a href="{% url 'dashboard:index' %}" class="btn btn-sm btn-outline-secondary">Hoje</a>
+      {% endif %}
+      {% if status_filter %}<input type="hidden" name="status" value="{{ status_filter }}">{% endif %}
+      {% if date_from %}<input type="hidden" name="date_from" value="{{ date_from }}">{% endif %}
+      {% if date_to %}<input type="hidden" name="date_to" value="{{ date_to }}">{% endif %}
+      {% if attention_filter %}<input type="hidden" name="attention" value="1">{% endif %}
+    </form>
+  </div>
+</div>
+
 <!-- Summary Cards -->
 <div class="row g-3 mb-4">
   <div class="col-6 col-md-3">
@@ -33,7 +52,7 @@
       <div style="font-size:2rem; font-weight:700; color:var(--hospital-primary);">
         {{ summary.total_today }}
       </div>
-      <div class="text-muted small">Total Hoje</div>
+      <div class="text-muted small">{{ total_label }}</div>
     </div>
   </div>
   <div class="col-6 col-md-3">
@@ -74,7 +93,7 @@
 <div class="row g-3 mb-4">
   <div class="col-md-4">
     <div class="card p-3">
-      <h6 class="text-muted small mb-2">AGUARDANDO POR ETAPA</h6>
+      <h6 class="text-muted small mb-2">AGUARDANDO POR ETAPA <span class="badge bg-secondary">ATUAL</span></h6>
       <div class="d-flex justify-content-between mb-1">
         <span>Fila Médica</span> <strong>{{ stage_waiting.waiting_doctor }}</strong>
       </div>
@@ -151,7 +170,7 @@
   <div class="d-flex justify-content-between align-items-center mb-3 flex-wrap gap-2">
     <h5 class="mb-0">Todos os Casos</h5>
     <div class="admin-filters d-flex gap-2 align-items-center flex-wrap">
-      <a href="{% url 'dashboard:index' %}?attention=1" class="btn btn-sm {% if attention_filter %}btn-warning{% else %}btn-outline-warning{% endif %}">
+      <a href="{% url 'dashboard:index' %}?attention=1{% if metrics_date %}&metrics_date={{ metrics_date }}{% endif %}" class="btn btn-sm {% if attention_filter %}btn-warning{% else %}btn-outline-warning{% endif %}">
         ⚠ Atenção necessária{% if attention_count is not None %} ({{ attention_count }}){% endif %}
       </a>
       <form method="get" class="d-flex gap-2 align-items-center flex-wrap">
@@ -173,6 +192,7 @@
           <input type="date" name="date_to" id="date_to" class="form-control form-control-sm" style="width:auto;"
                  value="{{ date_to }}" placeholder="Data fim">
         </div>
+        {% if metrics_date %}<input type="hidden" name="metrics_date" value="{{ metrics_date }}">{% endif %}
         <button type="submit" class="btn btn-sm btn-hospital-outline">Filtrar</button>
         {% if status_filter or date_from or date_to %}
         <a href="{% url 'dashboard:index' %}" class="btn btn-sm btn-outline-secondary">Limpar</a>
@@ -239,7 +259,7 @@
     <ul class="pagination pagination-sm justify-content-center mb-0">
       {% if page_obj.has_previous %}
       <li class="page-item">
-        <a class="page-link" href="?page={{ page_obj.previous_page_number }}{% if status_filter %}&status={{ status_filter }}{% endif %}{% if date_from %}&date_from={{ date_from }}{% endif %}{% if date_to %}&date_to={{ date_to }}{% endif %}{% if attention_filter %}&attention=1{% endif %}">Anterior</a>
+        <a class="page-link" href="?page={{ page_obj.previous_page_number }}{% if status_filter %}&status={{ status_filter }}{% endif %}{% if date_from %}&date_from={{ date_from }}{% endif %}{% if date_to %}&date_to={{ date_to }}{% endif %}{% if attention_filter %}&attention=1{% endif %}{% if metrics_date %}&metrics_date={{ metrics_date }}{% endif %}">Anterior</a>
       </li>
       {% else %}
       <li class="page-item disabled"><span class="page-link">Anterior</span></li>
@@ -250,14 +270,14 @@
         <li class="page-item active"><span class="page-link">{{ i }}</span></li>
         {% else %}
         <li class="page-item">
-          <a class="page-link" href="?page={{ i }}{% if status_filter %}&status={{ status_filter }}{% endif %}{% if date_from %}&date_from={{ date_from }}{% endif %}{% if date_to %}&date_to={{ date_to }}{% endif %}{% if attention_filter %}&attention=1{% endif %}">{{ i }}</a>
+          <a class="page-link" href="?page={{ i }}{% if status_filter %}&status={{ status_filter }}{% endif %}{% if date_from %}&date_from={{ date_from }}{% endif %}{% if date_to %}&date_to={{ date_to }}{% endif %}{% if attention_filter %}&attention=1{% endif %}{% if metrics_date %}&metrics_date={{ metrics_date }}{% endif %}">{{ i }}</a>
         </li>
         {% endif %}
       {% endfor %}
 
       {% if page_obj.has_next %}
       <li class="page-item">
-        <a class="page-link" href="?page={{ page_obj.next_page_number }}{% if status_filter %}&status={{ status_filter }}{% endif %}{% if date_from %}&date_from={{ date_from }}{% endif %}{% if date_to %}&date_to={{ date_to }}{% endif %}{% if attention_filter %}&attention=1{% endif %}">Próxima</a>
+        <a class="page-link" href="?page={{ page_obj.next_page_number }}{% if status_filter %}&status={{ status_filter }}{% endif %}{% if date_from %}&date_from={{ date_from }}{% endif %}{% if date_to %}&date_to={{ date_to }}{% endif %}{% if attention_filter %}&attention=1{% endif %}{% if metrics_date %}&metrics_date={{ metrics_date }}{% endif %}">Próxima</a>
       </li>
       {% else %}
       <li class="page-item disabled"><span class="page-link">Próxima</span></li>
