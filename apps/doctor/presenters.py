@@ -326,6 +326,42 @@ class DoctorReportPresenter:
         """
         return _detect_caustic_ingestion(self.source_text)
 
+    def _build_comorbidities_line(self) -> str:
+        """Build the comorbidities display line from structured_data.
+
+        Returns one of:
+        - "Comorbidades descritas: <comma-separated names>" when items exist.
+        - "Comorbidades descritas: sem comorbidades descritas no relatório" when
+          the field is present but empty or all items are invalid.
+        - "Comorbidades descritas: extração de comorbidades não disponível neste caso"
+          when the field is absent (old case without extraction).
+        """
+        preop = _extract_nested(self.structured_data, "preop_screening")
+        if not isinstance(preop, dict) or "comorbidities_described" not in preop:
+            return "Comorbidades descritas: extração de comorbidades não disponível neste caso"
+
+        items = preop.get("comorbidities_described")
+        if not isinstance(items, list) or not items:
+            return "Comorbidades descritas: sem comorbidades descritas no relatório"
+
+        seen: set[str] = set()
+        names: list[str] = []
+        for item in items:
+            if not isinstance(item, dict):
+                continue
+            name = item.get("name")
+            if not isinstance(name, str) or not name.strip():
+                continue
+            normalized = name.strip()
+            if normalized not in seen:
+                seen.add(normalized)
+                names.append(normalized)
+
+        if not names:
+            return "Comorbidades descritas: sem comorbidades descritas no relatório"
+
+        return f"Comorbidades descritas: {', '.join(names)}"
+
     def build_text_report(self) -> str:
         """Render the report as a markdown-like text block for audit/testing."""
         report = self.build_report()
@@ -345,6 +381,8 @@ class DoctorReportPresenter:
         if context.get("clinical_alert_lines"):
             for alert_line in context["clinical_alert_lines"]:
                 lines.append(alert_line)
+        if context.get("comorbidities_line"):
+            lines.append(context["comorbidities_line"])
         lines.append("")
 
         # Blocks
@@ -598,6 +636,7 @@ class DoctorReportPresenter:
             "tracked_exam_lines": self._build_tracked_exam_lines(),
             "pediatric": "paciente pediátrico: sim" if self._is_pediatric() else "",
             "clinical_alert_lines": self._build_clinical_alert_lines(),
+            "comorbidities_line": self._build_comorbidities_line(),
         }
 
     def _resolve_canonical_procedure_name(self) -> str:

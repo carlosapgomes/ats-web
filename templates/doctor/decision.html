@@ -101,6 +101,7 @@
     <div class="report-meta mb-3 small text-muted">
       <div>{{ report.context.procedure }}</div>
       <div>{{ report.context.origin }}</div>
+      <div>{{ report.context.comorbidities_line }}</div>
       {% for line in report.context.transfusion_lines %}<div>{{ line }}</div>{% endfor %}
       {% for line in report.context.tracked_exam_lines %}<div>{{ line }}</div>{% endfor %}
       {% if report.context.pediatric %}<div>{{ report.context.pediatric }}</div>{% endif %}

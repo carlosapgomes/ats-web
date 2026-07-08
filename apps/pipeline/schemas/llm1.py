@@ -192,6 +192,13 @@ class Llm1ClinicalFlags(StrictModel):
     prior_coronary_angioplasty: EvidenceFlag = "unknown"
 
 
+class Llm1Comorbidity(StrictModel):
+    """Explicit comorbidity/clinical background described in the source report."""
+
+    name: str = Field(min_length=1, max_length=120)
+    source_text_hint: str | None = None
+
+
 class Llm1RulebookSignals(StrictModel):
     """Grouped rulebook signals added for the rewritten supported EDA flow."""
 
@@ -218,6 +225,7 @@ class Llm1PreopScreening(StrictModel):
     inr: float | None
     evidence_spans: list[Llm1EvidenceSpan] = Field(default_factory=list)
     rulebook_signals: Llm1RulebookSignals = Field(default_factory=Llm1RulebookSignals)
+    comorbidities_described: list[Llm1Comorbidity] = Field(default_factory=list, max_length=20)
 
 
 class Llm1PolicyPrecheck(StrictModel):
