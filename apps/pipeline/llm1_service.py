@@ -69,7 +69,7 @@ eda = {"indication_category", "exclusion_type", "is_pediatric", "foreign_body_su
 eda.requested_procedure = {"name", "urgency", "subtype"}.
 eda.labs = {"hb_g_dl", "hct_percent", "platelets_per_mm3", "tp_seconds", "inr", "rni", "ttpa_seconds", "urea_mg_dl", "creatinine_mg_dl", "source_text_hint"}.
 eda.ecg = {"report_present", "abnormal_flag", "source_text_hint"}.
-preop_screening = {"exam_type", "has_cardiovascular_disease", "has_active_respiratory_symptoms", "has_prior_respiratory_disease", "has_ecg_report", "has_chest_xray_report", "has_echocardiogram_report", "hb_g_dl", "platelets_per_mm3", "inr", "evidence_spans", "rulebook_signals"}.
+preop_screening = {"exam_type", "has_cardiovascular_disease", "has_active_respiratory_symptoms", "has_prior_respiratory_disease", "has_ecg_report", "has_chest_xray_report", "has_echocardiogram_report", "hb_g_dl", "platelets_per_mm3", "inr", "evidence_spans", "rulebook_signals", "comorbidities_described"}.
 policy_precheck = {"excluded_from_eda_flow", "exclusion_reason", "labs_required", "labs_pass", "labs_failed_items", "ecg_required", "ecg_present", "pediatric_flag", "notes"}.
 summary = {"one_liner", "bullet_points"}; bullet_points deve ter 3 a 8 itens.
 extraction_quality = {"confidence", "missing_fields", "notes"}; confidence: alta, media ou baixa.
@@ -92,6 +92,15 @@ LLM1_DEFAULT_USER_PROMPT = (
     "minimos, exames condicionais, subtipo EDA suportado e contexto de "
     "paciente pediatrico. Incluir preop_screening.evidence_spans com "
     "field_path e excerpt sempre que houver evidencia. "
+    "Extrair comorbidades descritas (comorbidities_described) como lista "
+    "de objetos {name, source_text_hint}. Extrair apenas comorbidades e "
+    "condicoes cronicas descritas explicitamente no relatorio. Siglas comuns "
+    "como HAS, DM2, DRC devem ser normalizadas quando seguro. Nao inferir "
+    "comorbidade apenas por medicacao, exame, idade ou fator de risco sem "
+    "diagnostico explicito. Nao incluir sintomas, indicacao da EDA, exames "
+    "laboratoriais ou diagnostico agudo isolado como comorbidade cronica. "
+    "Retornar lista vazia se o relatorio disser 'sem comorbidades', 'nega "
+    "comorbidades' ou equivalente. "
     "Extrair origin_context (cidade/hospital/unidade/UF) quando disponivel "
     "no texto. Identificar exames rastreados (tracked_exams) com recencia "
     "determinada por data/hora ou posicao textual, com desempate pela ultima "
@@ -273,6 +282,17 @@ def _render_user_prompt(
         "Preencher preop_screening.rulebook_signals.clinical_flags com sinais clinicos do "
         "rulebook, inclusive contexto de paciente pediatrico, hepatopatia, cardiopatia, "
         "doenca cardiovascular, criterios respiratorios e gatilhos para ECG/ECO.\n"
+        "Preencher preop_screening.comorbidities_described como lista de comorbidades "
+        "cronicas/antecedentes patologicos descritos explicitamente no relatorio. "
+        "Cada item deve conter {name, source_text_hint}. "
+        "Normalizar siglas comuns quando seguro: HAS -> hipertensao arterial sistemica, "
+        "DM2 -> diabetes mellitus tipo 2, DRC -> doenca renal cronica. "
+        "Nao inferir comorbidade apenas por medicacao, exame laboratorial, idade, fator "
+        "de risco ou sugestao clinica sem diagnostico/antecedente explicito. "
+        "Nao incluir sintomas, indicacao da EDA, exames laboratoriais ou diagnostico "
+        "agudo isolado como comorbidade cronica. "
+        "Retornar lista vazia se o relatorio disser 'sem comorbidades', 'nega "
+        "comorbidades' ou equivalente.\n"
         "Se patient.age < 16, marcar eda.is_pediatric=true e "
         "policy_precheck.pediatric_flag=true; se age >= 16, manter ambos false. "
         "Explicitar contexto de paciente pediatrico no resumo.\n\n"

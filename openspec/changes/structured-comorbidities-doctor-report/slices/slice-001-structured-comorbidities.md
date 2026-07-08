@@ -2,7 +2,7 @@
 
 ## Status
 
-- [ ] Pending
+- [x] Done
 
 ## Contexto zero para implementador
 

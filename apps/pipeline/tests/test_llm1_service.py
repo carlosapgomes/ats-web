@@ -615,6 +615,69 @@ class TestLlm1CausticIngestionPrompt:
         )
 
 
+# ── Comorbidities described (Slice 001) ────────────────────────────────────
+
+
+class TestLlm1ComorbiditiesDescribed:
+    """LLM1 deve aceitar e processar comorbidities_described (Slice 001)."""
+
+    def test_llm1_accepts_structured_comorbidities_described(self) -> None:
+        payload = _valid_llm1_payload()
+        payload["preop_screening"]["comorbidities_described"] = [
+            {"name": "hipertensão arterial sistêmica", "source_text_hint": "HAS"},
+            {"name": "diabetes mellitus tipo 2", "source_text_hint": "DM2"},
+        ]
+        service = _make_service(json.dumps(payload))
+
+        result = service.run(
+            case_id="case-com-001",
+            agency_record_number="12345",
+            extracted_text="...",
+            system_prompt="SP",
+            user_prompt_template="UT",
+        )
+
+        preop = result.structured_data["preop_screening"]
+        assert isinstance(preop, dict)
+        assert preop["comorbidities_described"][0]["name"] == "hipertensão arterial sistêmica"
+        assert preop["comorbidities_described"][1]["name"] == "diabetes mellitus tipo 2"
+        assert preop["comorbidities_described"][0]["source_text_hint"] == "HAS"
+
+    def test_llm1_defaults_missing_comorbidities_to_empty_list(self) -> None:
+        payload = _valid_llm1_payload()
+        payload["preop_screening"].pop("comorbidities_described", None)
+        service = _make_service(json.dumps(payload))
+
+        result = service.run(
+            case_id="case-com-002",
+            agency_record_number="12345",
+            extracted_text="...",
+            system_prompt="SP",
+            user_prompt_template="UT",
+        )
+
+        preop = result.structured_data["preop_screening"]
+        assert isinstance(preop, dict)
+        assert preop["comorbidities_described"] == []
+
+    def test_render_user_prompt_instructs_structured_comorbidity_extraction(self) -> None:
+        prompt = _render_user_prompt(
+            template="Template base",
+            case_id="case-com-003",
+            agency_record_number="12345",
+            clean_text="Texto clinico.",
+        )
+        lower = prompt.lower()
+        assert "comorbidities_described" in prompt
+        assert "comorbidades" in lower
+        assert "source_text_hint" in prompt
+        assert "não infer" in lower or "nao infer" in lower
+
+    def test_default_user_prompt_mentions_comorbidities(self) -> None:
+        up = LLM1_DEFAULT_USER_PROMPT
+        assert "comorbidities_described" in up or "comorbidades" in up.lower()
+
+
 # ── Fallback / default LLM1 prompts ─────────────────────────────────────────
 
 

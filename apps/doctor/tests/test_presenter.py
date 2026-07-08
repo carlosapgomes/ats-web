@@ -780,6 +780,103 @@ class TestDoctorReportPresenter:
         assert "12.0 g/dL" in line
 
 
+# ── Comorbidities line (Slice 001) ─────────────────────────────────────────
+
+
+class TestComorbiditiesLine:
+    """Tests for DoctorReportPresenter comorbidities_line (Slice 001)."""
+
+    def test_comorbidities_line_lists_names_separated_by_comma(self) -> None:
+        presenter = DoctorReportPresenter(
+            structured_data={
+                "preop_screening": {
+                    "comorbidities_described": [
+                        {"name": "hipertensão arterial sistêmica", "source_text_hint": "HAS"},
+                        {"name": "diabetes mellitus tipo 2", "source_text_hint": "DM2"},
+                    ]
+                }
+            },
+            summary_text="",
+            suggested_action={},
+        )
+        report = presenter.build_report()
+        assert report["context"]["comorbidities_line"] == (
+            "Comorbidades descritas: hipertensão arterial sistêmica, diabetes mellitus tipo 2"
+        )
+
+    def test_comorbidities_line_empty_list_uses_no_comorbidities_text(self) -> None:
+        presenter = DoctorReportPresenter(
+            structured_data={"preop_screening": {"comorbidities_described": []}},
+            summary_text="",
+            suggested_action={},
+        )
+        report = presenter.build_report()
+        assert report["context"]["comorbidities_line"] == (
+            "Comorbidades descritas: sem comorbidades descritas no relatório"
+        )
+
+    def test_comorbidities_line_missing_field_uses_unavailable_text_for_old_cases(self) -> None:
+        presenter = DoctorReportPresenter(
+            structured_data={"preop_screening": {}},
+            summary_text="",
+            suggested_action={},
+        )
+        report = presenter.build_report()
+        assert report["context"]["comorbidities_line"] == (
+            "Comorbidades descritas: extração de comorbidades não disponível neste caso"
+        )
+
+    def test_comorbidities_line_missing_preop_screening_uses_unavailable_text(self) -> None:
+        presenter = DoctorReportPresenter(
+            structured_data={},
+            summary_text="",
+            suggested_action={},
+        )
+        report = presenter.build_report()
+        assert report["context"]["comorbidities_line"] == (
+            "Comorbidades descritas: extração de comorbidades não disponível neste caso"
+        )
+
+    def test_comorbidities_line_deduplicates_and_ignores_blank_items(self) -> None:
+        presenter = DoctorReportPresenter(
+            structured_data={
+                "preop_screening": {
+                    "comorbidities_described": [
+                        {"name": "hipertensão arterial sistêmica"},
+                        {"name": "diabetes mellitus tipo 2"},
+                        {"name": "hipertensão arterial sistêmica"},
+                        {"name": ""},
+                        {"name": "  "},
+                    ]
+                }
+            },
+            summary_text="",
+            suggested_action={},
+        )
+        report = presenter.build_report()
+        assert report["context"]["comorbidities_line"] == (
+            "Comorbidades descritas: hipertensão arterial sistêmica, diabetes mellitus tipo 2"
+        )
+
+    def test_comorbidities_line_all_invalid_items_falls_back_to_empty(self) -> None:
+        presenter = DoctorReportPresenter(
+            structured_data={
+                "preop_screening": {
+                    "comorbidities_described": [
+                        {"name": ""},
+                        {"name": "  "},
+                    ]
+                }
+            },
+            summary_text="",
+            suggested_action={},
+        )
+        report = presenter.build_report()
+        assert report["context"]["comorbidities_line"] == (
+            "Comorbidades descritas: sem comorbidades descritas no relatório"
+        )
+
+
 # ── Caustic ingestion detection ──────────────────────────────────────────────
 
 

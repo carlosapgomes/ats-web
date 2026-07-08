@@ -2,7 +2,7 @@
 
 ## Slice vertical
 
-- [ ] Slice 001 — Extração estruturada LLM1 + exibição de comorbidades no relatório médico (`slices/slice-001-structured-comorbidities.md`)
+- [x] Slice 001 — Extração estruturada LLM1 + exibição de comorbidades no relatório médico (`slices/slice-001-structured-comorbidities.md`)
 
 ## Definition of Done do change
 
