@@ -2705,3 +2705,25 @@ class TestDashboardDynamicSearch:
         assert not any("supervisorsummary" in sql.lower() for sql in sqls), (
             "Partial não deve consultar SupervisorSummary (latest_summary).\n" + "\n".join(sqls)
         )
+
+    def test_case_list_form_has_no_duplicate_search_input(self, client) -> None:
+        """O form da lista não duplica name='search'.
+
+        O form da lista já tem o input visível ``type="search" name="search"``;
+        um hidden extra com o mesmo nome geraria ``?search=...&search=...`` no
+        submit. Apenas o form de métricas precisa de um hidden ``name="search"``
+        para preservar o termo ao trocar a data das métricas.
+        """
+        _login_as(client, "manager")
+        # Com termo ativo, o form de métricas renderiza seu hidden name="search";
+        # o form da lista não deve ter um hidden duplicado (usa o input visível).
+        response = client.get(reverse("dashboard:index") + "?search=ana")
+        assert response.status_code == 200
+        content = response.content.decode()
+
+        # Exatamente UM hidden name="search" (no form de métricas).
+        assert content.count('type="hidden" name="search"') == 1, (
+            'Deve haver apenas um hidden name="search" (form de métricas).'
+        )
+        # O input visível de busca segue presente no form da lista.
+        assert 'type="search" name="search"' in content
