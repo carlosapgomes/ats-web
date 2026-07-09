@@ -7,9 +7,9 @@ from typing import Any
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
 from django.core.paginator import Paginator
-from django.db.models import Avg, DurationField, ExpressionWrapper, F, Q, QuerySet
+from django.db.models import Avg, DateTimeField, DurationField, ExpressionWrapper, F, OuterRef, Q, QuerySet, Subquery
 from django.db.models.fields.json import KeyTextTransform
-from django.db.models.functions import Lower
+from django.db.models.functions import Coalesce, Lower
 from django.http import FileResponse, Http404, HttpRequest, HttpResponse, HttpResponseBase
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
@@ -200,13 +200,23 @@ def _compute_average_times(day: date | None = None) -> dict[str, str]:
     avg_sched = scheduled_qs.aggregate(avg=Avg("sched_time"))["avg"]
 
     # Ciclo Total
-    completed_qs = cases_qs.exclude(cleanup_completed_at=None).annotate(
+    cleanup_completed_event_ts = CaseEvent.objects.filter(
+        case=OuterRef("pk"),
+        event_type="CLEANUP_COMPLETED",
+    ).values("timestamp")[:1]
+    completed_qs = cases_qs.annotate(
+        completed_at_for_metrics=Coalesce(
+            "cleanup_completed_at",
+            Subquery(cleanup_completed_event_ts),
+            output_field=DateTimeField(),
+        )
+    ).exclude(completed_at_for_metrics=None)
+    avg_cycle = completed_qs.annotate(
         cycle_time=ExpressionWrapper(
-            F("cleanup_completed_at") - F("created_at"),
+            F("completed_at_for_metrics") - F("created_at"),
             output_field=DurationField(),
         ),
-    )
-    avg_cycle = completed_qs.aggregate(avg=Avg("cycle_time"))["avg"]
+    ).aggregate(avg=Avg("cycle_time"))["avg"]
 
     return {
         "upload_to_decision": _fmt_duration(avg_decision),
