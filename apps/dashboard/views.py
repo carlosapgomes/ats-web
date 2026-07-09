@@ -399,32 +399,12 @@ def _apply_case_search(cases_qs: QuerySet[Case], search_term: str) -> QuerySet[C
     ).filter(Q(search_arn__contains=search_lower) | Q(search_patient_name__contains=search_lower))
 
 
-@login_required
-@role_required("manager", "admin")
-def dashboard_index(request: HttpRequest) -> HttpResponse:
-    """Dashboard com métricas e tabela de todos os casos."""
-    # Data das métricas — usa query string metrics_date, padrão hoje
-    raw_metrics_date = request.GET.get("metrics_date", "")
-    metrics_date: date | None = None
-    metrics_date_str = ""
-    if raw_metrics_date:
-        try:
-            metrics_date = date.fromisoformat(raw_metrics_date)
-            metrics_date_str = raw_metrics_date
-        except (ValueError, TypeError):
-            metrics_date = None  # inválido → cai para hoje
+def _dashboard_case_list_context(request: HttpRequest) -> dict[str, Any]:
+    """Monta o contexto para a lista de casos do dashboard.
 
-    summary = _compute_summary(day=metrics_date)
-    stage_waiting = _compute_stage_waiting()
-    admission_flow = _compute_admission_flow(day=metrics_date)
-    avg_times = _compute_average_times(day=metrics_date)
-
-    # Label para o card de total
-    if metrics_date is not None:
-        total_label = f"Total em {metrics_date.strftime('%d/%m/%Y')}"
-    else:
-        total_label = "Total Hoje"
-
+    Extraído para ser compartilhado entre a renderização completa e a
+    renderização parcial (X-ATS-Partial: case-list).
+    """
     now = timezone.now()
 
     # Filtro de atenção
@@ -464,10 +444,8 @@ def dashboard_index(request: HttpRequest) -> HttpResponse:
     # Contador de atenção (total de casos suspeitos, sem paginação)
     attention_count: int | None = None
     if attention_filter:
-        # Já filtrado, usa count do paginator
         attention_count = cases_qs.count()
     else:
-        # Calcula separadamente sem afetar a query principal
         attention_count = Case.objects.exclude(status=CaseStatus.CLEANED).filter(_attention_q(now)).count()
 
     # Paginação
@@ -477,8 +455,72 @@ def dashboard_index(request: HttpRequest) -> HttpResponse:
 
     enriched_cases = [_enrich_case(c, now=now, attention_filter=attention_filter) for c in page_obj]
 
+    metrics_date_str = ""
+    raw_metrics_date = request.GET.get("metrics_date", "")
+    if raw_metrics_date:
+        try:
+            date.fromisoformat(raw_metrics_date)
+            metrics_date_str = raw_metrics_date
+        except (ValueError, TypeError):
+            pass
+
+    return {
+        "cases": enriched_cases,
+        "page_obj": page_obj,
+        "status_filter": status_filter,
+        "date_from": date_from,
+        "date_to": date_to,
+        "search": search_raw,
+        "search_term": search_term,
+        "search_min_chars_help": search_min_chars_help,
+        "attention_filter": attention_filter,
+        "attention_count": attention_count,
+        "metrics_date": metrics_date_str,
+    }
+
+
+@login_required
+@role_required("manager", "admin")
+def dashboard_index(request: HttpRequest) -> HttpResponse:
+    """Dashboard com métricas e tabela de todos os casos.
+
+    Se o header ``X-ATS-Partial: case-list`` estiver presente, retorna
+    apenas o partial ``dashboard/_case_list.html`` para busca dinâmica
+    via Vanilla JS. Caso contrário, renderiza a página completa.
+    """
+    # Data das métricas — usa query string metrics_date, padrão hoje
+    raw_metrics_date = request.GET.get("metrics_date", "")
+    metrics_date: date | None = None
+    if raw_metrics_date:
+        try:
+            metrics_date = date.fromisoformat(raw_metrics_date)
+        except (ValueError, TypeError):
+            metrics_date = None  # inválido → cai para hoje
+
+    summary = _compute_summary(day=metrics_date)
+    stage_waiting = _compute_stage_waiting()
+    admission_flow = _compute_admission_flow(day=metrics_date)
+    avg_times = _compute_average_times(day=metrics_date)
+
+    # Label para o card de total
+    if metrics_date is not None:
+        total_label = f"Total em {metrics_date.strftime('%d/%m/%Y')}"
+    else:
+        total_label = "Total Hoje"
+
     # Último resumo para o card no dashboard
     latest_summary = SupervisorSummary.objects.order_by("-window_end").first()
+
+    # Contexto da lista de casos (compartilhado entre renderização completa e parcial)
+    case_list_context = _dashboard_case_list_context(request)
+
+    # Renderização parcial para busca dinâmica (X-ATS-Partial: case-list)
+    if request.headers.get("X-ATS-Partial") == "case-list":
+        return render(
+            request,
+            "dashboard/_case_list.html",
+            case_list_context,
+        )
 
     return render(
         request,
@@ -488,21 +530,11 @@ def dashboard_index(request: HttpRequest) -> HttpResponse:
             "stage_waiting": stage_waiting,
             "admission_flow": admission_flow,
             "avg_times": avg_times,
-            "cases": enriched_cases,
-            "page_obj": page_obj,
-            "status_filter": status_filter,
-            "date_from": date_from,
-            "date_to": date_to,
+            "latest_summary": latest_summary,
+            "total_label": total_label,
             "status_choices": CaseStatus.choices,
             "STATUS_LABELS": STATUS_LABELS,
-            "latest_summary": latest_summary,
-            "attention_filter": attention_filter,
-            "attention_count": attention_count,
-            "metrics_date": metrics_date_str,
-            "total_label": total_label,
-            "search": search_raw,
-            "search_term": search_term,
-            "search_min_chars_help": search_min_chars_help,
+            **case_list_context,
         },
     )
 

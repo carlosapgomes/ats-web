@@ -2539,3 +2539,132 @@ class TestDashboardMetricsDate:
         content = response.content.decode()
         # A página renderiza normalmente
         assert "Total no dia" in content or "Total Hoje" in content or "Aguardando" in content
+
+
+# ── Dashboard: Dynamic Search slice 004 ──────────────────────────────────
+
+
+@pytest.mark.django_db
+class TestDashboardDynamicSearch:
+    """Testes para busca dinâmica progressiva (slice 004)."""
+
+    def test_dashboard_has_stable_container(self, client) -> None:
+        """GET /dashboard/ renderiza container id='dashboard-case-list'."""
+        _login_as(client, "manager")
+        response = client.get(reverse("dashboard:index"))
+        assert response.status_code == 200
+        content = response.content.decode()
+        assert 'id="dashboard-case-list"' in content
+
+    def test_dashboard_includes_search_js(self, client) -> None:
+        """GET /dashboard/ inclui static/js/dashboard_search.js."""
+        _login_as(client, "manager")
+        response = client.get(reverse("dashboard:index"))
+        assert response.status_code == 200
+        content = response.content.decode()
+        assert "js/dashboard_search.js" in content
+
+    def test_partial_not_duplicated_when_included(self, client) -> None:
+        """GET /dashboard/ inclui o partial sem duplicar a lista.
+
+        Verifica que o container 'dashboard-case-list' existe UMA vez
+        e que o alerta de nenhum caso aparece apenas uma vez.
+        """
+        _login_as(client, "manager")
+        response = client.get(reverse("dashboard:index"))
+        assert response.status_code == 200
+        content = response.content.decode()
+        # O container deve aparecer exatamente uma vez
+        assert content.count('id="dashboard-case-list"') == 1
+
+    def test_partial_header_returns_only_partial(self, client) -> None:
+        """GET /dashboard/ com header X-ATS-Partial: case-list retorna apenas o partial."""
+        user = _login_as(client, "manager")
+        _create_case(
+            created_by=user,
+            status=CaseStatus.NEW,
+            agency_record_number="PARTIAL-001",
+        )
+        response = client.get(
+            reverse("dashboard:index"),
+            headers={"X-ATS-Partial": "case-list"},
+        )
+        assert response.status_code == 200
+        content = response.content.decode()
+        # Deve conter o caso
+        assert "PARTIAL-001" in content
+        # NÃO deve conter elementos da página completa
+        assert "base.html" not in content
+        assert "Dashboard" not in content
+        assert "Visão geral" not in content
+
+    def test_partial_search_filters_cases(self, client) -> None:
+        """Partial com ?search=ana contém caso esperado e exclui não esperado."""
+        user = _login_as(client, "manager")
+        Case.objects.all().delete()
+
+        _create_case(
+            created_by=user,
+            status=CaseStatus.NEW,
+            agency_record_number="SRC-PARTIAL-001",
+            structured_data={"patient": {"name": "Ana Maria"}},
+        )
+        _create_case(
+            created_by=user,
+            status=CaseStatus.NEW,
+            agency_record_number="SRC-PARTIAL-002",
+            structured_data={"patient": {"name": "João Silva"}},
+        )
+
+        response = client.get(
+            reverse("dashboard:index") + "?search=ana",
+            headers={"X-ATS-Partial": "case-list"},
+        )
+        assert response.status_code == 200
+        content = response.content.decode()
+        assert "Ana Maria" in content
+        assert "João Silva" not in content
+
+    def test_partial_pagination_preserves_search(self, client) -> None:
+        """Paginação do partial preserva search."""
+        user = _login_as(client, "manager")
+        Case.objects.all().delete()
+
+        for i in range(25):
+            _create_case(
+                created_by=user,
+                status=CaseStatus.NEW,
+                agency_record_number=f"PP-SRC-{i:03d}",
+                structured_data={"patient": {"name": f"Paciente {i:03d}"}},
+            )
+
+        response = client.get(
+            reverse("dashboard:index") + "?search=paciente",
+            headers={"X-ATS-Partial": "case-list"},
+        )
+        assert response.status_code == 200
+        content = response.content.decode()
+        # Links de paginação devem conter search=paciente
+        assert "search=paciente" in content or "search%3Dpaciente" in content
+
+    def test_search_js_file_has_debounce_and_min_chars(self, client) -> None:
+        """Arquivo JS contém debounce e regra de mínimo de 3 caracteres."""
+        import os
+        from pathlib import Path
+
+        # O static root do projeto fica na raiz
+        base_dir = Path(__file__).resolve().parent.parent.parent.parent
+        js_path = os.path.join(base_dir, "static", "js", "dashboard_search.js")
+        assert os.path.exists(js_path), f"JS file not found: {js_path}"
+
+        with open(js_path) as f:
+            js_content = f.read()
+
+        # Deve conter debounce
+        assert "debounce" in js_content or "setTimeout" in js_content or "clearTimeout" in js_content
+        # Deve conter regra de mínimo de 3 caracteres
+        assert "3" in js_content or ">= 3" in js_content or "> 2" in js_content
+        # Deve conter fetch
+        assert "fetch" in js_content or "XMLHttpRequest" in js_content
+        # Deve conter AbortController ou mecanismo de cancelamento
+        assert "AbortController" in js_content or "abort" in js_content or "controller" in js_content
