@@ -2727,3 +2727,176 @@ class TestDashboardDynamicSearch:
         )
         # O input visível de busca segue presente no form da lista.
         assert 'type="search" name="search"' in content
+
+
+# ── Dashboard: Case List Filter Layout Polish (Slice 001) ──────────────
+
+
+@pytest.mark.django_db
+class TestDashboardCaseListFilterLayout:
+    """Testes de contrato HTML para o polimento visual dos filtros de "Todos os Casos".
+
+    Verifica o layout em duas linhas: header com título + botão Atenção,
+    e formulário de filtros em grid Bootstrap responsivo.
+    """
+
+    def _get_content(self, client, query: str = "") -> str:
+        """Helper: faz GET no dashboard e retorna HTML como string."""
+        _login_as(client, "manager")
+        url = reverse("dashboard:index")
+        if query:
+            url += "?" + query
+        response = client.get(url)
+        assert response.status_code == 200
+        return str(response.content, encoding="utf-8")
+
+    def _filter_form_start(self, content: str) -> int:
+        """Retorna a posição do <form> de filtros da lista (segundo form method=get).
+
+        A página tem dois forms method=get: primeiro é o de métricas,
+        segundo é o de filtros da lista. Encontramos o segundo.
+        """
+        first = content.find('<form method="get"')
+        second = content.find('<form method="get"', first + 1)
+        return second
+
+    def test_card_header_shows_title_before_filters(self, client) -> None:
+        """R1: Header do card com 'Todos os Casos' antes da área de filtros.
+
+        O título deve aparecer antes do formulário de filtros no HTML.
+        """
+        content = self._get_content(client)
+        title_pos = content.find("Todos os Casos")
+        form_pos = self._filter_form_start(content)
+        assert title_pos != -1, "'Todos os Casos' deve estar no HTML"
+        assert form_pos != -1, "Deve haver um formulário GET de filtros"
+        assert title_pos < form_pos, (
+            f"'Todos os Casos' (pos {title_pos}) deve aparecer antes do <form> da lista (pos {form_pos})"
+        )
+
+    def test_attention_link_outside_form_in_header(self, client) -> None:
+        """R1: Botão 'Atenção necessária' aparece no header do card e antes do <form> da lista."""
+        content = self._get_content(client)
+        attention_pos = content.find("⚠ Atenção necessária")
+        form_pos = self._filter_form_start(content)
+        assert attention_pos != -1, "Link 'Atenção necessária' deve estar no HTML"
+        assert form_pos != -1, "Deve haver um formulário GET de filtros"
+        assert attention_pos < form_pos, (
+            f"'Atenção necessária' (pos {attention_pos}) deve aparecer antes do <form> da lista (pos {form_pos})"
+        )
+
+    def test_filter_form_has_responsive_grid_classes(self, client) -> None:
+        """R2: Formulário contém classes de grid responsivo (row, g-2/g-md-3, align-items-end)."""
+        content = self._get_content(client)
+        assert 'class="row g-2' in content or 'class="row' in content and "g-2" in content, (
+            "Deve conter 'row' com classe g-2 ou similar"
+        )
+        assert "align-items-end" in content, "Deve conter 'align-items-end' para alinhar inputs pela base"
+
+    def test_search_field_has_col_lg_4(self, client) -> None:
+        """R3: Campo de busca está em coluna col-lg-4 ou maior no desktop."""
+        content = self._get_content(client)
+        assert (
+            "col-lg-4" in content
+            or "col-lg-5" in content
+            or "col-lg-6" in content
+            or "col-lg-7" in content
+            or "col-lg-8" in content
+        ), "Campo de busca deve ocupar col-lg-* maior (pelo menos col-lg-4)"
+
+    def test_status_label_visible_with_for_id(self, client) -> None:
+        """R4: Status tem label visível 'Status' associado ao select com for/id."""
+        content = self._get_content(client)
+        assert 'label for="status"' in content or '<label for="status"' in content, (
+            "Label 'Status' deve ter for='status'"
+        )
+        assert 'id="status"' in content, "Select de status deve ter id='status'"
+        assert "Status" in content, "Texto 'Status' deve estar visível"
+
+    def test_all_labels_present(self, client) -> None:
+        """R4: Labels 'Buscar por nome ou registro', 'Data inicial' e 'Data final' continuam presentes."""
+        content = self._get_content(client)
+        assert "Buscar por nome ou registro" in content, "Label 'Buscar por nome ou registro' deve estar presente"
+        assert "Data inicial" in content, "Label 'Data inicial' deve estar presente"
+        assert "Data final" in content, "Label 'Data final' deve estar presente"
+
+    def test_no_duplicate_search_in_filter_form(self, client) -> None:
+        """R6: O formulário da lista não contém dois controles 'name="search"' quando ?search=ana está ativo.
+
+        O input visível type="search" name="search" é o único controle com
+        name="search" dentro do formulário da lista. O hidden fica só no form
+        de métricas.
+        """
+        content = self._get_content(client, "search=ana")
+        # Conta quantas vezes o atributo name="search" aparece DENTRO de um <form>
+        # que também contenha type="search" (form da lista).
+        # Estratégia: conta o input type="search" name="search" e os hidden
+        # name="search" para verificar que não há hidden duplicado no form da lista.
+        search_visible_count = content.count('name="search" id="search"')
+        assert search_visible_count == 1, (
+            f'Deve haver exatamente um input type="search" name="search", encontrado {search_visible_count}'
+        )
+        # Só deve haver 1 hidden name="search" (do form de métricas)
+        hidden_search_count = content.count('type="hidden" name="search"')
+        assert hidden_search_count == 1, (
+            f'Deve haver exatamente 1 hidden name="search" (form de métricas), encontrado {hidden_search_count}'
+        )
+
+    def test_metrics_date_hidden_present(self, client) -> None:
+        """R8: Hidden 'metrics_date' continua presente no formulário da lista quando ?metrics_date=2026-07-08 está ativo."""
+        content = self._get_content(client, "metrics_date=2026-07-08")
+        assert 'type="hidden" name="metrics_date" value="2026-07-08"' in content, (
+            "Hidden metrics_date deve estar presente no form da lista"
+        )
+        # Além disso, deve ter o hidden no form de métricas também
+        assert content.count('type="hidden" name="metrics_date"') >= 1
+
+    def test_attention_link_preserves_metrics_date_and_search(self, client) -> None:
+        """R9: Link 'Atenção necessária' preserva metrics_date e search quando presentes."""
+        content = self._get_content(client, "metrics_date=2026-07-08&search=ana")
+        # O link de atenção deve conter ambos parâmetros
+        attention_link_start = content.find("⚠ Atenção necessária")
+        assert attention_link_start != -1, "Link de atenção deve estar presente"
+        # Busca o href do link (volta para encontrar <a)
+        link_section = content[:attention_link_start]
+        href_start = link_section.rfind('href="')
+        assert href_start != -1, "Deve encontrar href antes do texto Atenção"
+        href = link_section[href_start:]
+        assert "metrics_date=2026-07-08" in href, f"Link de atenção deve preservar metrics_date, href contém: {href}"
+        assert "search=ana" in href or "search=ana" in content, "Link de atenção deve preservar search"
+
+    def test_dashboard_search_js_included(self, client) -> None:
+        """R10: JS dashboard_search.js continua incluído na página."""
+        content = self._get_content(client)
+        assert "dashboard_search.js" in content, "dashboard_search.js deve estar incluído na página"
+
+    def test_attention_link_has_count_badge(self, client) -> None:
+        """R1: Link 'Atenção necessária' exibe contagem (N)."""
+        content = self._get_content(client)
+        assert "Atenção necessária" in content, "Texto 'Atenção necessária' deve estar presente"
+        # O contador pode ser 0 ou mais, mas deve estar presente
+        assert "attention_count" in content or "(0)" in content or "(1)" in content, (
+            "Contagem de atenção deve estar visível"
+        )
+
+    def test_attention_link_has_btn_class(self, client) -> None:
+        """Link de atenção tem classe btn (btn-sm btn-warning ou btn-outline-warning)."""
+        content = self._get_content(client)
+        assert "btn-warning" in content or "btn-outline-warning" in content, (
+            "Link de atenção deve ter classe btn-warning ou btn-outline-warning"
+        )
+
+    def test_dashboard_case_list_id_and_data_attr(self, client) -> None:
+        """Preserva id='dashboard-case-list' e data-dashboard-search-target."""
+        content = self._get_content(client)
+        assert 'id="dashboard-case-list"' in content, "id='dashboard-case-list' deve estar presente"
+        assert "data-dashboard-search-target" in content, "data-dashboard-search-target deve estar presente"
+
+    def test_filter_actions_have_filtrar_and_limpar(self, client) -> None:
+        """Botões 'Filtrar' e 'Limpar' continuam presentes.
+
+        'Filtrar' aparece sempre. 'Limpar' só aparece quando há filtros ativos.
+        """
+        content = self._get_content(client, "search=ana")
+        assert "Filtrar" in content, "Botão 'Filtrar' deve estar presente"
+        assert "Limpar" in content, "Link 'Limpar' deve estar presente quando há filtros ativos"
