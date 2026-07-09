@@ -2961,24 +2961,6 @@ class TestDashboardMetricsPeriod:
         """Ajusta campos de um caso sem disparar signals."""
         Case.objects.filter(pk=case.pk).update(**kwargs)
 
-    @staticmethod
-    def _create_cleaned_case_with_cleanup_completed(
-        user,
-        *,
-        created_at: datetime,
-        cleanup_completed_at: datetime | None = None,
-        agency_record_number: str = "",
-    ) -> Case:
-        """Cria caso CLEANED com timestamps específicos."""
-        case = Case.objects.create(
-            created_by=user,
-            status=CaseStatus.CLEANED,
-            agency_record_number=agency_record_number or "CYCLE-TEST",
-            created_at=created_at,
-            cleanup_completed_at=cleanup_completed_at,
-        )
-        return case
-
     # ── R1: Default period is today ────────────────────────────────────
 
     def test_metrics_period_default_is_today(self, client) -> None:
@@ -3220,7 +3202,7 @@ class TestDashboardMetricsPeriod:
         )
 
         avg = _compute_average_times(period="today")
-        assert avg["upload_to_decision"] != "—", "Deveria haver ao menos 1 caso decidido no período (today), mas não há"
+        assert avg["upload_to_decision"] == "122 h"
 
     def test_average_decision_to_schedule_filters_by_appointment_decided_at(self, client) -> None:
         """Tempo Decisão→Agendamento filtra por appointment_decided_at no período.
@@ -3262,7 +3244,7 @@ class TestDashboardMetricsPeriod:
         )
 
         avg = _compute_average_times(period="today")
-        assert avg["decision_to_schedule"] != "—", "Deveria haver ao menos 1 caso agendado no período (today)"
+        assert avg["decision_to_schedule"] == "28 h"
 
     def test_average_total_cycle_filters_by_cleanup_completion_timestamp(self, client) -> None:
         """Tempo Ciclo Total filtra por cleanup_completed_at no período.
@@ -3279,22 +3261,25 @@ class TestDashboardMetricsPeriod:
         five_days_ago = today - timedelta(days=5)
 
         # Caso criado há 5 dias mas concluído hoje
-        Case.objects.create(
+        case = _create_case(
             created_by=user,
             status=CaseStatus.CLEANED,
             agency_record_number="CYCLE-TODAY",
-            created_at=timezone.make_aware(
-                datetime.combine(five_days_ago, time(8, 0)),
-                tz,
-            ),
             cleanup_completed_at=timezone.make_aware(
                 datetime.combine(today, time(10, 0)),
                 tz,
             ),
         )
+        self._set_created_at(
+            case,
+            timezone.make_aware(
+                datetime.combine(five_days_ago, time(8, 0)),
+                tz,
+            ),
+        )
 
         avg = _compute_average_times(period="today")
-        assert avg["total_cycle"] != "—", "Deveria haver ao menos 1 caso concluído no período (today)"
+        assert avg["total_cycle"] == "122 h"
 
     def test_total_cycle_period_uses_cleanup_completed_event_fallback(self, client) -> None:
         """Ciclo Total usa evento CLEANUP_COMPLETED quando cleanup_completed_at está vazio.
@@ -3319,13 +3304,13 @@ class TestDashboardMetricsPeriod:
             tz,
         )
 
-        case = Case.objects.create(
+        case = _create_case(
             created_by=user,
             status=CaseStatus.CLEANED,
             agency_record_number="CYCLE-EVT-FALLBACK",
-            created_at=created,
         )
         self._set_field(case, cleanup_completed_at=None)
+        self._set_created_at(case, created)
 
         # Criar evento CLEANUP_COMPLETED no período
         event = CaseEvent.objects.create(
@@ -3338,7 +3323,7 @@ class TestDashboardMetricsPeriod:
         CaseEvent.objects.filter(pk=event.pk).update(timestamp=completed)
 
         avg = _compute_average_times(period="today")
-        assert avg["total_cycle"] != "—", "Ciclo Total deve usar evento CLEANUP_COMPLETED como fallback"
+        assert avg["total_cycle"] == "122 h"
 
     # ── Template tests ──────────────────────────────────────────────────
 

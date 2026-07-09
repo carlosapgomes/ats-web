@@ -38,7 +38,7 @@
 
   /**
    * Retorna os parâmetros atuais do formulário de filtros como URLSearchParams.
-   * Preserva status, date_from, date_to, attention e metrics_date.
+   * Preserva status, date_from, date_to, attention e metrics_period.
    */
   function getFilterParams() {
     var params = new URLSearchParams();
