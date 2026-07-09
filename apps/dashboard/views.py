@@ -485,9 +485,20 @@ def dashboard_index(request: HttpRequest) -> HttpResponse:
     """Dashboard com métricas e tabela de todos os casos.
 
     Se o header ``X-ATS-Partial: case-list`` estiver presente, retorna
-    apenas o partial ``dashboard/_case_list.html`` para busca dinâmica
-    via Vanilla JS. Caso contrário, renderiza a página completa.
+    apenas o partial ``dashboard/_case_list.html`` para busca dinâmica via
+    Vanilla JS, **sem computar as métricas** (resposta leve). Caso
+    contrário, renderiza a página completa.
     """
+    # Busca dinâmica: retorna somente a lista de casos. O partial depende
+    # apenas do contexto da lista, então computar summary/fluxo/tempos
+    # médios seria trabalho descartado a cada keystroke (debounce).
+    if request.headers.get("X-ATS-Partial") == "case-list":
+        return render(
+            request,
+            "dashboard/_case_list.html",
+            _dashboard_case_list_context(request),
+        )
+
     # Data das métricas — usa query string metrics_date, padrão hoje
     raw_metrics_date = request.GET.get("metrics_date", "")
     metrics_date: date | None = None
@@ -511,16 +522,8 @@ def dashboard_index(request: HttpRequest) -> HttpResponse:
     # Último resumo para o card no dashboard
     latest_summary = SupervisorSummary.objects.order_by("-window_end").first()
 
-    # Contexto da lista de casos (compartilhado entre renderização completa e parcial)
+    # Contexto da lista de casos
     case_list_context = _dashboard_case_list_context(request)
-
-    # Renderização parcial para busca dinâmica (X-ATS-Partial: case-list)
-    if request.headers.get("X-ATS-Partial") == "case-list":
-        return render(
-            request,
-            "dashboard/_case_list.html",
-            case_list_context,
-        )
 
     return render(
         request,
