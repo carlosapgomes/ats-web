@@ -407,12 +407,27 @@ def dashboard_index(request: HttpRequest) -> HttpResponse:
     # Filtro de atenção
     attention_filter: bool = request.GET.get("attention") == "1"
 
+    # Busca server-side
+    search_raw = request.GET.get("search", "")
+    search_term = search_raw.strip()[:100]
+    search_min_chars_help = False
+
     # Tabela de casos — todos, sem filtro de usuario
     cases_qs = Case.objects.select_related("created_by").order_by("-created_at")
 
     # Filtro de atenção (exclui CLEANED, aplica critérios de atenção)
     if attention_filter:
         cases_qs = cases_qs.exclude(status=CaseStatus.CLEANED).filter(_attention_q(now))
+
+    # Busca: só filtra com 3+ caracteres
+    if len(search_term) >= 3:
+        search_lower = search_term.lower()
+        search_q = Q(agency_record_number__icontains=search_lower) | Q(
+            structured_data__patient__name__icontains=search_lower
+        )
+        cases_qs = cases_qs.filter(search_q)
+    elif len(search_term) in (1, 2):
+        search_min_chars_help = True
 
     # Filtros
     status_filter = request.GET.get("status", "")
@@ -465,6 +480,9 @@ def dashboard_index(request: HttpRequest) -> HttpResponse:
             "attention_count": attention_count,
             "metrics_date": metrics_date_str,
             "total_label": total_label,
+            "search": search_raw,
+            "search_term": search_term,
+            "search_min_chars_help": search_min_chars_help,
         },
     )
 

@@ -41,6 +41,7 @@
       {% if date_from %}<input type="hidden" name="date_from" value="{{ date_from }}">{% endif %}
       {% if date_to %}<input type="hidden" name="date_to" value="{{ date_to }}">{% endif %}
       {% if attention_filter %}<input type="hidden" name="attention" value="1">{% endif %}
+      {% if search %}<input type="hidden" name="search" value="{{ search }}">{% endif %}
     </form>
   </div>
 </div>
@@ -170,10 +171,15 @@
   <div class="d-flex justify-content-between align-items-center mb-3 flex-wrap gap-2">
     <h5 class="mb-0">Todos os Casos</h5>
     <div class="admin-filters d-flex gap-2 align-items-center flex-wrap">
-      <a href="{% url 'dashboard:index' %}?attention=1{% if metrics_date %}&metrics_date={{ metrics_date }}{% endif %}" class="btn btn-sm {% if attention_filter %}btn-warning{% else %}btn-outline-warning{% endif %}">
+      <a href="{% url 'dashboard:index' %}?attention=1{% if metrics_date %}&metrics_date={{ metrics_date }}{% endif %}{% if search %}&search={{ search|urlencode }}{% endif %}" class="btn btn-sm {% if attention_filter %}btn-warning{% else %}btn-outline-warning{% endif %}">
         ⚠ Atenção necessária{% if attention_count is not None %} ({{ attention_count }}){% endif %}
       </a>
       <form method="get" class="d-flex gap-2 align-items-center flex-wrap">
+        <div class="d-inline-flex flex-column align-items-start">
+          <label for="search" class="form-label form-label-sm mb-0 small text-muted">Buscar por nome ou registro</label>
+          <input type="search" name="search" id="search" class="form-control form-control-sm" style="width:auto;"
+                 value="{{ search }}" placeholder="Digite ao menos 3 caracteres">
+        </div>
         <select name="status" class="form-select form-select-sm" style="width:auto;">
           <option value="">Todos os status</option>
           {% for code, _label in status_choices %}
@@ -193,13 +199,20 @@
                  value="{{ date_to }}" placeholder="Data fim">
         </div>
         {% if metrics_date %}<input type="hidden" name="metrics_date" value="{{ metrics_date }}">{% endif %}
+        {% if search %}<input type="hidden" name="search" value="{{ search }}">{% endif %}
         <button type="submit" class="btn btn-sm btn-hospital-outline">Filtrar</button>
-        {% if status_filter or date_from or date_to %}
+        {% if status_filter or date_from or date_to or search %}
         <a href="{% url 'dashboard:index' %}" class="btn btn-sm btn-outline-secondary">Limpar</a>
         {% endif %}
       </form>
     </div>
   </div>
+
+  {% if search_min_chars_help %}
+  <div class="alert alert-info py-2 mb-3" role="alert">
+    Digite ao menos <strong>3 caracteres</strong> para buscar por nome do paciente ou número de registro.
+  </div>
+  {% endif %}
 
   {% if cases %}
   <div class="d-flex flex-column gap-2">
@@ -246,7 +259,7 @@
   {% else %}
   <div class="text-center py-5">
     <p class="text-muted mb-3 fs-5">Nenhum caso encontrado</p>
-    {% if status_filter or date_from or date_to %}
+    {% if status_filter or date_from or date_to or search %}
     <p class="text-muted small mb-3">Nenhum resultado para os filtros aplicados.</p>
     <a href="{% url 'dashboard:index' %}" class="btn btn-hospital-outline">Limpar filtros</a>
     {% endif %}
@@ -259,7 +272,7 @@
     <ul class="pagination pagination-sm justify-content-center mb-0">
       {% if page_obj.has_previous %}
       <li class="page-item">
-        <a class="page-link" href="?page={{ page_obj.previous_page_number }}{% if status_filter %}&status={{ status_filter }}{% endif %}{% if date_from %}&date_from={{ date_from }}{% endif %}{% if date_to %}&date_to={{ date_to }}{% endif %}{% if attention_filter %}&attention=1{% endif %}{% if metrics_date %}&metrics_date={{ metrics_date }}{% endif %}">Anterior</a>
+        <a class="page-link" href="?page={{ page_obj.previous_page_number }}{% if status_filter %}&status={{ status_filter }}{% endif %}{% if date_from %}&date_from={{ date_from }}{% endif %}{% if date_to %}&date_to={{ date_to }}{% endif %}{% if attention_filter %}&attention=1{% endif %}{% if metrics_date %}&metrics_date={{ metrics_date }}{% endif %}{% if search %}&search={{ search|urlencode }}{% endif %}">Anterior</a>
       </li>
       {% else %}
       <li class="page-item disabled"><span class="page-link">Anterior</span></li>
@@ -270,14 +283,14 @@
         <li class="page-item active"><span class="page-link">{{ i }}</span></li>
         {% else %}
         <li class="page-item">
-          <a class="page-link" href="?page={{ i }}{% if status_filter %}&status={{ status_filter }}{% endif %}{% if date_from %}&date_from={{ date_from }}{% endif %}{% if date_to %}&date_to={{ date_to }}{% endif %}{% if attention_filter %}&attention=1{% endif %}{% if metrics_date %}&metrics_date={{ metrics_date }}{% endif %}">{{ i }}</a>
+          <a class="page-link" href="?page={{ i }}{% if status_filter %}&status={{ status_filter }}{% endif %}{% if date_from %}&date_from={{ date_from }}{% endif %}{% if date_to %}&date_to={{ date_to }}{% endif %}{% if attention_filter %}&attention=1{% endif %}{% if metrics_date %}&metrics_date={{ metrics_date }}{% endif %}{% if search %}&search={{ search|urlencode }}{% endif %}">{{ i }}</a>
         </li>
         {% endif %}
       {% endfor %}
 
       {% if page_obj.has_next %}
       <li class="page-item">
-        <a class="page-link" href="?page={{ page_obj.next_page_number }}{% if status_filter %}&status={{ status_filter }}{% endif %}{% if date_from %}&date_from={{ date_from }}{% endif %}{% if date_to %}&date_to={{ date_to }}{% endif %}{% if attention_filter %}&attention=1{% endif %}{% if metrics_date %}&metrics_date={{ metrics_date }}{% endif %}">Próxima</a>
+        <a class="page-link" href="?page={{ page_obj.next_page_number }}{% if status_filter %}&status={{ status_filter }}{% endif %}{% if date_from %}&date_from={{ date_from }}{% endif %}{% if date_to %}&date_to={{ date_to }}{% endif %}{% if attention_filter %}&attention=1{% endif %}{% if metrics_date %}&metrics_date={{ metrics_date }}{% endif %}{% if search %}&search={{ search|urlencode }}{% endif %}">Próxima</a>
       </li>
       {% else %}
       <li class="page-item disabled"><span class="page-link">Próxima</span></li>
