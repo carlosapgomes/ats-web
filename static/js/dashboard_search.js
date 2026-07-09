@@ -46,7 +46,7 @@
     var dateFromInput = document.querySelector('input[name="date_from"]');
     var dateToInput = document.querySelector('input[name="date_to"]');
     var attentionLink = document.querySelector('a[href*="attention=1"]');
-    var metricsDateInput = document.querySelector('input[name="metrics_date"]');
+    var metricsPeriodInput = document.querySelector('input[name="metrics_period"]');
 
     if (statusSelect && statusSelect.value) {
       params.set('status', statusSelect.value);
@@ -61,8 +61,8 @@
     if (attentionLink && attentionLink.classList.contains('btn-warning')) {
       params.set('attention', '1');
     }
-    if (metricsDateInput && metricsDateInput.value) {
-      params.set('metrics_date', metricsDateInput.value);
+    if (metricsPeriodInput && metricsPeriodInput.value) {
+      params.set('metrics_period', metricsPeriodInput.value);
     }
 
     return params;
