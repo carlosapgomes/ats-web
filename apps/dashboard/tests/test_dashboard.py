@@ -2267,6 +2267,35 @@ class TestDashboardSearch:
         content = response.content.decode()
         assert "EMPTY-SRC" in content
 
+    def test_search_query_uses_trigram_indexes(self) -> None:
+        """EXPLAIN prova que a busca usa os índices trigram (não seq scan).
+
+        Guarda-contrato: ``__icontains`` geraria ``UPPER(col) LIKE UPPER(p)``
+        e não seria acelerado pelo índice ``lower(col)``. A busca deve casar
+        com os índices ``cases_case_*_trgm_idx`` da migration ``cases.0011``.
+        """
+        from django.db import connection
+
+        from apps.dashboard.views import _apply_case_search
+
+        if connection.vendor != "postgresql":
+            pytest.skip("Índices trigram são específicos do PostgreSQL")
+
+        # Termo com >= 3 caracteres ativa o filtro de busca.
+        qs = _apply_case_search(Case.objects.all(), "ana")
+        sql, params = qs.query.sql_with_params()
+
+        with connection.cursor() as cur:
+            # Força o planner a considerar índices mesmo em tabelas pequenas.
+            cur.execute("SET LOCAL enable_seqscan = off")
+            cur.execute("EXPLAIN " + sql, params)
+            plan = "\n".join(str(row[0]) for row in cur.fetchall())
+
+        assert "cases_case_arn_trgm_idx" in plan, "Busca por agency_record_number deve usar o índice trigram.\n" + plan
+        assert "cases_case_patient_name_trgm_idx" in plan, (
+            "Busca por nome do paciente deve usar o índice trigram.\n" + plan
+        )
+
 
 # ── Dashboard: metrics_date slice 002 ────────────────────────────────────
 

@@ -7,7 +7,9 @@ from typing import Any
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
 from django.core.paginator import Paginator
-from django.db.models import Avg, DurationField, ExpressionWrapper, F, Q
+from django.db.models import Avg, DurationField, ExpressionWrapper, F, Q, QuerySet
+from django.db.models.fields.json import KeyTextTransform
+from django.db.models.functions import Lower
 from django.http import FileResponse, Http404, HttpRequest, HttpResponse, HttpResponseBase
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
@@ -376,6 +378,27 @@ def _enrich_case(case: Case, *, now: datetime | None = None, attention_filter: b
     }
 
 
+def _apply_case_search(cases_qs: QuerySet[Case], search_term: str) -> QuerySet[Case]:
+    """Aplica busca server-side alinhada aos índices GIN trigram.
+
+    Filtra por nome do paciente (structured_data -> patient -> name) e por
+    agency_record_number. As expressões ``lower(...)`` casam com os índices
+    da migration ``cases.0011`` (``cases_case_arn_trgm_idx`` e
+    ``cases_case_patient_name_trgm_idx``), permitindo Bitmap Index Scan em
+    vez de seq scan em tabelas grandes.
+
+    Observação: ``__icontains`` seria compilado como ``UPPER(col) LIKE
+    UPPER(p)``, expressão incompatível com o índice ``lower(col)`` e que
+    portanto não seria acelerada por ele.
+    """
+    search_lower = search_term.lower()
+    patient_name = KeyTextTransform("name", "structured_data__patient")
+    return cases_qs.annotate(
+        search_arn=Lower("agency_record_number"),
+        search_patient_name=Lower(patient_name),
+    ).filter(Q(search_arn__contains=search_lower) | Q(search_patient_name__contains=search_lower))
+
+
 @login_required
 @role_required("manager", "admin")
 def dashboard_index(request: HttpRequest) -> HttpResponse:
@@ -419,13 +442,10 @@ def dashboard_index(request: HttpRequest) -> HttpResponse:
     if attention_filter:
         cases_qs = cases_qs.exclude(status=CaseStatus.CLEANED).filter(_attention_q(now))
 
-    # Busca: só filtra com 3+ caracteres
+    # Busca: só filtra com 3+ caracteres. A expressão usada no helper
+    # _apply_case_search é alinhada aos índices trigram para evitar seq scan.
     if len(search_term) >= 3:
-        search_lower = search_term.lower()
-        search_q = Q(agency_record_number__icontains=search_lower) | Q(
-            structured_data__patient__name__icontains=search_lower
-        )
-        cases_qs = cases_qs.filter(search_q)
+        cases_qs = _apply_case_search(cases_qs, search_term)
     elif len(search_term) in (1, 2):
         search_min_chars_help = True
 
