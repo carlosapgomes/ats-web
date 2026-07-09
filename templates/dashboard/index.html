@@ -199,7 +199,6 @@
                  value="{{ date_to }}" placeholder="Data fim">
         </div>
         {% if metrics_date %}<input type="hidden" name="metrics_date" value="{{ metrics_date }}">{% endif %}
-        {% if search %}<input type="hidden" name="search" value="{{ search }}">{% endif %}
         <button type="submit" class="btn btn-sm btn-hospital-outline">Filtrar</button>
         {% if status_filter or date_from or date_to or search %}
         <a href="{% url 'dashboard:index' %}" class="btn btn-sm btn-outline-secondary">Limpar</a>
