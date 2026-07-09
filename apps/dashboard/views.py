@@ -57,7 +57,32 @@ def _local_day_bounds(day: date | None = None) -> tuple[datetime, datetime]:
     return start, end
 
 
-def _compute_summary(day: date | None = None) -> dict[str, int]:
+def _period_bounds(period: str) -> tuple[datetime | None, datetime | None]:
+    """Retorna (start, end) para o período de métricas.
+
+    Valores aceitos:
+        'today' → início de hoje até início de amanhã
+        '7d'    → início de hoje - 6 dias até início de amanhã
+        '30d'   → início de hoje - 29 dias até início de amanhã
+        'all'   → (None, None) — sem filtro temporal
+
+    Valor inválido ou ausente cai para 'today'.
+    """
+    if period == "all":
+        return None, None
+
+    today_start, tomorrow_start = _local_day_bounds()
+
+    if period == "7d":
+        return today_start - timedelta(days=6), tomorrow_start
+    elif period == "30d":
+        return today_start - timedelta(days=29), tomorrow_start
+    else:
+        # 'today' ou qualquer valor inválido
+        return today_start, tomorrow_start
+
+
+def _compute_summary(day: date | None = None, period: str | None = None) -> dict[str, int]:
     """Computa métricas resumidas do dashboard.
 
     Usa campos de decisão imutáveis (doctor_decision, appointment_status)
@@ -67,22 +92,30 @@ def _compute_summary(day: date | None = None) -> dict[str, int]:
       como negados, não como aceitos.
     - Aceitos e Negados são mutuamente exclusivos.
 
-    Usa _local_day_bounds() para filtrar casos do dia local em vez de
-    timezone.now().date() que retorna data UTC.
+    Usa _local_day_bounds() ou _period_bounds() para filtrar casos.
 
-    Se day for fornecido (ex: metrics_date), as métricas refletem
-    aquele dia em vez de hoje.
+    Se period for fornecido ("today", "7d", "30d", "all"), as métricas
+    refletem o período correspondente. day é mantido para compatibilidade
+    reversa com testes existentes.
     """
-    start, end = _local_day_bounds(day)
-    today_cases = Case.objects.filter(created_at__gte=start, created_at__lt=end)
+    if period is not None:
+        start, end = _period_bounds(period)
+        if start is None:
+            # all: sem filtro temporal
+            period_cases = Case.objects.all()
+        else:
+            period_cases = Case.objects.filter(created_at__gte=start, created_at__lt=end)
+    else:
+        start, end = _local_day_bounds(day)
+        period_cases = Case.objects.filter(created_at__gte=start, created_at__lt=end)
 
-    total_today = today_cases.count()
+    total_today = period_cases.count()
 
     # Casos administrativamente encerrados (via CASE_ADMINISTRATIVELY_CLOSED)
     admin_closed_ids = set(
         CaseEvent.objects.filter(
             event_type="CASE_ADMINISTRATIVELY_CLOSED",
-            case__in=today_cases,
+            case__in=period_cases,
         )
         .values_list("case_id", flat=True)
         .distinct()
@@ -91,13 +124,13 @@ def _compute_summary(day: date | None = None) -> dict[str, int]:
 
     # Excluir admin-closed de accepted e denied
     accepted = (
-        today_cases.filter(doctor_decision="accept")
+        period_cases.filter(doctor_decision="accept")
         .exclude(appointment_status="denied")
         .exclude(pk__in=admin_closed_ids)
         .count()
     )
     denied = (
-        today_cases.filter(Q(doctor_decision="deny") | Q(appointment_status="denied"))
+        period_cases.filter(Q(doctor_decision="deny") | Q(appointment_status="denied"))
         .exclude(pk__in=admin_closed_ids)
         .count()
     )
@@ -122,21 +155,31 @@ def _compute_stage_waiting() -> dict[str, int]:
     }
 
 
-def _compute_admission_flow(day: date | None = None) -> dict[str, int]:
-    """Fluxo de admissão (agendado vs imediato) para casos aceitos no dia.
+def _compute_admission_flow(day: date | None = None, period: str | None = None) -> dict[str, int]:
+    """Fluxo de admissão (agendado vs imediato) para casos aceitos no período.
 
-    Usa _local_day_bounds() em vez de timezone.now().date() para
-    consistência com _compute_summary() na definição do dia local.
+    Usa _local_day_bounds() ou _period_bounds() para filtrar.
 
-    Se day for fornecido (ex: metrics_date), o fluxo reflete
-    aquele dia em vez de hoje.
+    Se period for fornecido, o fluxo reflete o período correspondente.
+    day é mantido para compatibilidade reversa.
     """
-    start, end = _local_day_bounds(day)
-    base = Case.objects.filter(
-        created_at__gte=start,
-        created_at__lt=end,
-        doctor_decision="accept",
-    )
+    if period is not None:
+        start, end = _period_bounds(period)
+        if start is None:
+            base = Case.objects.filter(doctor_decision="accept")
+        else:
+            base = Case.objects.filter(
+                created_at__gte=start,
+                created_at__lt=end,
+                doctor_decision="accept",
+            )
+    else:
+        start, end = _local_day_bounds(day)
+        base = Case.objects.filter(
+            created_at__gte=start,
+            created_at__lt=end,
+            doctor_decision="accept",
+        )
     return {
         "scheduled": base.filter(doctor_admission_flow="scheduled").count(),
         "immediate": base.filter(doctor_admission_flow="immediate").count(),
@@ -166,57 +209,123 @@ def _fmt_duration(td: timedelta | None) -> str:
     return f"{hours} h {minutes:02d} min"
 
 
-def _compute_average_times(day: date | None = None) -> dict[str, str]:
+def _compute_average_times(day: date | None = None, period: str | None = None) -> dict[str, str]:
     """Tempos médios do fluxo.
 
     Calcula médias apenas quando há dados suficientes.
-    Se day for fornecido (ex: metrics_date), filtra casos criados
-    naquele dia.
+    Se period for fornecido ("today", "7d", "30d", "all"), filtra por
+    timestamp de conclusão da etapa no período:
+    - Upload → Decisão Médica: doctor_decided_at no período
+    - Decisão → Agendamento: appointment_decided_at no período
+    - Ciclo Total: completed_at_for_metrics no período
+
+    day é mantido para compatibilidade reversa (filtra por created_at).
     """
     cases_qs = Case.objects.all()
-    if day is not None:
-        start, end = _local_day_bounds(day)
-        cases_qs = cases_qs.filter(created_at__gte=start, created_at__lt=end)
 
-    # Upload → Decisão Médica
-    decided_qs = cases_qs.exclude(doctor_decided_at=None).annotate(
-        decision_time=ExpressionWrapper(
-            F("doctor_decided_at") - F("created_at"),
-            output_field=DurationField(),
-        ),
-    )
-    avg_decision = decided_qs.aggregate(avg=Avg("decision_time"))["avg"]
+    if period is not None:
+        start, end = _period_bounds(period)
 
-    # Decisão → Agendamento
-    scheduled_qs = cases_qs.filter(
-        appointment_decided_at__isnull=False,
-        doctor_decided_at__isnull=False,
-    ).annotate(
-        sched_time=ExpressionWrapper(
-            F("appointment_decided_at") - F("doctor_decided_at"),
-            output_field=DurationField(),
-        ),
-    )
-    avg_sched = scheduled_qs.aggregate(avg=Avg("sched_time"))["avg"]
-
-    # Ciclo Total
-    cleanup_completed_event_ts = CaseEvent.objects.filter(
-        case=OuterRef("pk"),
-        event_type="CLEANUP_COMPLETED",
-    ).values("timestamp")[:1]
-    completed_qs = cases_qs.annotate(
-        completed_at_for_metrics=Coalesce(
-            "cleanup_completed_at",
-            Subquery(cleanup_completed_event_ts),
-            output_field=DateTimeField(),
+        # Upload → Decisão Médica: filtra por doctor_decided_at no período
+        if start is None:
+            decided_qs = cases_qs.exclude(doctor_decided_at=None)
+        else:
+            decided_qs = cases_qs.filter(doctor_decided_at__gte=start, doctor_decided_at__lt=end)
+        decided_qs = decided_qs.annotate(
+            decision_time=ExpressionWrapper(
+                F("doctor_decided_at") - F("created_at"),
+                output_field=DurationField(),
+            ),
         )
-    ).exclude(completed_at_for_metrics=None)
-    avg_cycle = completed_qs.annotate(
-        cycle_time=ExpressionWrapper(
-            F("completed_at_for_metrics") - F("created_at"),
-            output_field=DurationField(),
-        ),
-    ).aggregate(avg=Avg("cycle_time"))["avg"]
+        avg_decision = decided_qs.aggregate(avg=Avg("decision_time"))["avg"]
+
+        # Decisão → Agendamento: filtra por appointment_decided_at no período
+        if start is None:
+            scheduled_qs = cases_qs.filter(
+                appointment_decided_at__isnull=False,
+                doctor_decided_at__isnull=False,
+            )
+        else:
+            scheduled_qs = cases_qs.filter(
+                appointment_decided_at__gte=start,
+                appointment_decided_at__lt=end,
+                doctor_decided_at__isnull=False,
+            )
+        scheduled_qs = scheduled_qs.annotate(
+            sched_time=ExpressionWrapper(
+                F("appointment_decided_at") - F("doctor_decided_at"),
+                output_field=DurationField(),
+            ),
+        )
+        avg_sched = scheduled_qs.aggregate(avg=Avg("sched_time"))["avg"]
+
+        # Ciclo Total: filtra por completed_at_for_metrics no período
+        cleanup_completed_event_ts = CaseEvent.objects.filter(
+            case=OuterRef("pk"),
+            event_type="CLEANUP_COMPLETED",
+        ).values("timestamp")[:1]
+        completed_qs = cases_qs.annotate(
+            completed_at_for_metrics=Coalesce(
+                "cleanup_completed_at",
+                Subquery(cleanup_completed_event_ts),
+                output_field=DateTimeField(),
+            )
+        ).exclude(completed_at_for_metrics=None)
+        if start is not None:
+            completed_qs = completed_qs.filter(
+                completed_at_for_metrics__gte=start,
+                completed_at_for_metrics__lt=end,
+            )
+        avg_cycle = completed_qs.annotate(
+            cycle_time=ExpressionWrapper(
+                F("completed_at_for_metrics") - F("created_at"),
+                output_field=DurationField(),
+            ),
+        ).aggregate(avg=Avg("cycle_time"))["avg"]
+    else:
+        if day is not None:
+            start, end = _local_day_bounds(day)
+            cases_qs = cases_qs.filter(created_at__gte=start, created_at__lt=end)
+
+        # Upload → Decisão Médica
+        decided_qs = cases_qs.exclude(doctor_decided_at=None).annotate(
+            decision_time=ExpressionWrapper(
+                F("doctor_decided_at") - F("created_at"),
+                output_field=DurationField(),
+            ),
+        )
+        avg_decision = decided_qs.aggregate(avg=Avg("decision_time"))["avg"]
+
+        # Decisão → Agendamento
+        scheduled_qs = cases_qs.filter(
+            appointment_decided_at__isnull=False,
+            doctor_decided_at__isnull=False,
+        ).annotate(
+            sched_time=ExpressionWrapper(
+                F("appointment_decided_at") - F("doctor_decided_at"),
+                output_field=DurationField(),
+            ),
+        )
+        avg_sched = scheduled_qs.aggregate(avg=Avg("sched_time"))["avg"]
+
+        # Ciclo Total
+        cleanup_completed_event_ts = CaseEvent.objects.filter(
+            case=OuterRef("pk"),
+            event_type="CLEANUP_COMPLETED",
+        ).values("timestamp")[:1]
+        completed_qs = cases_qs.annotate(
+            completed_at_for_metrics=Coalesce(
+                "cleanup_completed_at",
+                Subquery(cleanup_completed_event_ts),
+                output_field=DateTimeField(),
+            )
+        ).exclude(completed_at_for_metrics=None)
+        avg_cycle = completed_qs.annotate(
+            cycle_time=ExpressionWrapper(
+                F("completed_at_for_metrics") - F("created_at"),
+                output_field=DurationField(),
+            ),
+        ).aggregate(avg=Avg("cycle_time"))["avg"]
 
     return {
         "upload_to_decision": _fmt_duration(avg_decision),
@@ -465,14 +574,13 @@ def _dashboard_case_list_context(request: HttpRequest) -> dict[str, Any]:
 
     enriched_cases = [_enrich_case(c, now=now, attention_filter=attention_filter) for c in page_obj]
 
-    metrics_date_str = ""
-    raw_metrics_date = request.GET.get("metrics_date", "")
-    if raw_metrics_date:
-        try:
-            date.fromisoformat(raw_metrics_date)
-            metrics_date_str = raw_metrics_date
-        except (ValueError, TypeError):
-            pass
+    # Período das métricas — preservado nos links de filtro/paginação
+    raw_metrics_period = request.GET.get("metrics_period", "")
+    valid_periods = {"today", "7d", "30d", "all"}
+    if raw_metrics_period not in valid_periods:
+        metrics_period = ""
+    else:
+        metrics_period = raw_metrics_period
 
     return {
         "cases": enriched_cases,
@@ -485,7 +593,7 @@ def _dashboard_case_list_context(request: HttpRequest) -> dict[str, Any]:
         "search_min_chars_help": search_min_chars_help,
         "attention_filter": attention_filter,
         "attention_count": attention_count,
-        "metrics_date": metrics_date_str,
+        "metrics_period": metrics_period,
     }
 
 
@@ -509,25 +617,27 @@ def dashboard_index(request: HttpRequest) -> HttpResponse:
             _dashboard_case_list_context(request),
         )
 
-    # Data das métricas — usa query string metrics_date, padrão hoje
-    raw_metrics_date = request.GET.get("metrics_date", "")
-    metrics_date: date | None = None
-    if raw_metrics_date:
-        try:
-            metrics_date = date.fromisoformat(raw_metrics_date)
-        except (ValueError, TypeError):
-            metrics_date = None  # inválido → cai para hoje
+    # Período das métricas — usa query string metrics_period, padrão hoje
+    raw_metrics_period = request.GET.get("metrics_period", "")
+    valid_periods = {"today", "7d", "30d", "all"}
+    if raw_metrics_period not in valid_periods:
+        metrics_period = "today"
+    else:
+        metrics_period = raw_metrics_period
 
-    summary = _compute_summary(day=metrics_date)
+    summary = _compute_summary(period=metrics_period)
     stage_waiting = _compute_stage_waiting()
-    admission_flow = _compute_admission_flow(day=metrics_date)
-    avg_times = _compute_average_times(day=metrics_date)
+    admission_flow = _compute_admission_flow(period=metrics_period)
+    avg_times = _compute_average_times(period=metrics_period)
 
     # Label para o card de total
-    if metrics_date is not None:
-        total_label = f"Total em {metrics_date.strftime('%d/%m/%Y')}"
-    else:
-        total_label = "Total Hoje"
+    period_labels = {
+        "today": "Total Hoje",
+        "7d": "Total 7 dias",
+        "30d": "Total 30 dias",
+        "all": "Total geral",
+    }
+    total_label = period_labels.get(metrics_period, "Total Hoje")
 
     # Último resumo para o card no dashboard
     latest_summary = SupervisorSummary.objects.order_by("-window_end").first()

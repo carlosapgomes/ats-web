@@ -2231,23 +2231,23 @@ class TestDashboardSearch:
         # Links de paginação devem conter search=paciente
         assert "search=paciente" in content or "search%3Dpaciente" in content
 
-    def test_search_preserves_metrics_date(self, client) -> None:
-        """metrics_date é preservado ao submeter busca."""
+    def test_search_preserves_metrics_period(self, client) -> None:
+        """metrics_period é preservado ao submeter busca."""
         user = _login_as(client, "manager")
         Case.objects.all().delete()
 
         _create_case(
             created_by=user,
             status=CaseStatus.NEW,
-            agency_record_number="SRC-MDATE",
+            agency_record_number="SRC-MPERIOD",
             structured_data={"patient": {"name": "Ana"}},
         )
 
-        # Formulário de filtros da lista deve preservar metrics_date como hidden
-        response = client.get(reverse("dashboard:index") + "?search=ana&metrics_date=2026-07-01")
+        # Formulário de filtros da lista deve preservar metrics_period como hidden
+        response = client.get(reverse("dashboard:index") + "?search=ana&metrics_period=30d")
         assert response.status_code == 200
         content = response.content.decode()
-        assert 'value="2026-07-01"' in content
+        assert 'value="30d"' in content
 
     def test_empty_search_does_not_filter(self, client) -> None:
         """Termo vazio (espaços) não filtra."""
@@ -2535,14 +2535,17 @@ class TestDashboardMetricsDate:
         response = client.get(reverse("dashboard:index") + "?metrics_date=invalid-date")
         assert response.status_code == 200, "Data inválida não deve retornar 500"
 
-    def test_template_has_metrics_date_form(self, client) -> None:
-        """Template contém label 'Data das métricas' e input name='metrics_date'."""
+    def test_template_has_metrics_period_selector(self, client) -> None:
+        """Template contém 'Período das métricas' e opções do seletor."""
         _login_as(client, "manager")
         response = client.get(reverse("dashboard:index"))
         assert response.status_code == 200
         content = response.content.decode()
-        assert "Data das métricas" in content, "Label 'Data das métricas' deve estar no template"
-        assert 'name="metrics_date"' in content, "Input 'metrics_date' deve estar no template"
+        assert "Período das métricas" in content, "Label 'Período das métricas' deve estar no template"
+        assert "Hoje" in content, "Opção 'Hoje' deve estar no template"
+        assert "7 dias" in content, "Opção '7 dias' deve estar no template"
+        assert "30 dias" in content, "Opção '30 dias' deve estar no template"
+        assert "Tudo" in content, "Opção 'Tudo' deve estar no template"
 
     def test_template_shows_stage_waiting_as_current(self, client) -> None:
         """Template deixa claro que 'Aguardando por etapa' é snapshot atual."""
@@ -2552,14 +2555,14 @@ class TestDashboardMetricsDate:
         content = response.content.decode()
         assert "ATUAL" in content, "Template deve indicar que a fila é snapshot atual"
 
-    def test_case_filter_form_preserves_metrics_date(self, client) -> None:
-        """Formulário de filtros de casos preserva metrics_date via hidden input."""
+    def test_case_filter_form_preserves_metrics_period(self, client) -> None:
+        """Formulário de filtros de casos preserva metrics_period via hidden input."""
         _login_as(client, "manager")
-        response = client.get(reverse("dashboard:index") + "?metrics_date=2026-07-01")
+        response = client.get(reverse("dashboard:index") + "?metrics_period=30d")
         assert response.status_code == 200
         content = response.content.decode()
-        assert 'name="metrics_date"' in content
-        assert 'value="2026-07-01"' in content, "Hidden input deve preservar o valor de metrics_date"
+        assert 'name="metrics_period"' in content
+        assert 'value="30d"' in content, "Hidden input deve preservar o valor de metrics_period"
 
     def test_metrics_date_view_invalid_falls_back_silently(self, client) -> None:
         """Data inválida no metrics_date cai de volta para o dia atual sem erro."""
@@ -2874,18 +2877,18 @@ class TestDashboardCaseListFilterLayout:
             f'Deve haver exatamente 1 hidden name="search" (form de métricas), encontrado {hidden_search_count}'
         )
 
-    def test_metrics_date_hidden_present(self, client) -> None:
-        """R8: Hidden 'metrics_date' continua presente no formulário da lista quando ?metrics_date=2026-07-08 está ativo."""
-        content = self._get_content(client, "metrics_date=2026-07-08")
-        assert 'type="hidden" name="metrics_date" value="2026-07-08"' in content, (
-            "Hidden metrics_date deve estar presente no form da lista"
+    def test_metrics_period_hidden_present(self, client) -> None:
+        """R8: Hidden 'metrics_period' continua presente no formulário da lista quando ?metrics_period=30d está ativo."""
+        content = self._get_content(client, "metrics_period=30d")
+        assert 'type="hidden" name="metrics_period" value="30d"' in content, (
+            "Hidden metrics_period deve estar presente no form da lista"
         )
         # Além disso, deve ter o hidden no form de métricas também
-        assert content.count('type="hidden" name="metrics_date"') >= 1
+        assert content.count('type="hidden" name="metrics_period"') >= 1
 
-    def test_attention_link_preserves_metrics_date_and_search(self, client) -> None:
-        """R9: Link 'Atenção necessária' preserva metrics_date e search quando presentes."""
-        content = self._get_content(client, "metrics_date=2026-07-08&search=ana")
+    def test_attention_link_preserves_metrics_period_and_search(self, client) -> None:
+        """R9: Link 'Atenção necessária' preserva metrics_period e search quando presentes."""
+        content = self._get_content(client, "metrics_period=30d&search=ana")
         # O link de atenção deve conter ambos parâmetros
         attention_link_start = content.find("⚠ Atenção necessária")
         assert attention_link_start != -1, "Link de atenção deve estar presente"
@@ -2894,7 +2897,7 @@ class TestDashboardCaseListFilterLayout:
         href_start = link_section.rfind('href="')
         assert href_start != -1, "Deve encontrar href antes do texto Atenção"
         href = link_section[href_start:]
-        assert "metrics_date=2026-07-08" in href, f"Link de atenção deve preservar metrics_date, href contém: {href}"
+        assert "metrics_period=30d" in href, f"Link de atenção deve preservar metrics_period, href contém: {href}"
         assert "search=ana" in href or "search=ana" in content, "Link de atenção deve preservar search"
 
     def test_dashboard_search_js_included(self, client) -> None:
@@ -2932,3 +2935,523 @@ class TestDashboardCaseListFilterLayout:
         content = self._get_content(client, "search=ana")
         assert "Filtrar" in content, "Botão 'Filtrar' deve estar presente"
         assert "Limpar" in content, "Link 'Limpar' deve estar presente quando há filtros ativos"
+
+
+# ── Dashboard: Metrics Period Selector (Slice 001) ─────────────────────
+
+
+@pytest.mark.django_db
+class TestDashboardMetricsPeriod:
+    """Testes para o seletor de período das métricas (metrics_period).
+
+    Substitui metrics_date por metrics_period=today|7d|30d|all.
+    Cards principais usam created_at no período.
+    Tempos médios usam timestamps de conclusão da etapa no período.
+    """
+
+    # ── Period boundary helpers ───────────────────────────────────────
+
+    @staticmethod
+    def _set_created_at(case: Case, dt: datetime) -> None:
+        """Ajusta created_at de um caso sem disparar signals."""
+        Case.objects.filter(pk=case.pk).update(created_at=dt)
+
+    @staticmethod
+    def _set_field(case: Case, **kwargs) -> None:
+        """Ajusta campos de um caso sem disparar signals."""
+        Case.objects.filter(pk=case.pk).update(**kwargs)
+
+    @staticmethod
+    def _create_cleaned_case_with_cleanup_completed(
+        user,
+        *,
+        created_at: datetime,
+        cleanup_completed_at: datetime | None = None,
+        agency_record_number: str = "",
+    ) -> Case:
+        """Cria caso CLEANED com timestamps específicos."""
+        case = Case.objects.create(
+            created_by=user,
+            status=CaseStatus.CLEANED,
+            agency_record_number=agency_record_number or "CYCLE-TEST",
+            created_at=created_at,
+            cleanup_completed_at=cleanup_completed_at,
+        )
+        return case
+
+    # ── R1: Default period is today ────────────────────────────────────
+
+    def test_metrics_period_default_is_today(self, client) -> None:
+        """Sem metrics_period, summary conta apenas casos de hoje.
+
+        Cria caso hoje e caso ontem. Summary default deve contar só hoje.
+        """
+        from apps.dashboard.views import _compute_summary
+
+        user = _login_as(client, "manager")
+        Case.objects.all().delete()
+
+        today = timezone.localdate()
+        yesterday = today - timedelta(days=1)
+
+        now_local = timezone.make_aware(
+            datetime.combine(today, time(10, 0)),
+            timezone.get_current_timezone(),
+        )
+        yesterday_local = timezone.make_aware(
+            datetime.combine(yesterday, time(10, 0)),
+            timezone.get_current_timezone(),
+        )
+
+        today_case = _create_case(
+            created_by=user,
+            status=CaseStatus.WAIT_DOCTOR,
+            agency_record_number="PERIOD-TODAY",
+        )
+        self._set_created_at(today_case, now_local)
+
+        yesterday_case = _create_case(
+            created_by=user,
+            status=CaseStatus.WAIT_DOCTOR,
+            agency_record_number="PERIOD-YEST",
+        )
+        self._set_created_at(yesterday_case, yesterday_local)
+
+        # Sem argumento (padrão today)
+        result = _compute_summary()
+        assert result["total_today"] == 1, (
+            f"Default today deve contar apenas hoje, obtido total_today={result['total_today']}"
+        )
+
+        # Com period="today" explicito
+        result2 = _compute_summary(period="today")
+        assert result2["total_today"] == 1
+
+        # GET default (sem query param) também deve ser hoje
+        response = client.get(reverse("dashboard:index"))
+        assert response.status_code == 200
+        content = response.content.decode()
+        assert "Total Hoje" in content or "Total hoje" in content
+
+    # ── R2: 7d includes last 7 local days ────────────────────────────────
+
+    def test_metrics_period_7d_includes_last_7_local_days(self, client) -> None:
+        """Caso criado há 6 dias entra em 7d; caso criado há 7 dias completos fica fora."""
+        from apps.dashboard.views import _compute_summary
+
+        user = _login_as(client, "manager")
+        Case.objects.all().delete()
+
+        tz = timezone.get_current_timezone()
+        today = timezone.localdate()
+
+        # Caso há 6 dias (deve entrar em 7d)
+        six_days_ago = timezone.make_aware(
+            datetime.combine(today - timedelta(days=6), time(8, 0)),
+            tz,
+        )
+        c1 = _create_case(
+            created_by=user,
+            status=CaseStatus.WAIT_DOCTOR,
+            agency_record_number="7D-IN-6DAYS",
+        )
+        self._set_created_at(c1, six_days_ago)
+
+        # Caso há 7 dias completos (deve ficar fora de 7d)
+        seven_days_ago_start = timezone.make_aware(
+            datetime.combine(today - timedelta(days=7), time(0, 0)),
+            tz,
+        )
+        c2 = _create_case(
+            created_by=user,
+            status=CaseStatus.WAIT_DOCTOR,
+            agency_record_number="7D-OUT-7DAYS",
+        )
+        self._set_created_at(c2, seven_days_ago_start)
+
+        result = _compute_summary(period="7d")
+        assert result["total_today"] == 1, f"7d deve contar 1 (caso de 6 dias atrás), obtido {result['total_today']}"
+
+    # ── R3: 30d includes last 30 local days ───────────────────────────────
+
+    def test_metrics_period_30d_includes_last_30_local_days(self, client) -> None:
+        """Caso criado há 29 dias entra em 30d; caso criado há 30 dias completos fica fora."""
+        from apps.dashboard.views import _compute_summary
+
+        user = _login_as(client, "manager")
+        Case.objects.all().delete()
+
+        tz = timezone.get_current_timezone()
+        today = timezone.localdate()
+
+        # Caso há 29 dias (deve entrar em 30d)
+        c1 = _create_case(
+            created_by=user,
+            status=CaseStatus.WAIT_DOCTOR,
+            agency_record_number="30D-IN-29DAYS",
+        )
+        self._set_created_at(
+            c1,
+            timezone.make_aware(
+                datetime.combine(today - timedelta(days=29), time(23, 59)),
+                tz,
+            ),
+        )
+
+        # Caso há 30 dias completos (deve ficar fora)
+        c2 = _create_case(
+            created_by=user,
+            status=CaseStatus.WAIT_DOCTOR,
+            agency_record_number="30D-OUT-30DAYS",
+        )
+        self._set_created_at(
+            c2,
+            timezone.make_aware(
+                datetime.combine(today - timedelta(days=30), time(0, 0)),
+                tz,
+            ),
+        )
+
+        result = _compute_summary(period="30d")
+        assert result["total_today"] == 1, f"30d deve contar 1 (caso de 29 dias atrás), obtido {result['total_today']}"
+
+    # ── R4: all includes everything ───────────────────────────────────────
+
+    def test_metrics_period_all_includes_all_cases(self, client) -> None:
+        """Caso antigo (criado há 90 dias) entra em 'all'."""
+        from apps.dashboard.views import _compute_summary
+
+        user = _login_as(client, "manager")
+        Case.objects.all().delete()
+
+        c1 = _create_case(
+            created_by=user,
+            status=CaseStatus.WAIT_DOCTOR,
+            agency_record_number="ALL-OLD",
+        )
+        self._set_created_at(
+            c1,
+            timezone.make_aware(
+                datetime.combine(timezone.localdate() - timedelta(days=90), time(8, 0)),
+                timezone.get_current_timezone(),
+            ),
+        )
+        _create_case(
+            created_by=user,
+            status=CaseStatus.WAIT_DOCTOR,
+            agency_record_number="ALL-NEW",
+        )
+
+        result = _compute_summary(period="all")
+        assert result["total_today"] == 2, f"all deve contar todos os casos (2), obtido {result['total_today']}"
+
+    # ── R5: Invalid period falls back to today ────────────────────────────
+
+    def test_invalid_metrics_period_falls_back_to_today(self, client) -> None:
+        """GET /dashboard/?metrics_period=invalid retorna 200 e marca Hoje como ativo."""
+        user = _login_as(client, "manager")
+        Case.objects.all().delete()
+
+        _create_case(
+            created_by=user,
+            status=CaseStatus.WAIT_DOCTOR,
+            agency_record_number="INV-001",
+        )
+
+        response = client.get(reverse("dashboard:index") + "?metrics_period=invalid")
+        assert response.status_code == 200
+        content = response.content.decode()
+        # Deve ter Hoje como ativo (active/checked) e não quebrar
+        assert "Hoje" in content
+
+    # ── R6: Average times filter by completion timestamps ─────────────────
+
+    def test_average_upload_to_decision_filters_by_doctor_decided_at(self, client) -> None:
+        """Tempo Upload→Decisão filtra por doctor_decided_at no período.
+
+        Caso criado antigo mas decidido hoje entra em 'today'.
+        Caso criado hoje mas decidido ontem não entra em 'today'.
+        """
+        from apps.dashboard.views import _compute_average_times
+
+        user = _login_as(client, "manager")
+        Case.objects.all().delete()
+
+        tz = timezone.get_current_timezone()
+        today = timezone.localdate()
+        yesterday = today - timedelta(days=1)
+
+        # Caso criado antigo (5 dias atrás) mas decidido hoje
+        case_in = _create_case(
+            created_by=user,
+            status=CaseStatus.DOCTOR_ACCEPTED,
+            doctor_decision="accept",
+            agency_record_number="AVG-DEC-IN",
+        )
+        self._set_field(
+            case_in,
+            created_at=timezone.make_aware(
+                datetime.combine(today - timedelta(days=5), time(8, 0)),
+                tz,
+            ),
+            doctor_decided_at=timezone.make_aware(
+                datetime.combine(today, time(10, 0)),
+                tz,
+            ),
+        )
+
+        # Caso criado hoje mas decidido ontem
+        case_out = _create_case(
+            created_by=user,
+            status=CaseStatus.DOCTOR_ACCEPTED,
+            doctor_decision="accept",
+            agency_record_number="AVG-DEC-OUT",
+        )
+        self._set_field(
+            case_out,
+            created_at=timezone.make_aware(
+                datetime.combine(today, time(8, 0)),
+                tz,
+            ),
+            doctor_decided_at=timezone.make_aware(
+                datetime.combine(yesterday, time(9, 0)),
+                tz,
+            ),
+        )
+
+        avg = _compute_average_times(period="today")
+        assert avg["upload_to_decision"] != "—", "Deveria haver ao menos 1 caso decidido no período (today), mas não há"
+
+    def test_average_decision_to_schedule_filters_by_appointment_decided_at(self, client) -> None:
+        """Tempo Decisão→Agendamento filtra por appointment_decided_at no período.
+
+        Caso agendado hoje entra mesmo se criado/decidido pelo médico antes.
+        """
+        from apps.dashboard.views import _compute_average_times
+
+        user = _login_as(client, "manager")
+        Case.objects.all().delete()
+
+        tz = timezone.get_current_timezone()
+        today = timezone.localdate()
+        yesterday = today - timedelta(days=1)
+        three_days_ago = today - timedelta(days=3)
+
+        # Caso criado há 3 dias, decidido há 2 dias, agendado hoje
+        c1 = _create_case(
+            created_by=user,
+            status=CaseStatus.APPT_CONFIRMED,
+            doctor_decision="accept",
+            appointment_status="confirmed",
+            agency_record_number="AVG-SCHED-IN",
+        )
+        self._set_field(
+            c1,
+            created_at=timezone.make_aware(
+                datetime.combine(three_days_ago, time(8, 0)),
+                tz,
+            ),
+            doctor_decided_at=timezone.make_aware(
+                datetime.combine(yesterday, time(10, 0)),
+                tz,
+            ),
+            appointment_decided_at=timezone.make_aware(
+                datetime.combine(today, time(14, 0)),
+                tz,
+            ),
+        )
+
+        avg = _compute_average_times(period="today")
+        assert avg["decision_to_schedule"] != "—", "Deveria haver ao menos 1 caso agendado no período (today)"
+
+    def test_average_total_cycle_filters_by_cleanup_completion_timestamp(self, client) -> None:
+        """Tempo Ciclo Total filtra por cleanup_completed_at no período.
+
+        Caso criado antes mas concluído hoje entra em 'today'.
+        """
+        from apps.dashboard.views import _compute_average_times
+
+        user = _login_as(client, "manager")
+        Case.objects.all().delete()
+
+        tz = timezone.get_current_timezone()
+        today = timezone.localdate()
+        five_days_ago = today - timedelta(days=5)
+
+        # Caso criado há 5 dias mas concluído hoje
+        Case.objects.create(
+            created_by=user,
+            status=CaseStatus.CLEANED,
+            agency_record_number="CYCLE-TODAY",
+            created_at=timezone.make_aware(
+                datetime.combine(five_days_ago, time(8, 0)),
+                tz,
+            ),
+            cleanup_completed_at=timezone.make_aware(
+                datetime.combine(today, time(10, 0)),
+                tz,
+            ),
+        )
+
+        avg = _compute_average_times(period="today")
+        assert avg["total_cycle"] != "—", "Deveria haver ao menos 1 caso concluído no período (today)"
+
+    def test_total_cycle_period_uses_cleanup_completed_event_fallback(self, client) -> None:
+        """Ciclo Total usa evento CLEANUP_COMPLETED quando cleanup_completed_at está vazio.
+
+        Caso histórico sem cleanup_completed_at mas com evento no período entra.
+        """
+        from apps.dashboard.views import _compute_average_times
+
+        user = _login_as(client, "manager")
+        Case.objects.all().delete()
+
+        tz = timezone.get_current_timezone()
+        today = timezone.localdate()
+        five_days_ago = today - timedelta(days=5)
+
+        created = timezone.make_aware(
+            datetime.combine(five_days_ago, time(8, 0)),
+            tz,
+        )
+        completed = timezone.make_aware(
+            datetime.combine(today, time(10, 0)),
+            tz,
+        )
+
+        case = Case.objects.create(
+            created_by=user,
+            status=CaseStatus.CLEANED,
+            agency_record_number="CYCLE-EVT-FALLBACK",
+            created_at=created,
+        )
+        self._set_field(case, cleanup_completed_at=None)
+
+        # Criar evento CLEANUP_COMPLETED no período
+        event = CaseEvent.objects.create(
+            case=case,
+            event_type="CLEANUP_COMPLETED",
+            actor=user,
+            actor_type="human",
+            payload={},
+        )
+        CaseEvent.objects.filter(pk=event.pk).update(timestamp=completed)
+
+        avg = _compute_average_times(period="today")
+        assert avg["total_cycle"] != "—", "Ciclo Total deve usar evento CLEANUP_COMPLETED como fallback"
+
+    # ── Template tests ──────────────────────────────────────────────────
+
+    def test_template_has_metrics_period_selector(self, client) -> None:
+        """GET /dashboard/ contém 'Período das métricas', 'Hoje', '7 dias', '30 dias', 'Tudo'."""
+        _login_as(client, "manager")
+        response = client.get(reverse("dashboard:index"))
+        assert response.status_code == 200
+        content = response.content.decode()
+        assert "Período das métricas" in content, "Label 'Período das métricas' deve estar no template"
+        assert "Hoje" in content, "Opção 'Hoje' deve estar no template"
+        assert "7 dias" in content, "Opção '7 dias' deve estar no template"
+        assert "30 dias" in content, "Opção '30 dias' deve estar no template"
+        assert "Tudo" in content, "Opção 'Tudo' deve estar no template"
+        # 'Data das métricas' não deve mais existir
+        assert "Data das métricas" not in content, "'Data das métricas' foi removido"
+
+    def test_case_filter_form_preserves_metrics_period(self, client) -> None:
+        """Formulário de filtros de casos preserva metrics_period via hidden input."""
+        _login_as(client, "manager")
+        response = client.get(reverse("dashboard:index") + "?metrics_period=30d")
+        assert response.status_code == 200
+        content = response.content.decode()
+        assert 'name="metrics_period"' in content, "metrics_period deve estar em algum input"
+        assert 'value="30d"' in content, "hidden input deve preservar value=30d"
+
+    def test_attention_link_preserves_metrics_period(self, client) -> None:
+        """Link 'Atenção necessária' preserva metrics_period e search."""
+        _login_as(client, "manager")
+        response = client.get(reverse("dashboard:index") + "?metrics_period=7d&search=ana")
+        assert response.status_code == 200
+        content = response.content.decode()
+        # O link de atenção deve conter metrics_period=7d
+        assert "metrics_period=7d" in content, "Link de atenção deve preservar metrics_period=7d"
+
+    def test_partial_pagination_preserves_metrics_period(self, client) -> None:
+        """Com casos suficientes para paginação e metrics_period=all, links de página preservam o parâmetro."""
+        user = _login_as(client, "manager")
+        Case.objects.all().delete()
+
+        # Criar 25 casos para forçar paginação
+        for i in range(25):
+            _create_case(
+                created_by=user,
+                status=CaseStatus.NEW,
+                agency_record_number=f"PAG-PERIOD-{i:03d}",
+            )
+
+        response = client.get(reverse("dashboard:index") + "?metrics_period=all")
+        assert response.status_code == 200
+        content = response.content.decode()
+        # Links de paginação devem conter metrics_period=all
+        assert "metrics_period=all" in content, "Paginação deve preservar metrics_period=all"
+        # Deve ter links de página (25 > 20 por página)
+        assert "page-link" in content, "Deve haver paginação"
+
+    def test_atual_label_still_present_in_stage_waiting(self, client) -> None:
+        """Aguardando por etapa continua como snapshot atual e rotulado 'ATUAL'."""
+        _login_as(client, "manager")
+        response = client.get(reverse("dashboard:index"))
+        assert response.status_code == 200
+        content = response.content.decode()
+        assert "ATUAL" in content, "Aguardando por etapa deve manter label ATUAL"
+
+    def test_metrics_period_option_active_highlighted(self, client) -> None:
+        """Opção ativa do seletor de período é visualmente identificável (active/selected)."""
+        _login_as(client, "manager")
+        # Testar com cada período
+        for period, label in [("today", "Hoje"), ("7d", "7 dias"), ("30d", "30 dias"), ("all", "Tudo")]:
+            response = client.get(reverse("dashboard:index") + f"?metrics_period={period}")
+            assert response.status_code == 200
+            content = response.content.decode()
+            # O label do período ativo deve estar presente
+            assert label in content, f"Período {period} deve mostrar label '{label}'"
+
+    def test_total_label_changes_with_period(self, client) -> None:
+        """Total label varia conforme período: 'Total hoje', 'Total 7 dias', 'Total 30 dias', 'Total geral'."""
+        _login_as(client, "manager")
+
+        response_today = client.get(reverse("dashboard:index"))
+        assert (
+            "Total hoje" in response_today.content.decode().lower() or "Total Hoje" in response_today.content.decode()
+        )
+
+        response_7d = client.get(reverse("dashboard:index") + "?metrics_period=7d")
+        assert "7 dias" in response_7d.content.decode()
+
+        response_30d = client.get(reverse("dashboard:index") + "?metrics_period=30d")
+        assert "30 dias" in response_30d.content.decode()
+
+        response_all = client.get(reverse("dashboard:index") + "?metrics_period=all")
+        assert "Total geral" in response_all.content.decode() or "Geral" in response_all.content.decode()
+
+    def test_average_times_card_shows_period_aux_text(self, client) -> None:
+        """Card de Tempo Médio mostra texto 'Etapas concluídas no período'."""
+        _login_as(client, "manager")
+        response = client.get(reverse("dashboard:index"))
+        assert response.status_code == 200
+        content = response.content.decode()
+        assert "Etapas concluídas no período" in content, (
+            "Card de Tempo Médio deve mostrar 'Etapas concluídas no período'"
+        )
+
+    def test_metrics_date_no_longer_in_template(self, client) -> None:
+        """Input metrics_date não está mais presente no template."""
+        _login_as(client, "manager")
+        response = client.get(reverse("dashboard:index"))
+        assert response.status_code == 200
+        content = response.content.decode()
+        assert 'name="metrics_date"' not in content, "metrics_date não deve mais estar no template"
+
+    def test_existing_metrics_date_view_still_works(self, client) -> None:
+        """GET com ?metrics_date=... não quebra (retorna 200) — compatibilidade reversa."""
+        _login_as(client, "manager")
+        response = client.get(reverse("dashboard:index") + "?metrics_date=2026-07-01")
+        assert response.status_code == 200
