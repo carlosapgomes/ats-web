@@ -2005,6 +2005,269 @@ class TestDashboardDateLabels:
         assert 'id="date_to"' in content or 'id="id_date_to"' in content
 
 
+# ── Dashboard: Search slice 003 ─────────────────────────────────────────
+
+
+@pytest.mark.django_db
+class TestDashboardSearch:
+    """Testes para busca server-side indexada (slice 003)."""
+
+    def test_search_form_present(self, client) -> None:
+        """Dashboard contém label 'Buscar por nome ou registro' e input name='search'."""
+        _login_as(client, "manager")
+        response = client.get(reverse("dashboard:index"))
+        assert response.status_code == 200
+        content = response.content.decode()
+        assert "Buscar por nome ou registro" in content
+        assert 'name="search"' in content
+
+    def test_search_by_patient_name(self, client) -> None:
+        """?search=ana encontra caso cujo paciente contém 'Ana'."""
+        user = _login_as(client, "manager")
+        Case.objects.all().delete()
+
+        _create_case(
+            created_by=user,
+            status=CaseStatus.NEW,
+            agency_record_number="SRC-PAT-001",
+            structured_data={"patient": {"name": "Ana Maria"}},
+        )
+        _create_case(
+            created_by=user,
+            status=CaseStatus.NEW,
+            agency_record_number="SRC-PAT-002",
+            structured_data={"patient": {"name": "João Silva"}},
+        )
+
+        response = client.get(reverse("dashboard:index") + "?search=ana")
+        assert response.status_code == 200
+        content = response.content.decode()
+        assert "Ana Maria" in content
+        assert "João Silva" not in content
+
+    def test_search_by_agency_record_number(self, client) -> None:
+        """?search=ocor encontra caso por agency_record_number."""
+        user = _login_as(client, "manager")
+        Case.objects.all().delete()
+
+        _create_case(
+            created_by=user,
+            status=CaseStatus.NEW,
+            agency_record_number="OCOR-001",
+            structured_data={"patient": {"name": "João Silva"}},
+        )
+        _create_case(
+            created_by=user,
+            status=CaseStatus.NEW,
+            agency_record_number="OUTRO-002",
+            structured_data={"patient": {"name": "Maria Souza"}},
+        )
+
+        response = client.get(reverse("dashboard:index") + "?search=ocor")
+        assert response.status_code == 200
+        content = response.content.decode()
+        assert "OCOR-001" in content
+        assert "OUTRO-002" not in content
+
+    def test_search_case_insensitive(self, client) -> None:
+        """Busca é case-insensitive."""
+        user = _login_as(client, "manager")
+        Case.objects.all().delete()
+
+        _create_case(
+            created_by=user,
+            status=CaseStatus.NEW,
+            agency_record_number="CASE-ABC",
+            structured_data={"patient": {"name": "ANA Maria"}},
+        )
+
+        # Busca por nome em lowercase
+        response = client.get(reverse("dashboard:index") + "?search=ana")
+        assert response.status_code == 200
+        content = response.content.decode()
+        assert "CASE-ABC" in content
+
+        # Busca por registro em lowercase
+        response = client.get(reverse("dashboard:index") + "?search=case")
+        assert response.status_code == 200
+        content = response.content.decode()
+        assert "CASE-ABC" in content
+
+    def test_search_min_chars_does_not_filter(self, client) -> None:
+        """?search=an (2 chars) não filtra e mostra ajuda de mínimo de 3 caracteres."""
+        user = _login_as(client, "manager")
+        Case.objects.all().delete()
+
+        _create_case(
+            created_by=user,
+            status=CaseStatus.NEW,
+            agency_record_number="TWO-CHARS",
+            structured_data={"patient": {"name": "Ana"}},
+        )
+
+        # search=an (2 chars) → não filtra, mostra todos
+        response = client.get(reverse("dashboard:index") + "?search=an")
+        assert response.status_code == 200
+        content = response.content.decode()
+        assert "TWO-CHARS" in content
+        # Deve mostrar ajuda
+        assert "3" in content or "caractere" in content or "mínimo" in content
+
+    def test_search_composes_with_status(self, client) -> None:
+        """Busca compõe com filtro status."""
+        user = _login_as(client, "manager")
+        Case.objects.all().delete()
+
+        _create_case(
+            created_by=user,
+            status=CaseStatus.NEW,
+            agency_record_number="STATUS-NEW",
+            structured_data={"patient": {"name": "Ana Santos"}},
+        )
+        _create_case(
+            created_by=user,
+            status=CaseStatus.WAIT_DOCTOR,
+            agency_record_number="STATUS-WAIT",
+            structured_data={"patient": {"name": "Ana Santos"}},
+        )
+
+        # Busca por nome + filtra por status NEW
+        response = client.get(reverse("dashboard:index") + "?search=ana&status=" + CaseStatus.NEW)
+        assert response.status_code == 200
+        content = response.content.decode()
+        assert "STATUS-NEW" in content
+        assert "STATUS-WAIT" not in content
+
+    def test_search_composes_with_dates(self, client) -> None:
+        """Busca compõe com date_from/date_to."""
+        user = _login_as(client, "manager")
+        Case.objects.all().delete()
+
+        today = timezone.localdate()
+        yesterday = today - timedelta(days=1)
+
+        # Caso de ontem
+        case_yest = _create_case(
+            created_by=user,
+            status=CaseStatus.NEW,
+            agency_record_number="YEST-001",
+            structured_data={"patient": {"name": "Ana Maria"}},
+        )
+        Case.objects.filter(pk=case_yest.pk).update(
+            created_at=timezone.make_aware(
+                datetime.combine(yesterday, time(8, 0)),
+                timezone.get_current_timezone(),
+            )
+        )
+
+        # Caso de hoje (fora do range, não deve aparecer)
+        case_today = _create_case(
+            created_by=user,
+            status=CaseStatus.NEW,
+            agency_record_number="TODAY-001",
+            structured_data={"patient": {"name": "Ana Maria"}},
+        )
+        Case.objects.filter(pk=case_today.pk).update(
+            created_at=timezone.make_aware(
+                datetime.combine(today, time(8, 0)),
+                timezone.get_current_timezone(),
+            )
+        )
+
+        # Busca+data=ontem
+        response = client.get(
+            reverse("dashboard:index")
+            + f"?search=ana&date_from={yesterday.isoformat()}&date_to={yesterday.isoformat()}"
+        )
+        assert response.status_code == 200
+        content = response.content.decode()
+        assert "YEST-001" in content
+        assert "TODAY-001" not in content
+
+    def test_search_composes_with_attention(self, client) -> None:
+        """Busca compõe com attention=1."""
+        user = _login_as(client, "manager")
+        Case.objects.all().delete()
+
+        # Caso FAILED (entra no filtro de atenção)
+        _create_case(
+            created_by=user,
+            status=CaseStatus.FAILED,
+            agency_record_number="ATT-FAIL",
+            structured_data={"patient": {"name": "Ana Santos"}},
+        )
+        # Caso WAIT_DOCTOR fresco (não entra no filtro de atenção)
+        _create_case(
+            created_by=user,
+            status=CaseStatus.WAIT_DOCTOR,
+            agency_record_number="ATT-FRESH",
+            structured_data={"patient": {"name": "Ana Santos"}},
+        )
+
+        # Busca só deve mostrar FAILED (attention=1 já exclui o WAIT_DOCTOR fresco)
+        response = client.get(reverse("dashboard:index") + "?search=ana&attention=1")
+        assert response.status_code == 200
+        content = response.content.decode()
+        assert "ATT-FAIL" in content
+        assert "ATT-FRESH" not in content
+
+    def test_pagination_preserves_search(self, client) -> None:
+        """Links de paginação preservam search."""
+        user = _login_as(client, "manager")
+        Case.objects.all().delete()
+
+        # Criar 25 casos para garantir paginação
+        for i in range(25):
+            _create_case(
+                created_by=user,
+                status=CaseStatus.NEW,
+                agency_record_number=f"PAG-SRC-{i:03d}",
+                structured_data={"patient": {"name": f"Paciente {i:03d}"}},
+            )
+
+        response = client.get(reverse("dashboard:index") + "?search=paciente")
+        assert response.status_code == 200
+        content = response.content.decode()
+        # Links de paginação devem conter search=paciente
+        assert "search=paciente" in content or "search%3Dpaciente" in content
+
+    def test_search_preserves_metrics_date(self, client) -> None:
+        """metrics_date é preservado ao submeter busca."""
+        user = _login_as(client, "manager")
+        Case.objects.all().delete()
+
+        _create_case(
+            created_by=user,
+            status=CaseStatus.NEW,
+            agency_record_number="SRC-MDATE",
+            structured_data={"patient": {"name": "Ana"}},
+        )
+
+        # Formulário de filtros da lista deve preservar metrics_date como hidden
+        response = client.get(reverse("dashboard:index") + "?search=ana&metrics_date=2026-07-01")
+        assert response.status_code == 200
+        content = response.content.decode()
+        assert 'value="2026-07-01"' in content
+
+    def test_empty_search_does_not_filter(self, client) -> None:
+        """Termo vazio (espaços) não filtra."""
+        user = _login_as(client, "manager")
+        Case.objects.all().delete()
+
+        _create_case(
+            created_by=user,
+            status=CaseStatus.NEW,
+            agency_record_number="EMPTY-SRC",
+            structured_data={"patient": {"name": "Qualquer"}},
+        )
+
+        # search= (vazio) → mostra todos
+        response = client.get(reverse("dashboard:index") + "?search=")
+        assert response.status_code == 200
+        content = response.content.decode()
+        assert "EMPTY-SRC" in content
+
+
 # ── Dashboard: metrics_date slice 002 ────────────────────────────────────
 
 
