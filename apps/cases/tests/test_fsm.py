@@ -170,6 +170,14 @@ class TestFSMClosurePaths:
         case = Case.objects.get(pk=case.pk)
         assert case.status == CaseStatus.WAIT_R1_CLEANUP_THUMBS
 
+    def test_final_reply_posted_sets_timestamp(self, user, case_factory, advance_to) -> None:
+        """final_reply_posted() registra timestamp para métricas/auditoria."""
+        case = advance_to(case_factory(user), CaseStatus.DOCTOR_DENIED)
+        case.final_reply_posted(user=user)
+        case.save()
+        case = Case.objects.get(pk=case.pk)
+        assert case.final_reply_posted_at is not None
+
     def test_transition_confirmed_to_wait_cleanup(self, user, case_factory, advance_to) -> None:
         """APPT_CONFIRMED → WAIT_R1_CLEANUP_THUMBS."""
         case = advance_to(case_factory(user), CaseStatus.APPT_CONFIRMED)
@@ -204,6 +212,14 @@ class TestFSMCleanup:
         case = Case.objects.get(pk=case.pk)
         assert case.status == CaseStatus.CLEANUP_RUNNING
 
+    def test_cleanup_triggered_sets_timestamp(self, user, case_factory, advance_to) -> None:
+        """cleanup_triggered() registra timestamp do início do cleanup."""
+        case = advance_to(case_factory(user), CaseStatus.WAIT_R1_CLEANUP_THUMBS)
+        case.cleanup_triggered(user=user)
+        case.save()
+        case = Case.objects.get(pk=case.pk)
+        assert case.cleanup_triggered_at is not None
+
     def test_transition_running_to_cleaned(self, user, case_factory, advance_to) -> None:
         """CLEANUP_RUNNING → CLEANED."""
         case = advance_to(case_factory(user), CaseStatus.CLEANUP_RUNNING)
@@ -211,6 +227,14 @@ class TestFSMCleanup:
         case.save()
         case = Case.objects.get(pk=case.pk)
         assert case.status == CaseStatus.CLEANED
+
+    def test_cleanup_completed_sets_timestamp(self, user, case_factory, advance_to) -> None:
+        """cleanup_completed() registra timestamp usado pelo ciclo total."""
+        case = advance_to(case_factory(user), CaseStatus.CLEANUP_RUNNING)
+        case.cleanup_completed(user=user)
+        case.save()
+        case = Case.objects.get(pk=case.pk)
+        assert case.cleanup_completed_at is not None
 
 
 class TestFSMInvalidTransitions:

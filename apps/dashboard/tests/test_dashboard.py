@@ -2497,6 +2497,38 @@ class TestDashboardMetricsDate:
             f"upload_to_decision para ontem deve ser '2 h', obtido '{avg['upload_to_decision']}'"
         )
 
+    def test_total_cycle_uses_cleanup_completed_event_when_field_is_empty(self, client) -> None:
+        """Ciclo total usa evento CLEANUP_COMPLETED quando cleanup_completed_at histórico está vazio."""
+        from apps.dashboard.views import _compute_average_times
+
+        user = _login_as(client, "manager")
+        Case.objects.all().delete()
+
+        metrics_day = timezone.localdate()
+        created_at = timezone.make_aware(
+            datetime.combine(metrics_day, time(8, 0)),
+            timezone.get_current_timezone(),
+        )
+        completed_at = created_at + timedelta(hours=2, minutes=30)
+        case = _create_case(
+            created_by=user,
+            status=CaseStatus.CLEANED,
+            agency_record_number="MD-CYCLE-EVENT",
+        )
+        Case.objects.filter(pk=case.pk).update(created_at=created_at, cleanup_completed_at=None)
+        event = CaseEvent.objects.create(
+            case=case,
+            event_type="CLEANUP_COMPLETED",
+            actor=user,
+            actor_type="human",
+            payload={},
+        )
+        CaseEvent.objects.filter(pk=event.pk).update(timestamp=completed_at)
+
+        avg = _compute_average_times(day=metrics_day)
+
+        assert avg["total_cycle"] == "2 h 30 min"
+
     def test_invalid_metrics_date_does_not_break(self, client) -> None:
         """Data inválida não retorna 500 e volta para o padrão."""
         _login_as(client, "manager")

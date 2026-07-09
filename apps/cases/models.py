@@ -4,6 +4,7 @@ import uuid
 from django.conf import settings
 from django.core.exceptions import ValidationError
 from django.db import models
+from django.utils import timezone
 from django_fsm import FSMField, transition
 
 
@@ -420,6 +421,7 @@ class Case(models.Model):
         target=CaseStatus.WAIT_R1_CLEANUP_THUMBS,
     )
     def final_reply_posted(self, user=None):
+        self.final_reply_posted_at = timezone.now()
         self._record_event("FINAL_REPLY_POSTED", user=user)
 
     @transition(
@@ -428,6 +430,7 @@ class Case(models.Model):
         target=CaseStatus.CLEANUP_RUNNING,
     )
     def cleanup_triggered(self, user=None):
+        self.cleanup_triggered_at = timezone.now()
         self._record_event("CLEANUP_TRIGGERED", user=user)
 
     @transition(
@@ -436,6 +439,7 @@ class Case(models.Model):
         target=CaseStatus.CLEANED,
     )
     def cleanup_completed(self, user=None):
+        self.cleanup_completed_at = timezone.now()
         self._record_event("CLEANUP_COMPLETED", user=user)
 
     @transition(field=status, source=CaseStatus.CLEANED, target=CaseStatus.WAIT_APPT)
