@@ -2668,3 +2668,40 @@ class TestDashboardDynamicSearch:
         assert "fetch" in js_content or "XMLHttpRequest" in js_content
         # Deve conter AbortController ou mecanismo de cancelamento
         assert "AbortController" in js_content or "abort" in js_content or "controller" in js_content
+
+    def test_partial_does_not_compute_metrics(self, client) -> None:
+        """O partial não computa métricas (guarda-contrato da otimização).
+
+        Com ``X-ATS-Partial: case-list`` a view deve retornar antes de
+        computar summary/fluxo/tempos médios/resumo de supervisão. Sem
+        isso, cada busca dinâmica (uma por debounce) pagaria ~10 queries
+        descartadas. Marcadores estáveis: ``AVG`` só aparece em
+        ``_compute_average_times``; a tabela ``cases_supervisorsummary``
+        só é tocada por ``latest_summary``.
+        """
+        from django.db import connection
+        from django.test.utils import CaptureQueriesContext
+
+        user = _login_as(client, "manager")
+        Case.objects.all().delete()
+        _create_case(
+            created_by=user,
+            status=CaseStatus.NEW,
+            agency_record_number="METRICS-SKIP-001",
+            structured_data={"patient": {"name": "Ana Maria"}},
+        )
+
+        with CaptureQueriesContext(connection) as cap:
+            response = client.get(
+                reverse("dashboard:index") + "?search=ana",
+                HTTP_X_ATS_PARTIAL="case-list",
+            )
+        assert response.status_code == 200
+        sqls = [q["sql"] for q in cap.captured_queries]
+
+        assert not any("AVG" in sql for sql in sqls), (
+            "Partial não deve executar _compute_average_times (AVG).\n" + "\n".join(sqls)
+        )
+        assert not any("supervisorsummary" in sql.lower() for sql in sqls), (
+            "Partial não deve consultar SupervisorSummary (latest_summary).\n" + "\n".join(sqls)
+        )
