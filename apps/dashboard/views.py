@@ -18,6 +18,12 @@ from django.views.decorators.clickjacking import xframe_options_sameorigin
 from django.views.decorators.http import require_POST
 
 from apps.accounts.decorators import role_required
+from apps.cases.admission import (
+    ADMISSION_FLOW_MAP,
+    SUPPORT_FLAG_MAP,
+    get_admission_flow_notice_copy,
+    is_operational_notice_flow,
+)
 from apps.cases.models import Case, CaseEvent, CaseStatus, SupervisorSummary
 from apps.cases.services import (
     ADMINISTRATIVE_CLOSURE_REASON_CHOICES,
@@ -26,14 +32,12 @@ from apps.cases.services import (
 
 # Reaproveita mapeamentos definidos no intake para consistência visual
 from apps.intake.views import (
-    ADMISSION_FLOW_MAP,
     EVENT_DOT_CSS,
     EVENT_LABELS,
     STATUS_CSS_CLASS,
     STATUS_LABELS,
     STEP_STATUS_INDEX,
     STEPS,
-    SUPPORT_FLAG_MAP,
 )
 
 
@@ -183,6 +187,9 @@ def _compute_admission_flow(day: date | None = None, period: str | None = None) 
     return {
         "scheduled": base.filter(doctor_admission_flow="scheduled").count(),
         "immediate": base.filter(doctor_admission_flow="immediate").count(),
+        "pre_icu": base.filter(doctor_admission_flow="pre_icu").count(),
+        "ward_icu_backup": base.filter(doctor_admission_flow="ward_icu_backup").count(),
+        "pediatric_em": base.filter(doctor_admission_flow="pediatric_em").count(),
     }
 
 
@@ -381,9 +388,9 @@ def _compute_result(case: Case) -> tuple[str, str]:
     if case.doctor_decision == "accept" and case.appointment_status == "confirmed":
         return ("✓ Agendamento Confirmado", "bg-success")
 
-    # Accepted — immediate admission
-    if case.doctor_decision == "accept" and case.doctor_admission_flow == "immediate":
-        return ("✓ Vinda Imediata", "bg-success")
+    # Accepted — operational notice flow without scheduling
+    if case.doctor_decision == "accept" and is_operational_notice_flow(case.doctor_admission_flow):
+        return (f"✓ {ADMISSION_FLOW_MAP.get(case.doctor_admission_flow, case.doctor_admission_flow)}", "bg-success")
 
     # Failed
     if case.status == CaseStatus.FAILED:
@@ -729,9 +736,9 @@ def dashboard_case_detail(request: HttpRequest, case_id: uuid.UUID) -> HttpRespo
     terminal_without_scheduling = case.status in (
         CaseStatus.WAIT_R1_CLEANUP_THUMBS,
         CaseStatus.CLEANED,
-    ) and (case.doctor_decision == "deny" or case.doctor_admission_flow == "immediate")
+    ) and (case.doctor_decision == "deny" or is_operational_notice_flow(case.doctor_admission_flow))
     is_doctor_denied_final = terminal_without_scheduling and case.doctor_decision == "deny"
-    is_immediate_final = terminal_without_scheduling and case.doctor_admission_flow == "immediate"
+    is_immediate_final = terminal_without_scheduling and is_operational_notice_flow(case.doctor_admission_flow)
     if terminal_without_scheduling:
         steps = [step for step in STEPS if step["label"] != "Agendamento"]
         current_step_idx = len(steps) - 1
@@ -791,11 +798,14 @@ def dashboard_case_detail(request: HttpRequest, case_id: uuid.UUID) -> HttpRespo
             "doctor_display": case.doctor_display,
         }
     elif result_info is None and is_immediate_final:
+        copy = get_admission_flow_notice_copy(case.doctor_admission_flow)
         result_info = {
             "type": "accepted_immediate",
             "support": SUPPORT_FLAG_MAP.get(case.doctor_support_flag, case.doctor_support_flag),
             "flow": ADMISSION_FLOW_MAP.get(case.doctor_admission_flow, case.doctor_admission_flow),
             "doctor_display": case.doctor_display,
+            "badge": copy["nir_badge"],
+            "body": copy["nir_body"],
         }
     elif result_info is None and case.appointment_status == "cancelled":
         result_info = {

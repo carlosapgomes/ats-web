@@ -4,6 +4,11 @@ from django.conf import settings
 from django.utils import timezone
 
 from apps.accounts.models import get_unread_notification_count
+from apps.cases.admission import (
+    OPERATIONAL_NOTICE_ACK_EVENT_TYPES,
+    OPERATIONAL_NOTICE_EVENT_TYPES,
+    OPERATIONAL_NOTICE_FLOWS,
+)
 from apps.cases.models import Case, CaseStatus
 
 ROLE_DISPLAY_NAMES = {
@@ -61,12 +66,12 @@ def queue_counts(request):  # type: ignore[no-untyped-def]
         count = Case.objects.filter(status=CaseStatus.WAIT_APPT).count()
         count += (
             Case.objects.filter(
-                doctor_admission_flow="immediate",
-                events__event_type="IMMEDIATE_ADMISSION_OPERATIONAL_NOTICE",
+                doctor_admission_flow__in=OPERATIONAL_NOTICE_FLOWS,
+                events__event_type__in=OPERATIONAL_NOTICE_EVENT_TYPES,
                 events__timestamp__date=today,
             )
             .exclude(status=CaseStatus.WAIT_APPT)
-            .exclude(events__event_type="SCHEDULER_IMMEDIATE_ACK")
+            .exclude(events__event_type__in=OPERATIONAL_NOTICE_ACK_EVENT_TYPES)
             .distinct()
             .count()
         )

@@ -116,8 +116,17 @@
       <div class="d-flex justify-content-between mb-1">
         <span>Agendamento</span> <strong>{{ admission_flow.scheduled }}</strong>
       </div>
-      <div class="d-flex justify-content-between">
+      <div class="d-flex justify-content-between mb-1">
         <span>Vinda Imediata</span> <strong>{{ admission_flow.immediate }}</strong>
+      </div>
+      <div class="d-flex justify-content-between mb-1">
+        <span>Vinda prévia para UTI</span> <strong>{{ admission_flow.pre_icu }}</strong>
+      </div>
+      <div class="d-flex justify-content-between mb-1">
+        <span>Enfermaria c/ retaguarda UTI</span> <strong>{{ admission_flow.ward_icu_backup }}</strong>
+      </div>
+      <div class="d-flex justify-content-between">
+        <span>Compartilhar com EM pediátrica</span> <strong>{{ admission_flow.pediatric_em }}</strong>
       </div>
     </div>
   </div>

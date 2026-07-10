@@ -5,7 +5,7 @@
     <span class="pulse-dot"></span>
     <strong>
       {{ pending_count }} solicitação{% if pending_count != 1 %}ções{% endif %} aguardando confirmação
-      {% if immediate_notice_count %} · {{ immediate_notice_count }} vinda{% if immediate_notice_count != 1 %}s{% endif %} imediata{% if immediate_notice_count != 1 %}s{% endif %} para ciência operacional{% endif %}.
+      {% if immediate_notice_count %} · {{ immediate_notice_count }} fluxo{% if immediate_notice_count != 1 %}s{% endif %} sem agendamento para ciência operacional{% endif %}.
     </strong>
   </div>
   {% else %}
@@ -16,8 +16,8 @@
 
   {% if immediate_notice_cases %}
   <div class="card p-4 mb-4 border-warning">
-    <h5 class="mb-3">⚡ Vinda imediata autorizada — ciência operacional</h5>
-    <p class="text-muted mb-3">Não abrir agendamento para estes casos. Comunicação apenas para ciência operacional.</p>
+    <h5 class="mb-3">Ciência operacional — fluxos sem agendamento</h5>
+    <p class="text-muted mb-3">Não abrir agendamento para estes casos. Cada card abaixo indica o fluxo escolhido pelo médico.</p>
     <div class="row g-3">
       {% for c in immediate_notice_cases %}
       <div class="col-12">
@@ -33,6 +33,9 @@
                 {% if c.patient_age %}{{ c.patient_age }} anos · {% endif %}
                 {{ c.patient_gender }}
                 {% if c.origin_unit %} · 🏥 {{ c.origin_unit }}{% endif %}
+              </div>
+              <div class="alert alert-warning py-2 px-3 mb-2 small">
+                <strong>{{ c.notice_title }}</strong><br>{{ c.notice_body }}
               </div>
               <div class="summary-box mb-2">
                 <div class="row">
@@ -176,6 +179,46 @@
   {% else %}
   <div class="alert alert-info d-flex align-items-center gap-2 mb-4" role="alert">
     Nenhum caso processado hoje.
+  </div>
+  {% endif %}
+
+  {% if acknowledged_notice_cases %}
+  <div class="card p-4 mt-4 border-info">
+    <h5 class="mb-3">Ciências operacionais confirmadas hoje</h5>
+    <div class="row g-3">
+      {% for c in acknowledged_notice_cases %}
+      <div class="col-12">
+        <div class="case-card card p-3 bg-light">
+          <div class="row">
+            <div class="col-lg-8">
+              <div class="patient-name mb-1">{{ c.patient_name }}</div>
+              <div class="case-meta mb-2">
+                {% if c.agency_record_number %}Reg. {{ c.agency_record_number }} · {% endif %}
+                {% if c.origin_unit %}🏥 {{ c.origin_unit }}{% endif %}
+              </div>
+              <div class="summary-box mb-2">
+                <div class="row">
+                  <div class="col-sm-3 mb-2"><div class="summary-label">Fluxo</div><div class="summary-value">{{ c.admission_flow_display }}</div></div>
+                  <div class="col-sm-3 mb-2"><div class="summary-label">Suporte</div><div class="summary-value">{{ c.support_flag_display }}</div></div>
+                  <div class="col-sm-6 mb-2"><div class="summary-label">Médico</div><div class="summary-value">{{ c.doctor_display|default:"—" }}</div></div>
+                </div>
+              </div>
+              {% if c.has_doctor_observation %}
+              <div class="alert alert-info py-2 px-3 mt-2 mb-0 small">
+                <strong>📝 Orientação médica:</strong> {{ c.doctor_observation }}
+              </div>
+              {% endif %}
+            </div>
+            <div class="col-lg-4 text-lg-end mt-3 mt-lg-0">
+              <span class="badge bg-info text-dark mb-2">Ciência confirmada</span>
+              <div class="small text-muted">Por {{ c.acknowledged_by }}</div>
+              <div class="waiting-time">{{ c.acknowledged_at|date:"d/m/Y H:i" }}</div>
+            </div>
+          </div>
+        </div>
+      </div>
+      {% endfor %}
+    </div>
   </div>
   {% endif %}
 {% endif %}

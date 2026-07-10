@@ -16,7 +16,15 @@ from django.utils import timezone
 from django.views.decorators.clickjacking import xframe_options_sameorigin
 
 from apps.accounts.decorators import role_required
-from apps.cases.models import Case, CaseStatus
+from apps.cases.admission import (
+    ADMISSION_FLOW_MAP,
+    OPERATIONAL_NOTICE_ACK_EVENT_TYPES,
+    OPERATIONAL_NOTICE_EVENT_TYPES,
+    OPERATIONAL_NOTICE_FLOWS,
+    SUPPORT_FLAG_MAP,
+    get_admission_flow_notice_copy,
+)
+from apps.cases.models import Case, CaseEvent, CaseStatus
 from apps.cases.services import (
     CASE_COMMUNICATION_MAX_LENGTH,
     CaseCommunicationError,
@@ -41,17 +49,6 @@ from .forms import PostScheduleIssueForm, SchedulerDecisionForm
 DOCTOR_DECISION_MAP: dict[str, str] = {
     "accept": "ACEITAR",
     "deny": "NEGAR",
-}
-
-SUPPORT_FLAG_MAP: dict[str, str] = {
-    "none": "Nenhum",
-    "anesthesist": "Anestesista",
-    "anesthesist_icu": "Anestesista + UTI",
-}
-
-ADMISSION_FLOW_MAP: dict[str, str] = {
-    "scheduled": "Agendamento",
-    "immediate": "Vinda Imediata",
 }
 
 
@@ -122,6 +119,7 @@ def _build_case_card(case: Case, wait_minutes: int, user: Any = None) -> dict[st
     If user is provided, lock status is computed relative to the current user.
     """
     has_psi = case.post_schedule_issue_status == "opened"
+    notice_copy = get_admission_flow_notice_copy(case.doctor_admission_flow)
     return {
         "case_id": str(case.case_id),
         "patient_name": _get_patient_name(case),
@@ -134,6 +132,8 @@ def _build_case_card(case: Case, wait_minutes: int, user: Any = None) -> dict[st
         "doctor_display": case.doctor_display,
         "support_flag_display": _get_support_flag_display(case),
         "admission_flow_display": _get_admission_flow_display(case),
+        "notice_title": notice_copy["scheduler_title"],
+        "notice_body": notice_copy["scheduler_body"],
         "has_doctor_observation": case.has_doctor_observation,
         "doctor_observation": case.doctor_observation,
         "wait_minutes": wait_minutes,
@@ -193,17 +193,18 @@ def _scheduler_queue_context(user: Any = None, tab: str = "pending") -> dict[str
 
     pending_count = len(pending_cards)
 
-    # ── Immediate notices (always computed for badges) ──────────────────
-    today: date = timezone.localdate()
+    # ── Operational notices (always computed for badges) ────────────────
+    start, end = _local_day_bounds()
 
     immediate_notice_qs: QuerySet[Case] = (
         Case.objects.filter(
-            doctor_admission_flow="immediate",
-            events__event_type="IMMEDIATE_ADMISSION_OPERATIONAL_NOTICE",
-            events__timestamp__date=today,
+            doctor_admission_flow__in=OPERATIONAL_NOTICE_FLOWS,
+            events__event_type__in=OPERATIONAL_NOTICE_EVENT_TYPES,
+            events__timestamp__gte=start,
+            events__timestamp__lt=end,
         )
         .exclude(status=CaseStatus.WAIT_APPT)
-        .exclude(events__event_type="SCHEDULER_IMMEDIATE_ACK")
+        .exclude(events__event_type__in=OPERATIONAL_NOTICE_ACK_EVENT_TYPES)
         .select_related("doctor")
         .distinct()
         .order_by("-doctor_decided_at", "-created_at")
@@ -217,8 +218,26 @@ def _scheduler_queue_context(user: Any = None, tab: str = "pending") -> dict[str
 
     immediate_notice_count = len(immediate_notice_cards)
 
+    # ── Ciências operacionais confirmadas hoje ──────────────────────────
+    acknowledged_notice_events = (
+        CaseEvent.objects.filter(
+            event_type__in=OPERATIONAL_NOTICE_ACK_EVENT_TYPES,
+            timestamp__gte=start,
+            timestamp__lt=end,
+            case__doctor_admission_flow__in=OPERATIONAL_NOTICE_FLOWS,
+        )
+        .select_related("actor", "case", "case__doctor")
+        .order_by("-timestamp")
+    )
+    acknowledged_notice_cards: list[dict[str, Any]] = []
+    for event in acknowledged_notice_events:
+        card = _build_case_card(event.case, 0)
+        actor = event.actor
+        card["acknowledged_at"] = event.timestamp
+        card["acknowledged_by"] = actor.username if actor is not None else "—"
+        acknowledged_notice_cards.append(card)
+
     # ── Processados hoje ────────────────────────────────────────────────
-    start, end = _local_day_bounds()
     processed_qs: QuerySet[Case] = (
         Case.objects.filter(
             scheduler=user,
@@ -241,9 +260,11 @@ def _scheduler_queue_context(user: Any = None, tab: str = "pending") -> dict[str
         "pending_cases": pending_cards,
         "immediate_notice_cases": immediate_notice_cards,
         "processed_today": processed_today,
+        "acknowledged_notice_cases": acknowledged_notice_cards,
         "pending_count": pending_count,
         "immediate_notice_count": immediate_notice_count,
         "processed_today_count": processed_today_count,
+        "acknowledged_notice_count": len(acknowledged_notice_cards),
         "total_notice_count": pending_count + immediate_notice_count,
     }
 
@@ -544,10 +565,10 @@ def scheduler_context_detail(request: HttpRequest, case_id: uuid.UUID) -> HttpRe
 @login_required
 @role_required("scheduler")
 def immediate_ack(request: HttpRequest, case_id: uuid.UUID) -> HttpResponse:
-    """POST: scheduler acknowledges immediate admission operational notice.
+    """POST: scheduler acknowledges an admission-flow operational notice.
 
     Uses select_for_update inside a transaction to guarantee idempotency
-    under concurrent calls — only one SCHEDULER_IMMEDIATE_ACK is created.
+    under concurrent calls — only one scheduler acknowledgement is created.
     """
     if request.method != "POST":
         raise Http404
@@ -557,18 +578,27 @@ def immediate_ack(request: HttpRequest, case_id: uuid.UUID) -> HttpResponse:
     case = get_object_or_404(
         Case,
         pk=case_id,
-        doctor_admission_flow="immediate",
-        events__event_type="IMMEDIATE_ADMISSION_OPERATIONAL_NOTICE",
+        doctor_admission_flow__in=OPERATIONAL_NOTICE_FLOWS,
+        events__event_type__in=OPERATIONAL_NOTICE_EVENT_TYPES,
     )
 
     with transaction.atomic():
         # Lock the row to prevent race conditions
         locked_case = Case.objects.select_for_update().get(pk=case.case_id)
 
-        already_acknowledged = locked_case.events.filter(event_type="SCHEDULER_IMMEDIATE_ACK").exists()
+        already_acknowledged = locked_case.events.filter(event_type__in=OPERATIONAL_NOTICE_ACK_EVENT_TYPES).exists()
 
         if not already_acknowledged:
-            locked_case._record_event("SCHEDULER_IMMEDIATE_ACK", user=request.user)
+            has_new_notice = locked_case.events.filter(event_type="ADMISSION_FLOW_OPERATIONAL_NOTICE").exists()
+            if has_new_notice:
+                payload: dict[str, object] = {"admission_flow": locked_case.doctor_admission_flow}
+                locked_case._record_event(
+                    "SCHEDULER_OPERATIONAL_NOTICE_ACK",
+                    user=request.user,
+                    payload=payload,
+                )
+            else:
+                locked_case._record_event("SCHEDULER_IMMEDIATE_ACK", user=request.user)
             locked_case.save()
 
     return redirect("scheduler:queue")

@@ -14,6 +14,12 @@ from django.utils import timezone
 from django.views.decorators.clickjacking import xframe_options_sameorigin
 
 from apps.accounts.decorators import role_required
+from apps.cases.admission import (
+    ADMISSION_FLOW_MAP,
+    SUPPORT_FLAG_MAP,
+    get_admission_flow_notice_copy,
+    is_operational_notice_flow,
+)
 from apps.cases.models import Case, CaseAttachment, CaseStatus
 from apps.cases.services import (
     CASE_COMMUNICATION_MAX_LENGTH,
@@ -29,14 +35,12 @@ from apps.cases.services import (
     renew_case_lock as renew_lock_service,
 )
 from apps.intake.views import (
-    ADMISSION_FLOW_MAP,
     EVENT_DOT_CSS,
     EVENT_LABELS,
     STATUS_CSS_CLASS,
     STATUS_LABELS,
     STEP_STATUS_INDEX,
     STEPS,
-    SUPPORT_FLAG_MAP,
 )
 
 from .forms import DoctorDecisionForm
@@ -508,11 +512,11 @@ def doctor_submit(request: HttpRequest, case_id: uuid.UUID) -> HttpResponse:
     case.doctor_decide(decision=decision, user=request.user)
     case.save()
 
-    if decision == "accept" and case.doctor_admission_flow == "immediate":
-        # Immediate admission does not open a scheduling gate. Room-3/scheduler is
-        # only informed for operational awareness; NIR receives the final result.
+    if decision == "accept" and is_operational_notice_flow(case.doctor_admission_flow):
+        # Non-scheduled admission flows do not open a scheduling gate. CHD/scheduler
+        # is informed only for operational awareness; NIR receives the final result.
         case._record_event(
-            "IMMEDIATE_ADMISSION_OPERATIONAL_NOTICE",
+            "ADMISSION_FLOW_OPERATIONAL_NOTICE",
             user=request.user,
             payload={
                 "support_flag": case.doctor_support_flag,
@@ -622,7 +626,7 @@ def doctor_decided_detail(request: HttpRequest, case_id: uuid.UUID) -> HttpRespo
     terminal_without_scheduling = case.status in (
         CaseStatus.WAIT_R1_CLEANUP_THUMBS,
         CaseStatus.CLEANED,
-    ) and (case.doctor_decision == "deny" or case.doctor_admission_flow == "immediate")
+    ) and (case.doctor_decision == "deny" or is_operational_notice_flow(case.doctor_admission_flow))
     if terminal_without_scheduling:
         steps = [step for step in STEPS if step["label"] != "Agendamento"]
         current_step_idx = len(steps) - 1
@@ -647,14 +651,10 @@ def doctor_decided_detail(request: HttpRequest, case_id: uuid.UUID) -> HttpRespo
         )
         and case.doctor_decision == "deny"
     )
-    is_immediate_final = (
-        case.status
-        in (
-            CaseStatus.WAIT_R1_CLEANUP_THUMBS,
-            CaseStatus.CLEANED,
-        )
-        and case.doctor_admission_flow == "immediate"
-    )
+    is_immediate_final = case.status in (
+        CaseStatus.WAIT_R1_CLEANUP_THUMBS,
+        CaseStatus.CLEANED,
+    ) and is_operational_notice_flow(case.doctor_admission_flow)
 
     is_scope_gated = (
         case.suggested_action
@@ -676,11 +676,14 @@ def doctor_decided_detail(request: HttpRequest, case_id: uuid.UUID) -> HttpRespo
             "doctor_display": case.doctor_display,
         }
     elif is_immediate_final:
+        copy = get_admission_flow_notice_copy(case.doctor_admission_flow)
         result_info = {
             "type": "accepted_immediate",
             "support": SUPPORT_FLAG_MAP.get(case.doctor_support_flag, case.doctor_support_flag),
             "flow": ADMISSION_FLOW_MAP.get(case.doctor_admission_flow, case.doctor_admission_flow),
             "doctor_display": case.doctor_display,
+            "badge": copy["nir_badge"],
+            "body": copy["nir_body"],
         }
     elif case.status in (CaseStatus.WAIT_R1_CLEANUP_THUMBS, CaseStatus.CLEANED, CaseStatus.APPT_CONFIRMED):
         result_info = {

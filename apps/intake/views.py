@@ -13,6 +13,12 @@ from django.urls import reverse
 from django.views.decorators.clickjacking import xframe_options_sameorigin
 
 from apps.accounts.decorators import role_required
+from apps.cases.admission import (
+    ADMISSION_FLOW_MAP,
+    SUPPORT_FLAG_MAP,
+    get_admission_flow_notice_copy,
+    is_operational_notice_flow,
+)
 from apps.cases.models import Case, CaseAttachment, CaseStatus
 from apps.cases.services import (
     CASE_COMMUNICATION_MAX_LENGTH,
@@ -140,7 +146,10 @@ EVENT_LABELS: dict[str, str] = {
     "WORK_LOCK_CLAIMED": "Caso reservado",
     "WORK_LOCK_RELEASED": "Reserva liberada",
     "WORK_LOCK_EXPIRED": "Reserva expirada",
-    # ── Vinda imediata ────────────────────────────────────────
+    # ── Ciência operacional CHD ───────────────────────────────
+    "ADMISSION_FLOW_OPERATIONAL_NOTICE": "Aviso de fluxo sem agendamento",
+    "SCHEDULER_OPERATIONAL_NOTICE_ACK": "Ciência de fluxo sem agendamento",
+    # ── Vinda imediata (eventos legados) ───────────────────────
     "IMMEDIATE_ADMISSION_OPERATIONAL_NOTICE": "Aviso de vinda imediata",
     "SCHEDULER_IMMEDIATE_ACK": "Ciência de vinda imediata",
     # ── Anexos ────────────────────────────────────────────────
@@ -157,17 +166,6 @@ EVENT_LABELS: dict[str, str] = {
 }
 
 # Cores do dot da timeline por event_type
-SUPPORT_FLAG_MAP: dict[str, str] = {
-    "none": "Nenhum",
-    "anesthesist": "Anestesista",
-    "anesthesist_icu": "Anestesista + UTI",
-}
-
-ADMISSION_FLOW_MAP: dict[str, str] = {
-    "scheduled": "Agendamento",
-    "immediate": "Vinda Imediata",
-}
-
 EVENT_DOT_CSS: dict[str, str] = {
     "CASE_CREATED": "reception",
     "CASE_START_PROCESSING": "system",
@@ -203,7 +201,10 @@ EVENT_DOT_CSS: dict[str, str] = {
     "WORK_LOCK_CLAIMED": "system",
     "WORK_LOCK_RELEASED": "system",
     "WORK_LOCK_EXPIRED": "system",
-    # ── Vinda imediata ────────────────────────────────────────
+    # ── Ciência operacional CHD ───────────────────────────────
+    "ADMISSION_FLOW_OPERATIONAL_NOTICE": "system",
+    "SCHEDULER_OPERATIONAL_NOTICE_ACK": "scheduler",
+    # ── Vinda imediata (eventos legados) ───────────────────────
     "IMMEDIATE_ADMISSION_OPERATIONAL_NOTICE": "system",
     "SCHEDULER_IMMEDIATE_ACK": "scheduler",
     # ── Anexos ────────────────────────────────────────────────
@@ -400,9 +401,9 @@ def case_detail(request: HttpRequest, case_id: uuid.UUID) -> HttpResponse:
     terminal_without_scheduling = case.status in (
         CaseStatus.WAIT_R1_CLEANUP_THUMBS,
         CaseStatus.CLEANED,
-    ) and (case.doctor_decision == "deny" or case.doctor_admission_flow == "immediate")
+    ) and (case.doctor_decision == "deny" or is_operational_notice_flow(case.doctor_admission_flow))
     is_doctor_denied_final = terminal_without_scheduling and case.doctor_decision == "deny"
-    is_immediate_final = terminal_without_scheduling and case.doctor_admission_flow == "immediate"
+    is_immediate_final = terminal_without_scheduling and is_operational_notice_flow(case.doctor_admission_flow)
     if terminal_without_scheduling:
         steps = [step for step in STEPS if step["label"] != "Agendamento"]
         current_step_idx = len(steps) - 1
@@ -500,11 +501,14 @@ def case_detail(request: HttpRequest, case_id: uuid.UUID) -> HttpResponse:
             "doctor_display": case.doctor_display,
         }
     elif is_immediate_final:
+        copy = get_admission_flow_notice_copy(case.doctor_admission_flow)
         result_info = {
             "type": "accepted_immediate",
             "support": SUPPORT_FLAG_MAP.get(case.doctor_support_flag, case.doctor_support_flag),
             "flow": ADMISSION_FLOW_MAP.get(case.doctor_admission_flow, case.doctor_admission_flow),
             "doctor_display": case.doctor_display,
+            "badge": copy["nir_badge"],
+            "body": copy["nir_body"],
         }
     elif case.status == CaseStatus.APPT_DENIED or (terminal_with_result and case.appointment_status == "denied"):
         result_info = {
@@ -1259,7 +1263,7 @@ def closed_case_detail(request: HttpRequest, case_id: uuid.UUID) -> HttpResponse
     terminal_without_scheduling = case.status in (
         CaseStatus.WAIT_R1_CLEANUP_THUMBS,
         CaseStatus.CLEANED,
-    ) and (case.doctor_decision == "deny" or case.doctor_admission_flow == "immediate")
+    ) and (case.doctor_decision == "deny" or is_operational_notice_flow(case.doctor_admission_flow))
     if terminal_without_scheduling:
         steps = [step for step in STEPS if step["label"] != "Agendamento"]
         current_step_idx = len(steps) - 1
@@ -1340,7 +1344,7 @@ def _build_historical_result_info(case: Case) -> dict[str, object] | None:
         CaseStatus.CLEANED,
     )
     is_doctor_denied_final = terminal_with_result and case.doctor_decision == "deny"
-    is_immediate_final = terminal_with_result and case.doctor_admission_flow == "immediate"
+    is_immediate_final = terminal_with_result and is_operational_notice_flow(case.doctor_admission_flow)
 
     # Scope-gated manual review
     is_scope_gated = isinstance(suggested_action, dict) and suggested_action.get("decision") == "manual_review_required"
@@ -1360,11 +1364,14 @@ def _build_historical_result_info(case: Case) -> dict[str, object] | None:
             "doctor_display": case.doctor_display,
         }
     elif is_immediate_final:
+        copy = get_admission_flow_notice_copy(case.doctor_admission_flow)
         result_info = {
             "type": "accepted_immediate",
             "support": SUPPORT_FLAG_MAP.get(case.doctor_support_flag, case.doctor_support_flag),
             "flow": ADMISSION_FLOW_MAP.get(case.doctor_admission_flow, case.doctor_admission_flow),
             "doctor_display": case.doctor_display,
+            "badge": copy["nir_badge"],
+            "body": copy["nir_body"],
         }
     elif case.status == CaseStatus.APPT_DENIED or (terminal_with_result and case.appointment_status == "denied"):
         result_info = {
