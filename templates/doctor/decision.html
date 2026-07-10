@@ -307,7 +307,6 @@
               <option value="" selected disabled>Selecione...</option>
               <option value="none"{% if form.support_flag.value == "none" %} selected{% endif %}>Nenhum</option>
               <option value="anesthesist"{% if form.support_flag.value == "anesthesist" %} selected{% endif %}>Anestesista</option>
-              <option value="anesthesist_icu"{% if form.support_flag.value == "anesthesist_icu" %} selected{% endif %}>Anestesista + UTI</option>
             </select>
             {% if form.support_flag.errors %}<div class="invalid-feedback d-block">{{ form.support_flag.errors.0 }}</div>{% else %}<div class="invalid-feedback">Selecione o tipo de suporte.</div>{% endif %}
           </div>
@@ -318,6 +317,9 @@
               <option value="" selected disabled>Selecione...</option>
               <option value="scheduled"{% if form.admission_flow.value == "scheduled" %} selected{% endif %}>Agendamento</option>
               <option value="immediate"{% if form.admission_flow.value == "immediate" %} selected{% endif %}>Vinda Imediata</option>
+              <option value="pre_icu"{% if form.admission_flow.value == "pre_icu" %} selected{% endif %}>Vinda prévia para UTI</option>
+              <option value="ward_icu_backup"{% if form.admission_flow.value == "ward_icu_backup" %} selected{% endif %}>Vinda para enfermaria (para retaguarda em UTI)</option>
+              <option value="pediatric_em"{% if form.admission_flow.value == "pediatric_em" %} selected{% endif %}>Compartilhar com EM pediátrica</option>
             </select>
             {% if form.admission_flow.errors %}<div class="invalid-feedback d-block">{{ form.admission_flow.errors.0 }}</div>{% else %}<div class="invalid-feedback">Selecione o fluxo de admissão.</div>{% endif %}
           </div>

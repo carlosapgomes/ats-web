@@ -2160,7 +2160,7 @@ class TestDoctorSubmitView:
         assert case.status == CaseStatus.WAIT_R1_CLEANUP_THUMBS
 
         events = CaseEvent.objects.filter(case=case)
-        assert events.filter(event_type="IMMEDIATE_ADMISSION_OPERATIONAL_NOTICE").exists()
+        assert events.filter(event_type="ADMISSION_FLOW_OPERATIONAL_NOTICE").exists()
         assert events.filter(event_type="FINAL_REPLY_POSTED").exists()
         assert not events.filter(event_type="SCHEDULER_REQUEST_POSTED").exists()
 

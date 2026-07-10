@@ -156,14 +156,17 @@
         confirmModal.show();
     }
 
-    function showFinalConfirmModal(decision, supportText, flowText, reason) {
+    function showFinalConfirmModal(decision, supportText, flowText, reason, flowValue) {
         confirmModalTitle.textContent = 'Confirmar Decisão';
 
         if (decision === 'accept') {
+            var acceptMessage = flowValue === 'scheduled'
+                ? 'O caso será encaminhado automaticamente para o CHD/agendamento.'
+                : 'O CHD receberá apenas ciência operacional. O NIR dará seguimento ao fluxo escolhido.';
             confirmBody.innerHTML =
                 '<div class="text-center mb-3"><span style="font-size:3rem;">&#10003;</span></div>' +
                 '<p class="text-center mb-1"><strong>ACEITAR</strong> &mdash; ' + escapeHtml(supportText) + ' &middot; ' + escapeHtml(flowText) + '</p>' +
-                '<div class="alert alert-info small mb-0 mt-3">O caso será encaminhado automaticamente para agendamento.</div>';
+                '<div class="alert alert-info small mb-0 mt-3">' + escapeHtml(acceptMessage) + '</div>';
         } else {
             confirmBody.innerHTML =
                 '<div class="text-center mb-3"><span style="font-size:3rem;">&#10007;</span></div>' +
@@ -203,8 +206,9 @@
             var flowText = admissionFlow && admissionFlow.selectedIndex >= 0
                 ? admissionFlow.options[admissionFlow.selectedIndex].text : '';
             var reason = denyReason ? denyReason.value.trim() : '';
+            var flowValue = admissionFlow ? admissionFlow.value : '';
 
-            showFinalConfirmModal(decision, supportText, flowText, reason);
+            showFinalConfirmModal(decision, supportText, flowText, reason, flowValue);
         });
     }
 

@@ -4,6 +4,8 @@ from typing import Any
 
 from django import forms
 
+from apps.cases.admission import ADMISSION_FLOW_CHOICES, SUPPORT_FLAG_CHOICES
+
 
 class DoctorDecisionForm(forms.Form):
     """Formulário de decisão médica com validação condicional."""
@@ -12,20 +14,11 @@ class DoctorDecisionForm(forms.Form):
         choices=[("accept", "Aceitar"), ("deny", "Negar")],
     )
     support_flag = forms.ChoiceField(
-        choices=[
-            ("", "---"),
-            ("none", "Nenhum"),
-            ("anesthesist", "Anestesista"),
-            ("anesthesist_icu", "Anestesista + UTI"),
-        ],
+        choices=SUPPORT_FLAG_CHOICES,
         required=False,
     )
     admission_flow = forms.ChoiceField(
-        choices=[
-            ("", "---"),
-            ("scheduled", "Agendamento"),
-            ("immediate", "Vinda Imediata"),
-        ],
+        choices=ADMISSION_FLOW_CHOICES,
         required=False,
     )
     reason = forms.CharField(widget=forms.Textarea, required=False)
