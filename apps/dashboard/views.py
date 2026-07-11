@@ -1,7 +1,7 @@
 """Views do dashboard de monitoramento para manager e admin."""
 
 import uuid
-from datetime import date, datetime, time, timedelta
+from datetime import date, datetime, timedelta
 from typing import Any
 
 from django.contrib import messages
@@ -28,6 +28,7 @@ from apps.cases.models import Case, CaseEvent, CaseStatus, SupervisorSummary
 from apps.cases.services import (
     ADMINISTRATIVE_CLOSURE_REASON_CHOICES,
     administratively_close_case,
+    local_day_bounds,
 )
 
 # Reaproveita mapeamentos definidos no intake para consistência visual
@@ -39,26 +40,6 @@ from apps.intake.views import (
     STEP_STATUS_INDEX,
     STEPS,
 )
-
-
-def _local_day_bounds(day: date | None = None) -> tuple[datetime, datetime]:
-    """Retorna início e fim do dia local (timezone-aware) para filtros ORM.
-
-    Usa o fuso horário configurado no Django (TIME_ZONE), não a data UTC
-    de timezone.now().date(). Isso evita o bug de fronteira UTC/local
-    onde timezone.now() já está no dia seguinte UTC enquanto o fuso local
-    ainda está no dia anterior.
-
-    Exemplo:
-        timezone.now()  = 2026-06-01 01:00 UTC
-        localdate(Bahia)= 2026-05-31 22:00 BRT
-        day=None        → bounds de 2026-05-31 00:00 até 2026-06-01 00:00 BRT
-    """
-    local_day = day or timezone.localdate()
-    current_tz = timezone.get_current_timezone()
-    start = timezone.make_aware(datetime.combine(local_day, time.min), current_tz)
-    end = start + timedelta(days=1)
-    return start, end
 
 
 def _period_bounds(period: str) -> tuple[datetime | None, datetime | None]:
@@ -75,7 +56,7 @@ def _period_bounds(period: str) -> tuple[datetime | None, datetime | None]:
     if period == "all":
         return None, None
 
-    today_start, tomorrow_start = _local_day_bounds()
+    today_start, tomorrow_start = local_day_bounds()
 
     if period == "7d":
         return today_start - timedelta(days=6), tomorrow_start
@@ -96,7 +77,7 @@ def _compute_summary(day: date | None = None, period: str | None = None) -> dict
       como negados, não como aceitos.
     - Aceitos e Negados são mutuamente exclusivos.
 
-    Usa _local_day_bounds() ou _period_bounds() para filtrar casos.
+    Usa local_day_bounds() ou _period_bounds() para filtrar casos.
 
     Se period for fornecido ("today", "7d", "30d", "all"), as métricas
     refletem o período correspondente. day é mantido para compatibilidade
@@ -110,7 +91,7 @@ def _compute_summary(day: date | None = None, period: str | None = None) -> dict
         else:
             period_cases = Case.objects.filter(created_at__gte=start, created_at__lt=end)
     else:
-        start, end = _local_day_bounds(day)
+        start, end = local_day_bounds(day)
         period_cases = Case.objects.filter(created_at__gte=start, created_at__lt=end)
 
     total_today = period_cases.count()
@@ -162,7 +143,7 @@ def _compute_stage_waiting() -> dict[str, int]:
 def _compute_admission_flow(day: date | None = None, period: str | None = None) -> dict[str, int]:
     """Fluxo de admissão (agendado vs imediato) para casos aceitos no período.
 
-    Usa _local_day_bounds() ou _period_bounds() para filtrar.
+    Usa local_day_bounds() ou _period_bounds() para filtrar.
 
     Se period for fornecido, o fluxo reflete o período correspondente.
     day é mantido para compatibilidade reversa.
@@ -178,7 +159,7 @@ def _compute_admission_flow(day: date | None = None, period: str | None = None) 
                 doctor_decision="accept",
             )
     else:
-        start, end = _local_day_bounds(day)
+        start, end = local_day_bounds(day)
         base = Case.objects.filter(
             created_at__gte=start,
             created_at__lt=end,
@@ -291,7 +272,7 @@ def _compute_average_times(day: date | None = None, period: str | None = None) -
         ).aggregate(avg=Avg("cycle_time"))["avg"]
     else:
         if day is not None:
-            start, end = _local_day_bounds(day)
+            start, end = local_day_bounds(day)
             cases_qs = cases_qs.filter(created_at__gte=start, created_at__lt=end)
 
         # Upload → Decisão Médica
@@ -738,7 +719,7 @@ def dashboard_case_detail(request: HttpRequest, case_id: uuid.UUID) -> HttpRespo
         CaseStatus.CLEANED,
     ) and (case.doctor_decision == "deny" or is_operational_notice_flow(case.doctor_admission_flow))
     is_doctor_denied_final = terminal_without_scheduling and case.doctor_decision == "deny"
-    is_immediate_final = terminal_without_scheduling and is_operational_notice_flow(case.doctor_admission_flow)
+    is_operational_notice_final = terminal_without_scheduling and is_operational_notice_flow(case.doctor_admission_flow)
     if terminal_without_scheduling:
         steps = [step for step in STEPS if step["label"] != "Agendamento"]
         current_step_idx = len(steps) - 1
@@ -797,7 +778,7 @@ def dashboard_case_detail(request: HttpRequest, case_id: uuid.UUID) -> HttpRespo
             "reason": case.doctor_reason,
             "doctor_display": case.doctor_display,
         }
-    elif result_info is None and is_immediate_final:
+    elif result_info is None and is_operational_notice_final:
         copy = get_admission_flow_notice_copy(case.doctor_admission_flow)
         result_info = {
             "type": "accepted_immediate",
