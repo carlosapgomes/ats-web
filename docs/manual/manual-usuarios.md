@@ -28,16 +28,24 @@ Neste manual, vamos usar principalmente o termo **CHD**, porque é o nome mais u
 8. O **NIR** confirma o recebimento do resultado.
 9. O caso é concluído e sai das filas operacionais.
 
-### 1.2 Fluxo principal: encaminhamento com vinda imediata
+### 1.2 Fluxos sem agendamento: ciência operacional do CHD e ação do NIR
 
-1. O **NIR** envia o PDF do encaminhamento.
-2. O sistema processa o documento automaticamente.
-3. O **Médico** avalia e aceita o caso, escolhendo o fluxo **Vinda Imediata**.
-4. O caso não deve ser agendado.
-5. O **CHD** recebe apenas um aviso para ciência operacional e clica em **Confirmar ciência**.
-6. O resultado fica disponível para o **NIR**.
-7. O **NIR** confirma o recebimento do resultado.
-8. O caso é concluído.
+Além do fluxo **Agendamento**, o médico pode aceitar um caso escolhendo um fluxo que **não abre agendamento para o CHD**.
+
+Regra geral:
+
+- quando o médico escolhe **Agendamento**, o caso vai para o **CHD** agendar;
+- quando escolhe qualquer outro fluxo de admissão, o **CHD** apenas toma ciência operacional, e o **NIR** conduz a ação necessária conforme o fluxo indicado.
+
+| Fluxo escolhido pelo médico | Ação do CHD | Ação principal do NIR |
+|---|---|---|
+| **Agendamento** | Agendar o exame | Aguardar resultado do CHD |
+| **Vinda imediata** | Confirmar ciência | Comunicar e conduzir vinda imediata conforme rotina institucional |
+| **Admissão prévia em leito de UTI** | Confirmar ciência | Providenciar/reservar leito de UTI |
+| **Admissão em enfermaria para suporte posterior em UTI** | Confirmar ciência | Providenciar enfermaria e retaguarda em UTI |
+| **Compartilhamento com a Pediatria** | Confirmar ciência | Acionar o coordenador da EM Pediátrica |
+
+Nesses fluxos sem agendamento, o caso segue para resultado do **NIR** após a decisão médica. O **CHD** recebe um card apenas para ciência operacional e deve clicar em **Confirmar ciência**.
 
 ### 1.3 Fluxo de negativa médica
 
@@ -343,12 +351,14 @@ Quando o caso já tiver um resultado final, o NIR deve confirmar o recebimento.
 O resultado pode ser, por exemplo:
 
 - regulação aceita com agendamento confirmado;
-- regulação aceita para vinda imediata;
+- regulação aceita para fluxo sem agendamento, como vinda imediata, admissão prévia em UTI, enfermaria com retaguarda em UTI ou compartilhamento com Pediatria;
 - negativa médica;
 - agendamento negado;
 - revisão manual obrigatória;
 - falha de processamento;
 - resultado de intercorrência pós-agendamento.
+
+Nos fluxos sem agendamento, o resultado final indica qual ação operacional cabe ao **NIR**. O **CHD** apenas toma ciência no sistema.
 
 Passo a passo:
 
@@ -484,19 +494,31 @@ Para aceitar:
 2. selecione o **Suporte Necessário**:
    - Nenhum;
    - Anestesista;
-   - Anestesista + UTI;
 3. selecione o **Fluxo de Admissão**:
    - Agendamento;
-   - Vinda Imediata;
+   - Vinda imediata;
+   - Admissão prévia em leito de UTI;
+   - Admissão em enfermaria para suporte posterior em UTI;
+   - Compartilhamento com a Pediatria;
 4. se necessário, preencha **Orientações para agendamento/execução**;
 5. clique em **Enviar Decisão**;
 6. confira o resumo na janela de confirmação;
 7. clique em **Confirmar Decisão**.
 
+O campo **Suporte Necessário** informa ao **CHD** se será preciso reservar anestesista. A reserva de leito de UTI ou enfermaria é conduzida pelo **NIR**, conforme o fluxo de admissão escolhido.
+
+Regra geral do **Fluxo de Admissão**:
+
+- escolha **Agendamento** quando o **CHD** precisa marcar data/horário;
+- escolha os demais fluxos quando o **CHD** deve apenas tomar ciência e o **NIR** deve executar uma ação operacional antes ou fora do agendamento.
+
+Caso importante: se o paciente já está em UTI próxima ao hospital, por exemplo na Grande Salvador, e virá de UTI móvel apenas para realizar o exame e retornar, selecione **Agendamento**. Nesse caso, use o campo **Orientações para agendamento/execução** para informar que o paciente está em UTI e provavelmente virá de UTI móvel.
+
 Use o campo de orientações para informações como:
 
 - priorizar por anemia;
 - agendar com anestesia;
+- paciente está em UTI e provavelmente virá de UTI móvel;
 - paciente deve trazer exames recentes;
 - cuidados para execução do procedimento.
 
@@ -562,7 +584,7 @@ Na página do CHD/agendador, acesse a **Fila de Agendamento**.
 
 A fila pode mostrar três tipos principais de item:
 
-1. **Vinda imediata autorizada** — apenas para ciência operacional. Não deve ser agendada.
+1. **Ciência operacional — fluxos sem agendamento** — não devem ser agendados pelo CHD.
 2. **Casos aguardando agendamento** — precisam ser confirmados ou negados.
 3. **Intercorrências pós-agendamento** — precisam de resposta do CHD.
 
@@ -570,18 +592,26 @@ A fila é atualizada automaticamente.
 
 ---
 
-## 5.2 Confirmar ciência de vinda imediata
+## 5.2 Confirmar ciência de fluxos sem agendamento
 
-Quando aparecer a seção **Vinda imediata autorizada — ciência operacional**:
+Quando aparecer a seção de **ciência operacional**:
 
 1. leia os dados do caso;
-2. confira a decisão médica e orientações, se houver;
-3. não abra agendamento para esse caso;
-4. clique em **Confirmar ciência**.
+2. confira o fluxo escolhido pelo médico;
+3. confira a decisão médica e orientações, se houver;
+4. não abra agendamento para esse caso;
+5. clique em **Confirmar ciência**.
 
-Esse botão apenas registra que o CHD tomou ciência da vinda imediata.
+Esse botão apenas registra que o **CHD** tomou ciência do fluxo sem agendamento. A confirmação fica registrada no histórico, incluindo quem confirmou e quando.
 
-Na prática, o paciente geralmente chega pela emergência, mas isso pode variar conforme decisão interna do NIR. O ponto principal para o CHD é: **não abrir agendamento** e registrar ciência no sistema.
+Fluxos em que o CHD apenas confirma ciência:
+
+- **Vinda imediata**;
+- **Admissão prévia em leito de UTI**;
+- **Admissão em enfermaria para suporte posterior em UTI**;
+- **Compartilhamento com a Pediatria**.
+
+Na prática, o encaminhamento operacional desses casos é conduzido pelo **NIR** conforme a rotina institucional. O ponto principal para o CHD é: **não abrir agendamento** e registrar ciência no sistema.
 
 ---
 
@@ -721,8 +751,11 @@ Sempre confira:
 |---|---|
 | Enviar novo caso | **Novo Encaminhamento** |
 | Decidir aceite/negativa médica | **Formulário de Decisão Médica** |
+| Médico indicar fluxo sem agendamento | **Formulário de Decisão Médica > Fluxo de Admissão** |
 | Pedir documento antes da decisão | **Comunicação operacional** |
 | Confirmar ou negar agendamento | **Confirmação de Agendamento** |
+| CHD tomar ciência de fluxo sem agendamento | **Fila do CHD > Confirmar ciência** |
+| NIR executar ação de UTI, enfermaria, vinda imediata ou Pediatria | **Resultado final do caso + rotina operacional NIR** |
 | CHD avisar NIR sobre alteração interna em caso histórico | **Buscar histórico > Detalhes > Comunicar NIR** |
 | NIR registrar intercorrência após agendamento | **Casos Encerrados > Detalhes > Intercorrência Pós-Agendamento** |
 | Responder intercorrência | **Fila do CHD/Agendador** |
