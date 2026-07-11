@@ -1,15 +1,10 @@
 """Context processors for the accounts app."""
 
 from django.conf import settings
-from django.utils import timezone
 
 from apps.accounts.models import get_unread_notification_count
-from apps.cases.admission import (
-    OPERATIONAL_NOTICE_ACK_EVENT_TYPES,
-    OPERATIONAL_NOTICE_EVENT_TYPES,
-    OPERATIONAL_NOTICE_FLOWS,
-)
 from apps.cases.models import Case, CaseStatus
+from apps.cases.services import unacknowledged_operational_notice_qs
 
 ROLE_DISPLAY_NAMES = {
     "nir": "NIR",
@@ -62,18 +57,7 @@ def queue_counts(request):  # type: ignore[no-untyped-def]
         count = Case.objects.filter(status=CaseStatus.WAIT_DOCTOR).count()
         return {"queue_count": count}
     if active_role == "scheduler":
-        today = timezone.localdate()
         count = Case.objects.filter(status=CaseStatus.WAIT_APPT).count()
-        count += (
-            Case.objects.filter(
-                doctor_admission_flow__in=OPERATIONAL_NOTICE_FLOWS,
-                events__event_type__in=OPERATIONAL_NOTICE_EVENT_TYPES,
-                events__timestamp__date=today,
-            )
-            .exclude(status=CaseStatus.WAIT_APPT)
-            .exclude(events__event_type__in=OPERATIONAL_NOTICE_ACK_EVENT_TYPES)
-            .distinct()
-            .count()
-        )
+        count += unacknowledged_operational_notice_qs().count()
         return {"queue_count": count}
     return {}

@@ -2,7 +2,7 @@
 
 import logging
 import uuid
-from datetime import date, datetime, time, timedelta
+from datetime import date, datetime, time
 from typing import Any
 
 from django.contrib import messages
@@ -33,7 +33,9 @@ from apps.cases.services import (
     compute_lock_display,
     expire_stale_locks_for_statuses,
     get_post_schedule_issue_reason_label,
+    local_day_bounds,
     post_case_communication_message,
+    unacknowledged_operational_notice_qs,
 )
 from apps.cases.services import (
     release_case_lock as release_lock_service,
@@ -153,19 +155,6 @@ def _build_case_card(case: Case, wait_minutes: int, user: Any = None) -> dict[st
 # ── View ──────────────────────────────────────────────────────────────────
 
 
-def _local_day_bounds(day: date | None = None) -> tuple[datetime, datetime]:
-    """Retorna início e fim do dia local (timezone-aware) para filtros ORM.
-
-    Usa o fuso horário configurado no Django (TIME_ZONE), não a data UTC
-    de timezone.now().date().
-    """
-    local_day = day or timezone.localdate()
-    current_tz = timezone.get_current_timezone()
-    start = timezone.make_aware(datetime.combine(local_day, time.min), current_tz)
-    end = start + timedelta(days=1)
-    return start, end
-
-
 def _scheduler_queue_context(user: Any = None, tab: str = "pending") -> dict[str, Any]:
     """Build context for full and HTMX scheduler queue renders.
 
@@ -194,20 +183,10 @@ def _scheduler_queue_context(user: Any = None, tab: str = "pending") -> dict[str
     pending_count = len(pending_cards)
 
     # ── Operational notices (always computed for badges) ────────────────
-    start, end = _local_day_bounds()
+    start, end = local_day_bounds()
 
     immediate_notice_qs: QuerySet[Case] = (
-        Case.objects.filter(
-            doctor_admission_flow__in=OPERATIONAL_NOTICE_FLOWS,
-            events__event_type__in=OPERATIONAL_NOTICE_EVENT_TYPES,
-            events__timestamp__gte=start,
-            events__timestamp__lt=end,
-        )
-        .exclude(status=CaseStatus.WAIT_APPT)
-        .exclude(events__event_type__in=OPERATIONAL_NOTICE_ACK_EVENT_TYPES)
-        .select_related("doctor")
-        .distinct()
-        .order_by("-doctor_decided_at", "-created_at")
+        unacknowledged_operational_notice_qs().select_related("doctor").order_by("-doctor_decided_at", "-created_at")
     )
 
     immediate_notice_cards: list[dict[str, Any]] = []

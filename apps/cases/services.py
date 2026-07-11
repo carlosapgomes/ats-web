@@ -9,7 +9,7 @@ from __future__ import annotations
 import uuid
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass
-from datetime import datetime, timedelta
+from datetime import date, datetime, time, timedelta
 from typing import Any
 
 from django.conf import settings
@@ -18,6 +18,11 @@ from django.db import transaction
 from django.db.models import QuerySet
 from django.utils import timezone
 
+from apps.cases.admission import (
+    OPERATIONAL_NOTICE_ACK_EVENT_TYPES,
+    OPERATIONAL_NOTICE_EVENT_TYPES,
+    OPERATIONAL_NOTICE_FLOWS,
+)
 from apps.cases.models import Case, CaseAttachment, CaseCommunicationMessage, CaseEvent, CaseStatus
 from apps.intake.services import create_case_attachment
 
@@ -1318,3 +1323,55 @@ def create_system_communication_notice_for_event(event: CaseEvent) -> CaseCommun
     )
 
     return msg
+
+
+# ── Shared day window and operational-notice queries ───────────────────
+
+
+def local_day_bounds(day: date | None = None) -> tuple[datetime, datetime]:
+    """Início e fim do dia local (timezone-aware) para filtros ORM.
+
+    Usa o fuso horário configurado no Django (TIME_ZONE), não a data UTC de
+    ``timezone.now().date()``. Isso evita o bug de fronteira UTC/local onde
+    ``timezone.now()`` já está no dia seguinte UTC enquanto o fuso local
+    ainda está no dia anterior.
+
+    Exemplo:
+        timezone.now()  = 2026-06-01 01:00 UTC
+        localdate(Bahia)= 2026-05-31 22:00 BRT
+        day=None        → bounds de 2026-05-31 00:00 até 2026-06-01 00:00 BRT
+    """
+    local_day = day or timezone.localdate()
+    current_tz = timezone.get_current_timezone()
+    start = timezone.make_aware(datetime.combine(local_day, time.min), current_tz)
+    end = start + timedelta(days=1)
+    return start, end
+
+
+def unacknowledged_operational_notice_qs(day: date | None = None) -> QuerySet[Case]:
+    """Casos com aviso operacional (fluxo sem agendamento) aguardando ciência do CHD.
+
+    Fonte única do critério "fila de ciência operacional", compartilhada entre
+    a renderização da fila do scheduler e o contador do badge/avatar — assim
+    badge e fila nunca divergem.
+
+    - fluxo em ``OPERATIONAL_NOTICE_FLOWS``
+      (immediate/pre_icu/ward_icu_backup/pediatric_em);
+    - existe evento de aviso (novo ``ADMISSION_FLOW_OPERATIONAL_NOTICE`` ou
+      legado ``IMMEDIATE_ADMISSION_OPERATIONAL_NOTICE``) dentro do dia local;
+    - caso não está em ``WAIT_APPT``;
+    - sem evento de ack (novo ``SCHEDULER_OPERATIONAL_NOTICE_ACK`` ou legado
+      ``SCHEDULER_IMMEDIATE_ACK``).
+    """
+    start, end = local_day_bounds(day)
+    return (
+        Case.objects.filter(
+            doctor_admission_flow__in=OPERATIONAL_NOTICE_FLOWS,
+            events__event_type__in=OPERATIONAL_NOTICE_EVENT_TYPES,
+            events__timestamp__gte=start,
+            events__timestamp__lt=end,
+        )
+        .exclude(status=CaseStatus.WAIT_APPT)
+        .exclude(events__event_type__in=OPERATIONAL_NOTICE_ACK_EVENT_TYPES)
+        .distinct()
+    )

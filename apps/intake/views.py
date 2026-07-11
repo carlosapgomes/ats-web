@@ -403,7 +403,7 @@ def case_detail(request: HttpRequest, case_id: uuid.UUID) -> HttpResponse:
         CaseStatus.CLEANED,
     ) and (case.doctor_decision == "deny" or is_operational_notice_flow(case.doctor_admission_flow))
     is_doctor_denied_final = terminal_without_scheduling and case.doctor_decision == "deny"
-    is_immediate_final = terminal_without_scheduling and is_operational_notice_flow(case.doctor_admission_flow)
+    is_operational_notice_final = terminal_without_scheduling and is_operational_notice_flow(case.doctor_admission_flow)
     if terminal_without_scheduling:
         steps = [step for step in STEPS if step["label"] != "Agendamento"]
         current_step_idx = len(steps) - 1
@@ -500,7 +500,7 @@ def case_detail(request: HttpRequest, case_id: uuid.UUID) -> HttpResponse:
             "reason": case.doctor_reason,
             "doctor_display": case.doctor_display,
         }
-    elif is_immediate_final:
+    elif is_operational_notice_final:
         copy = get_admission_flow_notice_copy(case.doctor_admission_flow)
         result_info = {
             "type": "accepted_immediate",
@@ -1344,7 +1344,7 @@ def _build_historical_result_info(case: Case) -> dict[str, object] | None:
         CaseStatus.CLEANED,
     )
     is_doctor_denied_final = terminal_with_result and case.doctor_decision == "deny"
-    is_immediate_final = terminal_with_result and is_operational_notice_flow(case.doctor_admission_flow)
+    is_operational_notice_final = terminal_with_result and is_operational_notice_flow(case.doctor_admission_flow)
 
     # Scope-gated manual review
     is_scope_gated = isinstance(suggested_action, dict) and suggested_action.get("decision") == "manual_review_required"
@@ -1363,7 +1363,7 @@ def _build_historical_result_info(case: Case) -> dict[str, object] | None:
             "reason": case.doctor_reason,
             "doctor_display": case.doctor_display,
         }
-    elif is_immediate_final:
+    elif is_operational_notice_final:
         copy = get_admission_flow_notice_copy(case.doctor_admission_flow)
         result_info = {
             "type": "accepted_immediate",

@@ -1,7 +1,6 @@
 """Views for the doctor app."""
 
 import uuid
-from datetime import date, datetime, time, timedelta
 from typing import Any
 
 from django.contrib import messages
@@ -27,6 +26,7 @@ from apps.cases.services import (
     claim_case_lock,
     compute_lock_display,
     expire_stale_locks_for_statuses,
+    local_day_bounds,
 )
 from apps.cases.services import (
     release_case_lock as release_lock_service,
@@ -45,15 +45,6 @@ from apps.intake.views import (
 
 from .forms import DoctorDecisionForm
 from .presenters import DoctorReportPresenter
-
-
-def _local_day_bounds(day: date | None = None) -> tuple[datetime, datetime]:
-    """Retorna início e fim do dia local (timezone-aware) para filtros ORM."""
-    local_day = day or timezone.localdate()
-    current_tz = timezone.get_current_timezone()
-    start = timezone.make_aware(datetime.combine(local_day, time.min), current_tz)
-    end = start + timedelta(days=1)
-    return start, end
 
 
 def _map_prior_decision_to_denial_type(decision: str) -> str:
@@ -233,7 +224,7 @@ def _doctor_queue_context(request: HttpRequest) -> dict[str, Any]:
     avg_wait = int(total_wait / len(pending_cards)) if pending_cards else 0
 
     # ── Decided today cases ───────────────────────────────────────
-    start, end = _local_day_bounds()
+    start, end = local_day_bounds()
     decided_qs: QuerySet[Case] = Case.objects.filter(
         doctor=doctor_user,
         doctor_decision__in=["accept", "deny"],
@@ -261,7 +252,7 @@ def doctor_queue(request: HttpRequest) -> HttpResponse:
     """View da fila médica: Pendentes (?tab=pending) ou Decididos Hoje (?tab=decided)."""
     ctx = _doctor_queue_context(request)
     # Always compute both counts for the nav badges; only materialize active tab list
-    start, end = _local_day_bounds()
+    start, end = local_day_bounds()
     doctor_user = request.user
     assert doctor_user.is_authenticated
     decided_count = Case.objects.filter(
@@ -651,7 +642,7 @@ def doctor_decided_detail(request: HttpRequest, case_id: uuid.UUID) -> HttpRespo
         )
         and case.doctor_decision == "deny"
     )
-    is_immediate_final = case.status in (
+    is_operational_notice_final = case.status in (
         CaseStatus.WAIT_R1_CLEANUP_THUMBS,
         CaseStatus.CLEANED,
     ) and is_operational_notice_flow(case.doctor_admission_flow)
@@ -675,7 +666,7 @@ def doctor_decided_detail(request: HttpRequest, case_id: uuid.UUID) -> HttpRespo
             "reason": case.doctor_reason,
             "doctor_display": case.doctor_display,
         }
-    elif is_immediate_final:
+    elif is_operational_notice_final:
         copy = get_admission_flow_notice_copy(case.doctor_admission_flow)
         result_info = {
             "type": "accepted_immediate",
