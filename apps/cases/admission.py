@@ -22,6 +22,15 @@ ADMISSION_FLOW_CHOICES: tuple[tuple[str, str], ...] = (
 
 ADMISSION_FLOW_MAP: dict[str, str] = dict(ADMISSION_FLOW_CHOICES[1:])
 
+# Labels compactos para badges de apresentação (dashboard + detalhe)
+# Preserva ADMISSION_FLOW_CHOICES completos para formulários médicos.
+COMPACT_ADMISSION_FLOW_LABELS: dict[str, str] = {
+    "immediate": "Vinda imediata",
+    "pre_icu": "Pré-UTI",
+    "ward_icu_backup": "Enfermaria + retaguarda UTI",
+    "pediatric_em": "EM pediátrica",
+}
+
 SUPPORT_FLAG_CHOICES: tuple[tuple[str, str], ...] = (
     ("", "---"),
     ("none", "Nenhum"),

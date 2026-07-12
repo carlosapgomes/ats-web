@@ -20,6 +20,7 @@ from django.views.decorators.http import require_POST
 from apps.accounts.decorators import role_required
 from apps.cases.admission import (
     ADMISSION_FLOW_MAP,
+    COMPACT_ADMISSION_FLOW_LABELS,
     SUPPORT_FLAG_MAP,
     get_admission_flow_notice_copy,
     is_operational_notice_flow,
@@ -43,13 +44,7 @@ from apps.intake.views import (
 )
 
 # ── Badge compacto para fluxos operacionais (Slice 001) ──────────────
-
-COMPACT_ADMISSION_FLOW_LABELS: dict[str, str] = {
-    "immediate": "Vinda imediata",
-    "pre_icu": "Pré-UTI",
-    "ward_icu_backup": "Enfermaria + retaguarda UTI",
-    "pediatric_em": "EM pediátrica",
-}
+# COMPACT_ADMISSION_FLOW_LABELS definido em apps/cases/admission.py
 
 
 def _parse_iso_date(raw: str) -> date | None:
@@ -1059,6 +1054,10 @@ def dashboard_case_detail(request: HttpRequest, case_id: uuid.UUID) -> HttpRespo
             "badge": copy["nir_badge"],
             "body": copy["nir_body"],
         }
+        # Slice 002: badge compacto apenas para fluxo ward_icu_backup (label longo que transborda)
+        if case.doctor_admission_flow == "ward_icu_backup":
+            compact_label = COMPACT_ADMISSION_FLOW_LABELS["ward_icu_backup"]
+            result_info["compact_badge"] = f"✓ {compact_label}"
     elif result_info is None and case.appointment_status == "cancelled":
         result_info = {
             "type": "appt_cancelled",
