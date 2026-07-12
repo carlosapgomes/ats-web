@@ -3,7 +3,7 @@
 ## Slices verticais
 
 - [x] Slice 001 — Médico: PDF principal da decisão médica com viewer mobile interno (`slices/slice-001-doctor-primary-pdf-viewer.md`)
-- [ ] Slice 002 — NIR + dashboard: PDFs principais em detalhes operacionais/históricos/gerenciais (`slices/slice-002-intake-dashboard-primary-pdf-viewer.md`)
+- [x] Slice 002 — NIR + dashboard: PDFs principais em detalhes operacionais/históricos/gerenciais (`slices/slice-002-intake-dashboard-primary-pdf-viewer.md`)
 - [ ] Slice 003 — CHD/scheduler: PDF principal no detalhe de processados (`slices/slice-003-scheduler-primary-pdf-viewer.md`)
 - [ ] Slice 004 — Anexos PDF: viewer mobile interno para anexos clínicos PDF (`slices/slice-004-pdf-attachments-viewer.md`)
 

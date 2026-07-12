@@ -627,6 +627,8 @@ def case_detail(request: HttpRequest, case_id: uuid.UUID) -> HttpResponse:
             "back_url": reverse("intake:my_cases"),
             "back_label": "← Voltar para lista",
             "pdf_url": reverse("intake:serve_pdf", args=[case.case_id]),
+            "mobile_pdf_viewer_url": reverse("intake:pdf_viewer", args=[case.case_id])
+            + f"?next={reverse('intake:case_detail', args=[case.case_id])}",
             "attachments": active_attachments,
             "can_add_supplemental": can_add_supplemental,
             "supplemental_lock_blocked_by": supplemental_lock_blocked_by,
@@ -947,10 +949,12 @@ def serve_pdf(request: HttpRequest, case_id: uuid.UUID) -> HttpResponseBase:
     if not case.pdf_file:
         raise Http404("PDF não encontrado para este caso.")
 
-    return FileResponse(
+    response = FileResponse(
         case.pdf_file.open("rb"),
         content_type="application/pdf",
     )
+    response["Cache-Control"] = "no-store"
+    return response
 
 
 @login_required
@@ -1321,6 +1325,10 @@ def closed_case_detail(request: HttpRequest, case_id: uuid.UUID) -> HttpResponse
         "form": detail_form,
         # PDF / Attachments
         "pdf_url": reverse("intake:closed_case_pdf", args=[case.case_id]) if case.pdf_file else "",
+        "mobile_pdf_viewer_url": reverse("intake:closed_case_pdf_viewer", args=[case.case_id])
+        + f"?next={reverse('intake:closed_case_detail', args=[case.case_id])}"
+        if case.pdf_file
+        else "",
         "attachments": active_attachments,
         # Navegação
         "back_url": reverse("intake:closed_cases_search"),
@@ -1449,9 +1457,91 @@ def closed_case_pdf(request: HttpRequest, case_id: uuid.UUID) -> HttpResponseBas
     if not case.pdf_file:
         raise Http404("PDF não encontrado para este caso.")
 
-    return FileResponse(
+    response = FileResponse(
         case.pdf_file.open("rb"),
         content_type="application/pdf",
+    )
+    response["Cache-Control"] = "no-store"
+    return response
+
+
+def _intake_validate_next_url(next_url: str, request: HttpRequest) -> str | None:
+    """Validate a next URL is safe for intake views, return None if unsafe."""
+    from django.utils.http import url_has_allowed_host_and_scheme
+
+    if next_url and url_has_allowed_host_and_scheme(
+        url=next_url,
+        allowed_hosts={request.get_host()},
+        require_https=request.is_secure(),
+    ):
+        return next_url
+    return None
+
+
+@login_required
+@role_required("nir")
+def pdf_viewer(request: HttpRequest, case_id: uuid.UUID) -> HttpResponse:
+    """Renderiza o viewer PDF mobile interno para NIR operacional.
+
+    Exige login e papel ativo 'nir'.
+    Usa intake:serve_pdf como fonte protegida.
+    Bloqueia casos CLEANED (devem usar closed_case_pdf_viewer).
+    """
+    case = get_object_or_404(Case, pk=case_id)
+    if case.status == CaseStatus.CLEANED:
+        raise Http404("PDF de caso concluído não está disponível na fila operacional.")
+    if not case.pdf_file:
+        raise Http404("PDF não encontrado para este caso.")
+
+    raw_next = request.GET.get("next", "")
+    back_url = _intake_validate_next_url(raw_next, request) or reverse("intake:case_detail", args=[case.case_id])
+
+    pdf_url = reverse("intake:serve_pdf", args=[case.case_id])
+
+    return render(
+        request,
+        "pdf_viewer/mobile_pdf_viewer.html",
+        {
+            "viewer_title": "PDF Original",
+            "case": case,
+            "pdf_url": pdf_url,
+            "back_url": back_url,
+            "back_label": "← Voltar ao caso",
+            "fallback_pdf_url": pdf_url,
+        },
+    )
+
+
+@login_required
+@role_required("nir")
+def closed_case_pdf_viewer(request: HttpRequest, case_id: uuid.UUID) -> HttpResponse:
+    """Renderiza o viewer PDF mobile interno para detalhe histórico NIR.
+
+    Exige login e papel ativo 'nir'.
+    Usa intake:closed_case_pdf como fonte protegida.
+    """
+    case = get_object_or_404(Case, pk=case_id)
+    if not _is_historical_scope_nir(case):
+        raise Http404("PDF não disponível para este caso.")
+    if not case.pdf_file:
+        raise Http404("PDF não encontrado para este caso.")
+
+    raw_next = request.GET.get("next", "")
+    back_url = _intake_validate_next_url(raw_next, request) or reverse("intake:closed_case_detail", args=[case.case_id])
+
+    pdf_url = reverse("intake:closed_case_pdf", args=[case.case_id])
+
+    return render(
+        request,
+        "pdf_viewer/mobile_pdf_viewer.html",
+        {
+            "viewer_title": "PDF Original",
+            "case": case,
+            "pdf_url": pdf_url,
+            "back_url": back_url,
+            "back_label": "← Voltar ao caso",
+            "fallback_pdf_url": pdf_url,
+        },
     )
 
 

@@ -3945,3 +3945,228 @@ class TestDashboardCustomDateRange:
 
         expected_label = f"Métricas de {start_formatted} a {end_formatted}"
         assert expected_label in content, f"Label deve conter '{expected_label}'"
+
+
+# ── PDF Viewer (Slice 002) ──────────────────────────────────────────────
+
+
+@pytest.mark.django_db
+class TestDashboardPdfViewerView:
+    """Tests for dashboard:pdf_viewer route (manager/admin)."""
+
+    def _login_as(self, client, role_name: str):
+        from apps.accounts.models import Role
+
+        user = User.objects.create_user(username=f"{role_name}@dash-pdfv.test", password="testpass123")
+        role, _ = Role.objects.get_or_create(name=role_name)
+        user.roles.add(role)
+        client.force_login(user)
+        session = client.session
+        session["active_role"] = role_name
+        session.save()
+        return user
+
+    def _create_case_with_pdf(self, *, created_by, status=CaseStatus.NEW) -> Case:
+        case = Case.objects.create(created_by=created_by, status=status)
+        case.pdf_file.save(
+            "test.pdf",
+            ContentFile(b"%PDF-1.4 fake pdf for dashboard viewer test"),
+            save=True,
+        )
+        return case
+
+    def test_pdf_viewer_requires_login(self, client) -> None:
+        """Redirects to login when unauthenticated."""
+        import uuid
+
+        url = reverse("dashboard:pdf_viewer", args=[uuid.uuid4()])
+        response = client.get(url)
+        assert response.status_code == 302
+        assert "/login/" in response.url
+
+    def test_pdf_viewer_blocks_nir(self, client) -> None:
+        """NIR user cannot access dashboard pdf_viewer."""
+        user = self._login_as(client, "nir")
+        case = self._create_case_with_pdf(created_by=user, status=CaseStatus.WAIT_DOCTOR)
+        response = client.get(reverse("dashboard:pdf_viewer", args=[case.case_id]))
+        assert response.status_code == 302
+        assert response.url == "/"
+
+    def test_pdf_viewer_blocks_doctor(self, client) -> None:
+        """Doctor user cannot access dashboard pdf_viewer."""
+        user = self._login_as(client, "doctor")
+        case = self._create_case_with_pdf(created_by=user, status=CaseStatus.WAIT_DOCTOR)
+        response = client.get(reverse("dashboard:pdf_viewer", args=[case.case_id]))
+        assert response.status_code == 302
+        assert response.url == "/"
+
+    def test_pdf_viewer_blocks_scheduler(self, client) -> None:
+        """Scheduler user cannot access dashboard pdf_viewer."""
+        user = self._login_as(client, "scheduler")
+        case = self._create_case_with_pdf(created_by=user, status=CaseStatus.WAIT_DOCTOR)
+        response = client.get(reverse("dashboard:pdf_viewer", args=[case.case_id]))
+        assert response.status_code == 302
+        assert response.url == "/"
+
+    def test_pdf_viewer_renders_for_manager(self, client) -> None:
+        """Manager gets 200 on dashboard:pdf_viewer."""
+        user = self._login_as(client, "manager")
+        case = self._create_case_with_pdf(created_by=user, status=CaseStatus.NEW)
+        response = client.get(reverse("dashboard:pdf_viewer", args=[case.case_id]))
+        assert response.status_code == 200
+
+    def test_pdf_viewer_renders_for_admin(self, client) -> None:
+        """Admin gets 200 on dashboard:pdf_viewer."""
+        user = self._login_as(client, "admin")
+        case = self._create_case_with_pdf(created_by=user, status=CaseStatus.NEW)
+        response = client.get(reverse("dashboard:pdf_viewer", args=[case.case_id]))
+        assert response.status_code == 200
+
+    def test_pdf_viewer_404_when_no_pdf(self, client) -> None:
+        """dashboard:pdf_viewer returns 404 when case has no pdf_file."""
+        user = self._login_as(client, "manager")
+        case = Case.objects.create(created_by=user, status=CaseStatus.NEW)
+        response = client.get(reverse("dashboard:pdf_viewer", args=[case.case_id]))
+        assert response.status_code == 404
+
+    def test_pdf_viewer_contains_case_pdf_url(self, client) -> None:
+        """Viewer page contains dashboard:case_pdf URL."""
+        user = self._login_as(client, "manager")
+        case = self._create_case_with_pdf(created_by=user, status=CaseStatus.NEW)
+        response = client.get(reverse("dashboard:pdf_viewer", args=[case.case_id]))
+        content = response.content.decode()
+        case_pdf_url = reverse("dashboard:case_pdf", args=[case.case_id])
+        assert case_pdf_url in content
+
+    def test_pdf_viewer_has_two_back_actions(self, client) -> None:
+        """Viewer has 'Voltar' in top nav and bottom section."""
+        user = self._login_as(client, "manager")
+        case = self._create_case_with_pdf(created_by=user, status=CaseStatus.NEW)
+        response = client.get(reverse("dashboard:pdf_viewer", args=[case.case_id]))
+        content = response.content.decode()
+        volgar_count = content.count("Voltar")
+        assert volgar_count >= 2, f"Expected at least 2 'Voltar', found {volgar_count}"
+
+    def test_pdf_viewer_has_fallback(self, client) -> None:
+        """Viewer contains fallback to open original PDF."""
+        user = self._login_as(client, "manager")
+        case = self._create_case_with_pdf(created_by=user, status=CaseStatus.NEW)
+        response = client.get(reverse("dashboard:pdf_viewer", args=[case.case_id]))
+        content = response.content.decode()
+        assert "Abrir PDF original" in content or "PDF original" in content
+
+    def test_pdf_viewer_back_url_defaults_to_case_detail(self, client) -> None:
+        """Back URL defaults to dashboard:case_detail when no next param."""
+        user = self._login_as(client, "manager")
+        case = self._create_case_with_pdf(created_by=user, status=CaseStatus.NEW)
+        response = client.get(reverse("dashboard:pdf_viewer", args=[case.case_id]))
+        content = response.content.decode()
+        case_detail_url = reverse("dashboard:case_detail", args=[case.case_id])
+        assert case_detail_url in content
+
+    def test_pdf_viewer_accepts_safe_next(self, client) -> None:
+        """Back URL uses safe next param when provided."""
+        user = self._login_as(client, "manager")
+        case = self._create_case_with_pdf(created_by=user, status=CaseStatus.NEW)
+        case_detail_url = reverse("dashboard:case_detail", args=[case.case_id])
+        response = client.get(reverse("dashboard:pdf_viewer", args=[case.case_id]) + f"?next={case_detail_url}")
+        content = response.content.decode()
+        assert case_detail_url in content
+
+
+@pytest.mark.django_db
+class TestDashboardCaseDetailMobilePdfLink:
+    """Tests that dashboard case_detail.html mobile link uses dashboard pdf_viewer."""
+
+    def _login_as(self, client, role_name: str):
+        from apps.accounts.models import Role
+
+        user = User.objects.create_user(username=f"{role_name}@dash-link.test", password="testpass123")
+        role, _ = Role.objects.get_or_create(name=role_name)
+        user.roles.add(role)
+        client.force_login(user)
+        session = client.session
+        session["active_role"] = role_name
+        session.save()
+        return user
+
+    def test_dashboard_case_detail_mobile_pdf_link_uses_dashboard_viewer(self, client) -> None:
+        """Mobile PDF link on dashboard case detail uses dashboard:pdf_viewer."""
+        user = self._login_as(client, "manager")
+        case = Case.objects.create(created_by=user, status=CaseStatus.NEW)
+        case.pdf_file.save("test.pdf", ContentFile(b"%PDF-1.4 fake"), save=True)
+        response = client.get(reverse("dashboard:case_detail", args=[case.case_id]))
+        assert response.status_code == 200
+        content = response.content.decode()
+        viewer_url = reverse("dashboard:pdf_viewer", args=[case.case_id])
+        assert viewer_url in content, f"Mobile PDF link should reference dashboard:pdf_viewer URL: {viewer_url}"
+        # Must NOT contain intake:pdf_viewer
+        assert reverse("intake:pdf_viewer", args=[case.case_id]) not in content
+
+    def test_dashboard_case_detail_mobile_link_no_target_blank(self, client) -> None:
+        """Mobile PDF link on dashboard does NOT use target='_blank'."""
+        import re
+
+        user = self._login_as(client, "manager")
+        case = Case.objects.create(created_by=user, status=CaseStatus.NEW)
+        case.pdf_file.save("test.pdf", ContentFile(b"%PDF-1.4 fake"), save=True)
+        response = client.get(reverse("dashboard:case_detail", args=[case.case_id]))
+        assert response.status_code == 200
+        content = response.content.decode()
+        viewer_url = reverse("dashboard:pdf_viewer", args=[case.case_id])
+        mobile_links = re.findall(
+            rf'<a[^>]*href="[^"]*{re.escape(viewer_url)}[^"]*"[^>]*>.*?</a>',
+            content,
+            re.DOTALL,
+        )
+        for link in mobile_links:
+            assert 'target="_blank"' not in link
+
+    def test_dashboard_case_detail_desktop_preserves_embed_with_case_pdf(self, client) -> None:
+        """Desktop section still has <embed> with dashboard:case_pdf URL."""
+        user = self._login_as(client, "manager")
+        case = Case.objects.create(created_by=user, status=CaseStatus.NEW)
+        case.pdf_file.save("test.pdf", ContentFile(b"%PDF-1.4 fake"), save=True)
+        response = client.get(reverse("dashboard:case_detail", args=[case.case_id]))
+        assert response.status_code == 200
+        content = response.content.decode()
+        case_pdf_url = reverse("dashboard:case_pdf", args=[case.case_id])
+        assert f'<embed src="{case_pdf_url}"' in content or ('<embed src="' in content and case_pdf_url in content), (
+            "Desktop embed should use dashboard:case_pdf"
+        )
+
+
+@pytest.mark.django_db
+class TestDashboardCasePdfCacheControl:
+    """Tests Cache-Control on dashboard:case_pdf."""
+
+    def _login_as(self, client, role_name: str):
+        from apps.accounts.models import Role
+
+        user = User.objects.create_user(username=f"{role_name}@dash-cache.test", password="testpass123")
+        role, _ = Role.objects.get_or_create(name=role_name)
+        user.roles.add(role)
+        client.force_login(user)
+        session = client.session
+        session["active_role"] = role_name
+        session.save()
+        return user
+
+    def test_dashboard_case_pdf_has_no_store_cache_control(self, client) -> None:
+        """dashboard:case_pdf response includes Cache-Control: no-store."""
+        user = self._login_as(client, "manager")
+        case = Case.objects.create(created_by=user, status=CaseStatus.NEW)
+        case.pdf_file.save("test.pdf", ContentFile(b"%PDF-1.4 fake for cache test"), save=True)
+        response = client.get(reverse("dashboard:case_pdf", args=[case.case_id]))
+        assert response.status_code == 200
+        cache_control = response.get("Cache-Control", "")
+        assert "no-store" in cache_control
+
+    def test_dashboard_case_pdf_content_type_is_pdf(self, client) -> None:
+        """dashboard:case_pdf returns Content-Type: application/pdf."""
+        user = self._login_as(client, "manager")
+        case = Case.objects.create(created_by=user, status=CaseStatus.NEW)
+        case.pdf_file.save("test.pdf", ContentFile(b"%PDF-1.4 fake for cache test"), save=True)
+        response = client.get(reverse("dashboard:case_pdf", args=[case.case_id]))
+        assert response.status_code == 200
+        assert response["Content-Type"] == "application/pdf"
