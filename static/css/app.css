@@ -329,7 +329,7 @@ body.hospital-shell h6 {
   top: 50%;
   left: 0.65rem;
   z-index: 2;
-  display: inline-flex;
+  display: none;
   align-items: center;
   justify-content: center;
   width: 1rem;
@@ -348,7 +348,6 @@ body.hospital-shell h6 {
 
 .metrics-period-date-input {
   max-width: 11rem;
-  padding-left: 2.05rem;
 }
 
 @media (min-width: 768px) {
@@ -405,6 +404,14 @@ body.hospital-shell h6 {
   .metrics-period-custom-fields {
     flex-direction: column;
     align-items: stretch;
+  }
+
+  .metrics-period-date-icon {
+    display: inline-flex;
+  }
+
+  .metrics-period-date-input {
+    padding-left: 2.05rem;
   }
 
   .metrics-period-date-control,
