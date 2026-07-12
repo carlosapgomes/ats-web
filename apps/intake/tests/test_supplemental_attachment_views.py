@@ -856,6 +856,7 @@ class TestIntakeCaseDetailImageAttachmentMobileLink:
         assert "<img" in content and serve_att_url in content, "Desktop should still have <img> for image attachments"
 
 
+@pytest.mark.django_db
 class TestIntakeAttachmentServeAttachmentNoStore:
     """Tests that intake:serve_attachment returns no-store Cache-Control."""
 
