@@ -1479,6 +1479,95 @@ def closed_case_pdf(request: HttpRequest, case_id: uuid.UUID) -> HttpResponseBas
     return response
 
 
+def _get_closed_case_attachment_or_404(case_id: uuid.UUID, attachment_id: uuid.UUID) -> tuple[Case, CaseAttachment]:
+    """Busca e autoriza anexo para o escopo histórico NIR.
+
+    Retorna (case, attachment) se autorizado.
+    Levanta Http404 se o caso está fora do escopo histórico,
+    o anexo está suprimido ou não pertence ao caso.
+    """
+    case = get_object_or_404(
+        Case.objects.select_related("created_by"),
+        case_id=case_id,
+    )
+
+    if not _is_historical_scope_nir(case):
+        raise Http404("Caso não está no escopo histórico NIR.")
+
+    attachment = get_object_or_404(
+        CaseAttachment,
+        attachment_id=attachment_id,
+        case=case,
+        is_suppressed=False,
+    )
+
+    return case, attachment
+
+
+@login_required
+@role_required("nir")
+@xframe_options_sameorigin
+def closed_case_attachment(
+    request: HttpRequest,
+    case_id: uuid.UUID,
+    attachment_id: uuid.UUID,
+) -> HttpResponseBase:
+    """Serve um anexo protegido para NIR histórico.
+
+    Acesso permitido apenas para NIR com papel ativo 'nir'
+    e casos dentro do escopo histórico NIR.
+    Anexos suprimidos retornam 404.
+    Resposta inclui Cache-Control: no-store.
+    """
+    case, attachment = _get_closed_case_attachment_or_404(case_id, attachment_id)
+
+    response = FileResponse(
+        attachment.file.open("rb"),
+        content_type=attachment.content_type,
+    )
+    response["Cache-Control"] = "no-store"
+    return response
+
+
+@login_required
+@role_required("nir")
+def closed_case_attachment_pdf_viewer(
+    request: HttpRequest,
+    case_id: uuid.UUID,
+    attachment_id: uuid.UUID,
+) -> HttpResponse:
+    """Renderiza o viewer PDF mobile interno para anexo PDF do NIR histórico.
+
+    Exige login e papel ativo 'nir'.
+    Usa intake:closed_case_attachment como fonte protegida.
+    Aplica a mesma autorização da rota binária.
+    Retorna 404 se o anexo não for PDF.
+    """
+    case, attachment = _get_closed_case_attachment_or_404(case_id, attachment_id)
+
+    if attachment.content_type != "application/pdf":
+        raise Http404("Anexo não é um PDF.")
+
+    back_url = resolve_safe_next_url(
+        request,
+        reverse("intake:closed_case_detail", args=[case.case_id]),
+    )
+    pdf_url = reverse("intake:closed_case_attachment", args=[case.case_id, attachment.attachment_id])
+
+    return render(
+        request,
+        "pdf_viewer/mobile_pdf_viewer.html",
+        {
+            "viewer_title": "Anexo PDF",
+            "case": case,
+            "pdf_url": pdf_url,
+            "back_url": back_url,
+            "back_label": "← Voltar ao caso",
+            "fallback_pdf_url": pdf_url,
+        },
+    )
+
+
 @login_required
 @role_required("nir")
 def attachment_pdf_viewer(

@@ -36,6 +36,16 @@ urlpatterns = [
     path("closed-cases/<uuid:case_id>/", views.closed_case_detail, name="closed_case_detail"),
     path("closed-cases/<uuid:case_id>/pdf/", views.closed_case_pdf, name="closed_case_pdf"),
     path("closed-cases/<uuid:case_id>/pdf-viewer/", views.closed_case_pdf_viewer, name="closed_case_pdf_viewer"),
+    path(
+        "closed-cases/<uuid:case_id>/attachments/<uuid:attachment_id>/",
+        views.closed_case_attachment,
+        name="closed_case_attachment",
+    ),
+    path(
+        "closed-cases/<uuid:case_id>/attachments/<uuid:attachment_id>/viewer/",
+        views.closed_case_attachment_pdf_viewer,
+        name="closed_case_attachment_pdf_viewer",
+    ),
     path("closed-cases/<uuid:case_id>/issue/", views.post_schedule_issue_open, name="post_schedule_issue_open"),
     path("<uuid:case_id>/communication/", views.post_case_communication, name="post_case_communication"),
 ]
