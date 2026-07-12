@@ -15,6 +15,7 @@ from django.views.decorators.clickjacking import xframe_options_sameorigin
 from apps.accounts.decorators import role_required
 from apps.cases.admission import (
     ADMISSION_FLOW_MAP,
+    COMPACT_ADMISSION_FLOW_LABELS,
     SUPPORT_FLAG_MAP,
     get_admission_flow_notice_copy,
     is_operational_notice_flow,
@@ -514,6 +515,10 @@ def case_detail(request: HttpRequest, case_id: uuid.UUID) -> HttpResponse:
             "badge": copy["nir_badge"],
             "body": copy["nir_body"],
         }
+        # Slice 002: badge compacto apenas para fluxo ward_icu_backup (label longo que transborda)
+        if case.doctor_admission_flow == "ward_icu_backup":
+            compact_label = COMPACT_ADMISSION_FLOW_LABELS["ward_icu_backup"]
+            result_info["compact_badge"] = f"✓ {compact_label}"
     elif case.status == CaseStatus.APPT_DENIED or (terminal_with_result and case.appointment_status == "denied"):
         result_info = {
             "type": "appt_denied",
@@ -1398,6 +1403,10 @@ def _build_historical_result_info(case: Case) -> dict[str, object] | None:
             "badge": copy["nir_badge"],
             "body": copy["nir_body"],
         }
+        # Slice 002: badge compacto apenas para fluxo ward_icu_backup (label longo que transborda)
+        if case.doctor_admission_flow == "ward_icu_backup":
+            compact_label = COMPACT_ADMISSION_FLOW_LABELS["ward_icu_backup"]
+            result_info["compact_badge"] = f"✓ {compact_label}"
     elif case.status == CaseStatus.APPT_DENIED or (terminal_with_result and case.appointment_status == "denied"):
         result_info = {
             "type": "appt_denied",

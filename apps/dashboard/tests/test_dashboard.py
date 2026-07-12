@@ -4426,3 +4426,160 @@ class TestDashboardBadgeCompactoProximoPasso:
         assert response.status_code == 200
         content = response.content.decode()
         assert "Atenção necessária" in content or "Atenção" in content
+
+
+class TestDashboardCaseDetailResultFinalBadge:
+    """Testes para badge do Resultado Final mobile sem overflow (Slice 002).
+
+    R1: Badge não transborda — classe badge-wrap.
+    R2: Label compacto para ward_icu_backup no chip.
+    R3: Texto completo preservado fora do chip.
+    R4: Dashboard e NIR detail.
+    R5: Outros badges preservados.
+    """
+
+    # ── R1 + R2: Badge compacto + anti-overflow ────────────────────────
+
+    @pytest.mark.django_db
+    def test_dashboard_detail_compact_badge_for_ward_icu_backup(self, client) -> None:
+        """R1+R2: Dashboard detail de ward_icu_backup mostra badge compacto e classe badge-wrap."""
+        user = _login_as(client, "manager")
+        doctor = User.objects.create_user(
+            username="doc.ward.backup@test.com",
+            password="pass123",
+            first_name="Carlos",
+            last_name="Doutor",
+        )
+        doctor.professional_council = "CRM"
+        doctor.professional_council_number = "99999"
+        doctor.save()
+        case = _create_case(
+            created_by=user,
+            status=CaseStatus.WAIT_R1_CLEANUP_THUMBS,
+            agency_record_number="SLICE002-WARD",
+            doctor=doctor,
+            doctor_decision="accept",
+            doctor_admission_flow="ward_icu_backup",
+            doctor_support_flag="none",
+        )
+        response = client.get(reverse("dashboard:case_detail", args=[case.case_id]))
+        assert response.status_code == 200
+        content = response.content.decode()
+        # Badge deve conter label compacto
+        assert "Enfermaria" in content
+        assert "retaguarda" in content
+        # Badge deve ter classe badge-wrap
+        assert "badge-wrap" in content
+        # bg-success deve estar presente (preservar classe Bootstrap)
+        assert "bg-success" in content
+
+    @pytest.mark.django_db
+    def test_dashboard_detail_full_text_preserved_outside_chip(self, client) -> None:
+        """R3: Texto completo do fluxo continua visível no detalhe fora do chip."""
+        user = _login_as(client, "manager")
+        doctor = User.objects.create_user(
+            username="doc.fulltext@test.com",
+            password="pass123",
+            first_name="Ana",
+            last_name="Medica",
+        )
+        doctor.professional_council = "CRM"
+        doctor.professional_council_number = "88888"
+        doctor.save()
+        case = _create_case(
+            created_by=user,
+            status=CaseStatus.WAIT_R1_CLEANUP_THUMBS,
+            agency_record_number="SLICE002-FULL",
+            doctor=doctor,
+            doctor_decision="accept",
+            doctor_admission_flow="ward_icu_backup",
+            doctor_support_flag="none",
+        )
+        response = client.get(reverse("dashboard:case_detail", args=[case.case_id]))
+        assert response.status_code == 200
+        content = response.content.decode()
+        # O texto "retaguarda em UTI" deve aparecer em algum lugar (body ou fluxo)
+        assert "retaguarda em UTI" in content
+
+    # ── R5: Outros badges preservados ───────────────────────────────────
+
+    @pytest.mark.django_db
+    def test_dashboard_detail_other_badges_preserved(self, client) -> None:
+        """R5: Outros tipos de resultado mantêm badges corretos."""
+        user = _login_as(client, "manager")
+        doctor = User.objects.create_user(
+            username="doc.other@test.com",
+            password="pass123",
+            first_name="Bruno",
+            last_name="Médico",
+        )
+        doctor.professional_council = "CRM"
+        doctor.professional_council_number = "77777"
+        doctor.save()
+
+        # Caso com agendamento confirmado
+        scheduler = User.objects.create_user(
+            username="sched.other@test.com",
+            password="pass123",
+            first_name="Sandra",
+        )
+        scheduler.save()
+        case_scheduled = _create_case(
+            created_by=user,
+            status=CaseStatus.WAIT_R1_CLEANUP_THUMBS,
+            agency_record_number="SLICE002-OTHER-SCHED",
+            doctor=doctor,
+            doctor_decision="accept",
+            doctor_admission_flow="scheduled",
+            doctor_support_flag="none",
+            appointment_status="confirmed",
+            scheduler=scheduler,
+        )
+        response = client.get(reverse("dashboard:case_detail", args=[case_scheduled.case_id]))
+        assert response.status_code == 200
+        content = response.content.decode()
+        assert "Agendamento Confirmado" in content
+        assert "bg-success" in content
+
+        # Caso com agendamento negado
+        case_denied = _create_case(
+            created_by=user,
+            status=CaseStatus.APPT_DENIED,
+            agency_record_number="SLICE002-OTHER-DENY",
+            doctor=doctor,
+            doctor_decision="accept",
+            doctor_admission_flow="scheduled",
+            appointment_status="denied",
+            appointment_reason="Sem vaga",
+            scheduler=scheduler,
+        )
+        response = client.get(reverse("dashboard:case_detail", args=[case_denied.case_id]))
+        assert response.status_code == 200
+        content = response.content.decode()
+        assert "Agendamento Negado" in content
+        assert "bg-danger" in content
+
+        # Caso de falha
+        case_failed = _create_case(
+            created_by=user,
+            status=CaseStatus.FAILED,
+            agency_record_number="SLICE002-OTHER-FAIL",
+        )
+        response = client.get(reverse("dashboard:case_detail", args=[case_failed.case_id]))
+        assert response.status_code == 200
+        content = response.content.decode()
+        assert "Falha no Processamento" in content
+        assert "bg-danger" in content
+
+        # Caso scope-gated
+        case_scope = _create_case(
+            created_by=user,
+            status=CaseStatus.WAIT_R1_CLEANUP_THUMBS,
+            agency_record_number="SLICE002-OTHER-SCOPE",
+            suggested_action={"decision": "manual_review_required", "reason_code": "non_eda"},
+        )
+        response = client.get(reverse("dashboard:case_detail", args=[case_scope.case_id]))
+        assert response.status_code == 200
+        content = response.content.decode()
+        assert "Revisão Manual" in content or "revisão manual" in content.lower()
+        assert "bg-warning" in content

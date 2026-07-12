@@ -103,7 +103,7 @@
     <p class="mb-0">{{ result_info.reason_text }}</p>
   {% elif result_info.type == "accepted_immediate" %}
     <div class="d-flex align-items-center gap-3 mb-3">
-      <span class="badge bg-success fs-6 px-3 py-2">{{ result_info.badge|default:"✓ Vinda Imediata Autorizada" }}</span>
+      <span class="badge bg-success fs-6 px-3 py-2 badge-wrap">{{ result_info.compact_badge|default:result_info.badge|default:"✓ Vinda Imediata Autorizada" }}</span>
     </div>
     <p class="mb-3">{{ result_info.body|default:"Caso aceito para vinda imediata. Não abrir agendamento para este caso." }}</p>
     {% if result_info.doctor_display %}
