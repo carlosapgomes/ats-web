@@ -2756,12 +2756,21 @@ class TestDashboardDynamicSearch:
         assert response.status_code == 200
         content = response.content.decode()
 
-        # Exatamente UM hidden name="search" (no form de métricas).
-        assert content.count('type="hidden" name="search"') == 1, (
-            'Deve haver apenas um hidden name="search" (form de métricas).'
+        # O form da lista (id=case-filter-form) não deve ter hidden name="search"
+        # (usa o input visível). Os mini-forms de Personalizado carregam seus
+        # próprios hidden name="search" para preservar o termo — isso é esperado.
+        import re
+
+        case_form_match = re.search(
+            r'<form\b[^>]*id="case-filter-form"[^>]*>.*?</form>', content, re.DOTALL | re.IGNORECASE
+        )
+        assert case_form_match, "Form da lista (id=case-filter-form) deve existir"
+        case_form = case_form_match.group(0)
+        assert 'type="hidden" name="search"' not in case_form, (
+            "Form da lista não deve duplicar name=search via hidden (usa input visível)"
         )
         # O input visível de busca segue presente no form da lista.
-        assert 'type="search" name="search"' in content
+        assert 'type="search" name="search"' in case_form
 
 
 # ── Dashboard: Case List Filter Layout Polish (Slice 001) ──────────────
@@ -2786,14 +2795,13 @@ class TestDashboardCaseListFilterLayout:
         return str(response.content, encoding="utf-8")
 
     def _filter_form_start(self, content: str) -> int:
-        """Retorna a posição do <form> de filtros da lista (segundo form method=get).
+        """Retorna a posição do <form> de filtros da lista (id=case-filter-form).
 
-        A página tem dois forms method=get: primeiro é o de métricas,
-        segundo é o de filtros da lista. Encontramos o segundo.
+        O seletor de período das métricas agora usa mini-forms SSR independentes,
+        então localizar por ordem de <form method=get> não é mais confiável.
+        Usamos o id canônico do form de filtros da lista.
         """
-        first = content.find('<form method="get"')
-        second = content.find('<form method="get"', first + 1)
-        return second
+        return content.find('id="case-filter-form"')
 
     def test_card_header_shows_title_before_filters(self, client) -> None:
         """R1: Header do card com 'Todos os Casos' antes da área de filtros.
@@ -2863,19 +2871,21 @@ class TestDashboardCaseListFilterLayout:
         de métricas.
         """
         content = self._get_content(client, "search=ana")
-        # Conta quantas vezes o atributo name="search" aparece DENTRO de um <form>
-        # que também contenha type="search" (form da lista).
-        # Estratégia: conta o input type="search" name="search" e os hidden
-        # name="search" para verificar que não há hidden duplicado no form da lista.
-        search_visible_count = content.count('name="search" id="search"')
-        assert search_visible_count == 1, (
-            f'Deve haver exatamente um input type="search" name="search", encontrado {search_visible_count}'
+        # O form da lista (id=case-filter-form) tem apenas o input visível de busca.
+        import re
+
+        case_form_match = re.search(
+            r'<form\b[^>]*id="case-filter-form"[^>]*>.*?</form>', content, re.DOTALL | re.IGNORECASE
         )
-        # Só deve haver 1 hidden name="search" (do form de métricas)
-        hidden_search_count = content.count('type="hidden" name="search"')
-        assert hidden_search_count == 1, (
-            f'Deve haver exatamente 1 hidden name="search" (form de métricas), encontrado {hidden_search_count}'
+        assert case_form_match, "Form da lista (id=case-filter-form) deve existir"
+        case_form = case_form_match.group(0)
+        # Um único controle visível name="search" no form da lista.
+        assert case_form.count('name="search" id="search"') == 1, (
+            "Form da lista deve ter exatamente um input visível name=search"
         )
+        # Nenhum hidden name="search" no form da lista (os hidden legítimos ficam
+        # nos mini-forms de Personalizado, para preservar o termo).
+        assert 'type="hidden" name="search"' not in case_form, "Form da lista não deve ter hidden name=search duplicado"
 
     def test_metrics_period_hidden_present(self, client) -> None:
         """R8: Hidden 'metrics_period' continua presente no formulário da lista quando ?metrics_period=30d está ativo."""
@@ -3456,32 +3466,31 @@ class TestDashboardCustomDateRange:
         Case.objects.filter(pk=case.pk).update(**fields)
 
     def test_metrics_custom_date_counts_cases_created_on_selected_local_day(self, client) -> None:
-        """custom_date conta apenas casos criados na data selecionada (dia local)."""
+        """custom_date conta apenas casos criados na data selecionada (dia local).
+
+        Usa uma data != hoje e SEM caso hoje, de forma que o fallback para
+        'today' produziria total=0: se total=1, então custom_date foi resolvido.
+        """
         user = _login_as(client, "manager")
         Case.objects.all().delete()
 
+        tz = timezone.get_current_timezone()
         today_local = timezone.localdate()
-        yesterday = today_local - timedelta(days=1)
+        selected = today_local - timedelta(days=2)  # data selecionada não é hoje
 
-        # Caso criado no dia selecionado
+        # Único caso, criado na data selecionada (não há caso hoje).
         case_in = _create_case(created_by=user, status=CaseStatus.WAIT_DOCTOR, agency_record_number="IN-DATE")
-        self._set_cases_date(
-            case_in, created_at=datetime.combine(today_local, time(8, 0), tzinfo=timezone.get_current_timezone())
-        )
-
-        # Caso criado fora do dia selecionado (ontem)
-        case_out = _create_case(created_by=user, status=CaseStatus.WAIT_DOCTOR, agency_record_number="OUT-DATE")
-        self._set_cases_date(
-            case_out, created_at=datetime.combine(yesterday, time(8, 0), tzinfo=timezone.get_current_timezone())
-        )
+        self._set_cases_date(case_in, created_at=datetime.combine(selected, time(8, 0), tzinfo=tz))
 
         response = client.get(
-            reverse("dashboard:index") + f"?metrics_period=custom_date&metrics_date={today_local.isoformat()}"
+            reverse("dashboard:index") + f"?metrics_period=custom_date&metrics_date={selected.isoformat()}"
         )
         assert response.status_code == 200
-        content = response.content.decode()
-        # Total deve ser 1 (só o caso do dia selecionado)
-        assert "1" in content, "custom_date deve contar apenas o caso do dia selecionado"
+        summary = response.context["summary"]
+        assert summary["total_today"] == 1, (
+            f"custom_date deve contar apenas o caso da data selecionada ({selected}); "
+            f"total_today={summary['total_today']} (fallback para hoje contaria 0)"
+        )
 
     def test_metrics_custom_range_counts_cases_created_in_inclusive_range(self, client) -> None:
         """custom_range inclui casos criados no início e fim do intervalo, exclui fora."""
@@ -3515,21 +3524,19 @@ class TestDashboardCustomDateRange:
             case_after, created_at=datetime.combine(after_end, time(0, 0, 1), tzinfo=timezone.get_current_timezone())
         )
 
-        # URL com custom_range — deve filtrar métricas para o intervalo
+        # URL com custom_range — deve filtrar métricas para o intervalo inclusivo
         response = client.get(
             reverse("dashboard:index")
             + f"?metrics_period=custom_range&metrics_start={start.isoformat()}&metrics_end={end.isoformat()}"
         )
         assert response.status_code == 200
 
-        # A lista de casos mostra todos os casos (filtro da lista não se aplica)
-        # Mas o card total deve refletir apenas os casos no intervalo
-        content = response.content.decode()
-
-        # Os casos de dentro do intervalo (RANGE-START, RANGE-END) aparecem na lista
-        assert "RANGE-START" in content, "Caso no início do range deve estar na lista"
-        assert "RANGE-END" in content, "Caso no fim do range deve estar na lista"
-        # Os casos de fora também aparecem na lista (sem filtro de lista)
+        # O card de métricas (summary) deve contar apenas os 2 casos dentro do
+        # intervalo [start, end] (inclusivo), excluindo before e after.
+        summary = response.context["summary"]
+        assert summary["total_today"] == 2, (
+            f"custom_range deve contar apenas RANGE-START e RANGE-END (inclusivo); total_today={summary['total_today']}"
+        )
 
     def test_metrics_custom_date_average_filters_by_stage_completion_date(self, client) -> None:
         """Tempo médio custom_date filtra por conclusão da etapa, não por created_at."""
@@ -3577,6 +3584,148 @@ class TestDashboardCustomDateRange:
         # Só o caso decidido hoje deve entrar (criado há 3 dias, decidido hoje)
         # O tempo deve ser > 0, aproximadamente 2 dias = ~2880 min
         assert result["upload_to_decision"] != "—", "Deveria haver tempo médio para decisão (caso decidido no período)"
+
+    def test_metrics_custom_range_average_filters_by_stage_completion_range(self, client) -> None:
+        """Tempo médio custom_range filtra por conclusão da etapa, não por created_at.
+
+        Caso criado fora do intervalo mas decidido dentro entra; caso criado
+        dentro mas decidido fora não entra. Prova que o filtro da média é por
+        doctor_decided_at no range (conclusão), e não por created_at.
+        """
+        from apps.dashboard.views import _compute_average_times
+
+        user = _login_as(client, "manager")
+        Case.objects.all().delete()
+
+        tz = timezone.get_current_timezone()
+        today_local = timezone.localdate()
+        start = today_local - timedelta(days=3)
+        end = today_local - timedelta(days=1)
+        far_past = today_local - timedelta(days=30)
+
+        # Caso criado há 30 dias (fora do range), decidido no início do range → entra.
+        # delta decisão-criação = 27 dias 2 h = 650 h.
+        case_in = _create_case(
+            created_by=user,
+            status=CaseStatus.DOCTOR_ACCEPTED,
+            doctor_decision="accept",
+            agency_record_number="RANGE-AVG-IN",
+        )
+        self._set_cases_date(
+            case_in,
+            created_at=datetime.combine(far_past, time(8, 0), tzinfo=tz),
+            doctor_decided_at=datetime.combine(start, time(10, 0), tzinfo=tz),
+        )
+
+        # Caso criado dentro do range, decidido bem antes do range → não entra.
+        # Se o filtro fosse por created_at, este caso entraria e produziria duração
+        # negativa, mudando a média para algo diferente de "650 h".
+        case_out = _create_case(
+            created_by=user,
+            status=CaseStatus.DOCTOR_ACCEPTED,
+            doctor_decision="accept",
+            agency_record_number="RANGE-AVG-OUT",
+        )
+        self._set_cases_date(
+            case_out,
+            created_at=datetime.combine(end, time(8, 0), tzinfo=tz),
+            doctor_decided_at=datetime.combine(far_past, time(10, 0), tzinfo=tz),
+        )
+
+        period = f"custom_range:{start.isoformat()}:{end.isoformat()}"
+        result = _compute_average_times(period=period)
+        # Apenas case_in contribui → média = 650 h exatos.
+        assert result["upload_to_decision"] == "650 h", (
+            f"custom_range deve filtrar média por doctor_decided_at (conclusão); "
+            f"obtido upload_to_decision={result['upload_to_decision']!r}"
+        )
+
+    def test_metrics_custom_range_total_cycle_uses_cleanup_event_fallback(self, client) -> None:
+        """Ciclo Total em custom_range usa evento CLEANUP_COMPLETED quando cleanup_completed_at está vazio."""
+        from apps.dashboard.views import _compute_average_times
+
+        user = _login_as(client, "manager")
+        Case.objects.all().delete()
+
+        tz = timezone.get_current_timezone()
+        today_local = timezone.localdate()
+        start = today_local - timedelta(days=3)
+        end = today_local - timedelta(days=1)
+        far_past = today_local - timedelta(days=30)
+
+        # Caso histórico sem cleanup_completed_at, com evento CLEANUP_COMPLETED dentro do range.
+        case = _create_case(
+            created_by=user,
+            status=CaseStatus.CLEANED,
+            agency_record_number="RANGE-CYCLE-EVT",
+        )
+        self._set_cases_date(
+            case,
+            created_at=datetime.combine(far_past, time(8, 0), tzinfo=tz),
+            cleanup_completed_at=None,
+        )
+        event = CaseEvent.objects.create(
+            case=case,
+            event_type="CLEANUP_COMPLETED",
+            actor=user,
+            actor_type="human",
+            payload={},
+        )
+        # Evento dentro do range (início do range).
+        CaseEvent.objects.filter(pk=event.pk).update(timestamp=datetime.combine(start, time(10, 0), tzinfo=tz))
+
+        period = f"custom_range:{start.isoformat()}:{end.isoformat()}"
+        result = _compute_average_times(period=period)
+        # delta = completed_event - created = (today-3 10:00) - (today-30 08:00) = 650 h.
+        assert result["total_cycle"] == "650 h", (
+            f"custom_range deve usar fallback do evento CLEANUP_COMPLETED quando "
+            f"cleanup_completed_at está vazio; obtido total_cycle={result['total_cycle']!r}"
+        )
+
+    def test_personalizado_uses_independent_ssr_mini_forms(self, client) -> None:
+        """Cada fluxo Personalizado é um <form> com seu próprio hidden metrics_period.
+
+        Guarda contra regressão do bug em que o botão 'Aplicar' usava onclick
+        para setar um input[name=metrics_period] inexistente dentro do form,
+        fazendo a UI sempre cair para 'today'. A correção adota dois mini-forms
+        SSR puros (design D7), cada um com hidden metrics_period + submit.
+        """
+        import re
+
+        _login_as(client, "manager")
+        response = client.get(reverse("dashboard:index"))
+        assert response.status_code == 200
+        content = response.content.decode()
+
+        # O padrão frágil (onclick setando metrics_period) não deve mais existir.
+        assert "querySelector('input[name=metrics_period]')" not in content, (
+            "UI não deve depender de onclick/JS para setar metrics_period"
+        )
+
+        forms = re.findall(r"<form\b[^>]*>.*?</form>", content, re.DOTALL | re.IGNORECASE)
+
+        # Mini-form Data específica: form com metrics_date + metrics_period=custom_date + submit.
+        date_form = [f for f in forms if 'name="metrics_date"' in f and 'value="custom_date"' in f and "Aplicar" in f]
+        assert date_form, (
+            "Deve existir um mini-form (Data específica) com metrics_date, "
+            "hidden metrics_period=custom_date e botão Aplicar"
+        )
+        assert 'type="submit"' in date_form[0], "Mini-form Data específica deve ter botão submit"
+
+        # Mini-form Intervalo: form com metrics_start + metrics_end + metrics_period=custom_range + submit.
+        range_form = [
+            f
+            for f in forms
+            if 'name="metrics_start"' in f
+            and 'name="metrics_end"' in f
+            and 'value="custom_range"' in f
+            and "Aplicar" in f
+        ]
+        assert range_form, (
+            "Deve existir um mini-form (Intervalo) com metrics_start, metrics_end, "
+            "hidden metrics_period=custom_range e botão Aplicar"
+        )
+        assert 'type="submit"' in range_form[0], "Mini-form Intervalo deve ter botão submit"
 
     def test_invalid_custom_date_falls_back_to_today_with_feedback(self, client) -> None:
         """metrics_period=custom_date sem metrics_date cai para today com feedback."""

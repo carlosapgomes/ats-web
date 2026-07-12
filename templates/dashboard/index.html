@@ -29,7 +29,7 @@
 <!-- Seletor de período das métricas -->
 <div class="row g-3 mb-3">
   <div class="col-12">
-    <form method="get" class="d-flex gap-2 align-items-center flex-wrap" id="metrics-period-form">
+    <div class="d-flex gap-2 align-items-center flex-wrap" id="metrics-period-selector">
       <span class="small fw-semibold me-1">Período das métricas</span>
       <div class="btn-group btn-group-sm" role="group" aria-label="Período das métricas">
         <a href="?metrics_period=today{% if search %}&search={{ search|urlencode }}{% endif %}{% if status_filter %}&status={{ status_filter }}{% endif %}{% if date_from %}&date_from={{ date_from }}{% endif %}{% if date_to %}&date_to={{ date_to }}{% endif %}{% if attention_filter %}&attention=1{% endif %}"
@@ -42,7 +42,9 @@
            class="btn {% if metrics_period == 'all' %}btn-primary{% else %}btn-outline-primary{% endif %}">Tudo</a>
       </div>
 
-      <!-- Personalizado: área expansível com data específica e intervalo -->
+      <!-- Personalizado: dois mini-forms SSR independentes (data específica / intervalo).
+           Cada mini-form carrega seu próprio hidden metrics_period + os filtros da
+           lista vigentes, então o submit funciona sem JavaScript. -->
       <details class="ms-2" {% if metrics_period == 'custom_date' or metrics_period == 'custom_range' or metrics_period_error %}open{% endif %}>
         <summary class="btn btn-sm {% if metrics_period == 'custom_date' or metrics_period == 'custom_range' %}btn-primary{% else %}btn-outline-primary{% endif %}" style="cursor:pointer;">Personalizado</summary>
         <div class="mt-2 p-2 border rounded bg-light" style="min-width: 320px;">
@@ -50,44 +52,48 @@
           <div class="alert alert-warning py-1 mb-2 small">{{ metrics_period_error }}</div>
           {% endif %}
 
-          <!-- Data específica -->
-          <div class="mb-2">
-            <strong class="small">Data específica</strong>
-          </div>
-          <div class="d-flex gap-2 align-items-center mb-2">
-            <input type="date" name="metrics_date" class="form-control form-control-sm"
-                   value="{% if metrics_period == 'custom_date' %}{{ metrics_date }}{% endif %}"
-                   style="max-width: 180px;">
-            <button type="submit" class="btn btn-sm btn-hospital-outline"
-                    onclick="this.form.querySelector('input[name=metrics_period]').value='custom_date'">Aplicar</button>
-          </div>
+          <!-- Mini-form: Data específica (SSR puro, sem JS) -->
+          <form method="get" class="mb-2" aria-label="Data específica">
+            <strong class="small d-block mb-1">Data específica</strong>
+            <div class="d-flex gap-2 align-items-center">
+              <input type="date" name="metrics_date" class="form-control form-control-sm"
+                     value="{% if metrics_period == 'custom_date' %}{{ metrics_date }}{% endif %}"
+                     style="max-width: 180px;">
+              <input type="hidden" name="metrics_period" value="custom_date">
+              {% if status_filter %}<input type="hidden" name="status" value="{{ status_filter }}">{% endif %}
+              {% if date_from %}<input type="hidden" name="date_from" value="{{ date_from }}">{% endif %}
+              {% if date_to %}<input type="hidden" name="date_to" value="{{ date_to }}">{% endif %}
+              {% if attention_filter %}<input type="hidden" name="attention" value="1">{% endif %}
+              {% if search %}<input type="hidden" name="search" value="{{ search }}">{% endif %}
+              <button type="submit" class="btn btn-sm btn-hospital-outline">Aplicar</button>
+            </div>
+          </form>
 
           <hr class="my-2">
 
-          <!-- Intervalo -->
-          <div class="mb-2">
-            <strong class="small">Intervalo</strong>
-          </div>
-          <div class="d-flex gap-2 align-items-center flex-wrap mb-1">
-            <input type="date" name="metrics_start" class="form-control form-control-sm"
-                   value="{% if metrics_period == 'custom_range' %}{{ metrics_start }}{% endif %}"
-                   style="max-width: 160px;">
-            <span class="small text-muted">até</span>
-            <input type="date" name="metrics_end" class="form-control form-control-sm"
-                   value="{% if metrics_period == 'custom_range' %}{{ metrics_end }}{% endif %}"
-                   style="max-width: 160px;">
-            <button type="submit" class="btn btn-sm btn-hospital-outline"
-                    onclick="this.form.querySelector('input[name=metrics_period]').value='custom_range'">Aplicar</button>
-          </div>
+          <!-- Mini-form: Intervalo (SSR puro, sem JS) -->
+          <form method="get" aria-label="Intervalo">
+            <strong class="small d-block mb-1">Intervalo</strong>
+            <div class="d-flex gap-2 align-items-center flex-wrap">
+              <input type="date" name="metrics_start" class="form-control form-control-sm"
+                     value="{% if metrics_period == 'custom_range' %}{{ metrics_start }}{% endif %}"
+                     style="max-width: 160px;">
+              <span class="small text-muted">até</span>
+              <input type="date" name="metrics_end" class="form-control form-control-sm"
+                     value="{% if metrics_period == 'custom_range' %}{{ metrics_end }}{% endif %}"
+                     style="max-width: 160px;">
+              <input type="hidden" name="metrics_period" value="custom_range">
+              {% if status_filter %}<input type="hidden" name="status" value="{{ status_filter }}">{% endif %}
+              {% if date_from %}<input type="hidden" name="date_from" value="{{ date_from }}">{% endif %}
+              {% if date_to %}<input type="hidden" name="date_to" value="{{ date_to }}">{% endif %}
+              {% if attention_filter %}<input type="hidden" name="attention" value="1">{% endif %}
+              {% if search %}<input type="hidden" name="search" value="{{ search }}">{% endif %}
+              <button type="submit" class="btn btn-sm btn-hospital-outline">Aplicar</button>
+            </div>
+          </form>
         </div>
       </details>
-
-      {% if status_filter %}<input type="hidden" name="status" value="{{ status_filter }}">{% endif %}
-      {% if date_from %}<input type="hidden" name="date_from" value="{{ date_from }}">{% endif %}
-      {% if date_to %}<input type="hidden" name="date_to" value="{{ date_to }}">{% endif %}
-      {% if attention_filter %}<input type="hidden" name="attention" value="1">{% endif %}
-      {% if search %}<input type="hidden" name="search" value="{{ search }}">{% endif %}
-    </form>
+    </div>
 
     <!-- Label do período ativo -->
     {% if metrics_period_label %}
@@ -238,8 +244,9 @@
     </a>
   </div>
 
-  <!-- Filtros em grid responsivo -->
-  <form method="get" class="row g-2 g-md-3 align-items-end mb-3">
+  <!-- Filtros em grid responsivo. id=case-filter-form é a fonte canônica dos
+       valores vigentes (período personalizado inclusivo) lidos pelo dashboard_search.js. -->
+  <form method="get" class="row g-2 g-md-3 align-items-end mb-3" id="case-filter-form">
     <div class="col-12 col-lg-4">
       <label for="search" class="form-label small text-muted mb-1">Buscar por nome ou registro</label>
       <input type="search" name="search" id="search" class="form-control form-control-sm"
