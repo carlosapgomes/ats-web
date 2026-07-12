@@ -401,3 +401,21 @@ class TestPdfViewerStaticJS:
         assert js_path.exists(), "pdf-viewer.js must exist"
         js = js_path.read_text()
         assert "error" in js.lower() or "catch" in js or "fallback" in js.lower()
+
+    def test_pdf_viewer_js_uses_visual_page_height_for_placeholders(self) -> None:
+        """Placeholders use displayed height, not raw render-scale viewport height."""
+        js_path = Path("static/js/pdf-viewer.js")
+        assert js_path.exists(), "pdf-viewer.js must exist"
+        js = js_path.read_text()
+
+        assert "calculateDisplayHeight" in js
+        assert "placeholderEl.style.minHeight = displayHeight + 'px';" in js
+        assert "placeholderEl.style.minHeight = viewport.height + 'px';" not in js
+
+    def test_pdf_viewer_js_clears_placeholder_min_height_after_render(self) -> None:
+        """Rendered pages should not keep stale min-height that creates blank gaps."""
+        js_path = Path("static/js/pdf-viewer.js")
+        assert js_path.exists(), "pdf-viewer.js must exist"
+        js = js_path.read_text()
+
+        assert "placeholderEl.style.minHeight = '';" in js

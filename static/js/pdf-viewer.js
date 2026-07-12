@@ -120,6 +120,32 @@ function createPagePlaceholder(pageNumber) {
 }
 
 /**
+ * Calculate the page height as it will be displayed in the current container.
+ * PDF.js renders at a high scale for sharpness, but CSS shrinks the canvas to
+ * the mobile viewport. Using the raw viewport height here creates blank gaps.
+ *
+ * @param {Object} viewport
+ * @param {HTMLElement} placeholderEl
+ * @returns {number}
+ */
+function calculateDisplayHeight(viewport, placeholderEl) {
+  const parent = placeholderEl.parentElement;
+  const parentRect = parent ? parent.getBoundingClientRect() : null;
+  const availableWidth =
+    (parentRect && parentRect.width) ||
+    (parent && parent.clientWidth) ||
+    placeholderEl.clientWidth ||
+    window.innerWidth ||
+    viewport.width;
+
+  if (!availableWidth || !viewport.width) {
+    return Math.ceil(viewport.height);
+  }
+
+  return Math.ceil(viewport.height * (availableWidth / viewport.width));
+}
+
+/**
  * Render a single page into the placeholder element.
  *
  * @param {Object} pdfDoc - PDF.js document
@@ -131,8 +157,9 @@ function renderPage(pdfDoc, pageNum, placeholderEl, scale) {
   pdfDoc.getPage(pageNum).then(function (page) {
     const viewport = page.getViewport({ scale: scale });
 
-    // Adjust placeholder min-height to match viewport
-    placeholderEl.style.minHeight = viewport.height + 'px';
+    // Reserve only the visual height that the scaled canvas will occupy on screen.
+    const displayHeight = calculateDisplayHeight(viewport, placeholderEl);
+    placeholderEl.style.minHeight = displayHeight + 'px';
 
     // Create canvas
     const canvas = document.createElement('canvas');
@@ -159,6 +186,9 @@ function renderPage(pdfDoc, pageNum, placeholderEl, scale) {
         if (!existingCanvas) {
           placeholderEl.insertBefore(canvas, placeholderEl.firstChild);
         }
+        // Let the rendered canvas define the final page height; otherwise the
+        // render-scale viewport height can leave large blank gaps on mobile.
+        placeholderEl.style.minHeight = '';
       })
       .catch(function (err) {
         console.error('Error rendering page ' + pageNum + ':', err);
