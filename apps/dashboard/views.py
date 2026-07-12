@@ -24,7 +24,7 @@ from apps.cases.admission import (
     get_admission_flow_notice_copy,
     is_operational_notice_flow,
 )
-from apps.cases.models import Case, CaseEvent, CaseStatus, SupervisorSummary
+from apps.cases.models import Case, CaseAttachment, CaseEvent, CaseStatus, SupervisorSummary
 from apps.cases.navigation import resolve_safe_next_url
 from apps.cases.services import (
     ADMINISTRATIVE_CLOSURE_REASON_CHOICES,
@@ -817,6 +817,97 @@ def dashboard_case_pdf(request: HttpRequest, case_id: uuid.UUID) -> HttpResponse
     return response
 
 
+def _get_dashboard_attachment_or_404(case_id: uuid.UUID, attachment_id: uuid.UUID) -> CaseAttachment:
+    """Retorna anexo ativo acessível pelo dashboard gerencial."""
+    return get_object_or_404(
+        CaseAttachment,
+        case__case_id=case_id,
+        attachment_id=attachment_id,
+        is_suppressed=False,
+    )
+
+
+@login_required
+@role_required("manager", "admin")
+@xframe_options_sameorigin
+def dashboard_case_attachment(
+    request: HttpRequest,
+    case_id: uuid.UUID,
+    attachment_id: uuid.UUID,
+) -> HttpResponseBase:
+    """Serve anexo clínico para manager/admin pelo dashboard."""
+    attachment = _get_dashboard_attachment_or_404(case_id, attachment_id)
+    response = FileResponse(
+        attachment.file.open("rb"),
+        content_type=attachment.content_type,
+    )
+    response["Cache-Control"] = "no-store"
+    return response
+
+
+@login_required
+@role_required("manager", "admin")
+def dashboard_attachment_pdf_viewer(
+    request: HttpRequest,
+    case_id: uuid.UUID,
+    attachment_id: uuid.UUID,
+) -> HttpResponse:
+    """Renderiza viewer mobile interno para anexo PDF no dashboard."""
+    attachment = _get_dashboard_attachment_or_404(case_id, attachment_id)
+    if attachment.content_type != "application/pdf":
+        raise Http404("Anexo não é um PDF.")
+
+    case = attachment.case
+    back_url = resolve_safe_next_url(request, reverse("dashboard:case_detail", args=[case.case_id]))
+    pdf_url = reverse("dashboard:case_attachment", args=[case.case_id, attachment.attachment_id])
+
+    return render(
+        request,
+        "pdf_viewer/mobile_pdf_viewer.html",
+        {
+            "viewer_title": "Anexo PDF",
+            "case": case,
+            "pdf_url": pdf_url,
+            "back_url": back_url,
+            "back_label": "← Voltar ao caso",
+            "fallback_pdf_url": pdf_url,
+            "show_dashboard_nav": True,
+        },
+    )
+
+
+@login_required
+@role_required("manager", "admin")
+def dashboard_attachment_image_viewer(
+    request: HttpRequest,
+    case_id: uuid.UUID,
+    attachment_id: uuid.UUID,
+) -> HttpResponse:
+    """Renderiza viewer mobile interno para anexo de imagem no dashboard."""
+    attachment = _get_dashboard_attachment_or_404(case_id, attachment_id)
+    if not attachment.content_type.startswith("image/"):
+        raise Http404("Anexo não é uma imagem.")
+
+    case = attachment.case
+    back_url = resolve_safe_next_url(request, reverse("dashboard:case_detail", args=[case.case_id]))
+    image_url = reverse("dashboard:case_attachment", args=[case.case_id, attachment.attachment_id])
+
+    return render(
+        request,
+        "image_viewer/mobile_image_viewer.html",
+        {
+            "viewer_title": "Anexo de imagem",
+            "case": case,
+            "attachment": attachment,
+            "image_url": image_url,
+            "fallback_image_url": image_url,
+            "back_url": back_url,
+            "back_label": "← Voltar ao caso",
+            "show_dashboard_nav": True,
+        },
+    )
+
+
 @login_required
 @role_required("manager", "admin")
 def dashboard_case_detail(request: HttpRequest, case_id: uuid.UUID) -> HttpResponse:
@@ -932,6 +1023,8 @@ def dashboard_case_detail(request: HttpRequest, case_id: uuid.UUID) -> HttpRespo
     elif result_info is None and case.status == CaseStatus.FAILED:
         result_info = {"type": "failed"}
 
+    active_attachments = list(case.attachments.filter(is_suppressed=False).order_by("created_at"))
+
     patient_name = ""
     if case.structured_data and isinstance(case.structured_data, dict):
         patient = case.structured_data.get("patient", {})
@@ -958,10 +1051,12 @@ def dashboard_case_detail(request: HttpRequest, case_id: uuid.UUID) -> HttpRespo
             "administrative_close_url": reverse("dashboard:administrative_close", args=[case.case_id]),
             "administrative_close_reason_choices": ADMINISTRATIVE_CLOSURE_REASON_CHOICES,
             # Parametrização para template compartilhado
+            "show_dashboard_nav": True,
             "show_intake_nav": False,
             "back_url": reverse("dashboard:index"),
             "back_label": "← Voltar ao dashboard",
             "pdf_url": reverse("dashboard:case_pdf", args=[case.case_id]),
+            "attachments": active_attachments,
             "mobile_pdf_viewer_url": reverse("dashboard:pdf_viewer", args=[case.case_id])
             + f"?next={reverse('dashboard:case_detail', args=[case.case_id])}",
         },
@@ -994,6 +1089,7 @@ def dashboard_pdf_viewer(request: HttpRequest, case_id: uuid.UUID) -> HttpRespon
             "back_url": back_url,
             "back_label": "← Voltar ao caso",
             "fallback_pdf_url": pdf_url,
+            "show_dashboard_nav": True,
         },
     )
 

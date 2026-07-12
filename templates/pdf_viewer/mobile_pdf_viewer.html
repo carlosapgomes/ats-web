@@ -6,6 +6,9 @@
 {% block page_title %}<h1 class="page-title">{{ viewer_title }}</h1>{% endblock %}
 
 {% block nav %}
+{% if show_dashboard_nav %}
+{% include "dashboard/_nav.html" %}
+{% endif %}
 <nav class="pdf-viewer-nav bg-white border-bottom py-2 px-3 d-flex align-items-center gap-2 sticky-top" style="z-index: 1030;">
   <a href="{{ back_url }}" class="btn btn-sm btn-outline-secondary d-inline-flex align-items-center gap-1">
     ← Voltar

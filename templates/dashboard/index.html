@@ -6,22 +6,7 @@
 {% block page_title %}<h1 class="page-title">Visão geral de todos os casos e métricas operacionais</h1>{% endblock %}
 
 {% block nav %}
-<nav class="app-nav mt-3" aria-label="Navegação">
-  <ul class="nav nav-pills gap-2">
-    <li class="nav-item">
-      <span class="nav-link active">Dashboard</span>
-    </li>
-    <li class="nav-item">
-      <a href="{% url 'admin_ui:prompt_list' %}" class="nav-link">Prompts</a>
-    </li>
-    <li class="nav-item">
-      <a href="{% url 'admin_ui:user_list' %}" class="nav-link">Usuários</a>
-    </li>
-    <li class="nav-item" hidden>
-      <a href="#" class="nav-link" onclick="return false;">Auditoria</a>
-    </li>
-  </ul>
-</nav>
+{% include "dashboard/_nav.html" %}
 {% endblock %}
 
 {% block content %}

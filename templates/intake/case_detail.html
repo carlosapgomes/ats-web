@@ -6,7 +6,9 @@
 {% block page_title %}<h1 class="page-title">Detalhes do encaminhamento e linha do tempo</h1>{% endblock %}
 
 {% block nav %}
-{% if show_intake_nav %}
+{% if show_dashboard_nav %}
+{% include "dashboard/_nav.html" %}
+{% elif show_intake_nav %}
 {% include "intake/_nav.html" %}
 {% elif show_doctor_nav %}
 {% include "doctor/_nav.html" %}
@@ -569,10 +571,19 @@
   </div>
 
   {% for att in attachments %}
+  {% if show_dashboard_nav %}
+    {% url 'dashboard:case_attachment' case.case_id att.attachment_id as attachment_file_url %}
+    {% url 'dashboard:attachment_pdf_viewer' case.case_id att.attachment_id as attachment_pdf_viewer_url %}
+    {% url 'dashboard:attachment_image_viewer' case.case_id att.attachment_id as attachment_image_viewer_url %}
+  {% else %}
+    {% url 'intake:serve_attachment' case.case_id att.attachment_id as attachment_file_url %}
+    {% url 'intake:attachment_pdf_viewer' case.case_id att.attachment_id as attachment_pdf_viewer_url %}
+    {% url 'intake:attachment_image_viewer' case.case_id att.attachment_id as attachment_image_viewer_url %}
+  {% endif %}
   <div class="card mb-3 border">
     <div class="card-header py-2 d-flex flex-column flex-md-row justify-content-between align-items-start align-items-md-center gap-2">
       {% if att.content_type == "application/pdf" %}
-      <a href="{% url 'intake:attachment_pdf_viewer' case.case_id att.attachment_id %}?next={{ request.get_full_path|urlencode }}"
+      <a href="{{ attachment_pdf_viewer_url }}?next={{ request.get_full_path|urlencode }}"
          class="btn btn-link text-decoration-none p-0 text-dark fw-semibold small text-start d-flex d-md-none flex-column align-items-start gap-1 w-100"
          rel="noopener" style="min-width: 0;">
         <span class="d-flex align-items-start gap-1 w-100" style="min-width: 0;">
@@ -582,7 +593,7 @@
         <small class="text-muted">(toque para visualizar o PDF)</small>
       </a>
       {% elif "image" in att.content_type %}
-      <a href="{% url 'intake:attachment_image_viewer' case.case_id att.attachment_id %}?next={{ request.get_full_path|urlencode }}"
+      <a href="{{ attachment_image_viewer_url }}?next={{ request.get_full_path|urlencode }}"
          class="btn btn-link text-decoration-none p-0 text-dark fw-semibold small text-start d-flex d-md-none flex-column align-items-start gap-1 w-100"
          rel="noopener" style="min-width: 0;">
         <span class="d-flex align-items-start gap-1 w-100" style="min-width: 0;">
@@ -592,7 +603,7 @@
         <small class="text-muted">(toque para visualizar a imagem)</small>
       </a>
       {% else %}
-      <a href="{% url 'intake:serve_attachment' case.case_id att.attachment_id %}"
+      <a href="{{ attachment_file_url }}"
          class="btn btn-link text-decoration-none p-0 text-dark fw-semibold small text-start d-flex d-md-none flex-column align-items-start gap-1 w-100"
          target="_blank" rel="noopener" style="min-width: 0;">
         <span class="d-flex align-items-start gap-1 w-100" style="min-width: 0;">
@@ -630,9 +641,9 @@
             {% if att.uploaded_by.get_full_name %} · {{ att.uploaded_by.get_full_name }}{% endif %}
           </span>
           <span class="d-flex align-items-center gap-2 flex-wrap">
-            <a href="{% url 'intake:serve_attachment' case.case_id att.attachment_id %}"
+            <a href="{{ attachment_file_url }}"
                class="btn btn-sm btn-hospital-outline" target="_blank" rel="noopener">Abrir em nova aba</a>
-            {% if case.status != "CLEANED" %}
+            {% if show_intake_nav and case.status != "CLEANED" %}
             <button class="btn btn-sm btn-outline-warning" type="button"
                     data-bs-toggle="collapse" data-bs-target="#suppress-{{ att.attachment_id }}"
                     aria-expanded="false" aria-controls="suppress-{{ att.attachment_id }}">
@@ -642,7 +653,7 @@
           </span>
         </div>
 
-        {% if case.status != "CLEANED" %}
+        {% if show_intake_nav and case.status != "CLEANED" %}
         <!-- Suppress action: keep before the embedded viewer so PDF plugins do not block clicks. -->
         <div class="collapse mb-3" id="suppress-{{ att.attachment_id }}">
           <div class="card card-body bg-light">
@@ -673,11 +684,11 @@
 
         {% if att.content_type == "application/pdf" %}
         <div class="ratio ratio-1x1" style="max-height: 70vh;">
-          <embed src="{% url 'intake:serve_attachment' case.case_id att.attachment_id %}" type="application/pdf" style="width: 100%; height: 100%;">
+          <embed src="{{ attachment_file_url }}" type="application/pdf" style="width: 100%; height: 100%;">
         </div>
         {% elif "image" in att.content_type %}
         <div class="text-center">
-          <img src="{% url 'intake:serve_attachment' case.case_id att.attachment_id %}"
+          <img src="{{ attachment_file_url }}"
                class="img-fluid"
                alt="{{ att.original_filename }}"
                style="max-height: 70vh;">
