@@ -9,6 +9,7 @@ from pathlib import Path
 
 import pytest
 from django.contrib.auth import get_user_model
+from django.core.files.base import ContentFile
 from django.urls import reverse
 
 from apps.cases.models import Case, CaseStatus
@@ -322,37 +323,38 @@ class TestDoctorServePdfCacheControl:
         session.save()
         return user
 
-    def test_serve_pdf_has_no_store_cache_control(self, client) -> None:
-        """serve_pdf response includes Cache-Control: no-store."""
+    def _create_case_with_real_pdf(self) -> Case:
+        """Cria um Case WAIT_DOCTOR com um pdf_file real no storage de teste.
+
+        Necessário porque serve_pdf faz pdf_file.open("rb"); um caminho sem
+        arquivo físico gera FileNotFoundError antes do header ser setado.
+        """
         nir_user = User.objects.create_user(username="nir_cache@test.com", password="testpass123")
         nir_user.roles.add(self._create_role("nir"))
-        case = Case.objects.create(
-            created_by=nir_user,
-            status=CaseStatus.WAIT_DOCTOR,
-            pdf_file="test_cases/dummy.pdf",
+        case = Case.objects.create(created_by=nir_user, status=CaseStatus.WAIT_DOCTOR)
+        case.pdf_file.save(
+            "test.pdf",
+            ContentFile(b"%PDF-1.4 fake pdf for testing"),
+            save=True,
         )
-        case.save()
+        return case
+
+    def test_serve_pdf_has_no_store_cache_control(self, client) -> None:
+        """serve_pdf response includes Cache-Control: no-store."""
+        case = self._create_case_with_real_pdf()
 
         self._login_as(client, "doctor")
         response = client.get(reverse("doctor:serve_pdf", args=[case.case_id]))
-        # The file doesn't actually exist, so we may get a Storage error
-        # but the test is about the response header when it succeeds.
-        # Let's check the response object itself.
-        assert response.has_header("Cache-Control")
+        assert response.status_code == 200
+        assert response["Cache-Control"] == "no-store"
 
     def test_serve_pdf_content_type_is_pdf(self, client) -> None:
         """serve_pdf returns Content-Type: application/pdf."""
-        nir_user = User.objects.create_user(username="nir_ct@cache.test", password="testpass123")
-        nir_user.roles.add(self._create_role("nir"))
-        case = Case.objects.create(
-            created_by=nir_user,
-            status=CaseStatus.WAIT_DOCTOR,
-            pdf_file="test_cases/dummy.pdf",
-        )
-        case.save()
+        case = self._create_case_with_real_pdf()
 
         self._login_as(client, "doctor")
         response = client.get(reverse("doctor:serve_pdf", args=[case.case_id]))
+        assert response.status_code == 200
         assert response["Content-Type"] == "application/pdf"
 
 
