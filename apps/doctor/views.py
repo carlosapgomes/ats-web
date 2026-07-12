@@ -10,6 +10,7 @@ from django.http import FileResponse, Http404, HttpRequest, HttpResponse, HttpRe
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
 from django.utils import timezone
+from django.utils.http import url_has_allowed_host_and_scheme
 from django.views.decorators.clickjacking import xframe_options_sameorigin
 
 from apps.accounts.decorators import role_required
@@ -45,6 +46,17 @@ from apps.intake.views import (
 
 from .forms import DoctorDecisionForm
 from .presenters import DoctorReportPresenter
+
+
+def _validate_next_url(next_url: str, request: HttpRequest) -> str | None:
+    """Validate a next URL is safe, return None if unsafe."""
+    if next_url and url_has_allowed_host_and_scheme(
+        url=next_url,
+        allowed_hosts={request.get_host()},
+        require_https=request.is_secure(),
+    ):
+        return next_url
+    return None
 
 
 def _map_prior_decision_to_denial_type(decision: str) -> str:
@@ -581,15 +593,20 @@ def serve_attachment(
 @role_required("doctor")
 @xframe_options_sameorigin
 def serve_pdf(request: HttpRequest, case_id: uuid.UUID) -> HttpResponseBase:
-    """Serve o PDF original do caso para visualização inline no <embed>."""
+    """Serve o PDF original do caso para visualização inline no <embed>.
+
+    Cache-Control: no-store para evitar cache de PDF médico sensível.
+    """
     case = get_object_or_404(Case, pk=case_id)
     if not case.pdf_file:
         raise Http404("PDF não encontrado para este caso.")
 
-    return FileResponse(
+    response = FileResponse(
         case.pdf_file.open("rb"),
         content_type="application/pdf",
     )
+    response["Cache-Control"] = "no-store"
+    return response
 
 
 @login_required
@@ -799,3 +816,38 @@ def doctor_lock_release(request: HttpRequest, case_id: uuid.UUID) -> HttpRespons
     )
 
     return JsonResponse({"success": released})
+
+
+@login_required
+@role_required("doctor")
+def pdf_viewer(request: HttpRequest, case_id: uuid.UUID) -> HttpResponse:
+    """Renderiza o viewer PDF mobile interno usando PDF.js.
+
+    Exige login e papel ativo 'doctor'.
+    Busca o Case por case_id e retorna 404 se não houver pdf_file.
+    Renderiza templates/pdf_viewer/mobile_pdf_viewer.html com:
+      - pdf_url: rota protegida doctor:serve_pdf
+      - back_url: validada de ?next ou fallback para doctor:decision
+    """
+    case = get_object_or_404(Case, pk=case_id)
+    if not case.pdf_file:
+        raise Http404("PDF não encontrado para este caso.")
+
+    # Validar next URL ou usar fallback canônico
+    raw_next = request.GET.get("next", "")
+    back_url = _validate_next_url(raw_next, request) or reverse("doctor:decision", args=[case.case_id])
+
+    pdf_url = reverse("doctor:serve_pdf", args=[case.case_id])
+
+    return render(
+        request,
+        "pdf_viewer/mobile_pdf_viewer.html",
+        {
+            "viewer_title": "PDF Original",
+            "case": case,
+            "pdf_url": pdf_url,
+            "back_url": back_url,
+            "back_label": "← Voltar ao caso",
+            "fallback_pdf_url": pdf_url,
+        },
+    )
