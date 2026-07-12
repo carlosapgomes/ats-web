@@ -771,6 +771,7 @@ class TestClosedCaseDetailImageAttachmentLinks:
         )
 
 
+@pytest.mark.django_db
 class TestOperationalServeAttachmentBlocksCleaned:
     """Tests that intake:serve_attachment (operational) still blocks CLEANED cases."""
 
