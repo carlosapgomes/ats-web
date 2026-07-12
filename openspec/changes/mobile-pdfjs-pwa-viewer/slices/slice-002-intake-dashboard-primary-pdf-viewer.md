@@ -15,6 +15,34 @@ Leia antes de codar:
 
 Assuma que o Slice 001 já criou o template compartilhado do viewer, `static/js/pdf-viewer.js` e PDF.js vendorizado. Implemente **somente este slice** com TDD: RED → GREEN → REFACTOR.
 
+## Protocolo obrigatório para implementador DeepSeek4-Flash
+
+Este slice será implementado por um modelo rápido e com tendência a concluir cedo demais. Portanto, siga este protocolo literalmente. **Se qualquer item abaixo falhar, o slice está INCOMPLETO**: não marque `tasks.md`, não faça commit/push e responda com bloqueio + evidência.
+
+1. **Plano antes de editar**: escreva no relatório uma mini matriz `Requisito → arquivo(s) → teste(s)`. Não implemente requisito sem teste ou justificativa explícita.
+2. **RED real**: crie/ajuste testes primeiro e rode o subconjunto alvo. Pelo menos um teste novo deve falhar pelo motivo esperado. Se o teste passar antes da implementação, ele não prova o comportamento; corrija o teste.
+3. **GREEN mínimo**: implemente somente o necessário para os testes do slice passarem. Não faça refactor amplo, não toque em apps fora do escopo e não antecipe slices futuros.
+4. **Verificação por inspeção**: além dos testes, rode buscas `rg`/inspeções descritas neste slice para comprovar que não restaram links mobile com `target="_blank"`, que o desktop ainda tem `<embed>`, que a rota protegida correta é usada e que `Cache-Control: no-store` foi adicionado onde exigido.
+5. **Quality gate completo**: execute exatamente `uv run ruff check .`, `uv run ruff format --check .`, `uv run mypy .` e `uv run pytest`. Se algum comando falhar, o slice não está pronto.
+6. **Relatório com evidência, não opinião**: cole comandos executados, resumo das saídas, testes RED/GREEN, snippets antes/depois e respostas objetivas aos gates. Inclua também `Handoff para verificador` com: arquivos alterados, comandos exatos para rerun, riscos/limitações e checklist dos requisitos R1..Rn. Inclua uma seção final `Status: COMPLETE` somente se todos os critérios estiverem comprovados.
+
+### Condições automáticas de INCOMPLETO
+
+Marque como incompleto se ocorrer qualquer uma destas situações:
+
+- teste planejado não foi escrito ou não foi executado;
+- quality gate completo não foi executado;
+- qualquer teste/lint/mypy falhou;
+- `tasks.md` foi marcado apesar de falha ou pendência;
+- `target="_blank"` permaneceu no link mobile que o slice deveria substituir;
+- o `<embed>` desktop foi removido ou passou a usar a rota errada;
+- viewer usa `MEDIA_URL`, caminho físico do arquivo ou URL sem autorização;
+- `next` é usado sem validação/fallback canônico;
+- `Cache-Control: no-store` exigido pelo slice ficou ausente;
+- PDF.js/viewer foi declarado pronto sem teste/inspeção que comprove carregamento do JS/template;
+- relatório temporário não foi criado no caminho exigido.
+
+
 ## Objetivo do slice
 
 Reusar o viewer mobile interno para PDFs principais nas superfícies que usam templates NIR/gerenciais:
@@ -161,6 +189,18 @@ Implementar o mínimo para passar.
 - Não alterar comportamento de autorização existente fora dos viewers.
 - Não mexer em anexos neste slice.
 
+## Checks de inspeção obrigatórios antes de concluir
+
+Além dos testes automatizados, execute e cole o resultado/resumo no relatório:
+
+```bash
+rg -n "mobile_pdf_viewer_url|target=\"_blank\"|<embed|pdf_url" templates/intake/case_detail.html templates/intake/closed_case_detail.html
+rg -n "pdf_viewer|closed_case_pdf_viewer|serve_pdf|closed_case_pdf|no-store|url_has_allowed_host_and_scheme" apps/intake/views.py apps/intake/urls.py
+rg -n "pdf_viewer|case_pdf|no-store|url_has_allowed_host_and_scheme" apps/dashboard/views.py apps/dashboard/urls.py
+```
+
+Interprete os resultados no relatório: dashboard deve apontar para rotas `dashboard:*`, NIR operacional para `intake:serve_pdf`, NIR histórico para `intake:closed_case_pdf`, e nenhum link mobile principal alterado pode manter `target="_blank"`.
+
 ## Critérios de sucesso do slice
 
 - [ ] Detalhe NIR operacional mobile usa viewer interno.
@@ -219,7 +259,7 @@ REPORT_PATH=/tmp/mobile-pdfjs-pwa-viewer-slice-002-report.md
 
 ```text
 Read AGENTS.md, PROJECT_CONTEXT.md and openspec/changes/mobile-pdfjs-pwa-viewer/{proposal.md,design.md,tasks.md,specs/mobile-pdf-viewer/spec.md,slices/slice-002-intake-dashboard-primary-pdf-viewer.md} first. Assume Slice 001 is complete.
-Implement ONLY Slice 002 using TDD. Reuse the shared PDF.js viewer template/static from Slice 001.
+Implement ONLY Slice 002 using TDD. Follow the DeepSeek4-Flash protocol in this file: plan, RED real, GREEN mínimo, inspection checks, full quality gate and evidence report. Reuse the shared PDF.js viewer template/static from Slice 001. If any required test/check/gate is missing or failing, report INCOMPLETE and do not update tasks.md or commit.
 Add internal mobile PDF viewer routes for intake operational case detail, intake closed-case detail, and dashboard case detail. Update the relevant templates so mobile links use viewer routes without target=_blank, while desktop embeds continue using the existing protected PDF binary routes.
 Preserve permissions and route boundaries: dashboard must use dashboard PDF route, not intake. Validate next URLs or use canonical fallbacks. Add Cache-Control: no-store to intake serve_pdf, intake closed_case_pdf and dashboard case_pdf.
 Do not touch attachments, models, migrations, FSM, pipeline, or add frontend frameworks. Run quality gate, update tasks.md, create /tmp/mobile-pdfjs-pwa-viewer-slice-002-report.md with evidence, commit and push. Reply with REPORT_PATH and stop.

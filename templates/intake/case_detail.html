@@ -581,12 +581,22 @@
         </span>
         <small class="text-muted">(toque para visualizar o PDF)</small>
       </a>
+      {% elif "image" in att.content_type %}
+      <a href="{% url 'intake:attachment_image_viewer' case.case_id att.attachment_id %}?next={{ request.get_full_path|urlencode }}"
+         class="btn btn-link text-decoration-none p-0 text-dark fw-semibold small text-start d-flex d-md-none flex-column align-items-start gap-1 w-100"
+         rel="noopener" style="min-width: 0;">
+        <span class="d-flex align-items-start gap-1 w-100" style="min-width: 0;">
+          <span class="flex-shrink-0">🖼️</span>
+          <span class="text-break">{{ att.original_filename }}</span>
+        </span>
+        <small class="text-muted">(toque para visualizar a imagem)</small>
+      </a>
       {% else %}
       <a href="{% url 'intake:serve_attachment' case.case_id att.attachment_id %}"
          class="btn btn-link text-decoration-none p-0 text-dark fw-semibold small text-start d-flex d-md-none flex-column align-items-start gap-1 w-100"
          target="_blank" rel="noopener" style="min-width: 0;">
         <span class="d-flex align-items-start gap-1 w-100" style="min-width: 0;">
-          <span class="flex-shrink-0">{% if "image" in att.content_type %}🖼️{% else %}📎{% endif %}</span>
+          <span class="flex-shrink-0">📎</span>
           <span class="text-break">{{ att.original_filename }}</span>
         </span>
         <small class="text-muted">(toque para abrir o anexo)</small>

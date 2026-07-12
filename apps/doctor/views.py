@@ -64,6 +64,9 @@ DOCTOR_DECISION_STATUSES = [
 
 # ── Helper mappers ───────────────────────────────────────────────────────
 
+SUPPORTED_IMAGE_TYPES = frozenset({"image/jpeg", "image/png"})
+
+
 SUPPORT_RECOMMENDATION_MAP: dict[str, str] = {
     "none": "Nenhum",
     "anesthesist": "Anestesista",
@@ -886,5 +889,46 @@ def attachment_pdf_viewer(
             "back_url": back_url,
             "back_label": "← Voltar ao caso",
             "fallback_pdf_url": pdf_url,
+        },
+    )
+
+
+def _is_supported_image_attachment(attachment: CaseAttachment) -> bool:
+    """Check if attachment is a supported image type (JPEG/PNG)."""
+    return attachment.content_type in SUPPORTED_IMAGE_TYPES
+
+
+@login_required
+@role_required("doctor")
+def attachment_image_viewer(
+    request: HttpRequest,
+    case_id: uuid.UUID,
+    attachment_id: uuid.UUID,
+) -> HttpResponse:
+    """Renderiza o viewer mobile interno para anexo imagem (JPEG/PNG) do médico.
+
+    Exige login e papel ativo 'doctor'.
+    Usa doctor:serve_attachment como fonte protegida.
+    Retorna 404 se o anexo não for JPEG/PNG ou estiver suprimido/inacessível.
+    """
+    case, attachment = _get_doctor_attachment_or_404(case_id, attachment_id, request)
+
+    if not _is_supported_image_attachment(attachment):
+        raise Http404("Anexo não é uma imagem suportada (JPEG/PNG).")
+
+    back_url = resolve_safe_next_url(request, reverse("doctor:decision", args=[case.case_id]))
+    image_url = reverse("doctor:serve_attachment", args=[case.case_id, attachment.attachment_id])
+
+    return render(
+        request,
+        "image_viewer/mobile_image_viewer.html",
+        {
+            "viewer_title": "Anexo de imagem",
+            "case": case,
+            "attachment": attachment,
+            "image_url": image_url,
+            "fallback_image_url": image_url,
+            "back_url": back_url,
+            "back_label": "← Voltar ao caso",
         },
     )

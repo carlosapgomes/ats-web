@@ -48,6 +48,43 @@
 - **THEN** the viewer shows a clear error message
 - **AND** it offers a fallback link to open the original protected PDF route
 
+## Requirement: Image attachments use protected internal viewing on mobile
+
+### Scenario: Mobile image attachment opens inside the app
+
+- **GIVEN** a user opens an authorized case page with a PNG or JPEG attachment
+- **WHEN** the mobile attachment action is rendered
+- **THEN** it links to an internal image viewer route in the same app
+- **AND** it does not use `target="_blank"`
+- **AND** the viewer displays the image with an HTML `<img>` sourced from a protected attachment route
+- **AND** the viewer provides top and bottom return actions
+
+### Scenario: Image viewer rejects non-image attachments
+
+- **GIVEN** an authorized user requests an image viewer route for a PDF or unsupported file type
+- **WHEN** the route is evaluated
+- **THEN** the request returns 404 or equivalent denial
+- **AND** no direct media URL is exposed
+
+## Requirement: Historical NIR PDF attachments use protected internal viewing
+
+### Scenario: Closed-case PDF attachment opens in internal viewer on mobile
+
+- **GIVEN** a NIR user opens the historical detail of an authorized closed case
+- **AND** the case has a non-suppressed PDF attachment
+- **WHEN** the mobile attachment action is rendered
+- **THEN** it links to an internal attachment PDF viewer route
+- **AND** it does not use `target="_blank"`
+- **AND** the viewer loads the PDF through a protected historical attachment route
+
+### Scenario: Historical attachment route is restricted to NIR historical scope
+
+- **GIVEN** a case or user outside the NIR historical scope
+- **WHEN** the historical attachment binary route or viewer route is requested
+- **THEN** access is denied
+- **AND** suppressed attachments are not served
+- **AND** the operational attachment route continues to block closed cases
+
 ## Requirement: Authorization and sensitive file handling are preserved
 
 ### Scenario: Unauthorized user cannot open viewer route

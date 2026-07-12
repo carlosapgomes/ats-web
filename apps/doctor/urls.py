@@ -22,4 +22,9 @@ urlpatterns = [
         views.attachment_pdf_viewer,
         name="attachment_pdf_viewer",
     ),
+    path(
+        "cases/<uuid:case_id>/attachments/<uuid:attachment_id>/image-viewer/",
+        views.attachment_image_viewer,
+        name="attachment_image_viewer",
+    ),
 ]

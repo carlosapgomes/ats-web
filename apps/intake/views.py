@@ -47,6 +47,9 @@ from .services import process_uploaded_files, validate_attachment_file
 
 logger = logging.getLogger(__name__)
 
+SUPPORTED_IMAGE_TYPES = frozenset({"image/jpeg", "image/png"})
+
+
 STATUS_LABELS: dict[str, str] = {
     "NEW": "Novo",
     "R1_ACK_PROCESSING": "Processando",
@@ -1600,6 +1603,88 @@ def attachment_pdf_viewer(
             "back_url": back_url,
             "back_label": "← Voltar ao caso",
             "fallback_pdf_url": pdf_url,
+        },
+    )
+
+
+def _is_supported_image_attachment(attachment: CaseAttachment) -> bool:
+    """Check if attachment is a supported image type (JPEG/PNG)."""
+    return attachment.content_type in SUPPORTED_IMAGE_TYPES
+
+
+@login_required
+@role_required("nir")
+def attachment_image_viewer(
+    request: HttpRequest,
+    case_id: uuid.UUID,
+    attachment_id: uuid.UUID,
+) -> HttpResponse:
+    """Renderiza o viewer mobile interno para anexo imagem (JPEG/PNG) do NIR operacional.
+
+    Exige login e papel ativo 'nir'.
+    Usa intake:serve_attachment como fonte protegida.
+    Bloqueia casos CLEANED.
+    Retorna 404 se o anexo não for JPEG/PNG ou estiver suprimido/inacessível.
+    """
+    case, attachment = _get_nir_attachment_or_404(case_id, attachment_id)
+
+    if not _is_supported_image_attachment(attachment):
+        raise Http404("Anexo não é uma imagem suportada (JPEG/PNG).")
+
+    back_url = resolve_safe_next_url(request, reverse("intake:case_detail", args=[case.case_id]))
+    image_url = reverse("intake:serve_attachment", args=[case.case_id, attachment.attachment_id])
+
+    return render(
+        request,
+        "image_viewer/mobile_image_viewer.html",
+        {
+            "viewer_title": "Anexo de imagem",
+            "case": case,
+            "attachment": attachment,
+            "image_url": image_url,
+            "fallback_image_url": image_url,
+            "back_url": back_url,
+            "back_label": "← Voltar ao caso",
+        },
+    )
+
+
+@login_required
+@role_required("nir")
+def closed_case_attachment_image_viewer(
+    request: HttpRequest,
+    case_id: uuid.UUID,
+    attachment_id: uuid.UUID,
+) -> HttpResponse:
+    """Renderiza o viewer mobile interno para anexo imagem (JPEG/PNG) do NIR histórico.
+
+    Exige login e papel ativo 'nir'.
+    Usa intake:closed_case_attachment como fonte protegida.
+    Aplica a mesma autorização da rota binária histórica.
+    Retorna 404 se o anexo não for JPEG/PNG.
+    """
+    case, attachment = _get_closed_case_attachment_or_404(case_id, attachment_id)
+
+    if not _is_supported_image_attachment(attachment):
+        raise Http404("Anexo não é uma imagem suportada (JPEG/PNG).")
+
+    back_url = resolve_safe_next_url(
+        request,
+        reverse("intake:closed_case_detail", args=[case.case_id]),
+    )
+    image_url = reverse("intake:closed_case_attachment", args=[case.case_id, attachment.attachment_id])
+
+    return render(
+        request,
+        "image_viewer/mobile_image_viewer.html",
+        {
+            "viewer_title": "Anexo de imagem",
+            "case": case,
+            "attachment": attachment,
+            "image_url": image_url,
+            "fallback_image_url": image_url,
+            "back_url": back_url,
+            "back_label": "← Voltar ao caso",
         },
     )
 

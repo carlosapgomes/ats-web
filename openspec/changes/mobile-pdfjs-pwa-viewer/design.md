@@ -214,15 +214,48 @@ Reusa o viewer compartilhado:
 - preservar autorização restrita de `scheduler_processed_pdf`;
 - testes scheduler.
 
+### Slice 003b — Consolidar validação de `next`
+
+Follow-up técnico antes de novos viewers:
+
+- criar helper compartilhado `apps.cases.navigation.resolve_safe_next_url`;
+- substituir helpers locais divergentes em doctor/intake/dashboard;
+- substituir validação inline do scheduler;
+- preservar fallbacks canônicos e permissões;
+- testes para `next` seguro, vazio, externo e protocol-relative.
+
 ### Slice 004 — Anexos PDF
 
 Reusa o viewer para anexos PDF:
 
 - médico: anexos PDF em `doctor/decision.html`;
 - NIR operacional: anexos PDF em `intake/case_detail.html`;
-- NIR histórico: somente se já houver rota autorizada adequada para arquivo histórico;
+- NIR histórico: fora do Slice 004 porque exigia rota histórica autorizada própria;
 - preservar imagens como estão;
 - testes de contratos de anexo.
+
+### Slice 005 — NIR histórico / anexos PDF de casos encerrados
+
+Corrige a dívida de UX remanescente em `templates/intake/closed_case_detail.html`:
+
+- criar rota histórica binária `intake:closed_case_attachment` para anexos de casos em `_is_historical_scope_nir`;
+- criar viewer `intake:closed_case_attachment_pdf_viewer` para anexos PDF;
+- mobile usa viewer interno sem `target="_blank"`;
+- desktop usa `<embed>` com rota histórica autorizada;
+- `intake:serve_attachment` operacional continua bloqueando `CLEANED`;
+- sem acesso histórico para doctor/scheduler/dashboard neste change.
+
+### Slice 006 — Anexos imagem / PNG e JPEG
+
+Resolve a mesma classe de problema PWA para imagens, sem introduzir biblioteca ou viewer complexo:
+
+- criar template simples `templates/image_viewer/mobile_image_viewer.html` com `<img class="img-fluid">`;
+- criar viewers de imagem para doctor, NIR operacional e NIR histórico;
+- aceitar apenas `image/jpeg` e `image/png`;
+- mobile usa página interna sem `target="_blank"`;
+- desktop preserva `<img>` inline dentro do collapse;
+- reutilizar rotas binárias protegidas e `resolve_safe_next_url`;
+- sem zoom avançado, galeria, rotação, JS extra ou mudanças no upload.
 
 ## Riscos e mitigação
 

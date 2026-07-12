@@ -1,0 +1,44 @@
+{% extends "base.html" %}
+{% load static %}
+
+{% block title %}{{ viewer_title }} · {{ app_display_name }}{% endblock %}
+
+{% block page_title %}<h1 class="page-title">{{ viewer_title }}</h1>{% endblock %}
+
+{% block nav %}
+<nav class="pdf-viewer-nav bg-white border-bottom py-2 px-3 d-flex align-items-center gap-2 sticky-top" style="z-index: 1030;">
+  <a href="{{ back_url }}" class="btn btn-sm btn-outline-secondary d-inline-flex align-items-center gap-1">
+    ← Voltar
+  </a>
+  <span class="small text-muted ms-auto">{{ attachment.original_filename }}</span>
+</nav>
+{% endblock %}
+
+{% block content %}
+
+<div class="image-viewer-container" style="max-width: 100%; overflow-x: hidden;">
+
+  <!-- Image display -->
+  <div class="text-center py-3">
+    <img src="{{ image_url }}"
+         class="img-fluid"
+         alt="{{ attachment.original_filename }}"
+         style="max-height: 80vh; object-fit: contain;">
+  </div>
+
+  <!-- Fallback link -->
+  <div class="text-center mb-3">
+    <a href="{{ fallback_image_url }}" class="btn btn-sm btn-outline-secondary" target="_blank" rel="noopener">
+      Abrir imagem original
+    </a>
+  </div>
+
+  <!-- Bottom back button -->
+  <div class="text-center py-4">
+    <a href="{{ back_url }}" class="btn btn-outline-secondary d-inline-flex align-items-center gap-1">
+      ← Voltar
+    </a>
+  </div>
+
+</div>
+{% endblock %}
