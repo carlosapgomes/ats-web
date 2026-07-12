@@ -14,9 +14,9 @@
 
 - [x] Desktop preserva embed nativo de PDF nas superfícies alteradas (scheduler).
 - [x] Mobile/PWA usa página interna do app, sem `target="_blank"`, para PDFs cobertos (scheduler).
-- [ ] Viewer interno usa PDF.js com Vanilla JS, sem framework frontend. (Slice 001)
-- [ ] PDF.js foi vendorizado em `static/vendor/pdfjs/` ou houve justificativa técnica documentada no relatório. (Slice 001)
-- [ ] Viewer renderiza páginas em canvas com lazy rendering/controle de carga. (Slice 001)
+- [x] Viewer interno usa PDF.js com Vanilla JS, sem framework frontend. (Slice 001)
+- [x] PDF.js foi vendorizado em `static/vendor/pdfjs/` ou houve justificativa técnica documentada no relatório. (Slice 001)
+- [x] Viewer renderiza páginas em canvas com lazy rendering/controle de carga. (Slice 001)
 - [x] Viewer tem botão “Voltar” no topo e no rodapé (compartilhado).
 - [x] URL de retorno é validada ou canônica; não depende apenas de `history.back()`.
 - [x] Validação de `next` dos PDF viewers usa helper compartilhado único, sem helpers locais divergentes ou validação inline.
@@ -24,7 +24,7 @@
 - [x] Rotas de viewer e PDF preservam autorização por papel.
 - [x] Nenhuma rota passa a expor `MEDIA_URL` ou caminho físico do arquivo.
 - [x] Respostas PDF tocadas têm `Cache-Control: no-store` e mantêm `Content-Type: application/pdf`.
-- [ ] Anexos PDF em detalhe histórico NIR (`closed_case_detail.html`) usam viewer interno no mobile e rota histórica autorizada no desktop.
+- [x] Anexos PDF em detalhe histórico NIR (`closed_case_detail.html`) usam viewer interno no mobile e rota histórica autorizada no desktop.
 - [x] Anexos PNG/JPEG usam viewer interno no mobile nas superfícies doctor, NIR operacional e NIR histórico, preservando `<img>` inline no desktop.
 - [x] Testes relevantes adicionados/ajustados seguindo TDD.
 - [x] Quality gate do AGENTS.md executado por slice:
