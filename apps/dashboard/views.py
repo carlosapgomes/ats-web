@@ -14,6 +14,7 @@ from django.http import FileResponse, Http404, HttpRequest, HttpResponse, HttpRe
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
 from django.utils import timezone
+from django.utils.http import url_has_allowed_host_and_scheme
 from django.views.decorators.clickjacking import xframe_options_sameorigin
 from django.views.decorators.http import require_POST
 
@@ -808,10 +809,12 @@ def dashboard_case_pdf(request: HttpRequest, case_id: uuid.UUID) -> HttpResponse
     case = get_object_or_404(Case, case_id=case_id)
     if not case.pdf_file:
         raise Http404("PDF não encontrado para este caso.")
-    return FileResponse(
+    response = FileResponse(
         case.pdf_file.open("rb"),
         content_type="application/pdf",
     )
+    response["Cache-Control"] = "no-store"
+    return response
 
 
 @login_required
@@ -959,6 +962,50 @@ def dashboard_case_detail(request: HttpRequest, case_id: uuid.UUID) -> HttpRespo
             "back_url": reverse("dashboard:index"),
             "back_label": "← Voltar ao dashboard",
             "pdf_url": reverse("dashboard:case_pdf", args=[case.case_id]),
+            "mobile_pdf_viewer_url": reverse("dashboard:pdf_viewer", args=[case.case_id])
+            + f"?next={reverse('dashboard:case_detail', args=[case.case_id])}",
+        },
+    )
+
+
+def _dashboard_validate_next_url(next_url: str, request: HttpRequest) -> str | None:
+    """Validate a next URL is safe for dashboard views, return None if unsafe."""
+    if next_url and url_has_allowed_host_and_scheme(
+        url=next_url,
+        allowed_hosts={request.get_host()},
+        require_https=request.is_secure(),
+    ):
+        return next_url
+    return None
+
+
+@login_required
+@role_required("manager", "admin")
+def dashboard_pdf_viewer(request: HttpRequest, case_id: uuid.UUID) -> HttpResponse:
+    """Renderiza o viewer PDF mobile interno para dashboard gerencial.
+
+    Exige login e papel ativo 'manager' ou 'admin'.
+    Usa dashboard:case_pdf como fonte protegida.
+    """
+    case = get_object_or_404(Case, pk=case_id)
+    if not case.pdf_file:
+        raise Http404("PDF não encontrado para este caso.")
+
+    raw_next = request.GET.get("next", "")
+    back_url = _dashboard_validate_next_url(raw_next, request) or reverse("dashboard:case_detail", args=[case.case_id])
+
+    pdf_url = reverse("dashboard:case_pdf", args=[case.case_id])
+
+    return render(
+        request,
+        "pdf_viewer/mobile_pdf_viewer.html",
+        {
+            "viewer_title": "PDF Original",
+            "case": case,
+            "pdf_url": pdf_url,
+            "back_url": back_url,
+            "back_label": "← Voltar ao caso",
+            "fallback_pdf_url": pdf_url,
         },
     )
 
