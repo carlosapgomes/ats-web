@@ -42,6 +42,20 @@ from apps.intake.views import (
 )
 
 
+def _parse_iso_date(raw: str) -> date | None:
+    """Tenta fazer parse de uma string ISO date (YYYY-MM-DD).
+
+    Retorna None se a string for vazia, inválida ou mal formatada.
+    """
+    if not raw or not isinstance(raw, str):
+        return None
+    raw = raw.strip()
+    try:
+        return date.fromisoformat(raw)
+    except (ValueError, TypeError):
+        return None
+
+
 def _period_bounds(period: str) -> tuple[datetime | None, datetime | None]:
     """Retorna (start, end) para o período de métricas.
 
@@ -51,12 +65,39 @@ def _period_bounds(period: str) -> tuple[datetime | None, datetime | None]:
         '30d'   → início de hoje - 29 dias até início de amanhã
         'all'   → (None, None) — sem filtro temporal
 
+    Períodos personalizados:
+        'custom_date:YYYY-MM-DD' → dia local específico inteiro
+        'custom_range:start:end' → intervalo inclusivo local
+
     Valor inválido ou ausente cai para 'today'.
     """
     if period == "all":
         return None, None
 
     today_start, tomorrow_start = local_day_bounds()
+
+    # Período personalizado: data específica
+    if period.startswith("custom_date:"):
+        parsed = _parse_iso_date(period.split(":", 1)[1])
+        if parsed is not None:
+            return local_day_bounds(parsed)
+        # Fallback seguro para today
+        return today_start, tomorrow_start
+
+    # Período personalizado: intervalo inclusivo
+    if period.startswith("custom_range:"):
+        parts = period.split(":", 2)
+        if len(parts) == 3:
+            start_date = _parse_iso_date(parts[1])
+            end_date = _parse_iso_date(parts[2])
+            if start_date is not None and end_date is not None and start_date <= end_date:
+                start = local_day_bounds(start_date)[0]
+                # end é exclusivo: início do dia seguinte a end_date
+                next_day = end_date + timedelta(days=1)
+                end = local_day_bounds(next_day)[0]
+                return start, end
+        # Fallback seguro para today
+        return today_start, tomorrow_start
 
     if period == "7d":
         return today_start - timedelta(days=6), tomorrow_start
@@ -563,12 +604,18 @@ def _dashboard_case_list_context(request: HttpRequest) -> dict[str, Any]:
     enriched_cases = [_enrich_case(c, now=now, attention_filter=attention_filter) for c in page_obj]
 
     # Período das métricas — preservado nos links de filtro/paginação
+    # Aceita presets e períodos personalizados
     raw_metrics_period = request.GET.get("metrics_period", "")
-    valid_periods = {"today", "7d", "30d", "all"}
+    valid_periods = {"today", "7d", "30d", "all", "custom_date", "custom_range"}
     if raw_metrics_period not in valid_periods:
         metrics_period = ""
     else:
         metrics_period = raw_metrics_period
+
+    # Campos personalizados preservados
+    metrics_date = request.GET.get("metrics_date", "")
+    metrics_start = request.GET.get("metrics_start", "")
+    metrics_end = request.GET.get("metrics_end", "")
 
     return {
         "cases": enriched_cases,
@@ -582,6 +629,9 @@ def _dashboard_case_list_context(request: HttpRequest) -> dict[str, Any]:
         "attention_filter": attention_filter,
         "attention_count": attention_count,
         "metrics_period": metrics_period,
+        "metrics_date": metrics_date,
+        "metrics_start": metrics_start,
+        "metrics_end": metrics_end,
     }
 
 
@@ -607,25 +657,85 @@ def dashboard_index(request: HttpRequest) -> HttpResponse:
 
     # Período das métricas — usa query string metrics_period, padrão hoje
     raw_metrics_period = request.GET.get("metrics_period", "")
-    valid_periods = {"today", "7d", "30d", "all"}
-    if raw_metrics_period not in valid_periods:
-        metrics_period = "today"
-    else:
+
+    # Parâmetros personalizados
+    raw_metrics_date = request.GET.get("metrics_date", "")
+    raw_metrics_start = request.GET.get("metrics_start", "")
+    raw_metrics_end = request.GET.get("metrics_end", "")
+
+    # Valida e resolve o período
+    metrics_period_error = ""
+
+    if raw_metrics_period == "custom_date":
+        parsed_date = _parse_iso_date(raw_metrics_date)
+        if parsed_date is None:
+            metrics_period = "today"
+            metrics_period_error = "Período personalizado inválido. Exibindo métricas de hoje."
+        else:
+            metrics_period = f"custom_date:{raw_metrics_date}"
+    elif raw_metrics_period == "custom_range":
+        parsed_start = _parse_iso_date(raw_metrics_start)
+        parsed_end = _parse_iso_date(raw_metrics_end)
+        if parsed_start is None or parsed_end is None or parsed_start > parsed_end:
+            metrics_period = "today"
+            metrics_period_error = "Período personalizado inválido. Exibindo métricas de hoje."
+        else:
+            metrics_period = f"custom_range:{raw_metrics_start}:{raw_metrics_end}"
+    elif raw_metrics_period in {"today", "7d", "30d", "all"}:
         metrics_period = raw_metrics_period
+    else:
+        metrics_period = "today"
 
     summary = _compute_summary(period=metrics_period)
     stage_waiting = _compute_stage_waiting()
     admission_flow = _compute_admission_flow(period=metrics_period)
     avg_times = _compute_average_times(period=metrics_period)
 
-    # Label para o card de total
+    # Labels
     period_labels = {
         "today": "Total Hoje",
         "7d": "Total 7 dias",
         "30d": "Total 30 dias",
         "all": "Total geral",
     }
-    total_label = period_labels.get(metrics_period, "Total Hoje")
+    period_labels_display = {
+        "today": "Métricas de hoje",
+        "7d": "Métricas dos últimos 7 dias",
+        "30d": "Métricas dos últimos 30 dias",
+        "all": "Métricas de todo o histórico",
+    }
+
+    # Label para exibição do período ativo
+    # Usa metrics_period (já resolvido) como base para o display,
+    # para que fallbacks com erro mostrem o label correto (e.g. "Métricas de hoje")
+    resolved_for_display = metrics_period
+    if metrics_period.startswith("custom_date:"):
+        resolved_for_display = "custom_date"
+    elif metrics_period.startswith("custom_range:"):
+        resolved_for_display = "custom_range"
+    elif metrics_period not in period_labels:
+        resolved_for_display = "today"
+    metrics_period_label = period_labels_display.get(resolved_for_display, "Métricas de hoje")
+    total_label = period_labels.get(resolved_for_display, "Total Hoje")
+
+    # Labels personalizados (apenas se não houve erro)
+    if not metrics_period_error:
+        if metrics_period.startswith("custom_date:"):
+            parsed_date = _parse_iso_date(metrics_period.split(":", 1)[1])
+            if parsed_date is not None:
+                date_formatted = parsed_date.strftime("%d/%m/%Y")
+                metrics_period_label = f"Métricas de {date_formatted}"
+                total_label = f"Total {date_formatted}"
+        elif metrics_period.startswith("custom_range:"):
+            parts = metrics_period.split(":", 2)
+            if len(parts) == 3:
+                parsed_start = _parse_iso_date(parts[1])
+                parsed_end = _parse_iso_date(parts[2])
+                if parsed_start is not None and parsed_end is not None:
+                    start_formatted = parsed_start.strftime("%d/%m/%Y")
+                    end_formatted = parsed_end.strftime("%d/%m/%Y")
+                    metrics_period_label = f"Métricas de {start_formatted} a {end_formatted}"
+                    total_label = "Total período"
 
     # Último resumo para o card no dashboard
     latest_summary = SupervisorSummary.objects.order_by("-window_end").first()
@@ -643,6 +753,8 @@ def dashboard_index(request: HttpRequest) -> HttpResponse:
             "avg_times": avg_times,
             "latest_summary": latest_summary,
             "total_label": total_label,
+            "metrics_period_label": metrics_period_label,
+            "metrics_period_error": metrics_period_error,
             "status_choices": CaseStatus.choices,
             "STATUS_LABELS": STATUS_LABELS,
             **case_list_context,
