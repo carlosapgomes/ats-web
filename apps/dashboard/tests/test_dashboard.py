@@ -3805,6 +3805,8 @@ class TestDashboardCustomDateRange:
         assert ".metrics-period-custom" in css_content
         assert ".metrics-period-date-control" in css_content
         assert ".metrics-period-date-icon" in css_content
+        assert ".dashboard-date-control" in css_content
+        assert ".dashboard-date-icon" in css_content
         assert "display: none;" in css_content, "Ícone customizado deve ficar oculto por padrão no desktop"
         assert "@media (max-width: 575.98px)" in css_content
         assert "display: inline-flex;" in css_content, "Ícone customizado deve aparecer só no mobile"
@@ -3823,6 +3825,20 @@ class TestDashboardCustomDateRange:
         assert 'name="metrics_start"' in content, "Template deve conter input metrics_start"
         assert 'name="metrics_end"' in content, "Template deve conter input metrics_end"
         assert content.count("bi-calendar-event") >= 3, "Cada campo date deve ter ícone discreto de calendário"
+
+    def test_case_filter_date_inputs_have_mobile_calendar_icons(self, client) -> None:
+        """Filtros Data inicial/final também recebem dica visual mobile de calendário."""
+        _login_as(client, "manager")
+        response = client.get(reverse("dashboard:index"))
+        assert response.status_code == 200
+        content = response.content.decode()
+
+        assert "dashboard-date-control" in content, "Filtros de data devem ter wrapper próprio"
+        assert "dashboard-date-icon" in content, "Filtros de data devem ter ícone mobile"
+        assert 'name="date_from"' in content
+        assert 'name="date_to"' in content
+        assert "dashboard-date-input" in content
+        assert content.count("bi-calendar-event") >= 5, "3 campos métricas + 2 filtros devem ter SVG calendar-event"
 
     def test_metrics_custom_params_preserved_in_case_filter_form(self, client) -> None:
         """Filtro da lista preserva metrics_period e campos customizados como hidden."""

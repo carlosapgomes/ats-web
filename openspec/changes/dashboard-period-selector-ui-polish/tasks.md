@@ -6,6 +6,7 @@
 
 - [x] Slice 001 — Reorganizar seletor de período como toolbar/card responsivo (`slices/slice-001-period-selector-toolbar.md`)
   - Follow-up mobile: campos `type="date"` do `Personalizado` receberam wrapper `.metrics-period-date-control` com SVG Bootstrap Icons `calendar-event` monocromático, evitando campos brancos sem dica visual no Android/iPhone sem depender de placeholder nativo. O ícone customizado fica oculto por padrão e aparece apenas em mobile (`max-width: 575.98px`), pois desktop já renderiza indicador/placeholder nativo.
+  - Follow-up mobile adicional: os filtros `Data inicial`/`Data final` do card `Todos os Casos` receberam o mesmo padrão mobile-only via `.dashboard-date-control`/`.dashboard-date-icon`, preservando o desktop nativo.
 
 ## Definition of Done do change
 
