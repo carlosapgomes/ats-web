@@ -8,7 +8,7 @@ from django.core.files.base import ContentFile
 from django.urls import reverse
 from django.utils import timezone
 
-from apps.cases.models import Case, CaseEvent, CaseStatus, SupervisorSummary
+from apps.cases.models import Case, CaseAttachment, CaseEvent, CaseStatus, SupervisorSummary
 
 User = get_user_model()
 
@@ -724,6 +724,20 @@ class TestDashboardCaseDetailNavPdf:
         content = response.content.decode()
         assert "Novo Encaminhamento" not in content
         assert "Meus Casos" not in content
+
+    def test_case_detail_preserves_dashboard_admin_nav(self, client) -> None:
+        """Detalhe aberto pelo dashboard mantém abas Dashboard/Prompts/Usuários."""
+        user = _login_as(client, "manager")
+        case = _create_case(created_by=user, status=CaseStatus.NEW)
+        response = client.get(reverse("dashboard:case_detail", args=[case.case_id]))
+        assert response.status_code == 200
+        content = response.content.decode()
+        assert reverse("dashboard:index") in content
+        assert reverse("admin_ui:prompt_list") in content
+        assert reverse("admin_ui:user_list") in content
+        assert "Dashboard" in content
+        assert "Prompts" in content
+        assert "Usuários" in content
 
     # ── Back to dashboard ─────────────────────────────────────────────
 
@@ -4022,6 +4036,20 @@ class TestDashboardPdfViewerView:
         response = client.get(reverse("dashboard:pdf_viewer", args=[case.case_id]))
         assert response.status_code == 200
 
+    def test_pdf_viewer_preserves_dashboard_admin_nav(self, client) -> None:
+        """Viewer mobile de PDF mantém abas Dashboard/Prompts/Usuários."""
+        user = self._login_as(client, "manager")
+        case = self._create_case_with_pdf(created_by=user, status=CaseStatus.NEW)
+        response = client.get(reverse("dashboard:pdf_viewer", args=[case.case_id]))
+        assert response.status_code == 200
+        content = response.content.decode()
+        assert reverse("dashboard:index") in content
+        assert reverse("admin_ui:prompt_list") in content
+        assert reverse("admin_ui:user_list") in content
+        assert "Dashboard" in content
+        assert "Prompts" in content
+        assert "Usuários" in content
+
     def test_pdf_viewer_404_when_no_pdf(self, client) -> None:
         """dashboard:pdf_viewer returns 404 when case has no pdf_file."""
         user = self._login_as(client, "manager")
@@ -4156,6 +4184,55 @@ class TestDashboardCaseDetailMobilePdfLink:
         assert f'<embed src="{case_pdf_url}"' in content or ('<embed src="' in content and case_pdf_url in content), (
             "Desktop embed should use dashboard:case_pdf"
         )
+
+    def test_dashboard_case_detail_mobile_attachment_pdf_link_uses_dashboard_viewer(self, client) -> None:
+        """Anexo PDF no detalhe dashboard mobile usa viewer do dashboard, não rota NIR."""
+        user = self._login_as(client, "manager")
+        case = Case.objects.create(created_by=user, status=CaseStatus.NEW)
+        attachment = CaseAttachment.objects.create(
+            case=case,
+            file=ContentFile(b"%PDF-1.4 fake attachment", name="anexo.pdf"),
+            original_filename="anexo.pdf",
+            stored_filename="anexo.pdf",
+            content_type="application/pdf",
+            size_bytes=24,
+            sha256="a" * 64,
+            uploaded_by=user,
+        )
+
+        response = client.get(reverse("dashboard:case_detail", args=[case.case_id]))
+
+        assert response.status_code == 200
+        content = response.content.decode()
+        viewer_url = reverse("dashboard:attachment_pdf_viewer", args=[case.case_id, attachment.attachment_id])
+        assert viewer_url in content
+        assert reverse("intake:attachment_pdf_viewer", args=[case.case_id, attachment.attachment_id]) not in content
+
+    def test_dashboard_attachment_pdf_viewer_preserves_dashboard_admin_nav(self, client) -> None:
+        """Viewer mobile de anexo PDF mantém abas Dashboard/Prompts/Usuários."""
+        user = self._login_as(client, "manager")
+        case = Case.objects.create(created_by=user, status=CaseStatus.NEW)
+        attachment = CaseAttachment.objects.create(
+            case=case,
+            file=ContentFile(b"%PDF-1.4 fake attachment", name="anexo.pdf"),
+            original_filename="anexo.pdf",
+            stored_filename="anexo.pdf",
+            content_type="application/pdf",
+            size_bytes=24,
+            sha256="b" * 64,
+            uploaded_by=user,
+        )
+
+        response = client.get(reverse("dashboard:attachment_pdf_viewer", args=[case.case_id, attachment.attachment_id]))
+
+        assert response.status_code == 200
+        content = response.content.decode()
+        assert reverse("dashboard:index") in content
+        assert reverse("admin_ui:prompt_list") in content
+        assert reverse("admin_ui:user_list") in content
+        assert "Dashboard" in content
+        assert "Prompts" in content
+        assert "Usuários" in content
 
 
 @pytest.mark.django_db
