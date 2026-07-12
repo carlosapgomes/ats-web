@@ -3761,6 +3761,48 @@ class TestDashboardCustomDateRange:
         # Deve mostrar feedback discreto
         assert "Período personalizado inválido" in content, "Deve mostrar feedback de erro"
 
+    def test_metrics_period_selector_uses_hospital_toolbar_classes(self, client) -> None:
+        """Seletor de período usa card/toolbar próprio alinhado ao tema hospitalar."""
+        _login_as(client, "manager")
+        response = client.get(reverse("dashboard:index"))
+        assert response.status_code == 200
+        content = response.content.decode()
+
+        assert "metrics-period-card" in content, "Seletor deve estar dentro de um card compacto"
+        assert "metrics-period-options" in content, "Opções devem usar wrapper responsivo próprio"
+        assert "metrics-period-option" in content, "Botões devem usar classe própria do seletor"
+        assert "metrics-period-custom-panel" in content, "Painel personalizado deve ter classe própria"
+
+    def test_metrics_period_selector_does_not_use_bootstrap_primary_group(self, client) -> None:
+        """Seletor evita btn-group/btn-primary Bootstrap puro, que desalinha no mobile."""
+        _login_as(client, "manager")
+        response = client.get(reverse("dashboard:index"))
+        assert response.status_code == 200
+        content = response.content.decode()
+
+        selector_start = content.index('id="metrics-period-selector"')
+        selector_end = content.index("<!-- Summary Cards -->")
+        selector_html = content[selector_start:selector_end]
+
+        assert "btn-group" not in selector_html
+        assert "btn-primary" not in selector_html
+        assert "btn-outline-primary" not in selector_html
+
+    def test_metrics_period_selector_css_has_responsive_rules(self, client) -> None:
+        """CSS do seletor define toolbar hospitalar e comportamento mobile."""
+        _login_as(client, "manager")
+        response = client.get(reverse("dashboard:index"))
+        assert response.status_code == 200
+
+        css_path = "/projects/dev/ats-web/static/css/app.css"
+        with open(css_path) as f:
+            css_content = f.read()
+
+        assert ".metrics-period-options" in css_content
+        assert ".metrics-period-option.is-active" in css_content
+        assert ".metrics-period-custom" in css_content
+        assert "@media (max-width: 575.98px)" in css_content
+
     def test_template_renders_custom_metrics_controls(self, client) -> None:
         """Template contém Personalizado, Data específica, Intervalo e inputs."""
         _login_as(client, "manager")

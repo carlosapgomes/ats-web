@@ -211,6 +211,180 @@ body.hospital-shell h6 {
   color: #fff;
 }
 
+/* ---------- Dashboard metrics period selector ---------- */
+
+.metrics-period-card {
+  border-color: rgba(199, 216, 226, 0.85);
+  background: rgba(255, 255, 255, 0.74);
+}
+
+.metrics-period-toolbar {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.metrics-period-heading {
+  min-width: 12rem;
+}
+
+.metrics-period-title {
+  color: var(--hospital-text);
+  font-size: 0.92rem;
+  font-weight: 700;
+  letter-spacing: 0.01em;
+}
+
+.metrics-period-label {
+  margin-top: 0.15rem;
+  color: var(--hospital-muted);
+  font-size: 0.88rem;
+  font-style: italic;
+}
+
+.metrics-period-options {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.5rem;
+  width: 100%;
+}
+
+.metrics-period-option {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 40px;
+  border: 1px solid var(--hospital-border);
+  border-radius: 0.55rem;
+  background: rgba(255, 255, 255, 0.62);
+  color: var(--hospital-primary);
+  font-weight: 700;
+  line-height: 1.1;
+  text-align: center;
+  text-decoration: none;
+  white-space: nowrap;
+}
+
+.metrics-period-option:hover,
+.metrics-period-option:focus {
+  border-color: var(--hospital-primary);
+  background: var(--hospital-accent-light);
+  color: var(--hospital-primary);
+}
+
+.metrics-period-option.is-active {
+  border-color: var(--hospital-primary);
+  background: var(--hospital-primary);
+  color: #fff;
+  box-shadow: 0 0 0 0.12rem rgba(11, 66, 99, 0.16);
+}
+
+.metrics-period-custom {
+  grid-column: 1 / -1;
+}
+
+.metrics-period-custom > summary {
+  width: 100%;
+  cursor: pointer;
+  list-style: none;
+}
+
+.metrics-period-custom > summary::-webkit-details-marker {
+  display: none;
+}
+
+.metrics-period-custom-panel {
+  margin-top: 0.5rem;
+  padding: 0.75rem;
+  border: 1px solid var(--hospital-border);
+  border-radius: 0.75rem;
+  background: rgba(255, 255, 255, 0.88);
+}
+
+.metrics-period-custom-grid {
+  display: grid;
+  gap: 0.75rem;
+}
+
+.metrics-period-custom-form + .metrics-period-custom-form {
+  padding-top: 0.75rem;
+  border-top: 1px solid rgba(199, 216, 226, 0.72);
+}
+
+.metrics-period-custom-fields {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.metrics-period-date-input {
+  max-width: 11rem;
+}
+
+@media (min-width: 768px) {
+  .metrics-period-toolbar {
+    flex-direction: row;
+    align-items: center;
+  }
+
+  .metrics-period-options {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: flex-start;
+    width: auto;
+  }
+
+  .metrics-period-option {
+    min-width: 4.8rem;
+  }
+
+  .metrics-period-option--custom {
+    min-width: 9rem;
+  }
+
+  .metrics-period-custom {
+    position: relative;
+    grid-column: auto;
+  }
+
+  .metrics-period-custom-panel {
+    width: min(42rem, calc(100vw - 3rem));
+  }
+
+  .metrics-period-custom-grid {
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1.6fr);
+  }
+
+  .metrics-period-custom-form + .metrics-period-custom-form {
+    padding-top: 0;
+    padding-left: 0.75rem;
+    border-top: 0;
+    border-left: 1px solid rgba(199, 216, 226, 0.72);
+  }
+}
+
+@media (max-width: 575.98px) {
+  .metrics-period-heading {
+    min-width: 0;
+  }
+
+  .metrics-period-custom-panel {
+    padding: 0.65rem;
+  }
+
+  .metrics-period-custom-fields {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .metrics-period-date-input,
+  .metrics-period-custom-fields .btn {
+    width: 100%;
+    max-width: none;
+  }
+}
+
 /* ---------- Touch-friendly buttons ---------- */
 
 .btn {
