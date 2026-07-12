@@ -2295,6 +2295,134 @@ class TestSchedulerProcessedTodayTab:
         assert "PARTIAL-PROC" in content
         assert "Atualizado automaticamente" in content
 
+    # ── PDF viewer ─────────────────────────────────────────────────────────
+
+    def test_scheduler_processed_detail_mobile_pdf_link_uses_internal_viewer(self, client) -> None:
+        """RED: Processados Hoje detail mobile link usa viewer interno.
+
+        - link mobile aponta para scheduler:processed_pdf_viewer
+        - link mobile não usa target="_blank"
+        - desktop embed usa scheduler:processed_pdf
+        """
+        scheduler_user = self._login_as(client, "scheduler")
+        case = self._create_case(
+            scheduler_user=scheduler_user,
+            appointment_status="confirmed",
+            appointment_decided_at=timezone.now(),
+            agency_record_number="VIEWER-MOBILE",
+        )
+        response = client.get(f"/scheduler/processed/{case.case_id}/")
+        assert response.status_code == 200
+        content = response.content.decode()
+
+        # Mobile link deve conter processed_pdf_viewer e NÃO target="_blank" no link mobile
+        viewer_path = f"processed/{case.case_id}/pdf-viewer/"
+        assert viewer_path in content
+
+        # O link mobile (d-md-none) não deve conter target="_blank"
+        # Encontrar a seção do link mobile entre d-md-none e /a>
+        mobile_link_start = content.find("d-inline-flex d-md-none")
+        assert mobile_link_start >= 0, "Link mobile não encontrado"
+        mobile_link_end = content.find("</a>", mobile_link_start)
+        mobile_link_html = content[mobile_link_start:mobile_link_end]
+        assert 'target="_blank"' not in mobile_link_html, "Link mobile não deve conter target=_blank"
+
+        # Desktop embed ainda usa processed_pdf
+        assert f"processed/{case.case_id}/pdf/" in content
+        assert "<embed" in content
+
+    def test_scheduler_processed_detail_contextual_without_pdf_url_no_viewer_link(self, client) -> None:
+        """RED: Contextual/notificação sem pdf_url não ganha link de viewer quebrado."""
+        from apps.accounts.models import UserNotification
+
+        scheduler_user = self._login_as(client, "scheduler")
+        nir_user = User.objects.create_user(username="nir_context_nopdf@test.com", password="testpass123")
+        nir_user.roles.add(self._create_role("nir"))
+        case = Case.objects.create(
+            created_by=nir_user,
+            status=CaseStatus.WAIT_R1_CLEANUP_THUMBS,
+            doctor_decision="accept",
+            doctor_admission_flow="scheduled",
+            appointment_status="confirmed",
+            scheduler=scheduler_user,
+            structured_data={"patient": {"name": "Contexto Sem PDF", "age": 50, "gender": "M"}},
+        )
+        case.save()
+
+        # Criar notificação para scheduler acessar via contexto
+        UserNotification.objects.create(
+            recipient=scheduler_user,
+            case=case,
+            title="Menção",
+            body_preview="Você foi mencionado",
+        )
+
+        response = client.get(f"/scheduler/context/{case.case_id}/")
+        assert response.status_code == 200
+        content = response.content.decode()
+
+        # Sem pdf_url, não deve ter link de viewer
+        assert "pdf-viewer/" not in content
+        assert "Visualizar PDF" not in content
+
+    def test_scheduler_processed_pdf_viewer_authorized_scheduler_renders(self, client) -> None:
+        """RED: Viewer renderiza 200 para scheduler autorizado.
+
+        - contém scheduler:processed_pdf como fonte
+        - contém dois "Voltar"
+        - contém fallback de PDF original
+        """
+        scheduler_user = self._login_as(client, "scheduler")
+        case = self._create_case(
+            scheduler_user=scheduler_user,
+            appointment_status="confirmed",
+            appointment_decided_at=timezone.now(),
+            agency_record_number="VIEWER-RENDERS",
+            pdf_file=SimpleUploadedFile("test.pdf", b"%PDF-1.4 test", content_type="application/pdf"),
+        )
+        response = client.get(f"/scheduler/processed/{case.case_id}/pdf-viewer/")
+        assert response.status_code == 200
+        content = response.content.decode()
+
+        # Viewer contém sduler:processed_pdf como fonte
+        assert f"processed/{case.case_id}/pdf/" in content
+
+        # Dois "Voltar"
+        assert content.count("Voltar") >= 2
+
+        # Fallback de PDF original
+        assert "fallback-pdf-url" in content or "abrir o PDF original" in content
+
+    def test_scheduler_processed_pdf_viewer_404_for_other_scheduler_case(self, client) -> None:
+        """RED: Viewer retorna 404 para scheduler de outro caso."""
+        self._login_as(client, "scheduler")
+        other_scheduler = User.objects.create_user(username="other_sched_viewer@test.com", password="testpass123")
+        other_scheduler.roles.add(self._create_role("scheduler"))
+        case = self._create_case(
+            scheduler_user=other_scheduler,
+            appointment_status="confirmed",
+            appointment_decided_at=timezone.now(),
+            agency_record_number="OTHER-VIEWER",
+        )
+        response = client.get(f"/scheduler/processed/{case.case_id}/pdf-viewer/")
+        assert response.status_code == 404
+
+    def test_scheduler_processed_pdf_response_has_no_store_cache_control(self, client) -> None:
+        """RED: scheduler:processed_pdf tem Cache-Control: no-store."""
+        scheduler_user = self._login_as(client, "scheduler")
+        case = self._create_case(
+            scheduler_user=scheduler_user,
+            appointment_status="confirmed",
+            appointment_decided_at=timezone.now(),
+            agency_record_number="CACHE-NO-STORE",
+            pdf_file=SimpleUploadedFile("test.pdf", b"%PDF-1.4 test", content_type="application/pdf"),
+        )
+        response = client.get(f"/scheduler/processed/{case.case_id}/pdf/")
+        assert response.status_code == 200
+        cache_control = response.headers.get("Cache-Control", "")
+        assert "no-store" in cache_control
+        assert response.headers.get("Content-Type") == "application/pdf"
+
 
 @pytest.mark.django_db
 class TestSchedulerQueueRegulationDays:

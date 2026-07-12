@@ -13,6 +13,7 @@ from django.http import FileResponse, Http404, HttpRequest, HttpResponse, HttpRe
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
 from django.utils import timezone
+from django.utils.http import url_has_allowed_host_and_scheme
 from django.views.decorators.clickjacking import xframe_options_sameorigin
 
 from apps.accounts.decorators import role_required
@@ -305,12 +306,19 @@ def scheduler_processed_detail(request: HttpRequest, case_id: uuid.UUID) -> Http
     back_url = reverse("scheduler:queue") + "?tab=processed"
     back_label = "← Voltar aos processados hoje"
 
+    pdf_url = reverse("scheduler:processed_pdf", args=[case.case_id])
+    mobile_pdf_viewer_url = (
+        reverse("scheduler:processed_pdf_viewer", args=[case.case_id])
+        + f"?next={reverse('scheduler:processed_detail', args=[case.case_id])}"
+    )
+
     context = _build_scheduler_detail_context(
         request=request,
         case=case,
         back_url=back_url,
         back_label=back_label,
-        pdf_url=reverse("scheduler:processed_pdf", args=[case.case_id]),
+        pdf_url=pdf_url,
+        mobile_pdf_viewer_url=mobile_pdf_viewer_url,
     )
 
     return render(request, "scheduler/context_detail.html", context)
@@ -321,18 +329,55 @@ def scheduler_processed_detail(request: HttpRequest, case_id: uuid.UUID) -> Http
 @xframe_options_sameorigin
 def scheduler_processed_pdf(request: HttpRequest, case_id: uuid.UUID) -> HttpResponseBase:
     """Serve PDF for a case processed by the logged-in scheduler."""
-    case = get_object_or_404(
-        Case,
-        case_id=case_id,
-        scheduler=request.user,
-        appointment_status__in=["confirmed", "denied"],
-    )
+    case = _get_scheduler_processed_case_or_404(case_id, request.user)
     if not case.pdf_file:
         raise Http404("PDF não encontrado para este caso.")
-    return FileResponse(
+    response = FileResponse(
         case.pdf_file.open("rb"),
         content_type="application/pdf",
     )
+    response["Cache-Control"] = "no-store"
+    return response
+
+
+@login_required
+@role_required("scheduler")
+def scheduler_processed_pdf_viewer(request: HttpRequest, case_id: uuid.UUID) -> HttpResponse:
+    """Render internal PDF viewer for a case processed by the logged-in scheduler.
+
+    Uses the shared mobile_pdf_viewer.html template with:
+    - pdf_url: protected scheduler:processed_pdf route as source
+    - back_url: validated next or canonical fallback to processed_detail
+    - fallback_pdf_url: same protected PDF route for error recovery
+    """
+    case = _get_scheduler_processed_case_or_404(case_id, request.user)
+    if not case.pdf_file:
+        raise Http404("PDF não encontrado para este caso.")
+
+    pdf_url = reverse("scheduler:processed_pdf", args=[case.case_id])
+    detail_url = reverse("scheduler:processed_detail", args=[case.case_id])
+
+    # Validate next URL or fall back to canonical processed detail
+    next_url = request.GET.get("next", "")
+    if next_url and url_has_allowed_host_and_scheme(
+        url=next_url,
+        allowed_hosts={request.get_host()},
+        require_https=request.is_secure(),
+    ):
+        back_url = next_url
+    else:
+        back_url = detail_url
+
+    context: dict[str, Any] = {
+        "viewer_title": "PDF original",
+        "case": case,
+        "pdf_url": pdf_url,
+        "fallback_pdf_url": pdf_url,
+        "back_url": back_url,
+        "back_label": "← Voltar",
+    }
+
+    return render(request, "pdf_viewer/mobile_pdf_viewer.html", context)
 
 
 # ── Context detail (read-only, by mention) ─────────────────────────────────
@@ -384,6 +429,24 @@ def _scheduler_historical_queryset() -> QuerySet[Case]:
     )
 
 
+# ── Authorization helper for processed cases ──────────────────────────
+
+
+def _get_scheduler_processed_case_or_404(case_id: uuid.UUID, user: Any) -> Case:
+    """Return a processed case owned by the given scheduler, or raise 404.
+
+    Shared between scheduler_processed_pdf and scheduler_processed_pdf_viewer
+    to avoid duplicating the authorization logic.
+    """
+    case = get_object_or_404(
+        Case,
+        case_id=case_id,
+        scheduler=user,
+        appointment_status__in=["confirmed", "denied"],
+    )
+    return case
+
+
 # ── Shared helper for scheduler detail context ─────────────────────────
 
 
@@ -394,6 +457,7 @@ def _build_scheduler_detail_context(
     back_url: str,
     back_label: str,
     pdf_url: str | None = None,
+    mobile_pdf_viewer_url: str | None = None,
 ) -> dict[str, Any]:
     """Build context for scheduler case detail template (context_detail.html).
 
@@ -402,6 +466,9 @@ def _build_scheduler_detail_context(
     - scheduler_processed_detail (detalhe de processados hoje)
 
     Não adquire lock, não altera FSM, não mostra ações de workflow.
+
+    mobile_pdf_viewer_url is only passed for processed cases (never for
+    historical/contextual access without PDF).
     """
     from apps.intake.views import (
         EVENT_DOT_CSS,
@@ -501,6 +568,8 @@ def _build_scheduler_detail_context(
         else "",
         # PDF link (only for processes hoje — never for historical/contextual)
         "pdf_url": pdf_url,
+        # Mobile internal PDF viewer (only for processed cases)
+        "mobile_pdf_viewer_url": mobile_pdf_viewer_url,
     }
 
     return context
