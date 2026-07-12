@@ -20,6 +20,7 @@ from apps.cases.admission import (
     is_operational_notice_flow,
 )
 from apps.cases.models import Case, CaseAttachment, CaseStatus
+from apps.cases.navigation import resolve_safe_next_url
 from apps.cases.services import (
     CASE_COMMUNICATION_MAX_LENGTH,
     ELIGIBLE_SUPPLEMENTAL_STATUSES,
@@ -1465,19 +1466,6 @@ def closed_case_pdf(request: HttpRequest, case_id: uuid.UUID) -> HttpResponseBas
     return response
 
 
-def _intake_validate_next_url(next_url: str, request: HttpRequest) -> str | None:
-    """Validate a next URL is safe for intake views, return None if unsafe."""
-    from django.utils.http import url_has_allowed_host_and_scheme
-
-    if next_url and url_has_allowed_host_and_scheme(
-        url=next_url,
-        allowed_hosts={request.get_host()},
-        require_https=request.is_secure(),
-    ):
-        return next_url
-    return None
-
-
 @login_required
 @role_required("nir")
 def pdf_viewer(request: HttpRequest, case_id: uuid.UUID) -> HttpResponse:
@@ -1493,8 +1481,7 @@ def pdf_viewer(request: HttpRequest, case_id: uuid.UUID) -> HttpResponse:
     if not case.pdf_file:
         raise Http404("PDF não encontrado para este caso.")
 
-    raw_next = request.GET.get("next", "")
-    back_url = _intake_validate_next_url(raw_next, request) or reverse("intake:case_detail", args=[case.case_id])
+    back_url = resolve_safe_next_url(request, reverse("intake:case_detail", args=[case.case_id]))
 
     pdf_url = reverse("intake:serve_pdf", args=[case.case_id])
 
@@ -1526,8 +1513,7 @@ def closed_case_pdf_viewer(request: HttpRequest, case_id: uuid.UUID) -> HttpResp
     if not case.pdf_file:
         raise Http404("PDF não encontrado para este caso.")
 
-    raw_next = request.GET.get("next", "")
-    back_url = _intake_validate_next_url(raw_next, request) or reverse("intake:closed_case_detail", args=[case.case_id])
+    back_url = resolve_safe_next_url(request, reverse("intake:closed_case_detail", args=[case.case_id]))
 
     pdf_url = reverse("intake:closed_case_pdf", args=[case.case_id])
 

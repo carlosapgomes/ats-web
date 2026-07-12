@@ -7,6 +7,7 @@ from typing import Any
 import pytest
 from django.contrib.auth import get_user_model
 from django.core.files.uploadedfile import SimpleUploadedFile
+from django.urls import reverse
 from django.utils import timezone
 
 from apps.accounts.models import Role
@@ -2422,6 +2423,44 @@ class TestSchedulerProcessedTodayTab:
         cache_control = response.headers.get("Cache-Control", "")
         assert "no-store" in cache_control
         assert response.headers.get("Content-Type") == "application/pdf"
+
+    def test_processed_pdf_viewer_rejects_external_next(self, client) -> None:
+        """Back URL falls back to scheduler:processed_detail when next is external."""
+        scheduler_user = self._login_as(client, "scheduler")
+        case = self._create_case(
+            scheduler_user=scheduler_user,
+            appointment_status="confirmed",
+            appointment_decided_at=timezone.now(),
+            agency_record_number="EXT-NEXT",
+            pdf_file=SimpleUploadedFile("test.pdf", b"%PDF-1.4 test", content_type="application/pdf"),
+        )
+        detail_url = reverse("scheduler:processed_detail", args=[case.case_id])
+        response = client.get(
+            reverse("scheduler:processed_pdf_viewer", args=[case.case_id]) + "?next=https://evil.example.com/phish"
+        )
+        assert response.status_code == 200
+        content = response.content.decode()
+        assert "evil.example" not in content
+        assert detail_url in content
+
+    def test_processed_pdf_viewer_rejects_protocol_relative_next(self, client) -> None:
+        """Back URL falls back to scheduler:processed_detail when next is protocol-relative."""
+        scheduler_user = self._login_as(client, "scheduler")
+        case = self._create_case(
+            scheduler_user=scheduler_user,
+            appointment_status="confirmed",
+            appointment_decided_at=timezone.now(),
+            agency_record_number="PROTO-REL",
+            pdf_file=SimpleUploadedFile("test.pdf", b"%PDF-1.4 test", content_type="application/pdf"),
+        )
+        detail_url = reverse("scheduler:processed_detail", args=[case.case_id])
+        response = client.get(
+            reverse("scheduler:processed_pdf_viewer", args=[case.case_id]) + "?next=//evil.example.com/phish"
+        )
+        assert response.status_code == 200
+        content = response.content.decode()
+        assert "evil.example" not in content
+        assert detail_url in content
 
 
 @pytest.mark.django_db

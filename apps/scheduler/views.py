@@ -13,7 +13,6 @@ from django.http import FileResponse, Http404, HttpRequest, HttpResponse, HttpRe
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
 from django.utils import timezone
-from django.utils.http import url_has_allowed_host_and_scheme
 from django.views.decorators.clickjacking import xframe_options_sameorigin
 
 from apps.accounts.decorators import role_required
@@ -26,6 +25,7 @@ from apps.cases.admission import (
     get_admission_flow_notice_copy,
 )
 from apps.cases.models import Case, CaseEvent, CaseStatus
+from apps.cases.navigation import resolve_safe_next_url
 from apps.cases.services import (
     CASE_COMMUNICATION_MAX_LENGTH,
     CaseCommunicationError,
@@ -357,16 +357,7 @@ def scheduler_processed_pdf_viewer(request: HttpRequest, case_id: uuid.UUID) -> 
     pdf_url = reverse("scheduler:processed_pdf", args=[case.case_id])
     detail_url = reverse("scheduler:processed_detail", args=[case.case_id])
 
-    # Validate next URL or fall back to canonical processed detail
-    next_url = request.GET.get("next", "")
-    if next_url and url_has_allowed_host_and_scheme(
-        url=next_url,
-        allowed_hosts={request.get_host()},
-        require_https=request.is_secure(),
-    ):
-        back_url = next_url
-    else:
-        back_url = detail_url
+    back_url = resolve_safe_next_url(request, detail_url)
 
     context: dict[str, Any] = {
         "viewer_title": "PDF original",

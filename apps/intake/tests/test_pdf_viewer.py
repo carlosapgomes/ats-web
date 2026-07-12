@@ -199,6 +199,28 @@ class TestIntakePdfViewerView:
         content = response.content.decode()
         assert case_detail_url in content
 
+    def test_pdf_viewer_rejects_external_next(self, client) -> None:
+        """Back URL falls back to intake:case_detail when next is external."""
+        case = self._create_operational_case_with_pdf()
+        self._login_as(client, "nir")
+        case_detail_url = reverse("intake:case_detail", args=[case.case_id])
+        response = client.get(
+            reverse("intake:pdf_viewer", args=[case.case_id]) + "?next=https://evil.example.com/phish"
+        )
+        content = response.content.decode()
+        assert "evil.example" not in content
+        assert case_detail_url in content
+
+    def test_pdf_viewer_rejects_protocol_relative_next(self, client) -> None:
+        """Back URL falls back to intake:case_detail when next is protocol-relative."""
+        case = self._create_operational_case_with_pdf()
+        self._login_as(client, "nir")
+        case_detail_url = reverse("intake:case_detail", args=[case.case_id])
+        response = client.get(reverse("intake:pdf_viewer", args=[case.case_id]) + "?next=//evil.example.com/phish")
+        content = response.content.decode()
+        assert "evil.example" not in content
+        assert case_detail_url in content
+
 
 @pytest.mark.django_db
 class TestIntakeClosedCasePdfViewerView:
@@ -284,6 +306,30 @@ class TestIntakeClosedCasePdfViewerView:
         closed_detail_url = reverse("intake:closed_case_detail", args=[case.case_id])
         assert closed_detail_url in content
 
+    def test_closed_pdf_viewer_rejects_external_next(self, client) -> None:
+        """Back URL falls back to closed_case_detail when next is external."""
+        case = self._create_cleaned_case_with_pdf()
+        self._login_as(client, "nir")
+        closed_detail_url = reverse("intake:closed_case_detail", args=[case.case_id])
+        response = client.get(
+            reverse("intake:closed_case_pdf_viewer", args=[case.case_id]) + "?next=https://evil.example.com/phish"
+        )
+        content = response.content.decode()
+        assert "evil.example" not in content
+        assert closed_detail_url in content
+
+    def test_closed_pdf_viewer_rejects_protocol_relative_next(self, client) -> None:
+        """Back URL falls back to closed_case_detail when next is protocol-relative."""
+        case = self._create_cleaned_case_with_pdf()
+        self._login_as(client, "nir")
+        closed_detail_url = reverse("intake:closed_case_detail", args=[case.case_id])
+        response = client.get(
+            reverse("intake:closed_case_pdf_viewer", args=[case.case_id]) + "?next=//evil.example.com/phish"
+        )
+        content = response.content.decode()
+        assert "evil.example" not in content
+        assert closed_detail_url in content
+
     def test_closed_pdf_viewer_has_fallback(self, client) -> None:
         """Viewer contains fallback to open original PDF."""
         case = self._create_cleaned_case_with_pdf()
@@ -291,6 +337,17 @@ class TestIntakeClosedCasePdfViewerView:
         response = client.get(reverse("intake:closed_case_pdf_viewer", args=[case.case_id]))
         content = response.content.decode()
         assert "Abrir PDF original" in content or "PDF original" in content
+
+    def test_closed_pdf_viewer_accepts_safe_next(self, client) -> None:
+        """Back URL uses safe next param when provided."""
+        case = self._create_cleaned_case_with_pdf()
+        self._login_as(client, "nir")
+        closed_detail_url = reverse("intake:closed_case_detail", args=[case.case_id])
+        response = client.get(
+            reverse("intake:closed_case_pdf_viewer", args=[case.case_id]) + f"?next={closed_detail_url}"
+        )
+        content = response.content.decode()
+        assert closed_detail_url in content
 
 
 @pytest.mark.django_db
