@@ -444,6 +444,21 @@ body.hospital-shell h6 {
   min-height: 48px;
 }
 
+/* ---------- Badge responsivo (wrap em mobile) ---------- */
+
+.badge-wrap {
+  max-width: 100%;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  text-align: left;
+  line-height: 1.25;
+}
+
+/* Container flexível para badges do dashboard */
+.dashboard-case-badges {
+  min-width: 0;
+}
+
 /* ---------- Badges & status ---------- */
 
 .badge-hospital-primary {
