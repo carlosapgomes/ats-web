@@ -8,6 +8,7 @@
 - [x] Slice 003b — Follow-up técnico: consolidar validação de `next` dos PDF viewers antes dos anexos (`slices/slice-003b-consolidate-pdf-viewer-next-validation.md`)
 - [x] Slice 004 — Anexos PDF: viewer mobile interno para anexos clínicos PDF (`slices/slice-004-pdf-attachments-viewer.md`)
 - [x] Slice 005 — NIR histórico: anexos PDF de casos encerrados com viewer mobile interno (`slices/slice-005-closed-case-attachment-pdf-viewer.md`)
+- [x] Slice 006 — Anexos imagem: viewer interno mobile para PNG/JPEG (`slices/slice-006-image-attachments-viewer.md`)
 
 ## Definition of Done do change
 
@@ -24,6 +25,7 @@
 - [x] Nenhuma rota passa a expor `MEDIA_URL` ou caminho físico do arquivo.
 - [x] Respostas PDF tocadas têm `Cache-Control: no-store` e mantêm `Content-Type: application/pdf`.
 - [ ] Anexos PDF em detalhe histórico NIR (`closed_case_detail.html`) usam viewer interno no mobile e rota histórica autorizada no desktop.
+- [x] Anexos PNG/JPEG usam viewer interno no mobile nas superfícies doctor, NIR operacional e NIR histórico, preservando `<img>` inline no desktop.
 - [x] Testes relevantes adicionados/ajustados seguindo TDD.
 - [x] Quality gate do AGENTS.md executado por slice:
   - [x] `uv run ruff check .`

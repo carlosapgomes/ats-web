@@ -16,6 +16,11 @@ urlpatterns = [
         name="attachment_pdf_viewer",
     ),
     path(
+        "<uuid:case_id>/attachments/<uuid:attachment_id>/image-viewer/",
+        views.attachment_image_viewer,
+        name="attachment_image_viewer",
+    ),
+    path(
         "<uuid:case_id>/attachments/<uuid:attachment_id>/suppress/",
         views.suppress_attachment,
         name="suppress_attachment",
@@ -45,6 +50,11 @@ urlpatterns = [
         "closed-cases/<uuid:case_id>/attachments/<uuid:attachment_id>/viewer/",
         views.closed_case_attachment_pdf_viewer,
         name="closed_case_attachment_pdf_viewer",
+    ),
+    path(
+        "closed-cases/<uuid:case_id>/attachments/<uuid:attachment_id>/image-viewer/",
+        views.closed_case_attachment_image_viewer,
+        name="closed_case_attachment_image_viewer",
     ),
     path("closed-cases/<uuid:case_id>/issue/", views.post_schedule_issue_open, name="post_schedule_issue_open"),
     path("<uuid:case_id>/communication/", views.post_case_communication, name="post_case_communication"),

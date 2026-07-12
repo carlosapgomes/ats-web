@@ -14,6 +14,34 @@ Você está no projeto ATS Web, um monolito Django SSR sem SPA/DRF. Leia antes d
 
 Implemente **somente este slice** usando TDD: RED → GREEN → REFACTOR. Mantenha o slice vertical e enxuto.
 
+## Protocolo obrigatório para implementador DeepSeek4-Flash
+
+Este slice será implementado por um modelo rápido e com tendência a concluir cedo demais. Portanto, siga este protocolo literalmente. **Se qualquer item abaixo falhar, o slice está INCOMPLETO**: não marque `tasks.md`, não faça commit/push e responda com bloqueio + evidência.
+
+1. **Plano antes de editar**: escreva no relatório uma mini matriz `Requisito → arquivo(s) → teste(s)`. Não implemente requisito sem teste ou justificativa explícita.
+2. **RED real**: crie/ajuste testes primeiro e rode o subconjunto alvo. Pelo menos um teste novo deve falhar pelo motivo esperado. Se o teste passar antes da implementação, ele não prova o comportamento; corrija o teste.
+3. **GREEN mínimo**: implemente somente o necessário para os testes do slice passarem. Não faça refactor amplo, não toque em apps fora do escopo e não antecipe slices futuros.
+4. **Verificação por inspeção**: além dos testes, rode buscas `rg`/inspeções descritas neste slice para comprovar que não restaram links mobile com `target="_blank"`, que o desktop ainda tem `<embed>`, que a rota protegida correta é usada e que `Cache-Control: no-store` foi adicionado onde exigido.
+5. **Quality gate completo**: execute exatamente `uv run ruff check .`, `uv run ruff format --check .`, `uv run mypy .` e `uv run pytest`. Se algum comando falhar, o slice não está pronto.
+6. **Relatório com evidência, não opinião**: cole comandos executados, resumo das saídas, testes RED/GREEN, snippets antes/depois e respostas objetivas aos gates. Inclua também `Handoff para verificador` com: arquivos alterados, comandos exatos para rerun, riscos/limitações e checklist dos requisitos R1..Rn. Inclua uma seção final `Status: COMPLETE` somente se todos os critérios estiverem comprovados.
+
+### Condições automáticas de INCOMPLETO
+
+Marque como incompleto se ocorrer qualquer uma destas situações:
+
+- teste planejado não foi escrito ou não foi executado;
+- quality gate completo não foi executado;
+- qualquer teste/lint/mypy falhou;
+- `tasks.md` foi marcado apesar de falha ou pendência;
+- `target="_blank"` permaneceu no link mobile que o slice deveria substituir;
+- o `<embed>` desktop foi removido ou passou a usar a rota errada;
+- viewer usa `MEDIA_URL`, caminho físico do arquivo ou URL sem autorização;
+- `next` é usado sem validação/fallback canônico;
+- `Cache-Control: no-store` exigido pelo slice ficou ausente;
+- PDF.js/viewer foi declarado pronto sem teste/inspeção que comprove carregamento do JS/template;
+- relatório temporário não foi criado no caminho exigido.
+
+
 ## Objetivo do slice
 
 Entregar o primeiro fluxo end-to-end do novo viewer:
@@ -172,6 +200,19 @@ Implemente o mínimo para os testes passarem.
 - Não criar abstrações genéricas para fontes de PDF ainda não usadas.
 - Não alterar FSM, models, migrations, pipeline LLM ou templates de outros papéis.
 
+## Checks de inspeção obrigatórios antes de concluir
+
+Além dos testes automatizados, execute e cole o resultado/resumo no relatório:
+
+```bash
+rg -n "doctor:serve_pdf|doctor:pdf_viewer|target=\"_blank\"|<embed" templates/doctor/decision.html
+rg -n "pdf_viewer|serve_pdf|Cache-Control|no-store|url_has_allowed_host_and_scheme" apps/doctor/views.py apps/doctor/urls.py
+rg -n "IntersectionObserver|getDocument|canvas|catch|error" static/js/pdf-viewer.js
+find static/vendor/pdfjs -maxdepth 1 -type f -print
+```
+
+Interprete os resultados no relatório: explique qual ocorrência de `target="_blank"`, se houver, não pertence ao link mobile do PDF principal; se pertencer, o slice está incompleto.
+
 ## Critérios de sucesso do slice
 
 - [ ] Médico autorizado abre `doctor:pdf_viewer` com 200.
@@ -232,7 +273,7 @@ REPORT_PATH=/tmp/mobile-pdfjs-pwa-viewer-slice-001-report.md
 
 ```text
 Read AGENTS.md, PROJECT_CONTEXT.md and openspec/changes/mobile-pdfjs-pwa-viewer/{proposal.md,design.md,tasks.md,specs/mobile-pdf-viewer/spec.md,slices/slice-001-doctor-primary-pdf-viewer.md} first.
-Implement ONLY Slice 001. Use TDD: write failing tests first, then implement the minimum, then refactor safely.
+Implement ONLY Slice 001. Follow the DeepSeek4-Flash protocol in this file: plan, RED real, GREEN mínimo, inspection checks, full quality gate and evidence report. Use TDD: write failing tests first, then implement the minimum, then refactor safely. If any required test/check/gate is missing or failing, report INCOMPLETE and do not update tasks.md or commit.
 Deliver the doctor primary PDF mobile/PWA viewer: mobile link in templates/doctor/decision.html must navigate to an internal doctor:pdf_viewer page, while desktop must keep the existing embed using doctor:serve_pdf.
 Create a shared SSR viewer template and Vanilla JS PDF.js renderer with lazy/progressive rendering and fallback. Prefer vendored PDF.js under static/vendor/pdfjs/. Do not add a JS framework, bundler, DRF, models, migrations, FSM or pipeline changes.
 Validate any next URL and fallback to doctor:decision. Add Cache-Control: no-store to the doctor PDF binary response.

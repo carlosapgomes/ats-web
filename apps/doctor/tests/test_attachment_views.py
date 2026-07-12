@@ -575,6 +575,207 @@ class TestDoctorAttachmentPdfViewerView:
 
 
 @pytest.mark.django_db
+class TestDoctorAttachmentImageViewerView:
+    """Tests for doctor:attachment_image_viewer route (Slice 006)."""
+
+    def _create_role(self, name: str):
+        from apps.accounts.models import Role
+
+        role, _ = Role.objects.get_or_create(name=name)
+        return role
+
+    def _login_as(self, client, role_name: str):
+        user = User.objects.create_user(username=f"{role_name}@attimgv.test", password="testpass123")
+        user.roles.add(self._create_role(role_name))
+        client.force_login(user)
+        session = client.session
+        session["active_role"] = role_name
+        session.save()
+        return user
+
+    def _get_image_viewer_url(self, case_id: uuid.UUID, attachment_id: uuid.UUID) -> str:
+        return reverse("doctor:attachment_image_viewer", args=[case_id, attachment_id])
+
+    def test_requires_login(self, client) -> None:
+        """Redirects to login when unauthenticated."""
+        url = self._get_image_viewer_url(uuid.uuid4(), uuid.uuid4())
+        response = client.get(url)
+        assert response.status_code == 302
+        assert "/login/" in response.url
+
+    def test_blocks_nir(self, client) -> None:
+        """User with active_role='nir' cannot access the viewer."""
+        case, attachments, _ = _setup_case_with_attachments(attachment_count=1)
+        att = attachments[0]
+        att.content_type = "image/jpeg"
+        att.save()
+        self._login_as(client, "nir")
+        response = client.get(self._get_image_viewer_url(case.case_id, att.attachment_id))
+        assert response.status_code == 302
+        assert response.url == "/"
+
+    def test_renders_for_authorized_doctor_with_jpeg(self, client) -> None:
+        """Doctor gets 200 with serve_attachment as image_url for JPEG."""
+        case, attachments, _ = _setup_case_with_attachments(attachment_count=1)
+        att = attachments[0]
+        att.content_type = "image/jpeg"
+        att.save()
+        self._login_as(client, "doctor")
+        response = client.get(self._get_image_viewer_url(case.case_id, att.attachment_id))
+        assert response.status_code == 200
+        content = response.content.decode()
+        serve_att_url = reverse("doctor:serve_attachment", args=[case.case_id, att.attachment_id])
+        assert serve_att_url in content
+        assert "<img" in content or "img-fluid" in content
+
+    def test_renders_for_authorized_doctor_with_png(self, client) -> None:
+        """Doctor gets 200 for PNG image."""
+        case, attachments, _ = _setup_case_with_attachments(attachment_count=1)
+        att = attachments[0]
+        att.content_type = "image/png"
+        att.save()
+        self._login_as(client, "doctor")
+        response = client.get(self._get_image_viewer_url(case.case_id, att.attachment_id))
+        assert response.status_code == 200
+
+    def test_has_two_back_actions(self, client) -> None:
+        """Viewer has 'Voltar' in top and bottom sections."""
+        case, attachments, _ = _setup_case_with_attachments(attachment_count=1)
+        att = attachments[0]
+        att.content_type = "image/jpeg"
+        att.save()
+        self._login_as(client, "doctor")
+        response = client.get(self._get_image_viewer_url(case.case_id, att.attachment_id))
+        content = response.content.decode()
+        volgar_count = content.count("Voltar")
+        assert volgar_count >= 2, f"Expected at least 2 'Voltar', found {volgar_count}"
+
+    def test_404_for_pdf_attachment(self, client) -> None:
+        """Returns 404 when attachment is PDF (not image)."""
+        case, attachments, _ = _setup_case_with_attachments(attachment_count=1)
+        att = attachments[0]
+        att.content_type = "application/pdf"
+        att.save()
+        self._login_as(client, "doctor")
+        response = client.get(self._get_image_viewer_url(case.case_id, att.attachment_id))
+        assert response.status_code == 404
+
+    def test_404_for_suppressed_attachment(self, client) -> None:
+        """Returns 404 when attachment is suppressed."""
+        case, attachments, _ = _setup_case_with_attachments(attachment_count=1, suppress_some=True)
+        att = attachments[0]
+        assert att.is_suppressed is True
+        self._login_as(client, "doctor")
+        response = client.get(self._get_image_viewer_url(case.case_id, att.attachment_id))
+        assert response.status_code == 404
+
+    def test_back_url_defaults_to_decision(self, client) -> None:
+        """Back URL defaults to doctor:decision when no next param."""
+        case, attachments, _ = _setup_case_with_attachments(attachment_count=1)
+        att = attachments[0]
+        att.content_type = "image/jpeg"
+        att.save()
+        self._login_as(client, "doctor")
+        response = client.get(self._get_image_viewer_url(case.case_id, att.attachment_id))
+        content = response.content.decode()
+        decision_url = reverse("doctor:decision", args=[case.case_id])
+        assert decision_url in content
+
+    def test_rejects_external_next(self, client) -> None:
+        """Back URL falls back to doctor:decision when next is external."""
+        case, attachments, _ = _setup_case_with_attachments(attachment_count=1)
+        att = attachments[0]
+        att.content_type = "image/jpeg"
+        att.save()
+        self._login_as(client, "doctor")
+        decision_url = reverse("doctor:decision", args=[case.case_id])
+        response = client.get(
+            self._get_image_viewer_url(case.case_id, att.attachment_id) + "?next=https://evil.example.com/phish"
+        )
+        content = response.content.decode()
+        assert "evil.example" not in content
+        assert decision_url in content
+
+
+@pytest.mark.django_db
+class TestDoctorDecisionAttachmentImageMobileLink:
+    """Tests that doctor/decision.html mobile image link uses internal viewer (Slice 006)."""
+
+    def _create_role(self, name: str):
+        from apps.accounts.models import Role
+
+        role, _ = Role.objects.get_or_create(name=name)
+        return role
+
+    def _login_doctor(self, client):
+        user = User.objects.create_user(username="doc_img_link@test.com", password="testpass123")
+        user.roles.add(self._create_role("doctor"))
+        client.force_login(user)
+        session = client.session
+        session["active_role"] = "doctor"
+        session.save()
+        return user
+
+    def test_doctor_image_attachment_mobile_link_uses_internal_viewer(self, client) -> None:
+        """Image attachment mobile link points to attachment_image_viewer, not serve_attachment directly."""
+        case, attachments, _ = _setup_case_with_attachments(attachment_count=1)
+        att = attachments[0]
+        att.content_type = "image/jpeg"
+        att.original_filename = "foto.jpg"
+        att.save()
+        self._login_doctor(client)
+
+        response = client.get(f"/doctor/{case.case_id}/")
+        assert response.status_code == 200
+        content = response.content.decode()
+
+        viewer_url = reverse("doctor:attachment_image_viewer", args=[case.case_id, att.attachment_id])
+        assert viewer_url in content, (
+            f"Mobile image attachment link should reference attachment_image_viewer URL: {viewer_url}"
+        )
+
+    def test_doctor_image_attachment_mobile_link_no_target_blank(self, client) -> None:
+        """Image attachment mobile link does NOT use target='_blank'."""
+        case, attachments, _ = _setup_case_with_attachments(attachment_count=1)
+        att = attachments[0]
+        att.content_type = "image/jpeg"
+        att.save()
+        self._login_doctor(client)
+
+        response = client.get(f"/doctor/{case.case_id}/")
+        assert response.status_code == 200
+        content = response.content.decode()
+
+        viewer_url = reverse("doctor:attachment_image_viewer", args=[case.case_id, att.attachment_id])
+        import re
+
+        mobile_img_links = re.findall(
+            rf'<a[^>]*href="[^"]*{re.escape(viewer_url)}[^"]*"[^>]*>.*?</a>',
+            content,
+            re.DOTALL,
+        )
+        for link in mobile_img_links:
+            assert 'target="_blank"' not in link, (
+                f"Mobile image attachment link should not use target=_blank: {link[:100]}"
+            )
+
+    def test_doctor_image_attachment_desktop_inline_img_preserved(self, client) -> None:
+        """Desktop image attachment still uses <img> with serve_attachment."""
+        case, attachments, _ = _setup_case_with_attachments(attachment_count=1)
+        att = attachments[0]
+        att.content_type = "image/jpeg"
+        att.original_filename = "foto.jpg"
+        att.save()
+        self._login_doctor(client)
+
+        response = client.get(f"/doctor/{case.case_id}/")
+        assert response.status_code == 200
+        content = response.content.decode()
+
+        serve_att_url = reverse("doctor:serve_attachment", args=[case.case_id, att.attachment_id])
+        assert "<img" in content and serve_att_url in content, "Desktop should still have <img> for image attachments"
+
+
 class TestDoctorAttachmentServeAttachmentNoStore:
     """Tests that doctor:serve_attachment returns no-store Cache-Control."""
 

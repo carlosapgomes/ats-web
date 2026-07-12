@@ -12,7 +12,35 @@ Leia antes de codar:
 6. `openspec/changes/mobile-pdfjs-pwa-viewer/specs/mobile-pdf-viewer/spec.md`
 7. Este arquivo
 
-Assuma que os Slices 001–003 já entregaram o viewer compartilhado para PDFs principais. Implemente **somente este slice** com TDD: RED → GREEN → REFACTOR.
+Assuma que os Slices 001–003b já entregaram o viewer compartilhado para PDFs principais e consolidaram a validação de `next` em `apps.cases.navigation.resolve_safe_next_url`. Implemente **somente este slice** com TDD: RED → GREEN → REFACTOR.
+
+## Protocolo obrigatório para implementador DeepSeek4-Flash
+
+Este slice será implementado por um modelo rápido e com tendência a concluir cedo demais. Portanto, siga este protocolo literalmente. **Se qualquer item abaixo falhar, o slice está INCOMPLETO**: não marque `tasks.md`, não faça commit/push e responda com bloqueio + evidência.
+
+1. **Plano antes de editar**: escreva no relatório uma mini matriz `Requisito → arquivo(s) → teste(s)`. Não implemente requisito sem teste ou justificativa explícita.
+2. **RED real**: crie/ajuste testes primeiro e rode o subconjunto alvo. Pelo menos um teste novo deve falhar pelo motivo esperado. Se o teste passar antes da implementação, ele não prova o comportamento; corrija o teste.
+3. **GREEN mínimo**: implemente somente o necessário para os testes do slice passarem. Não faça refactor amplo, não toque em apps fora do escopo e não antecipe slices futuros.
+4. **Verificação por inspeção**: além dos testes, rode buscas `rg`/inspeções descritas neste slice para comprovar que não restaram links mobile com `target="_blank"`, que o desktop ainda tem `<embed>`, que a rota protegida correta é usada e que `Cache-Control: no-store` foi adicionado onde exigido.
+5. **Quality gate completo**: execute exatamente `uv run ruff check .`, `uv run ruff format --check .`, `uv run mypy .` e `uv run pytest`. Se algum comando falhar, o slice não está pronto.
+6. **Relatório com evidência, não opinião**: cole comandos executados, resumo das saídas, testes RED/GREEN, snippets antes/depois e respostas objetivas aos gates. Inclua também `Handoff para verificador` com: arquivos alterados, comandos exatos para rerun, riscos/limitações e checklist dos requisitos R1..Rn. Inclua uma seção final `Status: COMPLETE` somente se todos os critérios estiverem comprovados.
+
+### Condições automáticas de INCOMPLETO
+
+Marque como incompleto se ocorrer qualquer uma destas situações:
+
+- teste planejado não foi escrito ou não foi executado;
+- quality gate completo não foi executado;
+- qualquer teste/lint/mypy falhou;
+- `tasks.md` foi marcado apesar de falha ou pendência;
+- `target="_blank"` permaneceu no link mobile que o slice deveria substituir;
+- o `<embed>` desktop foi removido ou passou a usar a rota errada;
+- viewer usa `MEDIA_URL`, caminho físico do arquivo ou URL sem autorização;
+- `next` é usado sem `apps.cases.navigation.resolve_safe_next_url` e fallback canônico;
+- `Cache-Control: no-store` exigido pelo slice ficou ausente;
+- PDF.js/viewer foi declarado pronto sem teste/inspeção que comprove carregamento do JS/template;
+- relatório temporário não foi criado no caminho exigido.
+
 
 ## Objetivo do slice
 
@@ -55,7 +83,7 @@ Criar view em `apps/doctor/views.py`:
 - retorna 404 se o anexo não for PDF (`content_type != "application/pdf"`);
 - retorna 404 se suprimido/inacessível;
 - usa `pdf_url=reverse("doctor:serve_attachment", args=[case.case_id, attachment.attachment_id])`;
-- `back_url` validado ou fallback `reverse("doctor:decision", args=[case.case_id])`.
+- `back_url` resolvido com `apps.cases.navigation.resolve_safe_next_url`, usando fallback `reverse("doctor:decision", args=[case.case_id])`.
 
 Se houver duplicação com `serve_attachment`, extrair helper privado pequeno para buscar/analisar autorização do anexo.
 
@@ -74,7 +102,7 @@ Criar view em `apps/intake/views.py`:
 - bloqueia caso `CLEANED`, como a rota atual;
 - retorna 404 se o anexo não for PDF;
 - usa `pdf_url=reverse("intake:serve_attachment", args=[case.case_id, attachment.attachment_id])`;
-- fallback `reverse("intake:case_detail", args=[case.case_id])`.
+- `back_url` resolvido com `apps.cases.navigation.resolve_safe_next_url`, usando fallback `reverse("intake:case_detail", args=[case.case_id])`.
 
 ### R3. Atualizar links mobile de anexos PDF
 
@@ -152,6 +180,18 @@ Implementar o mínimo.
 - Não alterar modelo `CaseAttachment`.
 - Não alterar fluxo de supressão/anexos suplementares.
 
+## Checks de inspeção obrigatórios antes de concluir
+
+Além dos testes automatizados, execute e cole o resultado/resumo no relatório:
+
+```bash
+rg -n "attachment_pdf_viewer|serve_attachment|target=\"_blank\"|<embed" templates/doctor/decision.html templates/intake/case_detail.html
+rg -n "attachment_pdf_viewer|serve_attachment|content_type.*application/pdf|no-store|resolve_safe_next_url|url_has_allowed_host_and_scheme" apps/doctor/views.py apps/intake/views.py apps/doctor/urls.py apps/intake/urls.py
+rg -n "serve_attachment|attachment_pdf_viewer|target=\"_blank\"" templates/intake/closed_case_detail.html
+```
+
+Interprete os resultados no relatório: links mobile de anexos PDF nos templates alterados não podem manter `target="_blank"`; imagens podem manter comportamento anterior; `closed_case_detail.html` não deve ganhar rota histórica nova de anexo sem design.
+
 ## Critérios de sucesso do slice
 
 - [ ] Anexo PDF médico mobile usa viewer interno.
@@ -200,7 +240,7 @@ REPORT_PATH=/tmp/mobile-pdfjs-pwa-viewer-slice-004-report.md
 
 ```text
 Read AGENTS.md, PROJECT_CONTEXT.md and openspec/changes/mobile-pdfjs-pwa-viewer/{proposal.md,design.md,tasks.md,specs/mobile-pdf-viewer/spec.md,slices/slice-004-pdf-attachments-viewer.md} first. Assume previous slices are complete.
-Implement ONLY Slice 004 using TDD. Add internal PDF.js viewer routes for PDF attachments in doctor and operational intake surfaces. Update mobile PDF attachment links to use viewer routes without target=_blank; keep desktop embeds and image behavior unchanged.
-Preserve attachment authorization, suppression handling, and CLEANED blocking for operational NIR. Reject non-PDF attachments in PDF viewer routes. Add Cache-Control: no-store to touched attachment-serving responses. Do not create historical CLEANED attachment routes, do not change models/migrations/FSM/pipeline/upload/suppression logic.
+Implement ONLY Slice 004 using TDD. Follow the DeepSeek4-Flash protocol in this file: plan, RED real, GREEN mínimo, inspection checks, full quality gate and evidence report. Add internal PDF.js viewer routes for PDF attachments in doctor and operational intake surfaces. Update mobile PDF attachment links to use viewer routes without target=_blank; keep desktop embeds and image behavior unchanged. If any required test/check/gate is missing or failing, report INCOMPLETE and do not update tasks.md or commit.
+Preserve attachment authorization, suppression handling, and CLEANED blocking for operational NIR. Reject non-PDF attachments in PDF viewer routes. Use apps.cases.navigation.resolve_safe_next_url for attachment viewer back_url; do not create a new next-validation helper or inline validation. Add Cache-Control: no-store to touched attachment-serving responses. Do not create historical CLEANED attachment routes, do not change models/migrations/FSM/pipeline/upload/suppression logic.
 Run quality gate, update tasks.md, write /tmp/mobile-pdfjs-pwa-viewer-slice-004-report.md, commit and push. Reply with REPORT_PATH and stop.
 ```
