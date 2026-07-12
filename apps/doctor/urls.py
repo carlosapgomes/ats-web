@@ -15,5 +15,6 @@ urlpatterns = [
     path("<uuid:case_id>/lock/renew/", views.doctor_lock_renew, name="lock_renew"),
     path("<uuid:case_id>/lock/release/", views.doctor_lock_release, name="lock_release"),
     path("<uuid:case_id>/pdf/", views.serve_pdf, name="serve_pdf"),
+    path("<uuid:case_id>/pdf-viewer/", views.pdf_viewer, name="pdf_viewer"),
     path("cases/<uuid:case_id>/attachments/<uuid:attachment_id>/", views.serve_attachment, name="serve_attachment"),
 ]
