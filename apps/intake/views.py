@@ -645,19 +645,11 @@ def case_detail(request: HttpRequest, case_id: uuid.UUID) -> HttpResponse:
     )
 
 
-@login_required
-@role_required("nir")
-@xframe_options_sameorigin
-def serve_attachment(
-    request: HttpRequest,
-    case_id: uuid.UUID,
-    attachment_id: uuid.UUID,
-) -> HttpResponseBase:
-    """Serve um anexo protegido para visualização NIR.
+def _get_nir_attachment_or_404(case_id: uuid.UUID, attachment_id: uuid.UUID) -> tuple[Case, CaseAttachment]:
+    """Busca e autoriza anexo para o NIR operacional.
 
-    Acesso permitido para NIR com papel ativo 'nir'.
-    O caso não pode estar CLEANED.
-    Anexos suprimidos retornam 404.
+    Retorna (case, attachment) se autorizado.
+    Levanta Http404 se o caso é CLEANED ou o anexo está suprimido.
     """
     case = get_object_or_404(
         Case.objects.select_related("created_by"),
@@ -673,10 +665,31 @@ def serve_attachment(
         is_suppressed=False,
     )
 
-    return FileResponse(
+    return case, attachment
+
+
+@login_required
+@role_required("nir")
+@xframe_options_sameorigin
+def serve_attachment(
+    request: HttpRequest,
+    case_id: uuid.UUID,
+    attachment_id: uuid.UUID,
+) -> HttpResponseBase:
+    """Serve um anexo protegido para visualização NIR.
+
+    Acesso permitido para NIR com papel ativo 'nir'.
+    O caso não pode estar CLEANED.
+    Anexos suprimidos retornam 404.
+    """
+    case, attachment = _get_nir_attachment_or_404(case_id, attachment_id)
+
+    response = FileResponse(
         attachment.file.open("rb"),
         content_type=attachment.content_type,
     )
+    response["Cache-Control"] = "no-store"
+    return response
 
 
 @login_required
@@ -1464,6 +1477,42 @@ def closed_case_pdf(request: HttpRequest, case_id: uuid.UUID) -> HttpResponseBas
     )
     response["Cache-Control"] = "no-store"
     return response
+
+
+@login_required
+@role_required("nir")
+def attachment_pdf_viewer(
+    request: HttpRequest,
+    case_id: uuid.UUID,
+    attachment_id: uuid.UUID,
+) -> HttpResponse:
+    """Renderiza o viewer PDF mobile interno para anexo PDF do NIR operacional.
+
+    Exige login e papel ativo 'nir'.
+    Usa intake:serve_attachment como fonte protegida.
+    Bloqueia casos CLEANED.
+    Retorna 404 se o anexo não for PDF ou estiver suprimido/inacessível.
+    """
+    case, attachment = _get_nir_attachment_or_404(case_id, attachment_id)
+
+    if attachment.content_type != "application/pdf":
+        raise Http404("Anexo não é um PDF.")
+
+    back_url = resolve_safe_next_url(request, reverse("intake:case_detail", args=[case.case_id]))
+    pdf_url = reverse("intake:serve_attachment", args=[case.case_id, attachment.attachment_id])
+
+    return render(
+        request,
+        "pdf_viewer/mobile_pdf_viewer.html",
+        {
+            "viewer_title": "Anexo PDF",
+            "case": case,
+            "pdf_url": pdf_url,
+            "back_url": back_url,
+            "back_label": "← Voltar ao caso",
+            "fallback_pdf_url": pdf_url,
+        },
+    )
 
 
 @login_required

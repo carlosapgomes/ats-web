@@ -11,6 +11,11 @@ urlpatterns = [
     path("<uuid:case_id>/", views.case_detail, name="case_detail"),
     path("<uuid:case_id>/attachments/<uuid:attachment_id>/", views.serve_attachment, name="serve_attachment"),
     path(
+        "<uuid:case_id>/attachments/<uuid:attachment_id>/viewer/",
+        views.attachment_pdf_viewer,
+        name="attachment_pdf_viewer",
+    ),
+    path(
         "<uuid:case_id>/attachments/<uuid:attachment_id>/suppress/",
         views.suppress_attachment,
         name="suppress_attachment",
