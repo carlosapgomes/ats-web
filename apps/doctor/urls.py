@@ -17,4 +17,9 @@ urlpatterns = [
     path("<uuid:case_id>/pdf/", views.serve_pdf, name="serve_pdf"),
     path("<uuid:case_id>/pdf-viewer/", views.pdf_viewer, name="pdf_viewer"),
     path("cases/<uuid:case_id>/attachments/<uuid:attachment_id>/", views.serve_attachment, name="serve_attachment"),
+    path(
+        "cases/<uuid:case_id>/attachments/<uuid:attachment_id>/viewer/",
+        views.attachment_pdf_viewer,
+        name="attachment_pdf_viewer",
+    ),
 ]

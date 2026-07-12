@@ -540,6 +540,32 @@ def doctor_submit(request: HttpRequest, case_id: uuid.UUID) -> HttpResponse:
     return redirect("doctor:queue")
 
 
+def _get_doctor_attachment_or_404(
+    case_id: uuid.UUID, attachment_id: uuid.UUID, request: HttpRequest
+) -> tuple[Case, CaseAttachment]:
+    """Busca e autoriza anexo para o médico.
+
+    Retorna (case, attachment) se autorizado.
+    Levanta Http404 se o caso não permite acesso ou o anexo está suprimido.
+    """
+    case = get_object_or_404(Case, pk=case_id)
+
+    is_wait_doctor = case.status == CaseStatus.WAIT_DOCTOR
+    is_decided_by_user = case.doctor == request.user and bool(case.doctor_decision)
+
+    if not (is_wait_doctor or is_decided_by_user):
+        raise Http404("Anexo não encontrado.")
+
+    attachment = get_object_or_404(
+        CaseAttachment,
+        attachment_id=attachment_id,
+        case=case,
+        is_suppressed=False,
+    )
+
+    return case, attachment
+
+
 @login_required
 @role_required("doctor")
 @xframe_options_sameorigin
@@ -556,26 +582,14 @@ def serve_attachment(
 
     Anexos suprimidos retornam 404.
     """
-    case = get_object_or_404(Case, pk=case_id)
+    case, attachment = _get_doctor_attachment_or_404(case_id, attachment_id, request)
 
-    # Check authorization
-    is_wait_doctor = case.status == CaseStatus.WAIT_DOCTOR
-    is_decided_by_user = case.doctor == request.user and bool(case.doctor_decision)
-
-    if not (is_wait_doctor or is_decided_by_user):
-        raise Http404("Anexo não encontrado.")
-
-    attachment = get_object_or_404(
-        CaseAttachment,
-        attachment_id=attachment_id,
-        case=case,
-        is_suppressed=False,
-    )
-
-    return FileResponse(
+    response = FileResponse(
         attachment.file.open("rb"),
         content_type=attachment.content_type,
     )
+    response["Cache-Control"] = "no-store"
+    return response
 
 
 @login_required
@@ -832,6 +846,41 @@ def pdf_viewer(request: HttpRequest, case_id: uuid.UUID) -> HttpResponse:
         "pdf_viewer/mobile_pdf_viewer.html",
         {
             "viewer_title": "PDF Original",
+            "case": case,
+            "pdf_url": pdf_url,
+            "back_url": back_url,
+            "back_label": "← Voltar ao caso",
+            "fallback_pdf_url": pdf_url,
+        },
+    )
+
+
+@login_required
+@role_required("doctor")
+def attachment_pdf_viewer(
+    request: HttpRequest,
+    case_id: uuid.UUID,
+    attachment_id: uuid.UUID,
+) -> HttpResponse:
+    """Renderiza o viewer PDF mobile interno para anexo PDF médico.
+
+    Exige login e papel ativo 'doctor'.
+    Usa doctor:serve_attachment como fonte protegida.
+    Retorna 404 se o anexo não for PDF ou estiver suprimido/inacessível.
+    """
+    case, attachment = _get_doctor_attachment_or_404(case_id, attachment_id, request)
+
+    if attachment.content_type != "application/pdf":
+        raise Http404("Anexo não é um PDF.")
+
+    back_url = resolve_safe_next_url(request, reverse("doctor:decision", args=[case.case_id]))
+    pdf_url = reverse("doctor:serve_attachment", args=[case.case_id, attachment.attachment_id])
+
+    return render(
+        request,
+        "pdf_viewer/mobile_pdf_viewer.html",
+        {
+            "viewer_title": "Anexo PDF",
             "case": case,
             "pdf_url": pdf_url,
             "back_url": back_url,

@@ -6,7 +6,7 @@
 - [x] Slice 002 — NIR + dashboard: PDFs principais em detalhes operacionais/históricos/gerenciais (`slices/slice-002-intake-dashboard-primary-pdf-viewer.md`)
 - [x] Slice 003 — CHD/scheduler: PDF principal no detalhe de processados (`slices/slice-003-scheduler-primary-pdf-viewer.md`)
 - [x] Slice 003b — Follow-up técnico: consolidar validação de `next` dos PDF viewers antes dos anexos (`slices/slice-003b-consolidate-pdf-viewer-next-validation.md`)
-- [ ] Slice 004 — Anexos PDF: viewer mobile interno para anexos clínicos PDF (`slices/slice-004-pdf-attachments-viewer.md`)
+- [x] Slice 004 — Anexos PDF: viewer mobile interno para anexos clínicos PDF (`slices/slice-004-pdf-attachments-viewer.md`)
 
 ## Definition of Done do change
 
