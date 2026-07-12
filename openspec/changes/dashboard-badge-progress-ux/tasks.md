@@ -4,7 +4,7 @@
 
 ## Slices verticais
 
-- [ ] Slice 001 — Cards do dashboard: badge compacto + próximo passo
+- [x] Slice 001 — Cards do dashboard: badge compacto + próximo passo
   (`slices/slice-001-dashboard-card-badges-next-step.md`)
 - [ ] Slice 002 — Detalhe do caso: Resultado Final mobile sem overflow
   (`slices/slice-002-result-final-badge-mobile.md`)

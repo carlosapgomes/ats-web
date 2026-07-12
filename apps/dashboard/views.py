@@ -42,6 +42,15 @@ from apps.intake.views import (
     STEPS,
 )
 
+# ── Badge compacto para fluxos operacionais (Slice 001) ──────────────
+
+COMPACT_ADMISSION_FLOW_LABELS: dict[str, str] = {
+    "immediate": "Vinda imediata",
+    "pre_icu": "Pré-UTI",
+    "ward_icu_backup": "Enfermaria + retaguarda UTI",
+    "pediatric_em": "EM pediátrica",
+}
+
 
 def _parse_iso_date(raw: str) -> date | None:
     """Tenta fazer parse de uma string ISO date (YYYY-MM-DD).
@@ -413,7 +422,10 @@ def _compute_result(case: Case) -> tuple[str, str]:
 
     # Accepted — operational notice flow without scheduling
     if case.doctor_decision == "accept" and is_operational_notice_flow(case.doctor_admission_flow):
-        return (f"✓ {ADMISSION_FLOW_MAP.get(case.doctor_admission_flow, case.doctor_admission_flow)}", "bg-success")
+        # Usa label compacto para badges da lista (evita overflow em mobile)
+        flow = case.doctor_admission_flow
+        compact_label = COMPACT_ADMISSION_FLOW_LABELS.get(flow, ADMISSION_FLOW_MAP.get(flow, flow))
+        return (f"✓ {compact_label}", "bg-success")
 
     # Failed
     if case.status == CaseStatus.FAILED:
@@ -500,6 +512,53 @@ def _get_attention_reason(case: Case, *, now: datetime | None = None) -> str:
     return ""
 
 
+def _compute_next_step(case: Case) -> tuple[str, str] | None:
+    """Computa label e CSS do próximo passo operacional pendente.
+
+    Retorna (label, css) ou None se não há pendência relevante.
+    Baseado deterministicamente no status do caso, sem novo campo persistido.
+    """
+    # WAIT_DOCTOR → Pendente: médico
+    if case.status == CaseStatus.WAIT_DOCTOR:
+        return ("Pendente: médico", "bg-info text-dark")
+
+    # DOCTOR_ACCEPTED / R3_POST_REQUEST → Pendente: agendador
+    if case.status in (CaseStatus.DOCTOR_ACCEPTED, CaseStatus.R3_POST_REQUEST):
+        return ("Pendente: agendador", "bg-info text-dark")
+
+    # WAIT_APPT — se fluxo agendado, Pendente: agendador
+    if case.status == CaseStatus.WAIT_APPT:
+        if case.doctor_admission_flow == "scheduled":
+            return ("Pendente: agendador", "bg-info text-dark")
+        # Fluxo operacional sem agendamento → NIR
+        return ("Pendente: NIR", "bg-info text-dark")
+
+    # Estados que aguardam ação do NIR
+    if case.status in (
+        CaseStatus.APPT_CONFIRMED,
+        CaseStatus.APPT_DENIED,
+        CaseStatus.R1_FINAL_REPLY_POSTED,
+        CaseStatus.WAIT_R1_CLEANUP_THUMBS,
+    ):
+        return ("Pendente: NIR", "bg-info text-dark")
+
+    # Fluxo operacional (sem agendamento) aceito e antes de cleanup → NIR
+    if case.doctor_decision == "accept" and is_operational_notice_flow(case.doctor_admission_flow):
+        if case.status not in (CaseStatus.CLEANUP_RUNNING, CaseStatus.CLEANED):
+            return ("Pendente: NIR", "bg-info text-dark")
+
+    # FAILED → Pendente: suporte
+    if case.status == CaseStatus.FAILED:
+        return ("Pendente: suporte", "bg-warning text-dark")
+
+    # CLEANUP_RUNNING → Encerrando
+    if case.status == CaseStatus.CLEANUP_RUNNING:
+        return ("Encerrando", "bg-secondary")
+
+    # CLEANED → sem sub-badge (ou Encerrado, conforme preferência)
+    return None
+
+
 def _enrich_case(case: Case, *, now: datetime | None = None, attention_filter: bool = False) -> dict[str, Any]:
     """Enriquece um Case com dados de apresentação para cards do dashboard."""
     if now is None:
@@ -515,6 +574,10 @@ def _enrich_case(case: Case, *, now: datetime | None = None, attention_filter: b
 
     attention_reason = _get_attention_reason(case, now=now) if attention_filter else ""
 
+    next_step = _compute_next_step(case)
+    next_step_label = next_step[0] if next_step else ""
+    next_step_css = next_step[1] if next_step else ""
+
     return {
         "case": case,
         "patient_name": patient_name,
@@ -524,6 +587,8 @@ def _enrich_case(case: Case, *, now: datetime | None = None, attention_filter: b
         "result_css": result_css,
         "origin_unit": case.get_origin_unit_display(compact=True),
         "attention_reason": attention_reason,
+        "next_step_label": next_step_label,
+        "next_step_css": next_step_css,
     }
 
 

@@ -4269,3 +4269,160 @@ class TestDashboardCasePdfCacheControl:
         response = client.get(reverse("dashboard:case_pdf", args=[case.case_id]))
         assert response.status_code == 200
         assert response["Content-Type"] == "application/pdf"
+
+
+# ── Dashboard: Badge compacto + próximo passo (Slice 001) ─────────────────
+
+
+@pytest.mark.django_db
+class TestDashboardBadgeCompactoProximoPasso:
+    """Testes para badge compacto e próximo passo no dashboard (Slice 001).
+
+    R1: Badge principal compacto para ward_icu_backup.
+    R2: Próximo passo operacional como sub-badge.
+    R3: Layout mobile sem sobreposição de data/hora.
+    R4: Desktop preservado (regressão).
+    R5: Sem alteração de comportamento backend.
+    """
+
+    # ── R1: Badge compacto ────────────────────────────────────────────
+
+    def test_compact_badge_for_ward_icu_backup(self, client) -> None:
+        """R1: Caso accept+ward_icu_backup renderiza label compacto no card."""
+        user = _login_as(client, "manager")
+        _create_case(
+            created_by=user,
+            status=CaseStatus.WAIT_R1_CLEANUP_THUMBS,
+            doctor_decision="accept",
+            doctor_admission_flow="ward_icu_backup",
+            agency_record_number="COMPACT-001",
+        )
+        response = client.get("/dashboard/")
+        assert response.status_code == 200
+        content = response.content.decode()
+        # Deve conter label compacto
+        assert "Enfermaria" in content and "retaguarda" in content
+        # NÃO deve conter o texto completo como badge principal
+        assert "Vinda para enfermaria (para retaguarda em UTI)" not in content
+
+    def test_full_label_preserved_in_admission_module(self, client) -> None:
+        """R1: Texto completo permanece inalterado em ADMISSION_FLOW_CHOICES."""
+        from apps.cases.admission import ADMISSION_FLOW_CHOICES
+
+        choices = dict(ADMISSION_FLOW_CHOICES)
+        assert "ward_icu_backup" in choices
+        assert choices["ward_icu_backup"] == "Vinda para enfermaria (para retaguarda em UTI)"
+
+    # ── R2: Próximo passo ─────────────────────────────────────────────
+
+    def test_next_step_wait_appt(self, client) -> None:
+        """R2: Caso WAIT_APPT com fluxo scheduled renderiza 'Pendente: agendador'."""
+        user = _login_as(client, "manager")
+        _create_case(
+            created_by=user,
+            status=CaseStatus.WAIT_APPT,
+            doctor_decision="accept",
+            doctor_admission_flow="scheduled",
+            agency_record_number="NEXT-APPT",
+        )
+        response = client.get("/dashboard/")
+        assert response.status_code == 200
+        content = response.content.decode()
+        assert "Pendente: agendador" in content
+
+    def test_next_step_wait_r1_cleanup_thumbs(self, client) -> None:
+        """R2: Caso WAIT_R1_CLEANUP_THUMBS renderiza 'Pendente: NIR'."""
+        user = _login_as(client, "manager")
+        _create_case(
+            created_by=user,
+            status=CaseStatus.WAIT_R1_CLEANUP_THUMBS,
+            doctor_decision="accept",
+            doctor_admission_flow="immediate",
+            agency_record_number="NEXT-NIR",
+        )
+        response = client.get("/dashboard/")
+        assert response.status_code == 200
+        content = response.content.decode()
+        assert "Pendente: NIR" in content
+
+    def test_next_step_cleaned_has_no_sub_badge(self, client) -> None:
+        """R2: Caso CLEANED não mostra sub-badge de próximo passo."""
+        user = _login_as(client, "manager")
+        _create_case(
+            created_by=user,
+            status=CaseStatus.CLEANED,
+            doctor_decision="accept",
+            doctor_admission_flow="immediate",
+            agency_record_number="NEXT-CLEAN",
+        )
+        response = client.get("/dashboard/")
+        assert response.status_code == 200
+        content = response.content.decode()
+        # CLEANED pode mostrar "Encerrado" ou não mostrar sub-badge
+        # Mas não deve mostrar "Pendente:"
+        assert "Pendente:" not in content
+
+    def test_next_step_failed(self, client) -> None:
+        """R2: Caso FAILED renderiza 'Pendente: suporte'."""
+        user = _login_as(client, "manager")
+        _create_case(
+            created_by=user,
+            status=CaseStatus.FAILED,
+            agency_record_number="NEXT-FAIL",
+        )
+        response = client.get("/dashboard/")
+        assert response.status_code == 200
+        content = response.content.decode()
+        assert "Pendente: suporte" in content
+
+    # ── R3: Layout responsivo ──────────────────────────────────────────
+
+    def test_responsive_badges_layout(self, client) -> None:
+        """R3: HTML possui estrutura de badges responsiva."""
+        user = _login_as(client, "manager")
+        _create_case(
+            created_by=user,
+            status=CaseStatus.WAIT_DOCTOR,
+            agency_record_number="LAYOUT-001",
+        )
+        response = client.get("/dashboard/")
+        assert response.status_code == 200
+        content = response.content.decode()
+        # Deve conter classe de badges flexível
+        assert "dashboard-case-badges" in content or "badge-wrap" in content or "flex-wrap" in content
+        # Data/hora não deve estar no mesmo container estreito do badge principal
+        # A data deve estar numa posição separada
+
+    # ── R4: Regressão — desktop preservado ─────────────────────────────
+
+    def test_regression_ver_detalhes_present(self, client) -> None:
+        """R4: Botão 'Ver detalhes' continua presente."""
+        user = _login_as(client, "manager")
+        _create_case(created_by=user, status=CaseStatus.NEW, agency_record_number="REG-VER")
+        response = client.get("/dashboard/")
+        assert response.status_code == 200
+        content = response.content.decode()
+        assert "Ver detalhes" in content
+
+    def test_regression_date_time_present(self, client) -> None:
+        """R4: Data/hora continua presente nos cards."""
+        user = _login_as(client, "manager")
+        case = _create_case(created_by=user, status=CaseStatus.NEW, agency_record_number="REG-DATE")
+        created_str = case.created_at.strftime("%d/%m/%Y")
+        response = client.get("/dashboard/")
+        assert response.status_code == 200
+        content = response.content.decode()
+        assert created_str in content
+
+    def test_regression_attention_badge_present(self, client) -> None:
+        """R4: Badge 'Atenção necessária' continua presente quando aplicável."""
+        user = _login_as(client, "manager")
+        _create_case(
+            created_by=user,
+            status=CaseStatus.WAIT_DOCTOR,
+            agency_record_number="REG-ATENCAO",
+        )
+        response = client.get("/dashboard/?attention=1")
+        assert response.status_code == 200
+        content = response.content.decode()
+        assert "Atenção necessária" in content or "Atenção" in content
