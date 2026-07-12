@@ -47,10 +47,15 @@
     var dateFromInput = document.querySelector('input[name="date_from"]');
     var dateToInput = document.querySelector('input[name="date_to"]');
     var attentionLink = document.querySelector('a[href*="attention=1"]');
-    var metricsPeriodInput = document.querySelector('input[name="metrics_period"]');
-    var metricsDateInput = document.querySelector('input[name="metrics_date"]');
-    var metricsStartInput = document.querySelector('input[name="metrics_start"]');
-    var metricsEndInput = document.querySelector('input[name="metrics_end"]');
+    // Período personalizado: lê da fonte canônica (#case-filter-form), que reflete o
+    // período vigente resolvido. Os mini-forms de Personalizado também têm
+    // inputs name=metrics_period, mas com valores fixos (custom_date/custom_range),
+    // por isso não servem como fonte do estado atual.
+    var caseFilterForm = document.getElementById('case-filter-form');
+    var metricsPeriodInput = caseFilterForm ? caseFilterForm.querySelector('input[name="metrics_period"]') : null;
+    var metricsDateInput = caseFilterForm ? caseFilterForm.querySelector('input[name="metrics_date"]') : null;
+    var metricsStartInput = caseFilterForm ? caseFilterForm.querySelector('input[name="metrics_start"]') : null;
+    var metricsEndInput = caseFilterForm ? caseFilterForm.querySelector('input[name="metrics_end"]') : null;
 
     if (statusSelect && statusSelect.value) {
       params.set('status', statusSelect.value);
