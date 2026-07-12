@@ -10,7 +10,6 @@ from django.http import FileResponse, Http404, HttpRequest, HttpResponse, HttpRe
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
 from django.utils import timezone
-from django.utils.http import url_has_allowed_host_and_scheme
 from django.views.decorators.clickjacking import xframe_options_sameorigin
 
 from apps.accounts.decorators import role_required
@@ -21,6 +20,7 @@ from apps.cases.admission import (
     is_operational_notice_flow,
 )
 from apps.cases.models import Case, CaseAttachment, CaseStatus
+from apps.cases.navigation import resolve_safe_next_url
 from apps.cases.services import (
     CASE_COMMUNICATION_MAX_LENGTH,
     assert_case_lock,
@@ -46,17 +46,6 @@ from apps.intake.views import (
 
 from .forms import DoctorDecisionForm
 from .presenters import DoctorReportPresenter
-
-
-def _validate_next_url(next_url: str, request: HttpRequest) -> str | None:
-    """Validate a next URL is safe, return None if unsafe."""
-    if next_url and url_has_allowed_host_and_scheme(
-        url=next_url,
-        allowed_hosts={request.get_host()},
-        require_https=request.is_secure(),
-    ):
-        return next_url
-    return None
 
 
 def _map_prior_decision_to_denial_type(decision: str) -> str:
@@ -834,8 +823,7 @@ def pdf_viewer(request: HttpRequest, case_id: uuid.UUID) -> HttpResponse:
         raise Http404("PDF não encontrado para este caso.")
 
     # Validar next URL ou usar fallback canônico
-    raw_next = request.GET.get("next", "")
-    back_url = _validate_next_url(raw_next, request) or reverse("doctor:decision", args=[case.case_id])
+    back_url = resolve_safe_next_url(request, reverse("doctor:decision", args=[case.case_id]))
 
     pdf_url = reverse("doctor:serve_pdf", args=[case.case_id])
 

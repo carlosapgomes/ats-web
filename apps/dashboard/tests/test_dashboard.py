@@ -4073,6 +4073,28 @@ class TestDashboardPdfViewerView:
         content = response.content.decode()
         assert case_detail_url in content
 
+    def test_pdf_viewer_rejects_external_next(self, client) -> None:
+        """Back URL falls back to dashboard:case_detail when next is external."""
+        user = self._login_as(client, "manager")
+        case = self._create_case_with_pdf(created_by=user, status=CaseStatus.NEW)
+        case_detail_url = reverse("dashboard:case_detail", args=[case.case_id])
+        response = client.get(
+            reverse("dashboard:pdf_viewer", args=[case.case_id]) + "?next=https://evil.example.com/phish"
+        )
+        content = response.content.decode()
+        assert "evil.example" not in content
+        assert case_detail_url in content
+
+    def test_pdf_viewer_rejects_protocol_relative_next(self, client) -> None:
+        """Back URL falls back to dashboard:case_detail when next is protocol-relative."""
+        user = self._login_as(client, "manager")
+        case = self._create_case_with_pdf(created_by=user, status=CaseStatus.NEW)
+        case_detail_url = reverse("dashboard:case_detail", args=[case.case_id])
+        response = client.get(reverse("dashboard:pdf_viewer", args=[case.case_id]) + "?next=//evil.example.com/phish")
+        content = response.content.decode()
+        assert "evil.example" not in content
+        assert case_detail_url in content
+
 
 @pytest.mark.django_db
 class TestDashboardCaseDetailMobilePdfLink:

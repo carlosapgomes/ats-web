@@ -217,6 +217,32 @@ class TestDoctorPdfViewerView:
         # Should link back to decision_url
         assert decision_url in content
 
+    def test_pdf_viewer_rejects_external_next(self, client) -> None:
+        """Back URL falls back to doctor:decision when next is external."""
+        case = self._create_case_with_pdf()
+        self._login_as(client, "doctor")
+        decision_url = reverse("doctor:decision", args=[case.case_id])
+        # Pass an external next URL
+        response = client.get(self._get_pdf_viewer_url(case.case_id) + "?next=https://evil.example.com/phish")
+        content = response.content.decode()
+        # Should NOT contain evil.example
+        assert "evil.example" not in content
+        # Should fall back to doctor:decision
+        assert decision_url in content
+
+    def test_pdf_viewer_rejects_protocol_relative_next(self, client) -> None:
+        """Back URL falls back to doctor:decision when next is protocol-relative."""
+        case = self._create_case_with_pdf()
+        self._login_as(client, "doctor")
+        decision_url = reverse("doctor:decision", args=[case.case_id])
+        # Pass a protocol-relative next URL
+        response = client.get(self._get_pdf_viewer_url(case.case_id) + "?next=//evil.example.com/phish")
+        content = response.content.decode()
+        # Should NOT contain evil.example
+        assert "evil.example" not in content
+        # Should fall back to doctor:decision
+        assert decision_url in content
+
 
 @pytest.mark.django_db
 class TestDoctorDecisionPdfMobileLink:
