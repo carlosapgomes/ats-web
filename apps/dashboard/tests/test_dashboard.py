@@ -3805,7 +3805,9 @@ class TestDashboardCustomDateRange:
         assert ".metrics-period-custom" in css_content
         assert ".metrics-period-date-control" in css_content
         assert ".metrics-period-date-icon" in css_content
+        assert "display: none;" in css_content, "Ícone customizado deve ficar oculto por padrão no desktop"
         assert "@media (max-width: 575.98px)" in css_content
+        assert "display: inline-flex;" in css_content, "Ícone customizado deve aparecer só no mobile"
 
     def test_template_renders_custom_metrics_controls(self, client) -> None:
         """Template contém Personalizado, Data específica, Intervalo e inputs."""
