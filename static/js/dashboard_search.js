@@ -38,7 +38,8 @@
 
   /**
    * Retorna os parâmetros atuais do formulário de filtros como URLSearchParams.
-   * Preserva status, date_from, date_to, attention e metrics_period.
+   * Preserva status, date_from, date_to, attention, metrics_period e
+   * campos personalizados (metrics_date, metrics_start, metrics_end).
    */
   function getFilterParams() {
     var params = new URLSearchParams();
@@ -47,6 +48,9 @@
     var dateToInput = document.querySelector('input[name="date_to"]');
     var attentionLink = document.querySelector('a[href*="attention=1"]');
     var metricsPeriodInput = document.querySelector('input[name="metrics_period"]');
+    var metricsDateInput = document.querySelector('input[name="metrics_date"]');
+    var metricsStartInput = document.querySelector('input[name="metrics_start"]');
+    var metricsEndInput = document.querySelector('input[name="metrics_end"]');
 
     if (statusSelect && statusSelect.value) {
       params.set('status', statusSelect.value);
@@ -63,6 +67,15 @@
     }
     if (metricsPeriodInput && metricsPeriodInput.value) {
       params.set('metrics_period', metricsPeriodInput.value);
+    }
+    if (metricsDateInput && metricsDateInput.value) {
+      params.set('metrics_date', metricsDateInput.value);
+    }
+    if (metricsStartInput && metricsStartInput.value) {
+      params.set('metrics_start', metricsStartInput.value);
+    }
+    if (metricsEndInput && metricsEndInput.value) {
+      params.set('metrics_end', metricsEndInput.value);
     }
 
     return params;

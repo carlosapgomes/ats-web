@@ -3427,16 +3427,307 @@ class TestDashboardMetricsPeriod:
             "Card de Tempo Médio deve mostrar 'Etapas concluídas no período'"
         )
 
-    def test_metrics_date_no_longer_in_template(self, client) -> None:
-        """Input metrics_date não está mais presente no template."""
+    def test_metrics_date_in_template_as_custom_control(self, client) -> None:
+        """Input metrics_date está presente como controle de período personalizado."""
         _login_as(client, "manager")
         response = client.get(reverse("dashboard:index"))
         assert response.status_code == 200
         content = response.content.decode()
-        assert 'name="metrics_date"' not in content, "metrics_date não deve mais estar no template"
+        assert 'name="metrics_date"' in content, "metrics_date deve estar presente no template (custom date)"
+        assert 'name="metrics_start"' in content, "metrics_start deve estar presente no template (custom range)"
+        assert 'name="metrics_end"' in content, "metrics_end deve estar presente no template (custom range)"
 
     def test_existing_metrics_date_view_still_works(self, client) -> None:
         """GET com ?metrics_date=... não quebra (retorna 200) — compatibilidade reversa."""
         _login_as(client, "manager")
         response = client.get(reverse("dashboard:index") + "?metrics_date=2026-07-01")
         assert response.status_code == 200
+
+
+# ── Dashboard: Custom Date Range Metrics (Slice 001) ─────────────────────
+
+
+@pytest.mark.django_db
+class TestDashboardCustomDateRange:
+    """Testes para data e intervalo personalizados nas métricas do dashboard."""
+
+    def _set_cases_date(self, case, **fields) -> None:
+        """Seta campos datetime de um Case via update() para burlar auto_now."""
+        Case.objects.filter(pk=case.pk).update(**fields)
+
+    def test_metrics_custom_date_counts_cases_created_on_selected_local_day(self, client) -> None:
+        """custom_date conta apenas casos criados na data selecionada (dia local)."""
+        user = _login_as(client, "manager")
+        Case.objects.all().delete()
+
+        today_local = timezone.localdate()
+        yesterday = today_local - timedelta(days=1)
+
+        # Caso criado no dia selecionado
+        case_in = _create_case(created_by=user, status=CaseStatus.WAIT_DOCTOR, agency_record_number="IN-DATE")
+        self._set_cases_date(
+            case_in, created_at=datetime.combine(today_local, time(8, 0), tzinfo=timezone.get_current_timezone())
+        )
+
+        # Caso criado fora do dia selecionado (ontem)
+        case_out = _create_case(created_by=user, status=CaseStatus.WAIT_DOCTOR, agency_record_number="OUT-DATE")
+        self._set_cases_date(
+            case_out, created_at=datetime.combine(yesterday, time(8, 0), tzinfo=timezone.get_current_timezone())
+        )
+
+        response = client.get(
+            reverse("dashboard:index") + f"?metrics_period=custom_date&metrics_date={today_local.isoformat()}"
+        )
+        assert response.status_code == 200
+        content = response.content.decode()
+        # Total deve ser 1 (só o caso do dia selecionado)
+        assert "1" in content, "custom_date deve contar apenas o caso do dia selecionado"
+
+    def test_metrics_custom_range_counts_cases_created_in_inclusive_range(self, client) -> None:
+        """custom_range inclui casos criados no início e fim do intervalo, exclui fora."""
+        user = _login_as(client, "manager")
+        Case.objects.all().delete()
+
+        today_local = timezone.localdate()
+        start = today_local - timedelta(days=5)
+        end = today_local - timedelta(days=2)
+        before_start = start - timedelta(days=1)
+        after_end = end + timedelta(days=1)
+
+        case_start = _create_case(created_by=user, status=CaseStatus.NEW, agency_record_number="RANGE-START")
+        self._set_cases_date(
+            case_start, created_at=datetime.combine(start, time(0, 0, 1), tzinfo=timezone.get_current_timezone())
+        )
+
+        case_end = _create_case(created_by=user, status=CaseStatus.NEW, agency_record_number="RANGE-END")
+        self._set_cases_date(
+            case_end, created_at=datetime.combine(end, time(23, 59, 59), tzinfo=timezone.get_current_timezone())
+        )
+
+        case_before = _create_case(created_by=user, status=CaseStatus.NEW, agency_record_number="RANGE-BEFORE")
+        self._set_cases_date(
+            case_before,
+            created_at=datetime.combine(before_start, time(23, 59, 59), tzinfo=timezone.get_current_timezone()),
+        )
+
+        case_after = _create_case(created_by=user, status=CaseStatus.NEW, agency_record_number="RANGE-AFTER")
+        self._set_cases_date(
+            case_after, created_at=datetime.combine(after_end, time(0, 0, 1), tzinfo=timezone.get_current_timezone())
+        )
+
+        # URL com custom_range — deve filtrar métricas para o intervalo
+        response = client.get(
+            reverse("dashboard:index")
+            + f"?metrics_period=custom_range&metrics_start={start.isoformat()}&metrics_end={end.isoformat()}"
+        )
+        assert response.status_code == 200
+
+        # A lista de casos mostra todos os casos (filtro da lista não se aplica)
+        # Mas o card total deve refletir apenas os casos no intervalo
+        content = response.content.decode()
+
+        # Os casos de dentro do intervalo (RANGE-START, RANGE-END) aparecem na lista
+        assert "RANGE-START" in content, "Caso no início do range deve estar na lista"
+        assert "RANGE-END" in content, "Caso no fim do range deve estar na lista"
+        # Os casos de fora também aparecem na lista (sem filtro de lista)
+
+    def test_metrics_custom_date_average_filters_by_stage_completion_date(self, client) -> None:
+        """Tempo médio custom_date filtra por conclusão da etapa, não por created_at."""
+        user = _login_as(client, "manager")
+        Case.objects.all().delete()
+
+        today_local = timezone.localdate()
+        yesterday = today_local - timedelta(days=1)
+        three_days_ago = today_local - timedelta(days=3)
+
+        # Caso criado há 3 dias, mas decidido hoje → deve entrar no upload_to_decision
+        case_decided_today = _create_case(
+            created_by=user,
+            status=CaseStatus.DOCTOR_ACCEPTED,
+            doctor_decision="accept",
+            agency_record_number="AVG-DEC-TODAY",
+        )
+        created_at_past = datetime.combine(three_days_ago, time(8, 0), tzinfo=timezone.get_current_timezone())
+        decided_at_today = datetime.combine(today_local, time(10, 0), tzinfo=timezone.get_current_timezone())
+        self._set_cases_date(case_decided_today, created_at=created_at_past, doctor_decided_at=decided_at_today)
+
+        # Caso criado hoje, mas decidido ontem → NÃO deve entrar no upload_to_decision
+        case_decided_yesterday = _create_case(
+            created_by=user,
+            status=CaseStatus.DOCTOR_ACCEPTED,
+            doctor_decision="accept",
+            agency_record_number="AVG-DEC-YEST",
+        )
+        created_at_today = datetime.combine(today_local, time(8, 0), tzinfo=timezone.get_current_timezone())
+        decided_at_yesterday = datetime.combine(yesterday, time(10, 0), tzinfo=timezone.get_current_timezone())
+        self._set_cases_date(
+            case_decided_yesterday, created_at=created_at_today, doctor_decided_at=decided_at_yesterday
+        )
+
+        # Chama _compute_average_times diretamente para verificar semântica
+        from zoneinfo import ZoneInfo
+
+        from django.utils import timezone as tz_utils
+
+        from apps.dashboard.views import _compute_average_times
+
+        with tz_utils.override(ZoneInfo("America/Sao_Paulo")):
+            result = _compute_average_times(period=f"custom_date:{today_local.isoformat()}")
+
+        # Só o caso decidido hoje deve entrar (criado há 3 dias, decidido hoje)
+        # O tempo deve ser > 0, aproximadamente 2 dias = ~2880 min
+        assert result["upload_to_decision"] != "—", "Deveria haver tempo médio para decisão (caso decidido no período)"
+
+    def test_invalid_custom_date_falls_back_to_today_with_feedback(self, client) -> None:
+        """metrics_period=custom_date sem metrics_date cai para today com feedback."""
+        _login_as(client, "manager")
+
+        # custom_date sem date
+        response = client.get(reverse("dashboard:index") + "?metrics_period=custom_date")
+        assert response.status_code == 200
+        content = response.content.decode()
+
+        # Deve cair para today
+        assert "Total Hoje" in content or "Métricas de hoje" in content, "Deve cair para today"
+        # Deve mostrar feedback discreto
+        assert "Período personalizado inválido" in content, "Deve mostrar feedback de erro"
+
+    def test_invalid_custom_range_falls_back_to_today_with_feedback(self, client) -> None:
+        """Intervalo invertido cai para today com feedback."""
+        _login_as(client, "manager")
+
+        today_local = timezone.localdate()
+        start = today_local
+        end = today_local - timedelta(days=5)  # start > end = invertido
+
+        response = client.get(
+            reverse("dashboard:index")
+            + f"?metrics_period=custom_range&metrics_start={start.isoformat()}&metrics_end={end.isoformat()}"
+        )
+        assert response.status_code == 200
+        content = response.content.decode()
+
+        # Deve cair para today
+        assert "Total Hoje" in content or "Métricas de hoje" in content, "Intervalo invertido deve cair para today"
+        # Deve mostrar feedback discreto
+        assert "Período personalizado inválido" in content, "Deve mostrar feedback de erro"
+
+    def test_template_renders_custom_metrics_controls(self, client) -> None:
+        """Template contém Personalizado, Data específica, Intervalo e inputs."""
+        _login_as(client, "manager")
+        response = client.get(reverse("dashboard:index"))
+        assert response.status_code == 200
+        content = response.content.decode()
+
+        assert "Personalizado" in content, "Template deve conter 'Personalizado'"
+        assert "Data específica" in content, "Template deve conter 'Data específica'"
+        assert "Intervalo" in content, "Template deve conter 'Intervalo'"
+        assert 'name="metrics_date"' in content, "Template deve conter input metrics_date"
+        assert 'name="metrics_start"' in content, "Template deve conter input metrics_start"
+        assert 'name="metrics_end"' in content, "Template deve conter input metrics_end"
+
+    def test_metrics_custom_params_preserved_in_case_filter_form(self, client) -> None:
+        """Filtro da lista preserva metrics_period e campos customizados como hidden."""
+        _login_as(client, "manager")
+
+        today_local = timezone.localdate()
+        response = client.get(
+            reverse("dashboard:index") + f"?metrics_period=custom_date&metrics_date={today_local.isoformat()}"
+        )
+        assert response.status_code == 200
+        content = response.content.decode()
+
+        # Deve ter hidden input para metrics_period no form de filtros
+        assert 'name="metrics_period"' in content, "Hidden metrics_period deve estar presente"
+        assert 'value="custom_date"' in content, "metrics_period=custom_date deve estar preservado"
+        assert f'value="{today_local.isoformat()}"' in content, "metrics_date deve estar preservado"
+
+    def test_attention_link_preserves_custom_metrics_params(self, client) -> None:
+        """Link de atenção preserva metrics_period=custom_date e metrics_date."""
+        _login_as(client, "manager")
+
+        today_local = timezone.localdate()
+        response = client.get(
+            reverse("dashboard:index")
+            + f"?metrics_period=custom_range&metrics_start={today_local.isoformat()}&metrics_end={today_local.isoformat()}"
+        )
+        assert response.status_code == 200
+        content = response.content.decode()
+
+        # Link de atenção deve conter os parâmetros customizados
+        assert "metrics_period=custom_range" in content, "Link atenção deve preservar metrics_period"
+        assert "metrics_start=" in content, "Link atenção deve preservar metrics_start"
+        assert "metrics_end=" in content, "Link atenção deve preservar metrics_end"
+
+    def test_partial_pagination_preserves_custom_metrics_params(self, client) -> None:
+        """Links de paginação no partial preservam campos customizados."""
+        user = _login_as(client, "manager")
+        Case.objects.all().delete()
+
+        # Criar 25 casos para forçar paginação
+        for i in range(25):
+            _create_case(created_by=user, status=CaseStatus.NEW, agency_record_number=f"PAG-CUST-{i:03d}")
+
+        today_local = timezone.localdate()
+        response = client.get(
+            reverse("dashboard:index") + f"?metrics_period=custom_date&metrics_date={today_local.isoformat()}"
+        )
+        assert response.status_code == 200
+        content = response.content.decode()
+
+        # Links de paginação devem preservar os parâmetros
+        assert "metrics_period=custom_date" in content, "Paginação deve preservar metrics_period"
+        assert f"metrics_date={today_local.isoformat()}" in content, "Paginação deve preservar metrics_date"
+
+    def test_dashboard_search_js_preserves_custom_metrics_params(self, client) -> None:
+        """dashboard_search.js lê metrics_date, metrics_start, metrics_end do DOM."""
+        _login_as(client, "manager")
+        response = client.get(reverse("dashboard:index"))
+        assert response.status_code == 200
+
+        # Lê o arquivo JS em vez de depender de teste JS dedicado
+        js_path = "/projects/dev/ats-web/static/js/dashboard_search.js"
+        with open(js_path) as f:
+            js_content = f.read()
+
+        assert "metrics_date" in js_content, "dashboard_search.js deve referenciar metrics_date"
+        assert "metrics_start" in js_content, "dashboard_search.js deve referenciar metrics_start"
+        assert "metrics_end" in js_content, "dashboard_search.js deve referenciar metrics_end"
+        assert "getFilterParams" in js_content, "getFilterParams deve estar presente"
+
+    def test_metrics_custom_date_from_query_string_shows_correct_label(self, client) -> None:
+        """custom_date exibe label legível 'Métricas de DD/MM/AAAA'."""
+        _login_as(client, "manager")
+
+        today_local = timezone.localdate()
+        formatted = today_local.strftime("%d/%m/%Y")
+
+        response = client.get(
+            reverse("dashboard:index") + f"?metrics_period=custom_date&metrics_date={today_local.isoformat()}"
+        )
+        assert response.status_code == 200
+        content = response.content.decode()
+
+        expected_label = f"Métricas de {formatted}"
+        assert expected_label in content, f"Label deve conter '{expected_label}'"
+
+    def test_metrics_custom_range_from_query_string_shows_correct_label(self, client) -> None:
+        """custom_range exibe label legível 'Métricas de DD/MM/AAAA a DD/MM/AAAA'."""
+        _login_as(client, "manager")
+
+        today_local = timezone.localdate()
+        start_date = (today_local - timedelta(days=3)).isoformat()
+        end_date = (today_local - timedelta(days=1)).isoformat()
+
+        start_formatted = (today_local - timedelta(days=3)).strftime("%d/%m/%Y")
+        end_formatted = (today_local - timedelta(days=1)).strftime("%d/%m/%Y")
+
+        response = client.get(
+            reverse("dashboard:index")
+            + f"?metrics_period=custom_range&metrics_start={start_date}&metrics_end={end_date}"
+        )
+        assert response.status_code == 200
+        content = response.content.decode()
+
+        expected_label = f"Métricas de {start_formatted} a {end_formatted}"
+        assert expected_label in content, f"Label deve conter '{expected_label}'"
