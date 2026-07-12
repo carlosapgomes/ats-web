@@ -62,8 +62,17 @@
               <form method="get" class="metrics-period-custom-form" aria-label="Data específica">
                 <strong class="small d-block mb-1">Data específica</strong>
                 <div class="metrics-period-custom-fields">
-                  <input type="date" name="metrics_date" class="form-control form-control-sm metrics-period-date-input"
-                         value="{% if metrics_period == 'custom_date' %}{{ metrics_date }}{% endif %}">
+                  <div class="metrics-period-date-control">
+                    <span class="metrics-period-date-icon" aria-hidden="true">
+                      <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="currentColor" class="bi bi-calendar-event" viewBox="0 0 16 16" focusable="false">
+                        <path d="M11 6.5a.5.5 0 0 1 .5-.5h1a.5.5 0 0 1 .5.5v1a.5.5 0 0 1-.5.5h-1a.5.5 0 0 1-.5-.5z"/>
+                        <path d="M3.5 0a.5.5 0 0 1 .5.5V1h8V.5a.5.5 0 0 1 1 0V1h1a2 2 0 0 1 2 2v11a2 2 0 0 1-2 2H2a2 2 0 0 1-2-2V3a2 2 0 0 1 2-2h1V.5a.5.5 0 0 1 .5-.5M1 4v10a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1V4z"/>
+                      </svg>
+                    </span>
+                    <input type="date" name="metrics_date" class="form-control form-control-sm metrics-period-date-input"
+                           aria-label="Escolher data específica"
+                           value="{% if metrics_period == 'custom_date' %}{{ metrics_date }}{% endif %}">
+                  </div>
                   <input type="hidden" name="metrics_period" value="custom_date">
                   {% if status_filter %}<input type="hidden" name="status" value="{{ status_filter }}">{% endif %}
                   {% if date_from %}<input type="hidden" name="date_from" value="{{ date_from }}">{% endif %}
@@ -78,11 +87,29 @@
               <form method="get" class="metrics-period-custom-form" aria-label="Intervalo">
                 <strong class="small d-block mb-1">Intervalo</strong>
                 <div class="metrics-period-custom-fields">
-                  <input type="date" name="metrics_start" class="form-control form-control-sm metrics-period-date-input"
-                         value="{% if metrics_period == 'custom_range' %}{{ metrics_start }}{% endif %}">
+                  <div class="metrics-period-date-control">
+                    <span class="metrics-period-date-icon" aria-hidden="true">
+                      <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="currentColor" class="bi bi-calendar-event" viewBox="0 0 16 16" focusable="false">
+                        <path d="M11 6.5a.5.5 0 0 1 .5-.5h1a.5.5 0 0 1 .5.5v1a.5.5 0 0 1-.5.5h-1a.5.5 0 0 1-.5-.5z"/>
+                        <path d="M3.5 0a.5.5 0 0 1 .5.5V1h8V.5a.5.5 0 0 1 1 0V1h1a2 2 0 0 1 2 2v11a2 2 0 0 1-2 2H2a2 2 0 0 1-2-2V3a2 2 0 0 1 2-2h1V.5a.5.5 0 0 1 .5-.5M1 4v10a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1V4z"/>
+                      </svg>
+                    </span>
+                    <input type="date" name="metrics_start" class="form-control form-control-sm metrics-period-date-input"
+                           aria-label="Data inicial das métricas"
+                           value="{% if metrics_period == 'custom_range' %}{{ metrics_start }}{% endif %}">
+                  </div>
                   <span class="small text-muted">até</span>
-                  <input type="date" name="metrics_end" class="form-control form-control-sm metrics-period-date-input"
-                         value="{% if metrics_period == 'custom_range' %}{{ metrics_end }}{% endif %}">
+                  <div class="metrics-period-date-control">
+                    <span class="metrics-period-date-icon" aria-hidden="true">
+                      <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="currentColor" class="bi bi-calendar-event" viewBox="0 0 16 16" focusable="false">
+                        <path d="M11 6.5a.5.5 0 0 1 .5-.5h1a.5.5 0 0 1 .5.5v1a.5.5 0 0 1-.5.5h-1a.5.5 0 0 1-.5-.5z"/>
+                        <path d="M3.5 0a.5.5 0 0 1 .5.5V1h8V.5a.5.5 0 0 1 1 0V1h1a2 2 0 0 1 2 2v11a2 2 0 0 1-2 2H2a2 2 0 0 1-2-2V3a2 2 0 0 1 2-2h1V.5a.5.5 0 0 1 .5-.5M1 4v10a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1V4z"/>
+                      </svg>
+                    </span>
+                    <input type="date" name="metrics_end" class="form-control form-control-sm metrics-period-date-input"
+                           aria-label="Data final das métricas"
+                           value="{% if metrics_period == 'custom_range' %}{{ metrics_end }}{% endif %}">
+                  </div>
                   <input type="hidden" name="metrics_period" value="custom_range">
                   {% if status_filter %}<input type="hidden" name="status" value="{{ status_filter }}">{% endif %}
                   {% if date_from %}<input type="hidden" name="date_from" value="{{ date_from }}">{% endif %}

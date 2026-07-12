@@ -5,6 +5,7 @@
 ## Slice vertical
 
 - [x] Slice 001 — Reorganizar seletor de período como toolbar/card responsivo (`slices/slice-001-period-selector-toolbar.md`)
+  - Follow-up mobile: campos `type="date"` do `Personalizado` receberam wrapper `.metrics-period-date-control` com SVG Bootstrap Icons `calendar-event` monocromático, evitando campos brancos sem dica visual no Android/iPhone sem depender de placeholder nativo.
 
 ## Definition of Done do change
 

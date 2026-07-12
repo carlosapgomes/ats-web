@@ -3772,6 +3772,8 @@ class TestDashboardCustomDateRange:
         assert "metrics-period-options" in content, "Opções devem usar wrapper responsivo próprio"
         assert "metrics-period-option" in content, "Botões devem usar classe própria do seletor"
         assert "metrics-period-custom-panel" in content, "Painel personalizado deve ter classe própria"
+        assert "metrics-period-date-control" in content, "Campos de data devem ter wrapper com dica visual"
+        assert "bi-calendar-event" in content, "Campos de data devem usar ícone calendar-event monocromático"
 
     def test_metrics_period_selector_does_not_use_bootstrap_primary_group(self, client) -> None:
         """Seletor evita btn-group/btn-primary Bootstrap puro, que desalinha no mobile."""
@@ -3801,6 +3803,8 @@ class TestDashboardCustomDateRange:
         assert ".metrics-period-options" in css_content
         assert ".metrics-period-option.is-active" in css_content
         assert ".metrics-period-custom" in css_content
+        assert ".metrics-period-date-control" in css_content
+        assert ".metrics-period-date-icon" in css_content
         assert "@media (max-width: 575.98px)" in css_content
 
     def test_template_renders_custom_metrics_controls(self, client) -> None:
@@ -3816,6 +3820,7 @@ class TestDashboardCustomDateRange:
         assert 'name="metrics_date"' in content, "Template deve conter input metrics_date"
         assert 'name="metrics_start"' in content, "Template deve conter input metrics_start"
         assert 'name="metrics_end"' in content, "Template deve conter input metrics_end"
+        assert content.count("bi-calendar-event") >= 3, "Cada campo date deve ter ícone discreto de calendário"
 
     def test_metrics_custom_params_preserved_in_case_filter_form(self, client) -> None:
         """Filtro da lista preserva metrics_period e campos customizados como hidden."""
