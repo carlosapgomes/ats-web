@@ -34,6 +34,7 @@ from apps.cases.services import (
 )
 
 # Reaproveita mapeamentos definidos no intake para consistência visual
+from apps.doctor.reporting import prepare_doctor_case_report
 from apps.intake.views import (
     EVENT_DOT_CSS,
     EVENT_LABELS,
@@ -991,7 +992,10 @@ def dashboard_case_detail(request: HttpRequest, case_id: uuid.UUID) -> HttpRespo
         current_step_idx = len(steps) - 1
 
     enriched_events = []
+    was_ready_for_doctor = False
     for e in events:
+        if e.event_type == "CASE_READY_FOR_DOCTOR":
+            was_ready_for_doctor = True
         enriched_events.append(
             {
                 "event": e,
@@ -1087,6 +1091,12 @@ def dashboard_case_detail(request: HttpRequest, case_id: uuid.UUID) -> HttpRespo
     elif result_info is None and case.status == CaseStatus.FAILED:
         result_info = {"type": "failed"}
 
+    # ── Doctor report reconstruction (Slice 001) ───────────────────
+    doctor_report_text = ""
+    if was_ready_for_doctor:
+        prepared = prepare_doctor_case_report(case)
+        doctor_report_text = prepared.presenter.build_text_report()
+
     active_attachments = list(case.attachments.filter(is_suppressed=False).order_by("created_at"))
 
     patient_name = ""
@@ -1120,6 +1130,7 @@ def dashboard_case_detail(request: HttpRequest, case_id: uuid.UUID) -> HttpRespo
             "back_url": reverse("dashboard:index"),
             "back_label": "← Voltar ao dashboard",
             "pdf_url": reverse("dashboard:case_pdf", args=[case.case_id]),
+            "doctor_report_text": doctor_report_text,
             "attachments": active_attachments,
             "mobile_pdf_viewer_url": reverse("dashboard:pdf_viewer", args=[case.case_id])
             + f"?next={reverse('dashboard:case_detail', args=[case.case_id])}",

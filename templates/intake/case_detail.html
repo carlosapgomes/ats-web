@@ -524,6 +524,27 @@
 </div>
 {% endif %}
 
+{% if show_dashboard_nav and doctor_report_text %}
+<!-- Relatório Médico Reconstruído (Dashboard) -->
+<div class="card p-4 mb-4 border-info">
+  <h5 class="mb-0">
+    <button class="btn btn-link text-decoration-none p-0 text-dark collapsed" type="button"
+            data-bs-toggle="collapse" data-bs-target="#doctor-report-collapse"
+            aria-expanded="false" aria-controls="doctor-report-collapse">
+      ⚙️ Relatório automático apresentado ao médico (reconstruído)
+      <small class="text-muted ms-2">(clique para expandir)</small>
+    </button>
+  </h5>
+  <div class="collapse" id="doctor-report-collapse">
+    <div class="alert alert-info small mt-3 mb-3">
+      <strong>📌 Aviso:</strong> Conteúdo reconstruído a partir dos artefatos armazenados do caso.
+      Não é um snapshot imutável da tela histórica.
+    </div>
+    <pre class="bg-light p-3 rounded-3 mb-0" style="white-space: pre-wrap; font-size: 0.875rem; max-height: 600px; overflow-y: auto;">{{ doctor_report_text }}</pre>
+  </div>
+</div>
+{% endif %}
+
 <!-- Texto Extraído -->
 {% if case.extracted_text %}
 <div class="card p-4 mb-4">
