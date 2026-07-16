@@ -4583,3 +4583,224 @@ class TestDashboardCaseDetailResultFinalBadge:
         content = response.content.decode()
         assert "Revisão Manual" in content or "revisão manual" in content.lower()
         assert "bg-warning" in content
+
+
+# ── Dashboard: Doctor Report Audit (Slice 001) ─────────────────────────
+
+
+@pytest.mark.django_db
+class TestDashboardDoctorReportAudit:
+    """Testes para o relatório automático médico reconstruído no detalhe do dashboard.
+
+    Requer: helper canônico em apps/doctor/reporting.py,
+    dashboard_case_detail detectando CASE_READY_FOR_DOCTOR,
+    card colapsável em templates/intake/case_detail.html.
+    """
+
+    def _create_case_with_llm_artifacts(self, user, *, agency_record_number="DR-REPORT-001", **kwargs):
+        """Cria caso com artefatos LLM completos em status NEW."""
+        case = _create_case(
+            created_by=user,
+            status=CaseStatus.NEW,
+            agency_record_number=agency_record_number,
+            structured_data={
+                "patient": {"name": "Maria Audit", "age": 45, "sex": "F"},
+                "eda": {
+                    "requested_procedure": {"subtype": "standard"},
+                    "labs": {"hb_g_dl": 13.5, "platelets_per_mm3": 250000, "inr": 1.0},
+                    "ecg": {"report_present": "yes", "abnormal_flag": "no"},
+                },
+                "origin_context": {"city": "Salvador", "hospital": "Hospital Geral"},
+                "preop_screening": {"comorbidities_described": []},
+                "policy_precheck": {
+                    "labs_pass": "yes",
+                    "ecg_present": "yes",
+                    "labs_required": True,
+                    "ecg_required": True,
+                },
+            },
+            summary_text="Paciente com dor abdominal, indicação de EDA eletiva.",
+            suggested_action={
+                "suggestion": "accept",
+                "support_recommendation": "none",
+                "asa": {"bucket": "low"},
+                "reason_code": "",
+                "reason_text": "",
+            },
+            extracted_text="Paciente relata dor abdominal há 3 meses.",
+            **kwargs,
+        )
+        return case
+
+    # ── R1: Manager vê relatório após handoff ────────────────────────────
+
+    def test_manager_views_reconstructed_report_after_handoff(self, client) -> None:
+        """Manager vê título e texto do relatório para caso com CASE_READY_FOR_DOCTOR."""
+        user = _login_as(client, "manager")
+        case = self._create_case_with_llm_artifacts(user)
+        # Avançar FSM até WAIT_DOCTOR para ter CASE_READY_FOR_DOCTOR
+        case = _advance_case_to(case, CaseStatus.WAIT_DOCTOR)
+
+        response = client.get(reverse("dashboard:case_detail", args=[case.case_id]))
+        assert response.status_code == 200
+        content = response.content.decode()
+
+        # Título do card
+        assert "Relatório automático apresentado ao médico (reconstruído)" in content
+        # Deve conter texto do resumo clínico
+        assert "Paciente com dor abdominal" in content
+        # Deve conter labels dos sete blocos
+        assert "Resumo clínico" in content
+        assert "Achados críticos" in content
+        assert "Pendências críticas" in content
+        assert "Decisão sugerida" in content
+        assert "Suporte recomendado" in content
+        assert "ASA estimado" in content
+        assert "Motivo objetivo" in content
+
+    # ── R2: Admin vê relatório após handoff ──────────────────────────────
+
+    def test_admin_views_reconstructed_report_after_handoff(self, client) -> None:
+        """Admin vê card do relatório para caso com CASE_READY_FOR_DOCTOR."""
+        user = _login_as(client, "admin")
+        case = self._create_case_with_llm_artifacts(user)
+        case = _advance_case_to(case, CaseStatus.WAIT_DOCTOR)
+
+        response = client.get(reverse("dashboard:case_detail", args=[case.case_id]))
+        assert response.status_code == 200
+        content = response.content.decode()
+        assert "Relatório automático apresentado ao médico (reconstruído)" in content
+
+    # ── R3: Collapse fechado e acessível ───────────────────────────────
+
+    def test_collapse_starts_closed_and_accessible(self, client) -> None:
+        """Card usa Bootstrap Collapse, inicia recolhido, ARIA correto."""
+        user = _login_as(client, "manager")
+        case = self._create_case_with_llm_artifacts(user)
+        case = _advance_case_to(case, CaseStatus.WAIT_DOCTOR)
+
+        response = client.get(reverse("dashboard:case_detail", args=[case.case_id]))
+        assert response.status_code == 200
+        content = response.content.decode()
+
+        # Bootstrap data attributes
+        assert 'data-bs-toggle="collapse"' in content
+        assert 'aria-expanded="false"' in content
+        assert "aria-controls" in content
+        # Body inicialmente sem show
+        assert 'class="collapse"' in content or 'class="collapse ' in content
+        assert 'class="collapse show"' not in content
+
+    # ── R4: Aviso de reconstrução ──────────────────────────────────────
+
+    def test_reconstruction_disclosure_present(self, client) -> None:
+        """Card informa que o conteúdo é reconstruído de artefatos armazenados."""
+        user = _login_as(client, "manager")
+        case = self._create_case_with_llm_artifacts(user)
+        case = _advance_case_to(case, CaseStatus.WAIT_DOCTOR)
+
+        response = client.get(reverse("dashboard:case_detail", args=[case.case_id]))
+        assert response.status_code == 200
+        content = response.content.decode()
+        assert "reconstruído" in content
+        assert "snapshot imutável" in content
+
+    # ── R5: Caso sem handoff não mostra card ───────────────────────────
+
+    def test_case_without_handoff_does_not_show_card(self, client) -> None:
+        """Caso com artefatos LLM mas sem CASE_READY_FOR_DOCTOR não mostra card."""
+        user = _login_as(client, "manager")
+        # Caso com artefatos mas em status NEW (nunca enviado ao médico)
+        case = self._create_case_with_llm_artifacts(user)
+        # Sem CASE_READY_FOR_DOCTOR na timeline
+
+        response = client.get(reverse("dashboard:case_detail", args=[case.case_id]))
+        assert response.status_code == 200
+        content = response.content.decode()
+        assert "Relatório automático apresentado ao médico (reconstruído)" not in content
+
+    # ── R6: Paridade com helper/presenter canônico ──────────────────────
+
+    def test_report_text_matches_canonical_presenter(self, client) -> None:
+        """doctor_report_text no context corresponde a build_text_report() do presenter canônico."""
+        from apps.doctor.presenters import DoctorReportPresenter
+
+        user = _login_as(client, "manager")
+        case = self._create_case_with_llm_artifacts(user)
+        case = _advance_case_to(case, CaseStatus.WAIT_DOCTOR)
+
+        # Reload fresh
+        case = Case.objects.get(pk=case.pk)
+
+        response = client.get(reverse("dashboard:case_detail", args=[case.case_id]))
+        assert response.status_code == 200
+
+        # Construir texto canônico
+        presenter = DoctorReportPresenter(
+            structured_data=case.structured_data or {},
+            summary_text=case.summary_text or "",
+            suggested_action=case.suggested_action or {},
+            recent_denial_context=None,
+            source_text=case.extracted_text or "",
+        )
+        canonical_text = presenter.build_text_report()
+
+        # O contexto deve conter doctor_report_text
+        doctor_report_text = response.context.get("doctor_report_text", "")
+        assert doctor_report_text, "doctor_report_text deve estar no context"
+        assert doctor_report_text == canonical_text, "doctor_report_text deve ser igual ao build_text_report() canônico"
+
+    # ── R7: Escaping ────────────────────────────────────────────────────
+
+    def test_html_content_is_escaped(self, client) -> None:
+        """Conteúdo HTML-like em summary_text aparece escapado, não como tag executável."""
+        user = _login_as(client, "manager")
+        case = _create_case(
+            created_by=user,
+            status=CaseStatus.NEW,
+            agency_record_number="DR-ESCAPE-001",
+            structured_data={"patient": {"name": "Test"}},
+            summary_text='<script>alert("audit")</script>',
+            suggested_action={"suggestion": "accept", "support_recommendation": "none"},
+            extracted_text="some text",
+        )
+        case = _advance_case_to(case, CaseStatus.WAIT_DOCTOR)
+
+        response = client.get(reverse("dashboard:case_detail", args=[case.case_id]))
+        assert response.status_code == 200
+        content = response.content.decode()
+
+        # Script tag não deve aparecer como HTML executável
+        assert "<script>" not in content or "&lt;script&gt;" in content
+        # O texto escapado deve estar presente
+        assert "&lt;script&gt;" in content
+
+    # ── R8: Acesso NIR bloqueado ───────────────────────────────────────
+
+    def test_nir_cannot_access_dashboard_detail(self, client) -> None:
+        """NIR não tem acesso ao dashboard case detail."""
+        _login_as(client, "nir")
+        nir_user = User.objects.create_user(username="nir.audit@test.com", password="testpass123")
+        from apps.accounts.models import Role as RoleModel
+
+        role, _ = RoleModel.objects.get_or_create(name="nir")
+        nir_user.roles.add(role)
+        case = _create_case(created_by=nir_user, status=CaseStatus.NEW)
+        response = client.get(reverse("dashboard:case_detail", args=[case.case_id]))
+        assert response.status_code == 302
+
+    # ── R9: Card ausente sem show_dashboard_nav ─────────────────────────
+
+    def test_card_absent_when_no_show_dashboard_nav(self, client) -> None:
+        """Card não aparece quando template é renderizado sem show_dashboard_nav (contexto NIR)."""
+        user = _login_as(client, "manager")
+        case = self._create_case_with_llm_artifacts(user)
+        case = _advance_case_to(case, CaseStatus.WAIT_DOCTOR)
+
+        response = client.get(reverse("dashboard:case_detail", args=[case.case_id]))
+        assert response.status_code == 200
+        content = response.content.decode()
+
+        # O card só deve aparecer uma vez no dashboard context
+        # (show_dashboard_nav=True + doctor_report_text)
+        assert content.count("Relatório automático apresentado ao médico (reconstruído)") == 1

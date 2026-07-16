@@ -45,17 +45,7 @@ from apps.intake.views import (
 )
 
 from .forms import DoctorDecisionForm
-from .presenters import DoctorReportPresenter
-
-
-def _map_prior_decision_to_denial_type(decision: str) -> str:
-    """Map PriorCaseSummary.decision to denial type for the presenter."""
-    if decision == "doctor_denied":
-        return "deny_triage"
-    if decision == "appointment_denied":
-        return "deny_appointment"
-    return "deny_triage"
-
+from .reporting import prepare_doctor_case_report
 
 DOCTOR_DECISION_STATUSES = [
     CaseStatus.DOCTOR_ACCEPTED,
@@ -82,12 +72,6 @@ SUGGESTION_FLOW_MAP: dict[str, str] = {
 DOCTOR_DECISION_MAP: dict[str, str] = {
     "accept": "ACEITAR",
     "deny": "NEGAR",
-}
-
-# Prior case decision mapping for display on UI cards
-PRIOR_DECISION_DISPLAY: dict[str, str] = {
-    "doctor_denied": "Regulação Negada",
-    "appointment_denied": "Agendamento Negado",
 }
 
 
@@ -291,8 +275,6 @@ def _build_decision_context(case: Case, form: DoctorDecisionForm, request: HttpR
     """Build context dict for the decision template."""
     from django.urls import reverse
 
-    from apps.pipeline.prior_case import lookup_prior_case_context
-
     # ── Correction context (R5) ──────────────────────────────────────
     correction_context: dict[str, object] | None = None
     if case.corrects_case_id:
@@ -323,33 +305,11 @@ def _build_decision_context(case: Case, form: DoctorDecisionForm, request: HttpR
         except Case.DoesNotExist:
             pass
 
-    prior_context = None
-    prior_decision_display = ""
-    recent_denial_ctx = None
-    if case.agency_record_number:
-        pc = lookup_prior_case_context(
-            case_id=case.case_id,
-            agency_record_number=case.agency_record_number,
-        )
-        if pc.prior_case is not None:
-            prior_context = pc
-            prior_decision_display = PRIOR_DECISION_DISPLAY.get(pc.prior_case.decision, pc.prior_case.decision)
-            recent_denial_ctx = {
-                "decision": _map_prior_decision_to_denial_type(pc.prior_case.decision),
-                "reason": pc.prior_case.reason,
-                "decided_at": pc.prior_case.decided_at,
-                "prior_denial_count_7d": pc.prior_denial_count_7d,
-            }
-
-    # Build 7-block report via presenter
-    presenter = DoctorReportPresenter(
-        structured_data=case.structured_data or {},
-        summary_text=case.summary_text or "",
-        suggested_action=case.suggested_action or {},
-        recent_denial_context=recent_denial_ctx,
-        source_text=case.extracted_text or "",
-    )
-    report = presenter.build_report()
+    # Use shared helper to prepare presenter and denial context
+    prepared = prepare_doctor_case_report(case)
+    report = prepared.presenter.build_report()
+    prior_context = prepared.prior_context
+    prior_decision_display = prepared.prior_decision_display
 
     # ── Suppress duplicate prior-case card when same as correction (R7) ──
     # If the case has an explicit correction and the prior case lookup
