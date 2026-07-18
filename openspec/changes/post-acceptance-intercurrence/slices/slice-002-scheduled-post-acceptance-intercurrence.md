@@ -101,6 +101,11 @@ Todos incluem `cycle_id`, `context` e `admission_flow`. Não criar simultaneamen
 
 Eventos antigos `POST_SCHEDULE_ISSUE_*` continuam com labels e projeções legíveis.
 
+- `POST_SCHEDULE_ISSUE_OPENED` e `POST_SCHEDULE_ISSUE_RESPONDED`: labels, timeline e projeção sistêmica preservados.
+- `POST_SCHEDULE_ISSUE_ACKNOWLEDGED`: label/dot na timeline preservados, mas **omitido da thread** (payload legado vazio, decisão histórica).
+- `POST_ACCEPTANCE_ISSUE_ACKNOWLEDGED`: projetado na thread (payload contém `cycle_id`, `context`, `admission_flow`); não cria `UserNotification`.
+- Ciclos novos geram **somente** `POST_ACCEPTANCE_ISSUE_*`. Wrappers legados delegam à API pós-aceitação e não recriam eventos antigos.
+
 ### R5. Snapshot de auditoria
 
 - abertura scheduled: snapshot da agenda atual;
@@ -229,7 +234,7 @@ Explique ocorrências legadas esperadas e confirme que nenhuma string visual ant
 - [ ] Quatro ações e locks passam sem regressão.
 - [ ] Snapshots before/after auditáveis.
 - [ ] ACK NIR limpa ciclo após registrar evento.
-- [ ] Eventos antigos e novos continuam legíveis/projetados.
+- [ ] Eventos antigos e novos continuam legíveis/projetados (ACK legado omitido da thread por payload vazio; ACK novo projetado).
 - [ ] Terminologia visual pós-aceitação.
 - [ ] Fluxos sem agenda ainda inelegíveis.
 - [ ] Encerramento administrativo compatível.
