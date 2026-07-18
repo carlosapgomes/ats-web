@@ -825,9 +825,9 @@ def scheduler_submit(request: HttpRequest, case_id: uuid.UUID) -> HttpResponse:
                 kwargs["appointment_location"] = form.cleaned_data.get("psi_appointment_location", "")
                 kwargs["appointment_instructions"] = form.cleaned_data.get("psi_appointment_instructions", "")
 
-            from apps.cases.services import respond_post_schedule_issue
+            from apps.cases.services import respond_scheduled_post_acceptance_issue
 
-            case = respond_post_schedule_issue(**kwargs)
+            case = respond_scheduled_post_acceptance_issue(**kwargs)
 
         except ValueError as exc:
             form.add_error(None, str(exc))

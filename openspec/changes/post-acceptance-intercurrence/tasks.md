@@ -4,12 +4,12 @@
 
 ## Status
 
-Change aberto na branch `change/post-acceptance-intercurrence`. Implementação ainda não iniciada.
+Change aberto na branch `change/post-acceptance-intercurrence`. Slice 001 e 002 concluídos.
 
 ## Slices verticais
 
 - [x] Slice 001 — Tornar notices operacionais iniciais duráveis até ACK (`slices/slice-001-durable-operational-notices.md`)
-- [ ] Slice 002 — Generalizar com compatibilidade o fluxo agendado para intercorrência pós-aceitação (`slices/slice-002-scheduled-post-acceptance-intercurrence.md`)
+- [x] Slice 002 — Generalizar com compatibilidade o fluxo agendado para intercorrência pós-aceitação (`slices/slice-002-scheduled-post-acceptance-intercurrence.md`)
 - [ ] Slice 003 — Entregar intercorrência pós-aceitação apenas para ciência nos quatro fluxos sem agenda (`slices/slice-003-operational-post-acceptance-intercurrence.md`)
 
 ## Justificativa do dimensionamento
@@ -24,12 +24,12 @@ Change aberto na branch `change/post-acceptance-intercurrence`. Implementação 
 - [ ] Notice operacional inicial sem ACK não expira na virada do dia.
 - [ ] Badge e fila CHD usam o mesmo critério durável.
 - [ ] Histórico de ciências confirmadas hoje continua filtrado pelo timestamp do ACK.
-- [ ] Conceito/UI passa a usar “intercorrência pós-aceitação”.
-- [ ] Campos legados e eventos históricos permanecem compatíveis.
-- [ ] Contexto `scheduled`/`operational_notice` e `cycle_id` são persistidos para ciclo ativo.
-- [ ] Backfill trata eventual intercorrência legada ativa sem perda.
-- [ ] Fluxo agendado preserva ações, locks e FSM existentes.
-- [ ] Resposta agendada audita snapshots anterior/novo da agenda.
+- [x] Conceito/UI passa a usar "intercorrência pós-aceitação" (Slice 002).
+- [x] Campos legados e eventos históricos permanecem compatíveis (Slice 002).
+- [x] Contexto `scheduled`/`operational_notice` e `cycle_id` são persistidos para ciclo ativo (Slice 002).
+- [x] Backfill trata eventual intercorrência legada ativa sem perda (Slice 002).
+- [x] Fluxo agendado preserva ações, locks e FSM existentes (Slice 002).
+- [x] Resposta agendada audita snapshots anterior/novo da agenda (Slice 002).
 - [ ] Os quatro fluxos sem agenda ficam elegíveis somente quando aceitos e `CLEANED`.
 - [ ] Fluxo sem agenda permanece `CLEANED` e não altera nenhum campo `appointment_*`.
 - [ ] CHD recebe pendência de ciência operacional por ciclo e confirma atomicamente.

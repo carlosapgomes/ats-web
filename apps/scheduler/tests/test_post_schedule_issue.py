@@ -178,14 +178,14 @@ class TestQueuePostScheduleIssue:
         assert "OCOR-PSI-001" in content
 
     def test_issue_card_shows_badge(self, client, case_factory, advance_to) -> None:
-        """Card mostra badge 'Intercorrência pós-agendamento'."""
+        """Card mostra badge 'Intercorrência pós-aceitação'."""
         _login_as(client, "scheduler")
         _create_case_with_opened_issue(case_factory, advance_to, None)
 
         response = client.get("/scheduler/")
         assert response.status_code == 200
         content = response.content.decode()
-        assert "Intercorrência pós-agendamento" in content or "Intercorrência" in content
+        assert "Intercorrência pós-aceitação" in content or "Intercorrência" in content
 
     def test_issue_card_shows_nir_reason(self, client, case_factory, advance_to) -> None:
         """Card mostra o motivo e mensagem do NIR."""
@@ -618,10 +618,10 @@ class TestSubmitPostScheduleIssue:
 
 
 class TestPostScheduleIssueEvents:
-    """Evento POST_SCHEDULE_ISSUE_RESPONDED registrado."""
+    """Evento POST_ACCEPTANCE_ISSUE_RESPONDED registrado (Slice 002)."""
 
     def test_respond_creates_event(self, client, case_factory, advance_to) -> None:
-        """Ação do agendador registra POST_SCHEDULE_ISSUE_RESPONDED com payload."""
+        """Ação do agendador registra POST_ACCEPTANCE_ISSUE_RESPONDED com payload."""
         scheduler_user = _login_as(client, "scheduler")
         case = _create_case_with_opened_issue(case_factory, advance_to, None)
         token = _claim_lock(case.case_id, scheduler_user)
@@ -637,14 +637,14 @@ class TestPostScheduleIssueEvents:
 
         event = CaseEvent.objects.filter(
             case=case,
-            event_type="POST_SCHEDULE_ISSUE_RESPONDED",
+            event_type="POST_ACCEPTANCE_ISSUE_RESPONDED",
         ).first()
         assert event is not None
         assert event.payload.get("action") == "cancel"
         assert event.payload.get("response_message") == "Cancelado por óbito."
 
     def test_reschedule_creates_event(self, client, case_factory, advance_to) -> None:
-        """Reschedule registra evento POST_SCHEDULE_ISSUE_RESPONDED."""
+        """Reschedule registra evento POST_ACCEPTANCE_ISSUE_RESPONDED."""
         scheduler_user = _login_as(client, "scheduler")
         case = _create_case_with_opened_issue(case_factory, advance_to, None)
         token = _claim_lock(case.case_id, scheduler_user)
@@ -663,7 +663,7 @@ class TestPostScheduleIssueEvents:
 
         event = CaseEvent.objects.filter(
             case=case,
-            event_type="POST_SCHEDULE_ISSUE_RESPONDED",
+            event_type="POST_ACCEPTANCE_ISSUE_RESPONDED",
         ).first()
         assert event is not None
         assert event.payload.get("action") == "reschedule"
