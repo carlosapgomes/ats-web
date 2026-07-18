@@ -32,6 +32,8 @@ O sistema DEVE manter na fila e no badge do CHD todo notice operacional inicial 
 
 O sistema DEVE preservar leitura, labels e projeções dos eventos legados `POST_SCHEDULE_ISSUE_*`, `IMMEDIATE_ADMISSION_OPERATIONAL_NOTICE` e `SCHEDULER_IMMEDIATE_ACK`.
 
+`POST_SCHEDULE_ISSUE_OPENED` e `POST_SCHEDULE_ISSUE_RESPONDED` mantêm labels, timeline e projeção sistêmica. `POST_SCHEDULE_ISSUE_ACKNOWLEDGED` preserva label/dot na timeline mas é **omitido da thread** (payload legado vazio). `POST_ACCEPTANCE_ISSUE_ACKNOWLEDGED` é projetado na thread (possui `cycle_id`, `context`, `admission_flow`). Nenhum evento legado é apagado, renomeado ou reescrito. Ciclos novos geram somente `POST_ACCEPTANCE_ISSUE_*`.
+
 #### Scenario: Caso histórico continua legível
 
 - **GIVEN** caso com eventos legados
