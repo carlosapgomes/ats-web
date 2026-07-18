@@ -849,7 +849,7 @@ class TestLegacyPostScheduleEventCompatibility:
     """
 
     def _make_legacy_event(self, case, user, event_type, payload):
-        """Cria CaseEvent legado manualmente."""
+        """Cria CaseEvent legado manualmente e retorna o evento."""
         from apps.cases.models import CaseEvent
 
         return CaseEvent.objects.create(
@@ -865,10 +865,13 @@ class TestLegacyPostScheduleEventCompatibility:
 
         return advance_to(case_factory(user), CaseStatus.CLEANED)
 
-    # ── OPENED ───────────────────────────────────────────────────────
+    # ═══════════════════════════════════════════════════════════════════
+    # OPENED
+    # ═══════════════════════════════════════════════════════════════════
 
     def test_legacy_opened_creates_system_notice(self, user, case_factory, advance_to):
-        """POST_SCHEDULE_ISSUE_OPENED legado gera mensagem sistêmica."""
+        """POST_SCHEDULE_ISSUE_OPENED legado gera exatamente 1 mensagem sistêmica."""
+        from apps.cases.models import CaseCommunicationMessage
         from apps.cases.services import create_system_communication_notice_for_event
 
         case = self._cleaned_case(user, case_factory, advance_to)
@@ -885,8 +888,13 @@ class TestLegacyPostScheduleEventCompatibility:
         assert msg.system_event_type == "POST_SCHEDULE_ISSUE_OPENED"
         assert "Óbito" in msg.body or "Intercorrência" in msg.body
 
+        # Exatamente uma mensagem
+        msgs = CaseCommunicationMessage.objects.filter(case=case, system_event_type="POST_SCHEDULE_ISSUE_OPENED")
+        assert msgs.count() == 1
+
     def test_legacy_opened_idempotent(self, user, case_factory, advance_to):
-        """System notice de POST_SCHEDULE_ISSUE_OPENED é idempotente."""
+        """Duas chamadas retornam a mesma mensagem (idempotência por source_event)."""
+        from apps.cases.models import CaseCommunicationMessage
         from apps.cases.services import create_system_communication_notice_for_event
 
         case = self._cleaned_case(user, case_factory, advance_to)
@@ -903,28 +911,73 @@ class TestLegacyPostScheduleEventCompatibility:
         assert msg2 is not None
         assert msg1.pk == msg2.pk, "System notice deve ser idempotente por source_event"
 
+        # Exatamente um CaseCommunicationMessage
+        count = CaseCommunicationMessage.objects.filter(
+            case=case, system_event_type="POST_SCHEDULE_ISSUE_OPENED"
+        ).count()
+        assert count == 1, "Não deve criar mensagem duplicada"
+
     def test_legacy_opened_no_user_notification(self, user, case_factory, advance_to):
-        """System notice legado não cria UserNotification."""
+        """Evento OPENED legado não cria UserNotification.
+
+        O baseline de notification é capturado ANTES da criação do CaseEvent,
+        impedindo que o signal mascare a verificação.
+        """
         from apps.accounts.models import UserNotification
         from apps.cases.services import create_system_communication_notice_for_event
 
         case = self._cleaned_case(user, case_factory, advance_to)
+        # Baseline ANTES do evento (T1)
+        before = UserNotification.objects.filter(case=case).count()
+
         event = self._make_legacy_event(
             case,
             user,
             "POST_SCHEDULE_ISSUE_OPENED",
             {"reason": "death", "message": "Óbito", "admission_flow": "scheduled"},
         )
-
-        before = UserNotification.objects.count()
+        # Signal já executou; chamada idempotente não deve criar notificação
         create_system_communication_notice_for_event(event)
-        after = UserNotification.objects.count()
+
+        after = UserNotification.objects.filter(case=case).count()
         assert after == before, "System notice legado não deve criar UserNotification"
 
-    # ── RESPONDED ────────────────────────────────────────────────────
+    def test_legacy_opened_no_extra_events(self, user, case_factory, advance_to):
+        """OPENED legado não cria CASE_COMMUNICATION_MESSAGE_POSTED."""
+        from apps.cases.services import create_system_communication_notice_for_event
+
+        case = self._cleaned_case(user, case_factory, advance_to)
+
+        event = self._make_legacy_event(
+            case,
+            user,
+            "POST_SCHEDULE_ISSUE_OPENED",
+            {"reason": "death", "message": "Óbito", "admission_flow": "scheduled"},
+        )
+        create_system_communication_notice_for_event(event)
+
+        # Nenhum CASE_COMMUNICATION_MESSAGE_POSTED
+        posted = case.events.filter(event_type="CASE_COMMUNICATION_MESSAGE_POSTED").count()
+        assert posted == 0, "OPENED legado não deve criar CASE_COMMUNICATION_MESSAGE_POSTED"
+
+    def test_legacy_opened_has_label_and_dot(self):
+        """POST_SCHEDULE_ISSUE_OPENED legado tem label e dot CSS (T3)."""
+        from apps.intake.views import EVENT_DOT_CSS, EVENT_LABELS
+
+        label = EVENT_LABELS.get("POST_SCHEDULE_ISSUE_OPENED")
+        assert label is not None, "POST_SCHEDULE_ISSUE_OPENED deve ter label na timeline"
+        assert "Intercorrência" in label or "intercorrência" in label.lower()
+
+        dot = EVENT_DOT_CSS.get("POST_SCHEDULE_ISSUE_OPENED")
+        assert dot is not None, "POST_SCHEDULE_ISSUE_OPENED deve ter dot CSS"
+
+    # ═══════════════════════════════════════════════════════════════════
+    # RESPONDED
+    # ═══════════════════════════════════════════════════════════════════
 
     def test_legacy_responded_creates_system_notice(self, user, case_factory, advance_to):
-        """POST_SCHEDULE_ISSUE_RESPONDED legado gera mensagem sistêmica."""
+        """POST_SCHEDULE_ISSUE_RESPONDED legado gera exatamente 1 mensagem sistêmica."""
+        from apps.cases.models import CaseCommunicationMessage
         from apps.cases.services import create_system_communication_notice_for_event
 
         case = self._cleaned_case(user, case_factory, advance_to)
@@ -945,6 +998,81 @@ class TestLegacyPostScheduleEventCompatibility:
         assert msg.system_event_type == "POST_SCHEDULE_ISSUE_RESPONDED"
         assert "cancelado" in msg.body.lower() or "Cancelado" in msg.body
 
+        msgs = CaseCommunicationMessage.objects.filter(case=case, system_event_type="POST_SCHEDULE_ISSUE_RESPONDED")
+        assert msgs.count() == 1
+
+    def test_legacy_responded_idempotent(self, user, case_factory, advance_to):
+        """Duas chamadas para RESPONDED retornam a mesma mensagem."""
+        from apps.cases.models import CaseCommunicationMessage
+        from apps.cases.services import create_system_communication_notice_for_event
+
+        case = self._cleaned_case(user, case_factory, advance_to)
+        event = self._make_legacy_event(
+            case,
+            user,
+            "POST_SCHEDULE_ISSUE_RESPONDED",
+            {
+                "action": "cancel",
+                "response_message": "Cancelado",
+                "admission_flow": "scheduled",
+            },
+        )
+
+        msg1 = create_system_communication_notice_for_event(event)
+        msg2 = create_system_communication_notice_for_event(event)
+        assert msg1 is not None
+        assert msg2 is not None
+        assert msg1.pk == msg2.pk, "RESPONDED idempotente por source_event"
+
+        count = CaseCommunicationMessage.objects.filter(
+            case=case, system_event_type="POST_SCHEDULE_ISSUE_RESPONDED"
+        ).count()
+        assert count == 1
+
+    def test_legacy_responded_no_user_notification(self, user, case_factory, advance_to):
+        """RESPONDED legado não cria UserNotification — baseline antes do evento (T1)."""
+        from apps.accounts.models import UserNotification
+        from apps.cases.services import create_system_communication_notice_for_event
+
+        case = self._cleaned_case(user, case_factory, advance_to)
+        before = UserNotification.objects.filter(case=case).count()
+
+        event = self._make_legacy_event(
+            case,
+            user,
+            "POST_SCHEDULE_ISSUE_RESPONDED",
+            {
+                "action": "cancel",
+                "response_message": "Cancelado",
+                "admission_flow": "scheduled",
+            },
+        )
+        create_system_communication_notice_for_event(event)
+
+        after = UserNotification.objects.filter(case=case).count()
+        assert after == before, "RESPONDED legado não deve criar UserNotification"
+
+    def test_legacy_responded_no_extra_events(self, user, case_factory, advance_to):
+        """RESPONDED legado não cria CASE_COMMUNICATION_MESSAGE_POSTED."""
+        from apps.cases.services import create_system_communication_notice_for_event
+
+        case = self._cleaned_case(user, case_factory, advance_to)
+
+        event = self._make_legacy_event(
+            case,
+            user,
+            "POST_SCHEDULE_ISSUE_RESPONDED",
+            {
+                "action": "cancel",
+                "response_message": "Cancelado",
+                "admission_flow": "scheduled",
+            },
+        )
+        create_system_communication_notice_for_event(event)
+
+        posted = case.events.filter(event_type="CASE_COMMUNICATION_MESSAGE_POSTED").count()
+        assert posted == 0, "RESPONDED legado não deve criar CASE_COMMUNICATION_MESSAGE_POSTED"
+
     def test_legacy_responded_shows_action_translated(self, user, case_factory, advance_to):
         """Ação da resposta legada é traduzida no corpo da mensagem."""
         from apps.cases.services import create_system_communication_notice_for_event
@@ -963,10 +1091,22 @@ class TestLegacyPostScheduleEventCompatibility:
 
         msg = create_system_communication_notice_for_event(event)
         assert msg is not None
-        # Deve conter termo legível de reagendamento ou ação
         assert "Reagendado" in msg.body or "reagendamento" in msg.body.lower() or "Nova data" in msg.body
 
-    # ── ACKNOWLEDGED (legado — omitido da thread) ───────────────────
+    def test_legacy_responded_has_label_and_dot(self):
+        """POST_SCHEDULE_ISSUE_RESPONDED legado tem label e dot CSS (T3)."""
+        from apps.intake.views import EVENT_DOT_CSS, EVENT_LABELS
+
+        label = EVENT_LABELS.get("POST_SCHEDULE_ISSUE_RESPONDED")
+        assert label is not None, "POST_SCHEDULE_ISSUE_RESPONDED deve ter label na timeline"
+        assert "Intercorrência" in label or "intercorrência" in label.lower()
+
+        dot = EVENT_DOT_CSS.get("POST_SCHEDULE_ISSUE_RESPONDED")
+        assert dot is not None, "POST_SCHEDULE_ISSUE_RESPONDED deve ter dot CSS"
+
+    # ═══════════════════════════════════════════════════════════════════
+    # ACKNOWLEDGED (legado — omitido da thread)
+    # ═══════════════════════════════════════════════════════════════════
 
     def test_legacy_acknowledged_does_not_create_system_notice(self, user, case_factory, advance_to):
         """POST_SCHEDULE_ISSUE_ACKNOWLEDGED legado NÃO gera system notice.
@@ -992,8 +1132,44 @@ class TestLegacyPostScheduleEventCompatibility:
         ).count()
         assert ack_count == 0
 
+    def test_legacy_acknowledged_no_user_notification(self, user, case_factory, advance_to):
+        """ACK legado não cria UserNotification — baseline antes do evento (T1)."""
+        from apps.accounts.models import UserNotification
+        from apps.cases.services import create_system_communication_notice_for_event
+
+        case = self._cleaned_case(user, case_factory, advance_to)
+        before = UserNotification.objects.filter(case=case).count()
+
+        event = self._make_legacy_event(
+            case,
+            user,
+            "POST_SCHEDULE_ISSUE_ACKNOWLEDGED",
+            {},
+        )
+        create_system_communication_notice_for_event(event)  # retorna None
+
+        after = UserNotification.objects.filter(case=case).count()
+        assert after == before, "ACK legado não deve criar UserNotification"
+
+    def test_legacy_acknowledged_no_extra_events(self, user, case_factory, advance_to):
+        """ACK legado não cria CASE_COMMUNICATION_MESSAGE_POSTED."""
+        from apps.cases.services import create_system_communication_notice_for_event
+
+        case = self._cleaned_case(user, case_factory, advance_to)
+
+        event = self._make_legacy_event(
+            case,
+            user,
+            "POST_SCHEDULE_ISSUE_ACKNOWLEDGED",
+            {},
+        )
+        create_system_communication_notice_for_event(event)  # retorna None
+
+        posted = case.events.filter(event_type="CASE_COMMUNICATION_MESSAGE_POSTED").count()
+        assert posted == 0, "ACK legado não deve criar CASE_COMMUNICATION_MESSAGE_POSTED"
+
     def test_legacy_acknowledged_has_label_and_dot(self):
-        """POST_SCHEDULE_ISSUE_ACKNOWLEDGED legado tem label e dot CSS."""
+        """POST_SCHEDULE_ISSUE_ACKNOWLEDGED legado tem label e dot CSS (T3)."""
         from apps.intake.views import EVENT_DOT_CSS, EVENT_LABELS
 
         label = EVENT_LABELS.get("POST_SCHEDULE_ISSUE_ACKNOWLEDGED")
