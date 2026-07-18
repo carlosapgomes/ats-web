@@ -1348,28 +1348,30 @@ def local_day_bounds(day: date | None = None) -> tuple[datetime, datetime]:
     return start, end
 
 
-def unacknowledged_operational_notice_qs(day: date | None = None) -> QuerySet[Case]:
+def unacknowledged_operational_notice_qs() -> QuerySet[Case]:
     """Casos com aviso operacional (fluxo sem agendamento) aguardando ciência do CHD.
 
     Fonte única do critério "fila de ciência operacional", compartilhada entre
     a renderização da fila do scheduler e o contador do badge/avatar — assim
     badge e fila nunca divergem.
 
+    Slice 001: o filtro diário foi removido para que notices operacionais
+    iniciais persistam até ACK, independentemente da data de criação.
+    O histórico "ciências confirmadas hoje" continua filtrado pelo timestamp
+    do ACK, não pelo timestamp do notice.
+
     - fluxo em ``OPERATIONAL_NOTICE_FLOWS``
       (immediate/pre_icu/ward_icu_backup/pediatric_em);
     - existe evento de aviso (novo ``ADMISSION_FLOW_OPERATIONAL_NOTICE`` ou
-      legado ``IMMEDIATE_ADMISSION_OPERATIONAL_NOTICE``) dentro do dia local;
+      legado ``IMMEDIATE_ADMISSION_OPERATIONAL_NOTICE``) sem restrição de data;
     - caso não está em ``WAIT_APPT``;
     - sem evento de ack (novo ``SCHEDULER_OPERATIONAL_NOTICE_ACK`` ou legado
       ``SCHEDULER_IMMEDIATE_ACK``).
     """
-    start, end = local_day_bounds(day)
     return (
         Case.objects.filter(
             doctor_admission_flow__in=OPERATIONAL_NOTICE_FLOWS,
             events__event_type__in=OPERATIONAL_NOTICE_EVENT_TYPES,
-            events__timestamp__gte=start,
-            events__timestamp__lt=end,
         )
         .exclude(status=CaseStatus.WAIT_APPT)
         .exclude(events__event_type__in=OPERATIONAL_NOTICE_ACK_EVENT_TYPES)
