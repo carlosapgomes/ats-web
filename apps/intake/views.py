@@ -26,7 +26,7 @@ from apps.cases.services import (
     CASE_COMMUNICATION_MAX_LENGTH,
     ELIGIBLE_SUPPLEMENTAL_STATUSES,
     CaseCommunicationError,
-    acknowledge_post_schedule_issue,
+    acknowledge_scheduled_post_acceptance_issue,
     add_supplemental_case_attachment,
     assert_case_lock,
     claim_case_lock,
@@ -139,6 +139,9 @@ EVENT_LABELS: dict[str, str] = {
     "POST_SCHEDULE_ISSUE_OPENED": "Intercorrência aberta",
     "POST_SCHEDULE_ISSUE_RESPONDED": "Intercorrência respondida pelo agendador",
     "POST_SCHEDULE_ISSUE_ACKNOWLEDGED": "Ciência de intercorrência confirmada",
+    "POST_ACCEPTANCE_ISSUE_OPENED": "Intercorrência pós-aceitação aberta",
+    "POST_ACCEPTANCE_ISSUE_RESPONDED": "Intercorrência pós-aceitação respondida",
+    "POST_ACCEPTANCE_ISSUE_ACKNOWLEDGED": "Ciência de intercorrência pós-aceitação confirmada",
     # ── Scope gate ───────────────────────────────────────────
     "SCOPE_GATE_BYPASS": "Fora do escopo — revisão manual necessária",
     # ── Pipeline / sistema ────────────────────────────────────
@@ -194,6 +197,9 @@ EVENT_DOT_CSS: dict[str, str] = {
     "POST_SCHEDULE_ISSUE_OPENED": "nir",
     "POST_SCHEDULE_ISSUE_RESPONDED": "scheduler",
     "POST_SCHEDULE_ISSUE_ACKNOWLEDGED": "nir",
+    "POST_ACCEPTANCE_ISSUE_OPENED": "nir",
+    "POST_ACCEPTANCE_ISSUE_RESPONDED": "scheduler",
+    "POST_ACCEPTANCE_ISSUE_ACKNOWLEDGED": "nir",
     # ── Scope gate ───────────────────────────────────────────
     "SCOPE_GATE_BYPASS": "system",
     # ── Pipeline / sistema ────────────────────────────────────
@@ -1028,7 +1034,7 @@ def confirm_receipt(request: HttpRequest, case_id: uuid.UUID) -> HttpResponse:
 
     # Execute FSM transitions
     if case.post_schedule_issue_status == "responded":
-        acknowledge_post_schedule_issue(case=case, user=request.user)
+        acknowledge_scheduled_post_acceptance_issue(case=case, user=request.user)
     else:
         case.cleanup_triggered(user=request.user)
         case.save()
@@ -1136,8 +1142,8 @@ def closed_cases_search(request: HttpRequest) -> HttpResponse:
     Mostra elegibilidade e botão de abertura apenas para elegíveis.
     """
     from apps.cases.services import (
-        get_post_schedule_issue_ineligibility_reason,
-        is_post_schedule_issue_eligible,
+        get_post_acceptance_issue_ineligibility_reason,
+        is_post_acceptance_issue_eligible,
     )
 
     query = request.GET.get("q", "").strip()
@@ -1157,7 +1163,7 @@ def closed_cases_search(request: HttpRequest) -> HttpResponse:
         )
 
         for c in qs:
-            eligible = is_post_schedule_issue_eligible(c)
+            eligible = is_post_acceptance_issue_eligible(c, context="scheduled")
             # Check if this case has corrected_by_cases (R3)
             corrected_by_count = 0
             if hasattr(c, "corrected_by_cases"):
@@ -1166,7 +1172,9 @@ def closed_cases_search(request: HttpRequest) -> HttpResponse:
                 {
                     "case": c,
                     "eligible": eligible,
-                    "ineligibility_reason": ("" if eligible else get_post_schedule_issue_ineligibility_reason(c)),
+                    "ineligibility_reason": (
+                        "" if eligible else get_post_acceptance_issue_ineligibility_reason(c, context="scheduled")
+                    ),
                     "status_label": STATUS_LABELS.get(c.status, c.get_status_display()),
                     "status_css": STATUS_CSS_CLASS.get(c.status, "status-pending"),
                     "patient_name": c.patient_name,
@@ -1229,9 +1237,9 @@ def closed_case_detail(request: HttpRequest, case_id: uuid.UUID) -> HttpResponse
     Não adquire lock. Não altera FSM em GET.
     """
     from apps.cases.services import (
-        get_post_schedule_issue_ineligibility_reason,
-        is_post_schedule_issue_eligible,
-        open_post_schedule_issue,
+        get_post_acceptance_issue_ineligibility_reason,
+        is_post_acceptance_issue_eligible,
+        open_post_acceptance_issue,
     )
 
     from .forms import PostScheduleIssueForm
@@ -1250,8 +1258,8 @@ def closed_case_detail(request: HttpRequest, case_id: uuid.UUID) -> HttpResponse
 
     # Processar POST de abertura de intercorrência
     if request.method == "POST":
-        if not is_post_schedule_issue_eligible(case):
-            messages.warning(request, get_post_schedule_issue_ineligibility_reason(case))
+        if not is_post_acceptance_issue_eligible(case, context="scheduled"):
+            messages.warning(request, get_post_acceptance_issue_ineligibility_reason(case, context="scheduled"))
             return redirect("intake:closed_case_detail", case_id=case.case_id)
 
         form = PostScheduleIssueForm(request.POST)
@@ -1259,11 +1267,12 @@ def closed_case_detail(request: HttpRequest, case_id: uuid.UUID) -> HttpResponse
             reason = form.cleaned_data["reason"]
             message = form.cleaned_data.get("message", "")
             try:
-                open_post_schedule_issue(
+                open_post_acceptance_issue(
                     case=case,
                     user=request.user,
                     reason=reason,
                     message=message,
+                    context="scheduled",
                 )
                 messages.success(
                     request,
@@ -1306,8 +1315,8 @@ def closed_case_detail(request: HttpRequest, case_id: uuid.UUID) -> HttpResponse
         )
 
     # Elegibilidade para intercorrência
-    eligible = is_post_schedule_issue_eligible(case)
-    ineligibility_reason = "" if eligible else get_post_schedule_issue_ineligibility_reason(case)
+    eligible = is_post_acceptance_issue_eligible(case, context="scheduled")
+    ineligibility_reason = "" if eligible else get_post_acceptance_issue_ineligibility_reason(case, context="scheduled")
 
     # Formulário (se elegível e GET, criar form vazio; POST inválido mantém detail_form do POST)
     if not request.method == "POST" and eligible:
@@ -1772,18 +1781,18 @@ def post_schedule_issue_open(request: HttpRequest, case_id: uuid.UUID) -> HttpRe
     POST: Valida e abre intercorrência via serviço de domínio.
     """
     from apps.cases.services import (
-        get_post_schedule_issue_ineligibility_reason,
-        is_post_schedule_issue_eligible,
-        open_post_schedule_issue,
+        get_post_acceptance_issue_ineligibility_reason,
+        is_post_acceptance_issue_eligible,
+        open_post_acceptance_issue,
     )
 
     from .forms import PostScheduleIssueForm
 
     case = get_object_or_404(Case, case_id=case_id)
 
-    # Verificar elegibilidade
-    if not is_post_schedule_issue_eligible(case):
-        reason = get_post_schedule_issue_ineligibility_reason(case)
+    # Verificar elegibilidade (contexto scheduled)
+    if not is_post_acceptance_issue_eligible(case, context="scheduled"):
+        reason = get_post_acceptance_issue_ineligibility_reason(case, context="scheduled")
         return render(
             request,
             "intake/post_schedule_issue_form.html",
@@ -1802,11 +1811,12 @@ def post_schedule_issue_open(request: HttpRequest, case_id: uuid.UUID) -> HttpRe
             reason = form.cleaned_data["reason"]
             message = form.cleaned_data.get("message", "")
             try:
-                open_post_schedule_issue(
+                open_post_acceptance_issue(
                     case=case,
                     user=request.user,
                     reason=reason,
                     message=message,
+                    context="scheduled",
                 )
                 messages.success(
                     request,

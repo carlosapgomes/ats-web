@@ -134,7 +134,7 @@ class TestDetailShowsRespondedIssue:
         response = client.get(reverse("intake:case_detail", args=[case.case_id]))
         assert response.status_code == 200
         content = response.content.decode()
-        assert "Intercorrência Pós-Agendamento" in content
+        assert "Intercorrência Pós-Aceitação" in content
         assert case.status == CaseStatus.WAIT_R1_CLEANUP_THUMBS
         assert case.post_schedule_issue_status == "responded"
 
@@ -238,7 +238,7 @@ class TestConfirmReceiptWithRespondedIssue:
         assert case.post_schedule_issue_status == ""
 
     def test_confirm_creates_acknowledged_event(self, client, case_factory, advance_to) -> None:
-        """Evento POST_SCHEDULE_ISSUE_ACKNOWLEDGED é criado."""
+        """Evento POST_ACCEPTANCE_ISSUE_ACKNOWLEDGED é criado."""
         client, user = _nir_client(client)
         case = _create_responded_issue(case_factory, advance_to, user, action="cancel")
         token = _get_lock_token(client, case)
@@ -250,7 +250,7 @@ class TestConfirmReceiptWithRespondedIssue:
 
         event = CaseEvent.objects.filter(
             case=case,
-            event_type="POST_SCHEDULE_ISSUE_ACKNOWLEDGED",
+            event_type="POST_ACCEPTANCE_ISSUE_ACKNOWLEDGED",
         ).first()
         assert event is not None
 
@@ -396,8 +396,8 @@ class TestNormalConfirmStillWorks:
             {"lock_token": token},
         )
 
-        # Deve criar ACKNOWLEDGED
-        assert CaseEvent.objects.filter(case=case, event_type="POST_SCHEDULE_ISSUE_ACKNOWLEDGED").exists()
+        # Deve criar ACKNOWLEDGED (novo tipo pós-aceitação)
+        assert CaseEvent.objects.filter(case=case, event_type="POST_ACCEPTANCE_ISSUE_ACKNOWLEDGED").exists()
 
         # NÃO deve criar novos eventos de cleanup (contagem permanece igual)
         cleanup_after = CaseEvent.objects.filter(

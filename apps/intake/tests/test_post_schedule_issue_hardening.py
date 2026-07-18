@@ -387,7 +387,7 @@ class TestNormalFlowsPreserved:
         response = client.get(reverse("scheduler:queue"))
         assert response.status_code == 200
         content = response.content.decode()
-        assert "Intercorrência pós-agendamento" not in content
+        assert "Intercorrência pós-aceitação" not in content
 
     def test_normal_nir_timeline_no_issue_events(self, client, case_factory, advance_to) -> None:
         """Timeline NIR normal não mostra eventos de intercorrência."""
