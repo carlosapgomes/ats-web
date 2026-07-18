@@ -1,146 +1,164 @@
-"""Testes de migration e backfill para campos post_acceptance_issue_*.
+"""Testes da migration 0012 — backfill de intercorrências legadas ativas.
 
-Slice 002: migration 0012 adiciona post_acceptance_issue_context e
-post_acceptance_issue_cycle_id com backfill de intercorrências legadas ativas.
+Testa a função backfill_active_post_acceptance_issues importada via
+importlib da migration 0012, com o registry histórico correto.
 """
 
 from __future__ import annotations
 
+import importlib
+import uuid
+from unittest.mock import MagicMock
+
 import pytest
+from django.contrib.auth import get_user_model
 
 from apps.cases.models import Case, CaseStatus
 
 pytestmark = pytest.mark.django_db
 
-
-def _refetch(case: Case) -> Case:
-    """Re-fetch a case from DB, avoiding django-fsm refresh_from_db issues."""
-    return Case.objects.get(pk=case.pk)
+User = get_user_model()
 
 
-class TestMigrationFields:
-    """Testes de existência dos campos e backfill da migration."""
+def _get_backfill_fn():
+    """Importa a função de backfill da migration 0012 via importlib."""
+    mod = importlib.import_module("apps.cases.migrations.0012_post_acceptance_issue_fields")
+    return mod.backfill_active_post_acceptance_issues
 
-    def test_fields_exist_on_model(self) -> None:
-        """Campos post_acceptance_issue_context e post_acceptance_issue_cycle_id existem."""
-        assert hasattr(Case, "post_acceptance_issue_context"), (
-            "Campo post_acceptance_issue_context não existe no modelo"
-        )
-        assert hasattr(Case, "post_acceptance_issue_cycle_id"), (
-            "Campo post_acceptance_issue_cycle_id não existe no modelo"
-        )
 
-    def test_defaults_are_correct(self, user, case_factory) -> None:
-        """Casos novos iniciam com valores default."""
-        case = case_factory(user)
-        assert case.post_acceptance_issue_context == ""
-        assert case.post_acceptance_issue_cycle_id is None
+def _create_backfill_data(pks: list[int], status: str) -> None:
+    """Cria casos com issue legada ativa via update (evita FSM)."""
+    Case.objects.filter(pk__in=pks).update(
+        post_schedule_issue_status=status,
+        post_schedule_issue_reason="death",
+    )
 
-    def test_backfill_opened_legacy_issue(self, user, case_factory, advance_to) -> None:
-        """Issue legada opened recebe contexto 'scheduled' e UUID único."""
-        case = advance_to(case_factory(user), CaseStatus.CLEANED)
-        case.doctor_decision = "accept"
-        case.doctor_admission_flow = "scheduled"
-        case.appointment_status = "confirmed"
-        # Set via update para evitar FSM protected field
-        Case.objects.filter(pk=case.pk).update(
-            post_schedule_issue_status="opened",
-            post_schedule_issue_reason="death",
-        )
-        # Executar backfill manual
-        from django.db import connection
 
-        with connection.cursor() as cursor:
-            cursor.execute(
-                """UPDATE cases_case
-                   SET post_acceptance_issue_context = 'scheduled',
-                       post_acceptance_issue_cycle_id = gen_random_uuid()
-                   WHERE post_schedule_issue_status IN ('opened', 'responded')
-                     AND post_acceptance_issue_context = ''"""
-            )
+class TestMigrationBackfill:
+    """Testes da função backfill da migration 0012."""
 
-        case = _refetch(case)
-        assert case.post_acceptance_issue_context == "scheduled", (
-            f"Contexto deve ser 'scheduled' após backfill, mas é '{case.post_acceptance_issue_context}'"
-        )
-        assert case.post_acceptance_issue_cycle_id is not None, "cycle_id deve ser preenchido após backfill"
+    def test_opened_receives_context_and_unique_uuid(self, user, case_factory, advance_to) -> None:
+        """Issue opened recebe contexto 'scheduled' e UUID único."""
+        backfill = _get_backfill_fn()
 
-    def test_backfill_responded_legacy_issue(self, user, case_factory, advance_to) -> None:
-        """Issue legada responded também recebe contexto/UUID."""
-        case = advance_to(case_factory(user), CaseStatus.CLEANED)
-        case.doctor_decision = "accept"
-        case.doctor_admission_flow = "scheduled"
-        case.appointment_status = "confirmed"
-        Case.objects.filter(pk=case.pk).update(
-            post_schedule_issue_status="responded",
-            post_schedule_issue_reason="death",
-            post_schedule_issue_response_action="cancel",
-        )
-
-        from django.db import connection
-
-        with connection.cursor() as cursor:
-            cursor.execute(
-                """UPDATE cases_case
-                   SET post_acceptance_issue_context = 'scheduled',
-                       post_acceptance_issue_cycle_id = gen_random_uuid()
-                   WHERE post_schedule_issue_status IN ('opened', 'responded')
-                     AND post_acceptance_issue_context = ''"""
-            )
-
-        case = _refetch(case)
-        assert case.post_acceptance_issue_context == "scheduled"
-        assert case.post_acceptance_issue_cycle_id is not None
-
-    def test_no_issue_active_stays_default(self, user, case_factory, advance_to) -> None:
-        """Casos sem issue ativa permanecem com valores vazios/nulos."""
-        case = advance_to(case_factory(user), CaseStatus.CLEANED)
-        case.doctor_decision = "accept"
-        case.doctor_admission_flow = "scheduled"
-        case.appointment_status = "confirmed"
-        Case.objects.filter(pk=case.pk).update(post_schedule_issue_status="")
-
-        case = _refetch(case)
-        assert case.post_acceptance_issue_context == ""
-        assert case.post_acceptance_issue_cycle_id is None
-
-    def test_each_case_gets_unique_cycle_id(self, user, case_factory, advance_to) -> None:
-        """Cada caso com issue ativa recebe UUID diferente."""
         case1 = advance_to(case_factory(user), CaseStatus.CLEANED)
         case1.doctor_decision = "accept"
         case1.doctor_admission_flow = "scheduled"
         case1.appointment_status = "confirmed"
-        Case.objects.filter(pk=case1.pk).update(
-            post_schedule_issue_status="opened",
-            post_schedule_issue_reason="death",
-        )
+        case1.save(update_fields=["doctor_decision", "doctor_admission_flow", "appointment_status"])
 
         case2 = advance_to(case_factory(user), CaseStatus.CLEANED)
         case2.doctor_decision = "accept"
         case2.doctor_admission_flow = "scheduled"
         case2.appointment_status = "confirmed"
-        Case.objects.filter(pk=case2.pk).update(
-            post_schedule_issue_status="responded",
+        case2.save(update_fields=["doctor_decision", "doctor_admission_flow", "appointment_status"])
+
+        _create_backfill_data([case1.pk, case2.pk], "opened")
+
+        from django.apps import apps as django_apps
+
+        backfill(django_apps, MagicMock())
+
+        c1 = Case.objects.get(pk=case1.pk)
+        c2 = Case.objects.get(pk=case2.pk)
+
+        assert c1.post_acceptance_issue_context == "scheduled"
+        assert c1.post_acceptance_issue_cycle_id is not None
+        assert isinstance(c1.post_acceptance_issue_cycle_id, uuid.UUID)
+
+        assert c2.post_acceptance_issue_context == "scheduled"
+        assert c2.post_acceptance_issue_cycle_id is not None
+
+        assert c1.post_acceptance_issue_cycle_id != c2.post_acceptance_issue_cycle_id, "UUIDs devem ser distintos"
+
+    def test_responded_receives_context_and_uuid(self, user, case_factory, advance_to) -> None:
+        """Issue responded também recebe contexto/UUID."""
+        backfill = _get_backfill_fn()
+
+        case = advance_to(case_factory(user), CaseStatus.CLEANED)
+        case.doctor_decision = "accept"
+        case.doctor_admission_flow = "scheduled"
+        case.appointment_status = "confirmed"
+        case.save(update_fields=["doctor_decision", "doctor_admission_flow", "appointment_status"])
+        _create_backfill_data([case.pk], "responded")
+
+        from django.apps import apps as django_apps
+
+        backfill(django_apps, MagicMock())
+
+        c = Case.objects.get(pk=case.pk)
+        assert c.post_acceptance_issue_context == "scheduled"
+        assert c.post_acceptance_issue_cycle_id is not None
+
+    def test_no_active_issue_stays_default(self, user, case_factory, advance_to) -> None:
+        """Casos sem issue ativa permanecem com valores vazios/nulos."""
+        backfill = _get_backfill_fn()
+
+        case = advance_to(case_factory(user), CaseStatus.CLEANED)
+        case.doctor_decision = "accept"
+        case.doctor_admission_flow = "scheduled"
+        case.appointment_status = "confirmed"
+        case.save(update_fields=["doctor_decision", "doctor_admission_flow", "appointment_status"])
+        # post_schedule_issue_status permanece "" (default)
+
+        from django.apps import apps as django_apps
+
+        backfill(django_apps, MagicMock())
+
+        c = Case.objects.get(pk=case.pk)
+        assert c.post_acceptance_issue_context == ""
+        assert c.post_acceptance_issue_cycle_id is None
+
+    def test_many_cases_in_same_batch_have_unique_uuids(self, user, case_factory, advance_to) -> None:
+        """Múltiplos casos no mesmo lote recebem UUIDs distintos."""
+        backfill = _get_backfill_fn()
+
+        pks = []
+        for i in range(10):
+            case = advance_to(case_factory(user), CaseStatus.CLEANED)
+            case.doctor_decision = "accept"
+            case.doctor_admission_flow = "scheduled"
+            case.appointment_status = "confirmed"
+            case.save(update_fields=["doctor_decision", "doctor_admission_flow", "appointment_status"])
+            pks.append(case.pk)
+
+        _create_backfill_data(pks, "opened")
+
+        from django.apps import apps as django_apps
+
+        backfill(django_apps, MagicMock())
+
+        uuids_set = set()
+        for pk in pks:
+            c = Case.objects.get(pk=pk)
+            assert c.post_acceptance_issue_context == "scheduled"
+            assert c.post_acceptance_issue_cycle_id is not None
+            uuids_set.add(c.post_acceptance_issue_cycle_id)
+
+        assert len(uuids_set) == 10, f"Esperados 10 UUIDs únicos, obtidos {len(uuids_set)}"
+
+    def test_existing_context_not_overwritten(self, user, case_factory, advance_to) -> None:
+        """Valores já preenchidos não são sobrescritos."""
+        backfill = _get_backfill_fn()
+
+        case = advance_to(case_factory(user), CaseStatus.CLEANED)
+        case.doctor_decision = "accept"
+        case.doctor_admission_flow = "scheduled"
+        case.appointment_status = "confirmed"
+        case.save(update_fields=["doctor_decision", "doctor_admission_flow", "appointment_status"])
+
+        existing_cycle_id = uuid.uuid4()
+        Case.objects.filter(pk=case.pk).update(
+            post_schedule_issue_status="opened",
             post_schedule_issue_reason="death",
-            post_schedule_issue_response_action="maintain",
+            post_acceptance_issue_context="scheduled",
+            post_acceptance_issue_cycle_id=existing_cycle_id,
         )
 
-        from django.db import connection
+        from django.apps import apps as django_apps
 
-        with connection.cursor() as cursor:
-            cursor.execute(
-                """UPDATE cases_case
-                   SET post_acceptance_issue_context = 'scheduled',
-                       post_acceptance_issue_cycle_id = gen_random_uuid()
-                   WHERE post_schedule_issue_status IN ('opened', 'responded')
-                     AND post_acceptance_issue_context = ''"""
-            )
+        backfill(django_apps, MagicMock())
 
-        case1 = _refetch(case1)
-        case2 = _refetch(case2)
-
-        assert case1.post_acceptance_issue_cycle_id is not None
-        assert case2.post_acceptance_issue_cycle_id is not None
-        assert case1.post_acceptance_issue_cycle_id != case2.post_acceptance_issue_cycle_id, (
-            "UUIDs devem ser diferentes entre casos"
-        )
+        c = Case.objects.get(pk=case.pk)
+        assert c.post_acceptance_issue_context == "scheduled"
+        assert c.post_acceptance_issue_cycle_id == existing_cycle_id, "UUID existente não deve ser sobrescrito"

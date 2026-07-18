@@ -10,24 +10,41 @@ def backfill_active_post_acceptance_issues(apps, schema_editor):
 
     Apenas casos com post_schedule_issue_status in ('opened', 'responded')
     recebem backfill. Casos sem issue ativa permanecem com valores default.
+
+    Cada caso recebe UUID único via uuid.uuid4() individual por instância.
+    bulk_update() em lotes para evitar memory pressure.
     """
     Case = apps.get_model("cases", "Case")
     qs = Case.objects.filter(post_schedule_issue_status__in=("opened", "responded"))
-    # Bulk update em lotes para evitar memory pressure
+
     batch_size = 500
-    pk_list = list(qs.values_list("pk", flat=True))
-    for i in range(0, len(pk_list), batch_size):
-        batch_pks = pk_list[i : i + batch_size]
-        Case.objects.filter(pk__in=batch_pks).update(
-            post_acceptance_issue_context="scheduled",
-            post_acceptance_issue_cycle_id=uuid.uuid4(),
+    updated: list = []
+    for case in qs.iterator(chunk_size=batch_size):
+        changed = False
+        if not case.post_acceptance_issue_context:
+            case.post_acceptance_issue_context = "scheduled"
+            changed = True
+        if case.post_acceptance_issue_cycle_id is None:
+            case.post_acceptance_issue_cycle_id = uuid.uuid4()
+            changed = True
+        if changed:
+            updated.append(case)
+        if len(updated) >= batch_size:
+            Case.objects.bulk_update(
+                updated,
+                ["post_acceptance_issue_context", "post_acceptance_issue_cycle_id"],
+            )
+            updated = []
+
+    if updated:
+        Case.objects.bulk_update(
+            updated,
+            ["post_acceptance_issue_context", "post_acceptance_issue_cycle_id"],
         )
 
 
 def reverse_backfill(apps, schema_editor):
     """Reverte apenas os campos novos — sem apagar dados legados."""
-    # Os campos serão removidos pela reversão do AddField.
-    # Nenhuma ação necessária aqui.
     pass
 
 

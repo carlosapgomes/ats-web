@@ -347,6 +347,45 @@ class TestAdministrativeCloseService:
         payload = event.payload
         assert "post_schedule_issue_status" in payload
 
+    def test_service_clears_post_acceptance_fields(self, user, case_factory, advance_to) -> None:
+        """Campos post_acceptance são limpos e snapshotados no encerramento (C7)."""
+        from apps.cases.services import administratively_close_case
+
+        case = advance_to(case_factory(user), CaseStatus.WAIT_APPT)
+        _set_post_schedule_issue(case, user)
+
+        # Preenche campos novos
+        import uuid as _uuid
+
+        test_cycle_id = _uuid.uuid4()
+        case.post_acceptance_issue_context = "scheduled"
+        case.post_acceptance_issue_cycle_id = test_cycle_id
+        case.save(update_fields=["post_acceptance_issue_context", "post_acceptance_issue_cycle_id"])
+
+        case = administratively_close_case(
+            case=case,
+            user=user,
+            reason_code="system_bug",
+            reason_text="Bug com intercorrência",
+            active_role="manager",
+        )
+
+        fresh_case = Case.objects.get(pk=case.pk)
+
+        # Campos novos limpos
+        assert fresh_case.post_acceptance_issue_context == ""
+        assert fresh_case.post_acceptance_issue_cycle_id is None
+
+        # Campos legados também limpos
+        assert fresh_case.post_schedule_issue_status == ""
+
+        # Payload snapshot contém contexto e cycle_id
+        event = CaseEvent.objects.filter(case=case, event_type="CASE_ADMINISTRATIVELY_CLOSED").first()
+        assert event is not None
+        payload = event.payload
+        assert payload.get("post_acceptance_issue_context") == "scheduled"
+        assert payload.get("post_acceptance_issue_cycle_id") == str(test_cycle_id)
+
 
 # ── Operational Queue Tests ─────────────────────────────────────────────
 

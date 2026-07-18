@@ -467,7 +467,7 @@ class TestPostScheduleIssueSystemNotices:
     def test_post_schedule_issue_opened_creates_system_notice(
         self, user, case_factory, advance_to, _cleaned_and_eligible, _nir_user
     ):
-        """POST_SCHEDULE_ISSUE_OPENED gera mensagem sistêmica na thread."""
+        """POST_ACCEPTANCE_ISSUE_OPENED gera mensagem sistêmica na thread."""
         from apps.cases.models import CaseCommunicationMessage
         from apps.cases.services import open_post_schedule_issue
 
@@ -482,7 +482,7 @@ class TestPostScheduleIssueSystemNotices:
         assert msgs.count() >= 1
         msg = msgs.order_by("-created_at").first()
         assert msg is not None
-        assert msg.system_event_type == "POST_SCHEDULE_ISSUE_OPENED"
+        assert msg.system_event_type == "POST_ACCEPTANCE_ISSUE_OPENED"
         assert msg.author is None
         assert "transporte" in msg.body.lower() or "Transporte" in msg.body
 
@@ -500,7 +500,7 @@ class TestPostScheduleIssueSystemNotices:
             message="Precisamos reagendar para próxima semana",
         )
 
-        msgs = CaseCommunicationMessage.objects.filter(case=case, system_event_type="POST_SCHEDULE_ISSUE_OPENED")
+        msgs = CaseCommunicationMessage.objects.filter(case=case, system_event_type="POST_ACCEPTANCE_ISSUE_OPENED")
         assert msgs.count() >= 1
         msg = msgs.order_by("-created_at").first()
         assert msg is not None
@@ -510,7 +510,7 @@ class TestPostScheduleIssueSystemNotices:
     def test_post_schedule_issue_responded_creates_system_notice(
         self, user, case_factory, advance_to, _cleaned_and_eligible, _nir_user
     ):
-        """POST_SCHEDULE_ISSUE_RESPONDED gera mensagem sistêmica."""
+        """POST_ACCEPTANCE_ISSUE_RESPONDED gera mensagem sistêmica."""
         from apps.cases.models import CaseCommunicationMessage
         from apps.cases.services import open_post_schedule_issue, respond_post_schedule_issue
 
@@ -524,7 +524,7 @@ class TestPostScheduleIssueSystemNotices:
             case=case, user=user, action="cancel", response_message="Agendamento cancelado"
         )
 
-        msgs = CaseCommunicationMessage.objects.filter(case=case, system_event_type="POST_SCHEDULE_ISSUE_RESPONDED")
+        msgs = CaseCommunicationMessage.objects.filter(case=case, system_event_type="POST_ACCEPTANCE_ISSUE_RESPONDED")
         assert msgs.count() >= 1
         msg = msgs.order_by("-created_at").first()
         assert msg is not None
@@ -569,21 +569,21 @@ class TestPostScheduleIssueSystemNotices:
         )
 
         msg = (
-            CaseCommunicationMessage.objects.filter(case=case2, system_event_type="POST_SCHEDULE_ISSUE_RESPONDED")
+            CaseCommunicationMessage.objects.filter(case=case2, system_event_type="POST_ACCEPTANCE_ISSUE_RESPONDED")
             .order_by("-created_at")
             .first()
         )
         assert msg is not None
         assert expected_label in msg.body
 
-    def test_post_schedule_issue_acknowledged_notice_behavior_is_documented(
+    def test_post_acceptance_issue_acknowledged_creates_system_notice(
         self, user, case_factory, advance_to, _cleaned_and_eligible, _nir_user
     ):
-        """Verifica que POST_SCHEDULE_ISSUE_ACKNOWLEDGED NÃO gera mensagem sistêmica.
+        """POST_ACCEPTANCE_ISSUE_ACKNOWLEDGED gera mensagem sistêmica (C6).
 
-        Acknowledged é omitido porque: é um passo interno de workflow sem conteúdo
-        significativo para a thread. O NIR ver a resposta na thread já é a 'ciência'.
-        Incluir criaria ruído.
+        Diferente do ACK legado (POST_SCHEDULE_ISSUE_ACKNOWLEDGED) que tem
+        payload vazio, o novo ACK possui cycle_id, context e admission_flow
+        e merece projeção na thread.
         """
         from apps.cases.models import CaseCommunicationMessage
         from apps.cases.services import (
@@ -601,11 +601,13 @@ class TestPostScheduleIssueSystemNotices:
         case = acknowledge_post_schedule_issue(case=case, user=_nir_user)
 
         ack_msgs = CaseCommunicationMessage.objects.filter(
-            case=case, system_event_type="POST_SCHEDULE_ISSUE_ACKNOWLEDGED"
+            case=case, system_event_type="POST_ACCEPTANCE_ISSUE_ACKNOWLEDGED"
         )
-        assert ack_msgs.count() == 0, (
-            "POST_SCHEDULE_ISSUE_ACKNOWLEDGED não deve gerar mensagem sistêmica — é ruído na thread"
-        )
+        assert ack_msgs.count() == 1, "POST_ACCEPTANCE_ISSUE_ACKNOWLEDGED deve gerar mensagem sistêmica"
+        msg = ack_msgs.first()
+        assert msg is not None
+        assert msg.message_type == "system"
+        assert "ciência" in msg.body.lower() or "Ciência" in msg.body
 
 
 @pytest.mark.django_db
@@ -762,7 +764,7 @@ class TestOperationalSystemNoticeHardening:
             reason="death",
         )
 
-        event = CaseEvent.objects.filter(case=case, event_type="POST_SCHEDULE_ISSUE_OPENED").first()
+        event = CaseEvent.objects.filter(case=case, event_type="POST_ACCEPTANCE_ISSUE_OPENED").first()
         assert event is not None
 
         msg1 = create_system_communication_notice_for_event(event)

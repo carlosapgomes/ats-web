@@ -148,10 +148,13 @@ class TestTimelineEvents:
         # Verificar label no evento via EVENT_LABELS
         from apps.intake.views import EVENT_LABELS
 
-        assert EVENT_LABELS.get("POST_SCHEDULE_ISSUE_ACKNOWLEDGED") == "Ciência de intercorrência confirmada"
+        assert (
+            EVENT_LABELS.get("POST_ACCEPTANCE_ISSUE_ACKNOWLEDGED")
+            == "Ciência de intercorrência pós-aceitação confirmada"
+        )
         event = CaseEvent.objects.filter(
             case=case,
-            event_type="POST_SCHEDULE_ISSUE_ACKNOWLEDGED",
+            event_type="POST_ACCEPTANCE_ISSUE_ACKNOWLEDGED",
         ).first()
         assert event is not None
         # Verificar que o template renderizaria o label corretamente
@@ -212,13 +215,13 @@ class TestMultiCycle:
         assert case.status == CaseStatus.CLEANED
 
         # Verificar eventos de ambos os ciclos
-        opened_events = CaseEvent.objects.filter(case=case, event_type="POST_SCHEDULE_ISSUE_OPENED").order_by(
+        opened_events = CaseEvent.objects.filter(case=case, event_type="POST_ACCEPTANCE_ISSUE_OPENED").order_by(
             "timestamp"
         )
-        responded_events = CaseEvent.objects.filter(case=case, event_type="POST_SCHEDULE_ISSUE_RESPONDED").order_by(
+        responded_events = CaseEvent.objects.filter(case=case, event_type="POST_ACCEPTANCE_ISSUE_RESPONDED").order_by(
             "timestamp"
         )
-        acked_events = CaseEvent.objects.filter(case=case, event_type="POST_SCHEDULE_ISSUE_ACKNOWLEDGED").order_by(
+        acked_events = CaseEvent.objects.filter(case=case, event_type="POST_ACCEPTANCE_ISSUE_ACKNOWLEDGED").order_by(
             "timestamp"
         )
 

@@ -105,6 +105,8 @@ Abertura também guarda motivo/mensagem. Para `scheduled`, snapshot da agenda at
 
 Formatadores, timeline e thread suportam eventos novos e antigos. Eventos antigos não são renomeados, duplicados ou apagados. Mensagens sistêmicas continuam sem `UserNotification`.
 
+**Projeção de ACK (C6, Slice 002):** `POST_SCHEDULE_ISSUE_ACKNOWLEDGED` (legado) continua omitido da thread por payload vazio. `POST_ACCEPTANCE_ISSUE_ACKNOWLEDGED` é projetado com mensagem genérica "Ciência da intercorrência pós-aceitação confirmada." pois possui `cycle_id`, `context` e `admission_flow` úteis para auditoria.
+
 ### D7. Elegibilidade
 
 Regras comuns:

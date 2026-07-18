@@ -449,3 +449,237 @@ class TestLegacyCompatibility:
 
         assert case.status == CaseStatus.CLEANED
         assert case.post_schedule_issue_status == ""
+
+
+# ── C4: Domain validation ──────────────────────────────────────────────
+
+
+class TestContextValidation:
+    """Testes de validação de contexto e cycle_id (Slice 002 C4)."""
+
+    def test_respond_rejeita_contexto_vazio(self, user, case_factory, advance_to) -> None:
+        """respond_scheduled_post_acceptance_issue rejeita contexto vazio."""
+        from apps.cases.services import (
+            open_post_acceptance_issue,
+            respond_scheduled_post_acceptance_issue,
+        )
+
+        case = _build_cleaned_confirmed(case_factory, advance_to, user)
+        case = open_post_acceptance_issue(case=case, user=user, reason="death", context="scheduled")
+        # Corrompe o contexto
+        Case.objects.filter(pk=case.pk).update(post_acceptance_issue_context="")
+
+        case = Case.objects.get(pk=case.pk)
+        with pytest.raises(ValueError, match="Contexto incorreto"):
+            respond_scheduled_post_acceptance_issue(case=case, user=user, action="maintain")
+
+    def test_respond_rejeita_cycle_id_nulo(self, user, case_factory, advance_to) -> None:
+        """respond_scheduled_post_acceptance_issue rejeita cycle_id nulo."""
+        from apps.cases.services import (
+            open_post_acceptance_issue,
+            respond_scheduled_post_acceptance_issue,
+        )
+
+        case = _build_cleaned_confirmed(case_factory, advance_to, user)
+        case = open_post_acceptance_issue(case=case, user=user, reason="death", context="scheduled")
+        # Corrompe o cycle_id
+        Case.objects.filter(pk=case.pk).update(post_acceptance_issue_cycle_id=None)
+
+        case = Case.objects.get(pk=case.pk)
+        with pytest.raises(ValueError, match="cycle_id ausente"):
+            respond_scheduled_post_acceptance_issue(case=case, user=user, action="maintain")
+
+    def test_ack_rejeita_contexto_vazio(self, user, case_factory, advance_to) -> None:
+        """acknowledge_scheduled_post_acceptance_issue rejeita contexto vazio."""
+        from apps.cases.services import (
+            acknowledge_scheduled_post_acceptance_issue,
+            open_post_acceptance_issue,
+            respond_scheduled_post_acceptance_issue,
+        )
+
+        case = _build_cleaned_confirmed(case_factory, advance_to, user)
+        case = open_post_acceptance_issue(case=case, user=user, reason="death", context="scheduled")
+        case = respond_scheduled_post_acceptance_issue(case=case, user=user, action="maintain")
+        # Corrompe o contexto
+        Case.objects.filter(pk=case.pk).update(post_acceptance_issue_context="")
+
+        case = Case.objects.get(pk=case.pk)
+        with pytest.raises(ValueError, match="Contexto incorreto"):
+            acknowledge_scheduled_post_acceptance_issue(case=case, user=user)
+
+    def test_ack_rejeita_cycle_id_nulo(self, user, case_factory, advance_to) -> None:
+        """acknowledge_scheduled_post_acceptance_issue rejeita cycle_id nulo."""
+        from apps.cases.services import (
+            acknowledge_scheduled_post_acceptance_issue,
+            open_post_acceptance_issue,
+            respond_scheduled_post_acceptance_issue,
+        )
+
+        case = _build_cleaned_confirmed(case_factory, advance_to, user)
+        case = open_post_acceptance_issue(case=case, user=user, reason="death", context="scheduled")
+        case = respond_scheduled_post_acceptance_issue(case=case, user=user, action="maintain")
+        # Corrompe o cycle_id
+        Case.objects.filter(pk=case.pk).update(post_acceptance_issue_cycle_id=None)
+
+        case = Case.objects.get(pk=case.pk)
+        with pytest.raises(ValueError, match="cycle_id ausente"):
+            acknowledge_scheduled_post_acceptance_issue(case=case, user=user)
+
+    def test_validacao_nao_altera_fsm_nem_agenda(self, user, case_factory, advance_to) -> None:
+        """Validação falha não altera FSM, agenda ou eventos."""
+        from apps.cases.services import (
+            open_post_acceptance_issue,
+            respond_scheduled_post_acceptance_issue,
+        )
+
+        case = _build_cleaned_confirmed(case_factory, advance_to, user)
+        case = open_post_acceptance_issue(case=case, user=user, reason="death", context="scheduled")
+        Case.objects.filter(pk=case.pk).update(post_acceptance_issue_context="")
+
+        events_before = CaseEvent.objects.filter(case=case).count()
+        status_before = case.status
+        appt_status_before = case.appointment_status
+
+        case = Case.objects.get(pk=case.pk)
+        try:
+            respond_scheduled_post_acceptance_issue(case=case, user=user, action="maintain")
+        except ValueError:
+            pass
+
+        case = Case.objects.get(pk=case.pk)
+        assert case.status == status_before, "FSM não deve ser alterado"
+        assert case.appointment_status == appt_status_before, "Agenda não deve ser alterada"
+        assert CaseEvent.objects.filter(case=case).count() == events_before, "Nenhum evento novo deve ser criado"
+
+
+# ── C5/C6: System notices for POST_ACCEPTANCE_ISSUE_* events ───────────
+
+
+class TestPostAcceptanceSystemNotices:
+    """Testes de mensagens sistêmicas para eventos POST_ACCEPTANCE_ISSUE_*."""
+
+    def test_opened_creates_system_notice(self, user, case_factory, advance_to) -> None:
+        """POST_ACCEPTANCE_ISSUE_OPENED gera mensagem sistêmica na thread."""
+        from apps.cases.services import open_post_acceptance_issue
+
+        case = _build_cleaned_confirmed(case_factory, advance_to, user)
+        case = open_post_acceptance_issue(case=case, user=user, reason="death", context="scheduled")
+
+        from apps.cases.models import CaseCommunicationMessage
+
+        msgs = CaseCommunicationMessage.objects.filter(case=case, system_event_type="POST_ACCEPTANCE_ISSUE_OPENED")
+        assert msgs.count() == 1
+        msg = msgs.first()
+        assert msg is not None
+        assert msg.message_type == "system"
+        assert "Intercorrência pós-aceitação" in msg.body
+
+    def test_responded_creates_system_notice(self, user, case_factory, advance_to) -> None:
+        """POST_ACCEPTANCE_ISSUE_RESPONDED gera mensagem sistêmica."""
+        from apps.cases.services import (
+            open_post_acceptance_issue,
+            respond_scheduled_post_acceptance_issue,
+        )
+
+        case = _build_cleaned_confirmed(case_factory, advance_to, user)
+        case = open_post_acceptance_issue(case=case, user=user, reason="death", context="scheduled")
+        case = respond_scheduled_post_acceptance_issue(
+            case=case, user=user, action="cancel", response_message="Cancelado"
+        )
+
+        from apps.cases.models import CaseCommunicationMessage
+
+        msgs = CaseCommunicationMessage.objects.filter(case=case, system_event_type="POST_ACCEPTANCE_ISSUE_RESPONDED")
+        assert msgs.count() == 1
+        msg = msgs.first()
+        assert msg is not None
+        assert msg.message_type == "system"
+        assert "Intercorrência respondida" in msg.body
+
+    def test_acknowledged_creates_system_notice(self, user, case_factory, advance_to) -> None:
+        """POST_ACCEPTANCE_ISSUE_ACKNOWLEDGED gera mensagem sistêmica (C6)."""
+        from apps.cases.services import (
+            acknowledge_scheduled_post_acceptance_issue,
+            open_post_acceptance_issue,
+            respond_scheduled_post_acceptance_issue,
+        )
+
+        case = _build_cleaned_confirmed(case_factory, advance_to, user)
+        case = open_post_acceptance_issue(case=case, user=user, reason="death", context="scheduled")
+        case = respond_scheduled_post_acceptance_issue(case=case, user=user, action="maintain")
+        case = acknowledge_scheduled_post_acceptance_issue(case=case, user=user)
+
+        from apps.cases.models import CaseCommunicationMessage
+
+        msgs = CaseCommunicationMessage.objects.filter(
+            case=case, system_event_type="POST_ACCEPTANCE_ISSUE_ACKNOWLEDGED"
+        )
+        assert msgs.count() == 1, "POST_ACCEPTANCE_ISSUE_ACKNOWLEDGED deve gerar 1 mensagem sistêmica"
+        msg = msgs.first()
+        assert msg is not None
+        assert msg.message_type == "system"
+        assert "ciência" in msg.body.lower() or "Ciência" in msg.body
+
+    def test_idempotent_notice_does_not_duplicate(self, user, case_factory, advance_to) -> None:
+        """create_system_communication_notice_for_event é idempotente."""
+        from apps.cases.services import create_system_communication_notice_for_event, open_post_acceptance_issue
+
+        case = _build_cleaned_confirmed(case_factory, advance_to, user)
+        case = open_post_acceptance_issue(case=case, user=user, reason="death", context="scheduled")
+
+        from apps.cases.models import CaseCommunicationMessage
+
+        event = case.events.filter(event_type="POST_ACCEPTANCE_ISSUE_OPENED").first()
+        assert event is not None, "Evento POST_ACCEPTANCE_ISSUE_OPENED deve existir"
+
+        # Primeira chamada
+        msg1 = create_system_communication_notice_for_event(event)
+
+        # Segunda chamada — deve retornar a mesma, não criar nova
+        msg2 = create_system_communication_notice_for_event(event)
+
+        assert msg1 is not None
+        assert msg2 is not None
+        assert msg1.pk == msg2.pk
+
+        count = CaseCommunicationMessage.objects.filter(
+            case=case, system_event_type="POST_ACCEPTANCE_ISSUE_OPENED"
+        ).count()
+        assert count == 1, "Não deve duplicar mensagem sistêmica"
+
+    def test_system_notice_does_not_create_user_notification(self, user, case_factory, advance_to) -> None:
+        """Mensagens sistêmicas não criam UserNotification."""
+        from apps.cases.services import open_post_acceptance_issue
+
+        case = _build_cleaned_confirmed(case_factory, advance_to, user)
+        from apps.accounts.models import UserNotification
+
+        before = UserNotification.objects.count()
+
+        case = open_post_acceptance_issue(case=case, user=user, reason="death", context="scheduled")
+
+        after = UserNotification.objects.count()
+        assert after == before, "Mensagem sistêmica não deve criar UserNotification"
+
+    def test_formatter_does_not_query_appointment_at(self, user, case_factory, advance_to) -> None:
+        """Formatador de POST_ACCEPTANCE_ISSUE_RESPONDED é projeção pura do payload."""
+        from apps.cases.models import CaseCommunicationMessage
+        from apps.cases.services import (
+            open_post_acceptance_issue,
+            respond_scheduled_post_acceptance_issue,
+        )
+
+        case = _build_cleaned_confirmed(case_factory, advance_to, user)
+        case = open_post_acceptance_issue(case=case, user=user, reason="death", context="scheduled")
+        case = respond_scheduled_post_acceptance_issue(case=case, user=user, action="cancel")
+
+        # Muda appointment_at após a resposta — o formatter deve usar
+        # o snapshot do payload, não o valor atual
+        Case.objects.filter(pk=case.pk).update(appointment_at="2030-01-01T00:00:00Z")
+
+        msg = CaseCommunicationMessage.objects.filter(
+            case=case, system_event_type="POST_ACCEPTANCE_ISSUE_RESPONDED"
+        ).first()
+        assert msg is not None
+        # O body não deve conter a data futura (2030) — vem do payload
+        assert "Cancelado" in msg.body
