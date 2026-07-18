@@ -46,9 +46,10 @@ class TestBackfillFunctionDirect:
     """Testes diretos da função backfill_active_post_acceptance_issues.
 
     Utilizam registry histórico do MigrationExecutor no estado 0012,
-    que inclui os AddField mas não o RunPython executado. Isto garante
-    que o model usado pelo backfill reflita o schema pós-AddField,
-    como ocorre durante a execução real da migration.
+    que inclui os AddField (campos novos presentes no modelo) mas
+    não o RunPython executado. A execução forward real é testada em
+    TestMigrationForwardReal com project state 0011 → 0012 via
+    MigrationExecutor.migrate().
     """
 
     @pytest.fixture(autouse=True)
@@ -74,7 +75,8 @@ class TestBackfillFunctionDirect:
         c1 = _create_case_data(user, case_factory, advance_to, "opened")
         c2 = _create_case_data(user, case_factory, advance_to, "opened")
 
-        # Executa com registry histórico (schema não tem os campos novos)
+        # Executa com registry histórico 0012 (schema inclui AddField, modelo tem
+        # os campos novos; o backfill preenche o que estiver vazio)
         backfill(self._historical_apps, connection.schema_editor())
 
         c1 = Case.objects.get(pk=c1.pk)

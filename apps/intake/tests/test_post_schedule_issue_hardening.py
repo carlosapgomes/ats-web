@@ -191,6 +191,86 @@ class TestTimelineEvents:
 
 
 # ═══════════════════════════════════════════════════════════════════════════
+# Legacy event timeline rendering (T3)
+# ═══════════════════════════════════════════════════════════════════════════
+
+
+class TestLegacyEventTimelineRendering:
+    """Eventos legados POST_SCHEDULE_ISSUE_* aparecem na timeline com labels.
+
+    Eventos são criados manualmente — wrappers não são usados.
+    """
+
+    def _events_from_detail(self, client, case) -> list[str]:
+        import re
+
+        response = client.get(reverse("intake:closed_case_detail", args=[case.case_id]))
+        assert response.status_code == 200
+        content = response.content.decode()
+        timeline_start = content.find("Linha do Tempo")
+        assert timeline_start >= 0
+        return re.findall(
+            r'<div class="timeline-event__title">([^<]+)</div>',
+            content[timeline_start:],
+        )
+
+    def test_legacy_opened_label_in_timeline(self, client, case_factory, advance_to) -> None:
+        """Label de POST_SCHEDULE_ISSUE_OPENED aparece na timeline renderizada."""
+        from apps.cases.models import CaseEvent
+
+        client, user = _nir_client(client)
+        case = _build_cleaned_confirmed(case_factory, advance_to, user)
+        CaseEvent.objects.create(
+            case=case,
+            event_type="POST_SCHEDULE_ISSUE_OPENED",
+            payload={"reason": "death", "message": "Óbito", "admission_flow": "scheduled"},
+            actor=user,
+        )
+
+        events = self._events_from_detail(client, case)
+        opened = [e for e in events if "Intercorrência" in e]
+        assert opened, f"Label de abertura não encontrado em {events}"
+
+    def test_legacy_responded_label_in_timeline(self, client, case_factory, advance_to) -> None:
+        """Label de POST_SCHEDULE_ISSUE_RESPONDED aparece na timeline renderizada."""
+        from apps.cases.models import CaseEvent
+
+        client, user = _nir_client(client)
+        case = _build_cleaned_confirmed(case_factory, advance_to, user)
+        CaseEvent.objects.create(
+            case=case,
+            event_type="POST_SCHEDULE_ISSUE_RESPONDED",
+            payload={
+                "action": "cancel",
+                "response_message": "Cancelado",
+                "admission_flow": "scheduled",
+            },
+            actor=user,
+        )
+
+        events = self._events_from_detail(client, case)
+        responded = [e for e in events if "respondida" in e.lower() or "Respondida" in e]
+        assert responded, f"Label de resposta não encontrado em {events}"
+
+    def test_legacy_acknowledged_label_in_timeline(self, client, case_factory, advance_to) -> None:
+        """Label de POST_SCHEDULE_ISSUE_ACKNOWLEDGED aparece na timeline renderizada."""
+        from apps.cases.models import CaseEvent
+
+        client, user = _nir_client(client)
+        case = _build_cleaned_confirmed(case_factory, advance_to, user)
+        CaseEvent.objects.create(
+            case=case,
+            event_type="POST_SCHEDULE_ISSUE_ACKNOWLEDGED",
+            payload={},
+            actor=user,
+        )
+
+        events = self._events_from_detail(client, case)
+        acked = [e for e in events if "ciência" in e.lower() or "Ciência" in e]
+        assert acked, f"Label de ciência não encontrado em {events}"
+
+
+# ═══════════════════════════════════════════════════════════════════════════
 # RED — Multi-cycle
 # ═══════════════════════════════════════════════════════════════════════════
 
