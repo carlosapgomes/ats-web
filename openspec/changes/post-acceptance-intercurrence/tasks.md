@@ -8,7 +8,7 @@ Change aberto na branch `change/post-acceptance-intercurrence`. Implementação 
 
 ## Slices verticais
 
-- [ ] Slice 001 — Tornar notices operacionais iniciais duráveis até ACK (`slices/slice-001-durable-operational-notices.md`)
+- [x] Slice 001 — Tornar notices operacionais iniciais duráveis até ACK (`slices/slice-001-durable-operational-notices.md`)
 - [ ] Slice 002 — Generalizar com compatibilidade o fluxo agendado para intercorrência pós-aceitação (`slices/slice-002-scheduled-post-acceptance-intercurrence.md`)
 - [ ] Slice 003 — Entregar intercorrência pós-aceitação apenas para ciência nos quatro fluxos sem agenda (`slices/slice-003-operational-post-acceptance-intercurrence.md`)
 

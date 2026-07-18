@@ -384,6 +384,116 @@ class TestSchedulerQueueView:
         assert "Pendente Scheduler" in content
         assert "Falso Positivo" not in content
 
+    # ── Durability tests (Slice 001: notices persist until ACK) ─────────
+
+    def _create_yesterday_notice(self, event_type: str = "IMMEDIATE_ADMISSION_OPERATIONAL_NOTICE") -> tuple[Any, Any]:
+        """Helper: cria NIR user, Case e CaseEvent com timestamp de ontem.
+
+        Nota: CaseEvent.timestamp tem auto_now_add=True, portanto criamos o
+        evento e depois atualizamos o timestamp via update() para contornar.
+        """
+        nir_user = User.objects.create_user(username="nir_yesterday@test.com", password="testpass123")
+        nir_user.roles.add(self._create_role("nir"))
+        yesterday = timezone.now() - timedelta(days=1, hours=12)
+        case = Case.objects.create(
+            created_by=nir_user,
+            status=CaseStatus.WAIT_R1_CLEANUP_THUMBS,
+            agency_record_number="YEST-001",
+            doctor_decision="accept",
+            doctor_admission_flow="immediate",
+            structured_data={"patient": {"name": "Paciente Ontem", "age": 45, "gender": "Masculino"}},
+        )
+        event = CaseEvent.objects.create(
+            case=case,
+            actor_type="human",
+            actor=nir_user,
+            event_type=event_type,
+        )
+        # Contorna auto_now_add=True
+        CaseEvent.objects.filter(pk=event.pk).update(timestamp=yesterday)
+        return nir_user, case
+
+    def test_yesterday_notice_without_ack_appears_today_in_queue(self, client) -> None:
+        """Notice de ontem sem ACK aparece na fila hoje."""
+        _, case = self._create_yesterday_notice()
+        self._login_as(client, "scheduler")
+        response = client.get("/scheduler/")
+        assert response.status_code == 200
+        content = response.content.decode()
+        assert "Paciente Ontem" in content
+        assert "YEST-001" in content
+        assert "Confirmar ciência" in content
+
+    def test_yesterday_notice_without_ack_increments_queue_count_today(self, client) -> None:
+        """Notice de ontem sem ACK incrementa queue_count hoje."""
+        from django.test import RequestFactory
+
+        from apps.accounts.context_processors import queue_counts
+
+        nir_user, _ = self._create_yesterday_notice()
+        scheduler_user = User.objects.create_user(username="sched_yc@test.com", password="testpass123")
+        scheduler_user.roles.add(self._create_role("scheduler"))
+        rf = RequestFactory()
+        request = rf.get("/")
+        request.user = scheduler_user
+        request.session = {"active_role": "scheduler"}
+        result = queue_counts(request)
+        assert result == {"queue_count": 1}
+
+    def test_yesterday_legacy_notice_without_ack_appears_today(self, client) -> None:
+        """Evento legado de ontem (IMMEDIATE_ADMISSION_OPERATIONAL_NOTICE) persiste hoje."""
+        _, case = self._create_yesterday_notice(event_type="IMMEDIATE_ADMISSION_OPERATIONAL_NOTICE")
+        self._login_as(client, "scheduler")
+        response = client.get("/scheduler/")
+        assert response.status_code == 200
+        content = response.content.decode()
+        assert "Paciente Ontem" in content
+        assert "YEST-001" in content
+
+    def test_yesterday_notice_ack_now_removes_from_queue_shows_in_history(self, client) -> None:
+        """Notice de ontem: ACK hoje remove da fila e mostra no histórico."""
+        _, case = self._create_yesterday_notice()
+        self._login_as(client, "scheduler")
+
+        # ACK hoje
+        response = client.post(f"/scheduler/{case.case_id}/immediate-ack/", follow=True)
+        assert response.status_code == 200
+
+        # Verifica que o ACK foi criado
+        assert CaseEvent.objects.filter(case=case, event_type="SCHEDULER_IMMEDIATE_ACK").exists()
+
+        # Verifica que sumiu da fila
+        content = response.content.decode()
+        assert "Paciente Ontem" not in content.replace("Paciente Ontem Ack", "")
+        assert "YEST-001" not in content
+
+        # Verifica que aparece no histórico de hoje
+        # O histórico usa a seção "Ciências operacionais confirmadas hoje"
+        # Precisamos ir na aba processed para ver
+        response = client.get("/scheduler/?tab=processed")
+        content = response.content.decode()
+        assert "Ciência confirmada" in content
+        assert "Paciente Ontem" in content
+
+    def test_yesterday_notice_already_acknowledged_does_not_appear(self, client) -> None:
+        """Notice de ontem já confirmado não reaparece."""
+        nir_user, case = self._create_yesterday_notice()
+        yesterday = timezone.now() - timedelta(days=1, hours=12)
+        ack = CaseEvent.objects.create(
+            case=case,
+            actor_type="human",
+            actor=nir_user,
+            event_type="SCHEDULER_IMMEDIATE_ACK",
+        )
+        # Contorna auto_now_add=True
+        CaseEvent.objects.filter(pk=ack.pk).update(timestamp=yesterday)
+
+        self._login_as(client, "scheduler")
+        response = client.get("/scheduler/")
+        assert response.status_code == 200
+        content = response.content.decode()
+        assert "Paciente Ontem" not in content
+
 
 @pytest.mark.django_db
 class TestSchedulerConfirmView:
