@@ -1,6 +1,8 @@
-"""Testes verticais NIR para intercorrência operacional (Slice 003 F2).
+"""Testes verticais NIR para intercorrência operacional (Slice 003 Cobertura).
 
-Asserts exatos: copy, badge, appointment fields, permissions, validation.
+T1: busca histórica NIR (search, structured_data, detalhes, inelegibilidade)
+T2: validação individual dos 3 novos motivos via view
+     + asserts exatos de copy, badge, appointment fields, permissions.
 """
 
 from __future__ import annotations
@@ -10,9 +12,12 @@ from django.urls import reverse
 from django.utils import timezone
 
 from apps.accounts.models import Role
-from apps.cases.models import Case, CaseStatus
+from apps.cases.models import Case, CaseEvent, CaseStatus
 
 pytestmark = pytest.mark.django_db
+
+
+# ── Fixtures ────────────────────────────────────────────────────────────────
 
 
 @pytest.fixture
@@ -55,22 +60,142 @@ def scheduler_client(client, scheduler_user):
     return client
 
 
-def _create_cleaned_operational_case(nir_user, flow="immediate"):
-    case = Case.objects.create(
-        created_by=nir_user,
-        status=CaseStatus.CLEANED,
-        doctor_decision="accept",
+# ── Helpers ─────────────────────────────────────────────────────────────────
+
+
+def _cleaned(**kwargs):
+    """Cria caso CLEANED aceito. Aceita kwargs para sobrescrever defaults."""
+    defaults = {
+        "status": CaseStatus.CLEANED,
+        "doctor_decision": "accept",
+        "doctor_admission_flow": "immediate",
+        "agency_record_number": "REG-001",
+    }
+    defaults.update(kwargs)
+    return Case.objects.create(**defaults)
+
+
+def _cleaned_with_patient(created_by, flow="pre_icu", record="REG-SENTINELA-003"):
+    """Caso CLEANED com structured_data rico para busca NIR."""
+    case = _cleaned(
+        created_by=created_by,
         doctor_admission_flow=flow,
-        agency_record_number="REG-001",
+        agency_record_number=record,
+        structured_data={
+            "patient": {"name": "Paciente Sentinela"},
+            "origin_context": {
+                "hospital": "Hospital Origem Sentinela",
+                "unit": "Unidade Sentinela",
+            },
+        },
     )
     return Case.objects.get(pk=case.pk)
 
 
+# ── T1: Busca histórica NIR ─────────────────────────────────────────────────
+
+
+class TestNirSearchOperational:
+    """T1: busca histórica NIR para casos operacionais CLEANED."""
+
+    def test_search_by_record_finds_case(self, nir_client, nir_user):
+        """T1.1: NIR pesquisa por registro e encontra caso operacional CLEANED."""
+        _cleaned_with_patient(nir_user, flow="pre_icu", record="REG-SENTINELA-003")
+
+        response = nir_client.get(reverse("intake:closed_cases_search"), {"q": "REG-SENTINELA-003"})
+        assert response.status_code == 200
+        content = response.content.decode()
+        assert "Paciente Sentinela" in content
+        assert "REG-SENTINELA-003" in content
+
+    def test_search_by_patient_name_finds_case(self, nir_client, nir_user):
+        """T1.2: NIR pesquisa por nome do paciente e encontra o caso."""
+        _cleaned_with_patient(nir_user, flow="pediatric_em", record="REG-T1-002")
+
+        response = nir_client.get(reverse("intake:closed_cases_search"), {"q": "Sentinela"})
+        assert response.status_code == 200
+        content = response.content.decode()
+        assert "Paciente Sentinela" in content
+        assert "REG-T1-002" in content
+
+    def test_result_shows_details_link(self, nir_client, nir_user):
+        """T1.3: resultado mostra link de acesso a Detalhes."""
+        _cleaned_with_patient(nir_user, flow="immediate", record="REG-T1-003")
+        response = nir_client.get(reverse("intake:closed_cases_search"), {"q": "REG-T1-003"})
+        content = response.content.decode()
+        assert 'href="/cases/closed-cases/' in content
+
+    def test_eligible_case_does_not_show_ineligibility(self, nir_client, nir_user):
+        """T1.4: caso elegível operacional não exibe mensagem de inelegibilidade."""
+        _cleaned_with_patient(nir_user, flow="ward_icu_backup", record="REG-T1-004")
+        response = nir_client.get(reverse("intake:closed_cases_search"), {"q": "REG-T1-004"})
+        content = response.content.decode()
+        assert "Paciente Sentinela" in content
+        assert "não é elegível" not in content and "inelegível" not in content.lower()
+
+    def test_non_nir_does_not_mutate_on_search(self, scheduler_client, nir_user):
+        """T1.5: não-NIR acessa busca sem causar mutação no caso."""
+        case = _cleaned_with_patient(nir_user, flow="immediate", record="REG-T1-005")
+        scheduler_client.get(reverse("intake:closed_cases_search"), {"q": "REG-T1-005"})
+        case = Case.objects.get(pk=case.pk)
+        assert case.post_schedule_issue_status == ""
+        assert case.status == CaseStatus.CLEANED
+
+
+# ── T2: Validação individual dos 3 novos motivos ────────────────────────────
+
+
+class TestThreeReasonsValidation:
+    """T2: testes parametrizados para os 3 novos motivos operacionais."""
+
+    REASONS = [
+        ("patient_absconded", "evadiu-se da unidade de origem"),
+        ("accepted_elsewhere", "unidade mais próxima da residência"),
+        ("origin_cancelled", "cancelada pela unidade de origem"),
+    ]
+
+    @pytest.mark.parametrize("reason,label_fragment", REASONS)
+    def test_empty_message_re_renders_with_error(self, nir_client, nir_user, reason, label_fragment):
+        """T2: POST sem mensagem retorna 200 com erro 'Mensagem é obrigatória'."""
+        case = _cleaned(created_by=nir_user)
+        response = nir_client.post(
+            reverse("intake:closed_case_detail", args=[case.case_id]),
+            {"reason": reason, "message": ""},
+        )
+        assert response.status_code == 200
+        content = response.content.decode()
+        assert "Mensagem é obrigatória" in content or "obrigat" in content.lower()
+
+        case = Case.objects.get(pk=case.pk)
+        assert case.post_schedule_issue_status == ""
+        assert not CaseEvent.objects.filter(case=case, event_type="POST_ACCEPTANCE_ISSUE_OPENED").exists()
+
+    @pytest.mark.parametrize("reason,label_fragment", REASONS)
+    def test_valid_post_persists(self, nir_client, nir_user, reason, label_fragment):
+        """T2: POST válido para cada motivo → status 'opened' e evento criado."""
+        case = _cleaned(created_by=nir_user)
+        response = nir_client.post(
+            reverse("intake:closed_case_detail", args=[case.case_id]),
+            {"reason": reason, "message": f"Motivo: {label_fragment}"},
+            follow=True,
+        )
+        assert response.status_code == 200
+
+        case = Case.objects.get(pk=case.pk)
+        assert case.post_schedule_issue_status == "opened"
+        assert case.post_acceptance_issue_context == "operational_notice"
+        assert case.post_schedule_issue_reason == reason
+        assert CaseEvent.objects.filter(case=case, event_type="POST_ACCEPTANCE_ISSUE_OPENED").exists()
+
+
+# ── Preservados (F2): Detalhe histórico NIR ─────────────────────────────────
+
+
 class TestNirClosedDetailOperational:
-    """F2: Detalhe histórico NIR com formulário operacional."""
+    """Detalhe histórico NIR com formulário operacional."""
 
     def test_detail_shows_form_with_new_reasons(self, nir_client, nir_user):
-        case = _create_cleaned_operational_case(nir_user, flow="immediate")
+        case = _cleaned(created_by=nir_user)
         response = nir_client.get(reverse("intake:closed_case_detail", args=[case.case_id]))
         assert response.status_code == 200
         content = response.content.decode()
@@ -79,8 +204,7 @@ class TestNirClosedDetailOperational:
         assert "cancelada pela unidade de origem" in content
 
     def test_post_success_shows_exact_accented_copy(self, nir_client, nir_user):
-        """F2: POST bem-sucedido exibe copy exata com acentos."""
-        case = _create_cleaned_operational_case(nir_user, flow="ward_icu_backup")
+        case = _cleaned(created_by=nir_user, doctor_admission_flow="ward_icu_backup")
         response = nir_client.post(
             reverse("intake:closed_case_detail", args=[case.case_id]),
             {"reason": "patient_absconded", "message": "Paciente evadiu-se da unidade de origem"},
@@ -97,8 +221,7 @@ class TestNirClosedDetailOperational:
         assert case.status == CaseStatus.CLEANED
 
     def test_awaiting_chd_science_shown_after_open(self, nir_client, nir_user):
-        """F2: Após abertura, HTML contém exatamente 'Aguardando ciência do CHD'."""
-        case = _create_cleaned_operational_case(nir_user, flow="immediate")
+        case = _cleaned(created_by=nir_user)
         nir_client.post(
             reverse("intake:closed_case_detail", args=[case.case_id]),
             {"reason": "accepted_elsewhere", "message": "Transferido para Hospital X"},
@@ -109,8 +232,7 @@ class TestNirClosedDetailOperational:
         assert "Aguardando ciência do CHD" in content
 
     def test_all_six_appointment_fields_unchanged_after_post(self, nir_client, nir_user):
-        """F2: Todos os 6 campos appointment_* imutáveis via POST NIR."""
-        case = _create_cleaned_operational_case(nir_user, flow="pediatric_em")
+        case = _cleaned(created_by=nir_user, doctor_admission_flow="pediatric_em")
         sentinel_dt = timezone.now()
 
         Case.objects.filter(pk=case.pk).update(
@@ -150,7 +272,7 @@ class TestNirClosedDetailOperational:
         assert snap_after == snap_before, f"Campos mudaram: before={snap_before}, after={snap_after}"
 
     def test_denied_case_blocked(self, nir_client, nir_user):
-        case = _create_cleaned_operational_case(nir_user, flow="immediate")
+        case = _cleaned(created_by=nir_user)
         case.doctor_decision = "deny"
         case.save(update_fields=["doctor_decision"])
         nir_client.post(
@@ -172,20 +294,16 @@ class TestNirClosedDetailOperational:
         assert response.status_code == 404
 
     def test_non_nir_blocked_exact_redirect(self, scheduler_client, nir_user):
-        """F2: Scheduler bloqueado com status específico (não range)."""
-        case = _create_cleaned_operational_case(nir_user, flow="immediate")
+        case = _cleaned(created_by=nir_user)
         response = scheduler_client.get(reverse("intake:closed_case_detail", args=[case.case_id]))
-        # Decorator @role_required("nir") redireciona sem mutation
         assert response.status_code == 302
 
     def test_form_validation_shows_error_for_empty_message(self, nir_client, nir_user):
-        """F2: POST sem mensagem re-renderiza com erro visível."""
-        case = _create_cleaned_operational_case(nir_user, flow="immediate")
+        case = _cleaned(created_by=nir_user)
         response = nir_client.post(
             reverse("intake:closed_case_detail", args=[case.case_id]),
             {"reason": "patient_absconded", "message": ""},
         )
-        # Não redireciona — re-renderiza com erro
         assert response.status_code == 200
         content = response.content.decode()
         assert "obrigat" in content.lower()
