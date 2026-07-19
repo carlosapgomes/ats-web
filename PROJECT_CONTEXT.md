@@ -177,6 +177,7 @@ static/          # css/app.css (paleta hospitalar), js/upload.js, js/password-to
   - `openspec/archive/ui-alinhamento-mocks/` (3 slices, Fase 2b)
   - `openspec/archive/align-llm-contract-and-doctor-routing/` (7 slices)
   - `openspec/archive/post-schedule-intercurrence/` (5 slices + follow-ups)
+  - `openspec/archive/post-acceptance-intercurrence/` (3 slices + hardenings — notices operacionais iniciais duráveis até ACK; intercorrência pós-aceitação nos modos `scheduled` e `operational_notice`; ciclos UUID auditáveis; fila/badge CHD deduplicados; ACK operacional sem alterar FSM ou campos `appointment_*`; compatibilidade com eventos e storage legados preservada).
   - `openspec/archive/consolidate-duplicated-test-fixtures/` (1 slice)
   - `openspec/archive/align-uuid-route-parameter-annotations/` (1 slice)
   - `openspec/archive/release-lock-on-successful-handoff/` (1 slice)
