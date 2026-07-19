@@ -50,9 +50,14 @@ OPERATIONAL_NOTICE_EVENT_TYPES: tuple[str, str] = (
     "IMMEDIATE_ADMISSION_OPERATIONAL_NOTICE",
 )
 
-OPERATIONAL_NOTICE_ACK_EVENT_TYPES: tuple[str, str] = (
+OPERATIONAL_NOTICE_ACK_EVENT_TYPES: tuple[str, str, str] = (
     "SCHEDULER_OPERATIONAL_NOTICE_ACK",
     "SCHEDULER_IMMEDIATE_ACK",
+    # Slice 003: POST_ACCEPTANCE_ISSUE_ACKNOWLEDGED de contexto
+    # operational_notice satisfaz o notice inicial. Queries ja filtram
+    # por doctor_admission_flow__in=OPERATIONAL_NOTICE_FLOWS, impedindo
+    # que ACKs scheduled afetem casos indevidos.
+    "POST_ACCEPTANCE_ISSUE_ACKNOWLEDGED",
 )
 
 ADMISSION_FLOW_NOTICE_COPY: dict[str, dict[str, str]] = {
