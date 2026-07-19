@@ -4,7 +4,7 @@
 
 ## Status
 
-Change aberto na branch `change/post-acceptance-intercurrence`. Slice 001 e 002 concluídos.
+Change aberto na branch `change/post-acceptance-intercurrence`. Slices 001, 002 e 003 concluídos.
 
 ## Slices verticais
 
@@ -21,9 +21,9 @@ Change aberto na branch `change/post-acceptance-intercurrence`. Slice 001 e 002 
 
 ## Definition of Done do change
 
-- [ ] Notice operacional inicial sem ACK não expira na virada do dia.
-- [ ] Badge e fila CHD usam o mesmo critério durável.
-- [ ] Histórico de ciências confirmadas hoje continua filtrado pelo timestamp do ACK.
+- [x] Notice operacional inicial sem ACK não expira na virada do dia.
+- [x] Badge e fila CHD usam o mesmo critério durável.
+- [x] Histórico de ciências confirmadas hoje continua filtrado pelo timestamp do ACK.
 - [x] Conceito/UI passa a usar "intercorrência pós-aceitação" (Slice 002).
 - [x] Campos legados e eventos históricos permanecem compatíveis (Slice 002).
 - [x] Contexto `scheduled`/`operational_notice` e `cycle_id` são persistidos para ciclo ativo (Slice 002).

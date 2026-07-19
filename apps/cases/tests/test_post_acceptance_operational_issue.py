@@ -982,15 +982,18 @@ class TestSystemNoticesOperational:
 
         event = case.events.filter(event_type="POST_ACCEPTANCE_ISSUE_OPENED").first()
         assert event is not None
+        cycle_id_val = event.payload.get("cycle_id", "")
 
         msg = create_system_communication_notice_for_event(event)
         assert msg is not None
         assert msg.message_type == "system"
-        # Deve mencionar o fluxo
-        assert "Enfermaria" in msg.body or "enfermaria" in msg.body.lower()
+        # F1: assert exato de fluxo, contexto e ciclo
+        assert "Fluxo: Vinda para enfermaria (para retaguarda em UTI)" in msg.body
+        assert "Modo: apenas para ciência" in msg.body
+        assert f"Ciclo: {cycle_id_val}" in msg.body
 
     def test_opened_notice_stable_after_storage_cleared(self, user, case_factory, advance_to):
-        """C6: Body da notice nao muda apos limpar storage ativo."""
+        """F1: Body da notice nao muda apos limpar storage ativo."""
         from apps.cases.services import (
             acknowledge_operational_post_acceptance_issue,
             create_system_communication_notice_for_event,
@@ -1009,10 +1012,15 @@ class TestSystemNoticesOperational:
 
         event = case.events.filter(event_type="POST_ACCEPTANCE_ISSUE_OPENED").first()
         assert event is not None
+        cycle_id_val = event.payload.get("cycle_id", "")
 
         msg_before = create_system_communication_notice_for_event(event)
         assert msg_before is not None
         body_before = msg_before.body
+        # F1: assert exato
+        assert "Compartilhar" in body_before
+        assert "Modo: apenas para ciência" in body_before
+        assert f"Ciclo: {cycle_id_val}" in body_before
 
         # Limpa storage ativo
         acknowledge_operational_post_acceptance_issue(case=case, user=user)
@@ -1022,8 +1030,8 @@ class TestSystemNoticesOperational:
         assert msg_after is not None
         assert msg_after.body == body_before
 
-    def test_ack_notice_includes_flow(self, user, case_factory, advance_to):
-        """C6: ACK notice inclui fluxo de admissao no corpo."""
+    def test_ack_notice_includes_flow_and_context_and_cycle(self, user, case_factory, advance_to):
+        """F1: ACK notice inclui fluxo, contexto e ciclo exatos."""
         from apps.cases.services import (
             acknowledge_operational_post_acceptance_issue,
             create_system_communication_notice_for_event,
@@ -1043,10 +1051,14 @@ class TestSystemNoticesOperational:
 
         ack_event = case.events.filter(event_type="POST_ACCEPTANCE_ISSUE_ACKNOWLEDGED").first()
         assert ack_event is not None
+        cycle_id_val = ack_event.payload.get("cycle_id", "")
 
         msg = create_system_communication_notice_for_event(ack_event)
         assert msg is not None
-        assert "Vinda" in msg.body or "imediata" in msg.body.lower()
+        # F1: asserts exatos
+        assert "Fluxo: Vinda Imediata" in msg.body
+        assert "Modo: apenas para ciência" in msg.body
+        assert f"Ciclo: {cycle_id_val}" in msg.body
 
     def test_opened_notice_does_not_create_user_notification(self, user, case_factory, advance_to):
         """C6: System notice nao cria UserNotification."""
