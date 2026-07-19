@@ -10,7 +10,7 @@ Change aberto na branch `change/post-acceptance-intercurrence`. Slice 001 e 002 
 
 - [x] Slice 001 — Tornar notices operacionais iniciais duráveis até ACK (`slices/slice-001-durable-operational-notices.md`)
 - [x] Slice 002 — Generalizar com compatibilidade o fluxo agendado para intercorrência pós-aceitação (`slices/slice-002-scheduled-post-acceptance-intercurrence.md`)
-- [ ] Slice 003 — Entregar intercorrência pós-aceitação apenas para ciência nos quatro fluxos sem agenda (`slices/slice-003-operational-post-acceptance-intercurrence.md`)
+- [x] Slice 003 — Entregar intercorrência pós-aceitação apenas para ciência nos quatro fluxos sem agenda (`slices/slice-003-operational-post-acceptance-intercurrence.md`)
 
 ## Justificativa do dimensionamento
 
@@ -30,18 +30,18 @@ Change aberto na branch `change/post-acceptance-intercurrence`. Slice 001 e 002 
 - [x] Backfill trata eventual intercorrência legada ativa sem perda (Slice 002).
 - [x] Fluxo agendado preserva ações, locks e FSM existentes (Slice 002).
 - [x] Resposta agendada audita snapshots anterior/novo da agenda (Slice 002).
-- [ ] Os quatro fluxos sem agenda ficam elegíveis somente quando aceitos e `CLEANED`.
-- [ ] Fluxo sem agenda permanece `CLEANED` e não altera nenhum campo `appointment_*`.
-- [ ] CHD recebe pendência de ciência operacional por ciclo e confirma atomicamente.
-- [ ] ACK histórico do notice inicial ou de ciclo anterior não oculta novo ciclo.
-- [ ] Notice inicial não duplica card quando há intercorrência operacional ativa.
-- [ ] Motivos de evasão e aceite por unidade mais próxima existem e são exibidos em português.
-- [ ] `CaseEvent` preserva eventos legados e registra os novos ciclos genericamente.
-- [ ] Mensagens sistêmicas da thread reconhecem eventos novos e antigos sem gerar `UserNotification`.
-- [ ] Encerramento administrativo e métricas não mudam de semântica.
-- [ ] Specs, `PROJECT_CONTEXT.md` e manual/documentação afetada são atualizados ao final.
-- [ ] Cada slice executa baseline, RED, GREEN, inspeções e quality gate completo.
-- [ ] Cada slice gera relatório temporário verificável, commit e push próprios.
+- [x] Os quatro fluxos sem agenda ficam elegíveis somente quando aceitos e `CLEANED`.
+- [x] Fluxo sem agenda permanece `CLEANED` e não altera nenhum campo `appointment_*`.
+- [x] CHD recebe pendência de ciência operacional por ciclo e confirma atomicamente.
+- [x] ACK histórico do notice inicial ou de ciclo anterior não oculta novo ciclo.
+- [x] Notice inicial não duplica card quando há intercorrência operacional ativa.
+- [x] Motivos de evasão e aceite por unidade mais próxima existem e são exibidos em português.
+- [x] `CaseEvent` preserva eventos legados e registra os novos ciclos genericamente.
+- [x] Mensagens sistêmicas da thread reconhecem eventos novos e antigos sem gerar `UserNotification`.
+- [x] Encerramento administrativo e métricas não mudam de semântica.
+- [x] Specs, `PROJECT_CONTEXT.md` e manual/documentação afetada são atualizados ao final.
+- [x] Cada slice executa baseline, RED, GREEN, inspeções e quality gate completo.
+- [x] Cada slice gera relatório temporário verificável, commit e push próprios.
 
 ## Regra de execução
 

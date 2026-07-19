@@ -439,6 +439,9 @@ POST_SCHEDULE_ISSUE_REASONS: tuple[str, ...] = (
     "transport_unavailable",
     "external_regulation",
     "reschedule_request",
+    "patient_absconded",
+    "accepted_elsewhere",
+    "origin_cancelled",
     "other",
 )
 
@@ -464,6 +467,9 @@ POST_SCHEDULE_ISSUE_REASON_LABELS: dict[str, str] = {
     "transport_unavailable": "Transporte indisponível pela unidade de origem",
     "external_regulation": "Exame realizado pela regulação estadual em outro serviço",
     "reschedule_request": "Solicitação de reagendamento pela unidade de origem",
+    "patient_absconded": "Paciente evadiu-se da unidade de origem",
+    "accepted_elsewhere": "Paciente aceito/transferido para unidade mais próxima",
+    "origin_cancelled": "Demanda cancelada pela unidade de origem",
     "other": "Outro",
 }
 
@@ -575,8 +581,7 @@ def is_post_acceptance_issue_eligible(case: Case, *, context: str = "") -> bool:
         return case.doctor_admission_flow == "scheduled" and case.appointment_status == "confirmed"
 
     if context == POST_ACCEPTANCE_ISSUE_CONTEXT_OPERATIONAL:
-        # Slice 003 will enable this; for now, always return False
-        return False
+        return case.doctor_admission_flow in OPERATIONAL_NOTICE_FLOWS
 
     return False
 
@@ -598,7 +603,9 @@ def get_post_acceptance_issue_ineligibility_reason(case: Case, *, context: str =
             return "Agendamento não está confirmado."
 
     if effective_context == POST_ACCEPTANCE_ISSUE_CONTEXT_OPERATIONAL:
-        return "Fluxo de intercorrência operacional ainda não disponível (Slice 003)."
+        if case.doctor_admission_flow not in OPERATIONAL_NOTICE_FLOWS:
+            return "Fluxo de admissão não é elegível para intercorrência operacional."
+        return "Caso elegível para intercorrência operacional."
 
     return "Motivo desconhecido."
 
@@ -673,8 +680,11 @@ def open_post_acceptance_issue(
         case.post_acceptance_issue_context = context
         case.post_acceptance_issue_cycle_id = cycle_id
 
-        # FSM transition CLEANED → WAIT_APPT (scheduled only for now)
-        case.open_post_schedule_issue(user=user)
+        if context == POST_ACCEPTANCE_ISSUE_CONTEXT_SCHEDULED:
+            # FSM transition CLEANED → WAIT_APPT (scheduled only)
+            case.open_post_schedule_issue(user=user)
+        # operational_notice: stay CLEANED, no FSM transition
+
         case.save()
 
         # Record the new generic audit event with appointment snapshot
@@ -884,6 +894,94 @@ def acknowledge_scheduled_post_acceptance_issue(
         )
 
     return Case.objects.get(pk=case.pk)
+
+
+# ── Operational post-acceptance issue (Slice 003) ───────────────────────
+
+
+def acknowledge_operational_post_acceptance_issue(
+    *,
+    case: Case,
+    user: Any,
+) -> Case:
+    """Acknowledge an opened operational post-acceptance intercurrence.
+
+    Stays CLEANED throughout. No FSM transition. No appointment changes.
+    Records POST_ACCEPTANCE_ISSUE_ACKNOWLEDGED with cycle/context/flux
+    BEFORE clearing active fields.
+
+    Args:
+        case: The case with an opened operational issue.
+        user: The scheduler user acknowledging.
+
+    Returns:
+        The case with cleared issue fields, still CLEANED.
+
+    Raises:
+        ValueError: If no opened operational issue exists or context mismatch.
+    """
+    with transaction.atomic():
+        case = Case.objects.select_for_update().get(pk=case.pk)
+
+        if case.post_schedule_issue_status != POST_SCHEDULE_ISSUE_STATUS_OPENED:
+            raise ValueError("Caso nao possui intercorrencia aberta para confirmar ciencia.")
+
+        if case.post_acceptance_issue_context != POST_ACCEPTANCE_ISSUE_CONTEXT_OPERATIONAL:
+            raise ValueError(f"Contexto incorreto para ACK operacional: '{case.post_acceptance_issue_context}'")
+        if case.post_acceptance_issue_cycle_id is None:
+            raise ValueError("Ciclo da intercorrencia nao identificado (cycle_id ausente).")
+
+        # Capture BEFORE clearing
+        cycle_id = case.post_acceptance_issue_cycle_id
+        context = case.post_acceptance_issue_context
+        admission_flow = case.doctor_admission_flow
+
+        # Clear legacy issue fields
+        case.post_schedule_issue_status = POST_SCHEDULE_ISSUE_STATUS_NONE
+        case.post_schedule_issue_reason = ""
+        case.post_schedule_issue_message = ""
+        case.post_schedule_issue_opened_by = None
+        case.post_schedule_issue_opened_at = None
+        case.post_schedule_issue_response_action = ""
+        case.post_schedule_issue_response_message = ""
+        case.post_schedule_issue_responded_by = None
+        case.post_schedule_issue_responded_at = None
+
+        # Clear new generic fields
+        case.post_acceptance_issue_context = ""
+        case.post_acceptance_issue_cycle_id = None
+
+        # Stay CLEANED — no FSM transition
+        case.save()
+
+        # Record ACK event WITH cycle/context BEFORE clearing
+        _record_event(
+            case,
+            "POST_ACCEPTANCE_ISSUE_ACKNOWLEDGED",
+            user,
+            {
+                "context": context,
+                "cycle_id": str(cycle_id) if cycle_id else None,
+                "admission_flow": admission_flow,
+            },
+        )
+
+    return Case.objects.get(pk=case.pk)
+
+
+def unacknowledged_operational_issue_qs() -> QuerySet[Case]:
+    """Casos com intercorrencia operacional aberta aguardando ciencia do CHD.
+
+    Fonte unica do criterio "fila de ciencia operacional pós-aceitação",
+    compartilhada entre renderizacao da fila do scheduler e contador do badge.
+
+    - post_schedule_issue_status == 'opened'
+    - post_acceptance_issue_context == 'operational_notice'
+    """
+    return Case.objects.filter(
+        post_schedule_issue_status=POST_SCHEDULE_ISSUE_STATUS_OPENED,
+        post_acceptance_issue_context=POST_ACCEPTANCE_ISSUE_CONTEXT_OPERATIONAL,
+    )
 
 
 # ── Case communication services ──────────────────────────────────────────────
@@ -1579,24 +1677,29 @@ def local_day_bounds(day: date | None = None) -> tuple[datetime, datetime]:
 
 
 def unacknowledged_operational_notice_qs() -> QuerySet[Case]:
-    """Casos com aviso operacional (fluxo sem agendamento) aguardando ciência do CHD.
+    """Casos com aviso operacional (fluxo sem agendamento) aguardando ciencia do CHD.
 
-    Fonte única do critério "fila de ciência operacional", compartilhada entre
-    a renderização da fila do scheduler e o contador do badge/avatar — assim
+    Fonte unica do criterio "fila de ciencia operacional", compartilhada entre
+    a renderizacao da fila do scheduler e o contador do badge/avatar — assim
     badge e fila nunca divergem.
 
-    Slice 001: o filtro diário foi removido para que notices operacionais
-    iniciais persistam até ACK, independentemente da data de criação.
-    O histórico "ciências confirmadas hoje" continua filtrado pelo timestamp
-    do ACK, não pelo timestamp do notice.
+    Slice 001: o filtro diario foi removido para que notices operacionais
+    iniciais persistam ate ACK, independentemente da data de criacao.
+    O historico "ciencias confirmadas hoje" continua filtrado pelo timestamp
+    do ACK, nao pelo timestamp do notice.
+
+    Slice 003: exclui casos com intercorrencia operacional ativa
+    (post_acceptance_issue_context='operational_notice' + opened) para
+    evitar duplicidade — o card mais recente substitui o inicial.
 
     - fluxo em ``OPERATIONAL_NOTICE_FLOWS``
       (immediate/pre_icu/ward_icu_backup/pediatric_em);
     - existe evento de aviso (novo ``ADMISSION_FLOW_OPERATIONAL_NOTICE`` ou
-      legado ``IMMEDIATE_ADMISSION_OPERATIONAL_NOTICE``) sem restrição de data;
-    - caso não está em ``WAIT_APPT``;
+      legado ``IMMEDIATE_ADMISSION_OPERATIONAL_NOTICE``) sem restricao de data;
+    - caso nao esta em ``WAIT_APPT``;
     - sem evento de ack (novo ``SCHEDULER_OPERATIONAL_NOTICE_ACK`` ou legado
-      ``SCHEDULER_IMMEDIATE_ACK``).
+      ``SCHEDULER_IMMEDIATE_ACK``);
+    - sem intercorrencia operacional ativa (evita duplicidade Slice 003).
     """
     return (
         Case.objects.filter(
@@ -1605,5 +1708,9 @@ def unacknowledged_operational_notice_qs() -> QuerySet[Case]:
         )
         .exclude(status=CaseStatus.WAIT_APPT)
         .exclude(events__event_type__in=OPERATIONAL_NOTICE_ACK_EVENT_TYPES)
+        .exclude(
+            post_schedule_issue_status=POST_SCHEDULE_ISSUE_STATUS_OPENED,
+            post_acceptance_issue_context=POST_ACCEPTANCE_ISSUE_CONTEXT_OPERATIONAL,
+        )
         .distinct()
     )

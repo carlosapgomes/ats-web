@@ -198,6 +198,30 @@ def _scheduler_queue_context(user: Any = None, tab: str = "pending") -> dict[str
 
     immediate_notice_count = len(immediate_notice_cards)
 
+    # ── Operational post-acceptance issues (Slice 003) ────────────────
+    from apps.cases.services import unacknowledged_operational_issue_qs
+
+    operational_issue_qs: QuerySet[Case] = (
+        unacknowledged_operational_issue_qs()
+        .select_related("doctor", "post_schedule_issue_opened_by")
+        .order_by("-post_schedule_issue_opened_at")
+    )
+
+    operational_issue_cards: list[dict[str, Any]] = []
+    for case in operational_issue_qs:
+        card = _build_case_card(case, 0)
+        card["issue_reason"] = case.post_schedule_issue_reason
+        card["issue_reason_label"] = get_post_schedule_issue_reason_label(case.post_schedule_issue_reason)
+        card["issue_message"] = case.post_schedule_issue_message
+        card["issue_opened_by_display"] = (
+            case.post_schedule_issue_opened_by.display_name if case.post_schedule_issue_opened_by else ""
+        )
+        card["issue_opened_at"] = case.post_schedule_issue_opened_at
+        card["admission_flow_display"] = _get_admission_flow_display(case)
+        operational_issue_cards.append(card)
+
+    operational_issue_count = len(operational_issue_cards)
+
     # ── Ciências operacionais confirmadas hoje ──────────────────────────
     acknowledged_notice_events = (
         CaseEvent.objects.filter(
@@ -239,13 +263,15 @@ def _scheduler_queue_context(user: Any = None, tab: str = "pending") -> dict[str
         "active_tab": tab,
         "pending_cases": pending_cards,
         "immediate_notice_cases": immediate_notice_cards,
+        "operational_issue_cases": operational_issue_cards,
         "processed_today": processed_today,
         "acknowledged_notice_cases": acknowledged_notice_cards,
         "pending_count": pending_count,
         "immediate_notice_count": immediate_notice_count,
+        "operational_issue_count": operational_issue_count,
         "processed_today_count": processed_today_count,
         "acknowledged_notice_count": len(acknowledged_notice_cards),
-        "total_notice_count": pending_count + immediate_notice_count,
+        "total_notice_count": pending_count + immediate_notice_count + operational_issue_count,
     }
 
     return context
@@ -639,6 +665,33 @@ def immediate_ack(request: HttpRequest, case_id: uuid.UUID) -> HttpResponse:
             else:
                 locked_case._record_event("SCHEDULER_IMMEDIATE_ACK", user=request.user)
             locked_case.save()
+
+    return redirect("scheduler:queue")
+
+
+# ── Operational post-acceptance issue ACK (Slice 003) ───────────────────
+
+
+@login_required
+@role_required("scheduler")
+def operational_issue_ack(request: HttpRequest, case_id: uuid.UUID) -> HttpResponse:
+    """POST: scheduler acknowledges an operational post-acceptance issue.
+
+    Uses select_for_update inside a transaction via domain service
+    to guarantee idempotency — only one ACK event is created.
+    """
+    if request.method != "POST":
+        raise Http404
+
+    from apps.cases.services import acknowledge_operational_post_acceptance_issue
+
+    case = get_object_or_404(Case, pk=case_id)
+
+    try:
+        acknowledge_operational_post_acceptance_issue(case=case, user=request.user)
+        messages.success(request, "Ciencia confirmada com sucesso.")
+    except ValueError as exc:
+        messages.warning(request, str(exc))
 
     return redirect("scheduler:queue")
 
