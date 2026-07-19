@@ -155,18 +155,19 @@ class TestChdOperationalIssueCard:
         content = response.content.decode()
         card_html = _extract_card_html(content, str(case.case_id))
 
-        # Dados sentinela obrigatórios
+        # Dados sentinela obrigatórios — asserts exatos sem fallback
         assert "Paciente Sentinela" in card_html
         assert "REG-SENTINELA-003" in card_html
-        assert "Unidade Sentinela" in card_html or "Hospital Origem Sentinela" in card_html
-        # Label do fluxo pre_icu ("Vinda prévia para UTI")
-        assert "prévia" in card_html.lower() or "previa" in card_html.lower()
+        assert "Hospital Origem Sentinela" in card_html
+        assert "Unidade Sentinela" in card_html
+        # Label do fluxo pre_icu
+        assert "Vinda prévia para UTI" in card_html
         # Motivo traduzido
-        assert "unidade mais próxima" in card_html.lower()
+        assert "unidade mais próxima" in card_html
         # Mensagem
         assert "Transferido para Hospital Destino" in card_html
-        # Ator (nir_user)
-        assert nir_user.get_full_name() or nir_user.username in card_html
+        # Ator (username exato)
+        assert nir_user.username in card_html
         # Horário formatado (dd/mm/YYYY HH:MM)
         import re
 
@@ -403,7 +404,10 @@ class TestBadgeVsQueueContext:
 
 
 class TestDailyAcknowledgmentHistory:
-    """T5: acknowledged_notice_count com ACK hoje/ontem + novo ciclo."""
+    """T5: acknowledged_notice_count com ACK hoje/ontem + novo ciclo.
+
+    H1: durabilidade da issue aberta ontem.
+    """
 
     def test_ack_today_shows_in_history(self, scheduler_client, scheduler_user, nir_user):
         """T5.1: ACK operacional hoje → acknowledged_notice_count == 1."""
@@ -468,3 +472,24 @@ class TestDailyAcknowledgmentHistory:
         response = scheduler_client.get(reverse("scheduler:queue"))
         content = response.content.decode()
         assert "data-operational-issue-card" in content
+
+    # ── H1: Durabilidade da issue aberta ontem ──────────────────────────
+
+    def test_issue_opened_yesterday_still_in_queue(self, scheduler_client, scheduler_user, nir_user):
+        """H1: Issue aberta há 36h ainda aparece na fila — sem filtro de data."""
+        case = _create_case_with_operational_issue(nir_user, flow="immediate")
+        # Move abertura para 36 horas atrás
+        thirty_six_hours_ago = timezone.now() - timedelta(hours=36)
+        Case.objects.filter(pk=case.pk).update(post_schedule_issue_opened_at=thirty_six_hours_ago)
+
+        qc, ctx = _queue_context(scheduler_user)
+
+        assert qc["queue_count"] == 1
+        assert ctx["operational_issue_count"] == 1
+        assert ctx["immediate_notice_count"] == 0
+        assert ctx["pending_count"] == 0
+        assert ctx["total_notice_count"] == 1
+
+        response = scheduler_client.get(reverse("scheduler:queue"))
+        content = response.content.decode()
+        assert content.count("data-operational-issue-card") == 1

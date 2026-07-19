@@ -191,7 +191,7 @@ static/          # css/app.css (paleta hospitalar), js/upload.js, js/password-to
 - **Change merged em main (não arquivado)**: `transactional-emails-auth-flows` (Slices 000–003 concluídos e validados em produção; Slice 004 hardening será implementado direto em main)
 - **Apps criados**: `apps/accounts/`, `apps/cases/`, `apps/llm/`, `apps/intake/`, `apps/pipeline/`,
   `apps/doctor/`, `apps/scheduler/`, `apps/dashboard/`, `apps/admin_ui/`
-- **Testes**: 2186 passando, quality gate verde (ruff + mypy + pytest)
+- **Testes**: 2187 passando, quality gate verde (ruff + mypy + pytest)
 - **Templates**: base.html com tema hospitalar, login, switch-role, perfil, password reset/change,
   intake (home, my_cases, case_detail), doctor (queue, decision)
 - **Documentacao de dominio**: `docs/DOMAIN_ANALYSIS.md`

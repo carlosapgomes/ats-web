@@ -134,12 +134,15 @@ class TestNirSearchOperational:
         assert "não é elegível" not in content and "inelegível" not in content.lower()
 
     def test_non_nir_does_not_mutate_on_search(self, scheduler_client, nir_user):
-        """T1.5: não-NIR acessa busca sem causar mutação no caso."""
+        """H2: não-NIR acessa busca e recebe 302 sem mutar caso."""
         case = _cleaned_with_patient(nir_user, flow="immediate", record="REG-T1-005")
-        scheduler_client.get(reverse("intake:closed_cases_search"), {"q": "REG-T1-005"})
+        response = scheduler_client.get(reverse("intake:closed_cases_search"), {"q": "REG-T1-005"})
+        assert response.status_code == 302
+
         case = Case.objects.get(pk=case.pk)
         assert case.post_schedule_issue_status == ""
         assert case.status == CaseStatus.CLEANED
+        assert not CaseEvent.objects.filter(case=case, event_type="POST_ACCEPTANCE_ISSUE_OPENED").exists()
 
 
 # ── T2: Validação individual dos 3 novos motivos ────────────────────────────
@@ -164,7 +167,7 @@ class TestThreeReasonsValidation:
         )
         assert response.status_code == 200
         content = response.content.decode()
-        assert "Mensagem é obrigatória" in content or "obrigat" in content.lower()
+        assert "Mensagem é obrigatória" in content
 
         case = Case.objects.get(pk=case.pk)
         assert case.post_schedule_issue_status == ""
@@ -306,7 +309,7 @@ class TestNirClosedDetailOperational:
         )
         assert response.status_code == 200
         content = response.content.decode()
-        assert "obrigat" in content.lower()
+        assert "Mensagem é obrigatória" in content
 
         case = Case.objects.get(pk=case.pk)
         assert case.post_schedule_issue_status == ""
