@@ -4,7 +4,10 @@ from django.conf import settings
 
 from apps.accounts.models import get_unread_notification_count
 from apps.cases.models import Case, CaseStatus
-from apps.cases.services import unacknowledged_operational_notice_qs
+from apps.cases.services import (
+    unacknowledged_operational_issue_qs,
+    unacknowledged_operational_notice_qs,
+)
 
 ROLE_DISPLAY_NAMES = {
     "nir": "NIR",
@@ -59,5 +62,6 @@ def queue_counts(request):  # type: ignore[no-untyped-def]
     if active_role == "scheduler":
         count = Case.objects.filter(status=CaseStatus.WAIT_APPT).count()
         count += unacknowledged_operational_notice_qs().count()
+        count += unacknowledged_operational_issue_qs().count()
         return {"queue_count": count}
     return {}

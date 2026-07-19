@@ -70,6 +70,62 @@
   </div>
   {% endif %}
 
+  {% if operational_issue_cases %}
+  <div class="card p-4 mb-4 border-danger">
+    <h5 class="mb-3">⚠️ Intercorrência pós-aceitação — apenas para ciência</h5>
+    <p class="text-muted mb-3">O CHD deve apenas confirmar ciência. Não abrir agendamento.</p>
+    <div class="row g-3">
+      {% for c in operational_issue_cases %}
+      <div class="col-12">
+        <div class="case-card card p-3 bg-danger bg-opacity-10">
+          <div class="row">
+            <div class="col-lg-8">
+              <div class="patient-name mb-1">{{ c.patient_name }}</div>
+              <span class="badge bg-warning text-dark mb-2">⚠️ Intercorrência pós-aceitação</span>
+              <div class="case-meta mb-2">
+                {% if c.agency_record_number %}Reg. {{ c.agency_record_number }} · {% endif %}
+                {% if c.patient_age %}{{ c.patient_age }} anos · {% endif %}
+                {{ c.patient_gender }}
+                {% if c.origin_unit %} · 🏥 {{ c.origin_unit }}{% endif %}
+              </div>
+              <div class="alert alert-warning py-2 px-3 mb-2 small">
+                <strong>Motivo:</strong> {{ c.issue_reason_label }}
+                {% if c.issue_message %}
+                <br><strong>Mensagem do NIR:</strong> {{ c.issue_message }}
+                {% endif %}
+              </div>
+              <div class="summary-box mb-2">
+                <div class="row">
+                  <div class="col-sm-5 mb-2"><div class="summary-label">Diagnóstico</div><div class="summary-value">{{ c.diagnosis|default:"—" }}</div></div>
+                  <div class="col-sm-3 mb-2"><div class="summary-label">Suporte</div><div class="summary-value">{{ c.support_flag_display }}</div></div>
+                  <div class="col-sm-4 mb-2"><div class="summary-label">Fluxo</div><div class="summary-value"><strong>{{ c.admission_flow_display }}</strong></div></div>
+                </div>
+                {% if c.doctor_display %}
+                <div class="row mt-1">
+                  <div class="col-sm-12"><div class="summary-label">Médico</div><div class="summary-value">{{ c.doctor_display }}</div></div>
+                </div>
+                {% endif %}
+              </div>
+              <div class="small text-muted">
+                Aberto por {{ c.issue_opened_by_display }}
+                {% if c.issue_opened_at %}em {{ c.issue_opened_at|date:"d/m/Y H:i" }}{% endif %}
+              </div>
+            </div>
+            <div class="col-lg-4 text-lg-end mt-3 mt-lg-0 d-flex flex-lg-column justify-content-between align-items-lg-end">
+              <div><span class="badge bg-warning text-dark mb-2">Não agendar</span></div>
+              <form method="post" action="{% url 'scheduler:operational_issue_ack' c.case_id %}" class="mt-2">
+                {% csrf_token %}
+                <button type="submit" class="btn btn-hospital">Confirmar ciência</button>
+              </form>
+            </div>
+          </div>
+        </div>
+      </div>
+      {% endfor %}
+    </div>
+  </div>
+  {% endif %}
+
   {% if pending_cases %}
   <div class="row g-3">
     {% for c in pending_cases %}

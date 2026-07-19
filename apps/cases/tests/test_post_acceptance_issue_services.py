@@ -136,19 +136,20 @@ class TestOpenPostAcceptanceIssue:
         assert case.post_schedule_issue_status == "opened"
         assert case.post_schedule_issue_reason == "death"
 
-    def test_fluxo_sem_agenda_bloqueado_ainda(self, user, case_factory, advance_to) -> None:
-        """Fluxos sem agenda (immediate/pre_icu/...) continuam inelegíveis."""
+    def test_fluxo_sem_agenda_agora_elegivel(self, user, case_factory, advance_to) -> None:
+        """Fluxos sem agenda (immediate/pre_icu/...) agora sao elegiveis (Slice 003)."""
         from apps.cases.services import open_post_acceptance_issue
 
         for flow in ("immediate", "pre_icu", "ward_icu_backup", "pediatric_em"):
             case = _build_cleaned_no_schedule(case_factory, advance_to, user, flow=flow)
-            with pytest.raises(ValueError, match="não é elegível|elegível"):
-                open_post_acceptance_issue(
-                    case=case,
-                    user=user,
-                    reason="death",
-                    context="operational_notice",
-                )
+            case = open_post_acceptance_issue(
+                case=case,
+                user=user,
+                reason="death",
+                context="operational_notice",
+            )
+            assert case.status == CaseStatus.CLEANED
+            assert case.post_acceptance_issue_context == "operational_notice"
 
     def test_segunda_abertura_falha(self, user, case_factory, advance_to) -> None:
         """Segunda abertura com issue ativa falha."""

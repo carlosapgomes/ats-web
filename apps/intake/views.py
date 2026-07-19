@@ -1163,7 +1163,16 @@ def closed_cases_search(request: HttpRequest) -> HttpResponse:
         )
 
         for c in qs:
-            eligible = is_post_acceptance_issue_eligible(c, context="scheduled")
+            eligible_scheduled = is_post_acceptance_issue_eligible(c, context="scheduled")
+            eligible_operational = is_post_acceptance_issue_eligible(c, context="operational_notice")
+            eligible = eligible_scheduled or eligible_operational
+            # Build ineligibility reason based on the most relevant context
+            if eligible:
+                ineligibility_reason = ""
+            elif c.doctor_admission_flow in ("immediate", "pre_icu", "ward_icu_backup", "pediatric_em"):
+                ineligibility_reason = get_post_acceptance_issue_ineligibility_reason(c, context="operational_notice")
+            else:
+                ineligibility_reason = get_post_acceptance_issue_ineligibility_reason(c, context="scheduled")
             # Check if this case has corrected_by_cases (R3)
             corrected_by_count = 0
             if hasattr(c, "corrected_by_cases"):
@@ -1172,9 +1181,7 @@ def closed_cases_search(request: HttpRequest) -> HttpResponse:
                 {
                     "case": c,
                     "eligible": eligible,
-                    "ineligibility_reason": (
-                        "" if eligible else get_post_acceptance_issue_ineligibility_reason(c, context="scheduled")
-                    ),
+                    "ineligibility_reason": ineligibility_reason,
                     "status_label": STATUS_LABELS.get(c.status, c.get_status_display()),
                     "status_css": STATUS_CSS_CLASS.get(c.status, "status-pending"),
                     "patient_name": c.patient_name,
@@ -1256,10 +1263,23 @@ def closed_case_detail(request: HttpRequest, case_id: uuid.UUID) -> HttpResponse
     # Armazena formulário bound (com erros) para re-renderizar em POST inválido
     detail_form: PostScheduleIssueForm | None = None
 
-    # Processar POST de abertura de intercorrência
+    # Determinar o contexto de elegibilidade para este caso
+    # Scheduled tem prioridade porque ja esta implementado e e mais restritivo
+    eligible_scheduled = is_post_acceptance_issue_eligible(case, context="scheduled")
+    eligible_operational = is_post_acceptance_issue_eligible(case, context="operational_notice")
+
+    # Processar POST de abertura de intercorrencia
     if request.method == "POST":
-        if not is_post_acceptance_issue_eligible(case, context="scheduled"):
-            messages.warning(request, get_post_acceptance_issue_ineligibility_reason(case, context="scheduled"))
+        # Detecta qual contexto usar baseado no caso
+        if eligible_scheduled:
+            issue_context = "scheduled"
+        elif eligible_operational:
+            issue_context = "operational_notice"
+        else:
+            messages.warning(
+                request,
+                get_post_acceptance_issue_ineligibility_reason(case, context="scheduled"),
+            )
             return redirect("intake:closed_case_detail", case_id=case.case_id)
 
         form = PostScheduleIssueForm(request.POST)
@@ -1272,16 +1292,22 @@ def closed_case_detail(request: HttpRequest, case_id: uuid.UUID) -> HttpResponse
                     user=request.user,
                     reason=reason,
                     message=message,
-                    context="scheduled",
+                    context=issue_context,
                 )
-                messages.success(
-                    request,
-                    "Intercorrência registrada com sucesso. O caso foi enviado para o agendador.",
-                )
+                if issue_context == "operational_notice":
+                    messages.success(
+                        request,
+                        "Intercorrencia registrada com sucesso. O agendador recebera um aviso para confirmar ciencia.",
+                    )
+                else:
+                    messages.success(
+                        request,
+                        "Intercorrencia registrada com sucesso. O caso foi enviado para o agendador.",
+                    )
                 return redirect("intake:closed_case_detail", case_id=case.case_id)
             except ValueError as exc:
                 messages.warning(request, str(exc))
-        # Form inválido — manter bound com erros para re-renderizar
+        # Form invalido — manter bound com erros para re-renderizar
         detail_form = form
 
     # ── GET: montar contexto ──────────────────────────────────
@@ -1314,11 +1340,18 @@ def closed_case_detail(request: HttpRequest, case_id: uuid.UUID) -> HttpResponse
             }
         )
 
-    # Elegibilidade para intercorrência
-    eligible = is_post_acceptance_issue_eligible(case, context="scheduled")
-    ineligibility_reason = "" if eligible else get_post_acceptance_issue_ineligibility_reason(case, context="scheduled")
+    # Elegibilidade para intercorrencia — ambos os contextos
+    eligible = eligible_scheduled or eligible_operational
+    if not eligible:
+        # Mostra o motivo mais relevante
+        ineligibility_reason = get_post_acceptance_issue_ineligibility_reason(
+            case,
+            context="scheduled" if case.doctor_admission_flow == "scheduled" else "operational_notice",
+        )
+    else:
+        ineligibility_reason = ""
 
-    # Formulário (se elegível e GET, criar form vazio; POST inválido mantém detail_form do POST)
+    # Formulario (se elegivel e GET, criar form vazio; POST invalido mantem detail_form do POST)
     if not request.method == "POST" and eligible:
         detail_form = PostScheduleIssueForm()
 
