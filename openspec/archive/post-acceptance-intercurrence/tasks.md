@@ -4,7 +4,7 @@
 
 ## Status
 
-Change aberto na branch `change/post-acceptance-intercurrence`. Slices 001, 002 e 003 concluídos.
+Change concluído e arquivado. Slices 001, 002 e 003 foram implementados, revisados, sincronizados com `origin/main`, validados, commitados e enviados para `origin/change/post-acceptance-intercurrence`.
 
 ## Slices verticais
 
