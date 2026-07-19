@@ -182,7 +182,7 @@ Nesse caso:
 4. O **CHD** usa **Comunicar NIR** para explicar o problema.
 5. O sistema notifica o **NIR** automaticamente.
 6. O **NIR** abre a notificação e lê o detalhe histórico do caso.
-7. Se for necessário mudar ou cancelar o agendamento, o **NIR** registra a intercorrência pós-agendamento.
+7. Se for necessário mudar ou cancelar o agendamento, o **NIR** registra a intercorrência pós-aceitação (modo agendado).
 8. O caso volta para o **CHD** responder de forma estruturada.
 
 Importante: a mensagem do CHD para o NIR **não reabre o caso sozinha**. Quem abre a intercorrência no sistema é o **NIR**, depois de ler o contexto.
@@ -205,7 +205,7 @@ Ela **não substitui** os botões formais do sistema. Por exemplo:
 - decisão médica deve ser feita no formulário de decisão médica;
 - confirmação ou negativa de agendamento deve ser feita no formulário do CHD/agendador;
 - confirmação de recebimento deve ser feita no botão próprio do NIR;
-- intercorrência pós-agendamento deve ser registrada no formulário específico;
+- intercorrência pós-aceitação (modo agendado) deve ser registrada no formulário específico;
 - aviso do CHD sobre alteração interna deve ser enviado pelo fluxo **Buscar histórico > Detalhes > Comunicar NIR**.
 
 ### 2.1 Como mencionar usuários ou equipes
@@ -392,7 +392,7 @@ O resultado pode ser, por exemplo:
 - agendamento negado;
 - revisão manual obrigatória;
 - falha de processamento;
-- resultado de intercorrência pós-agendamento.
+- resultado de intercorrência pós-aceitação (modo agendado).
 
 Nos fluxos sem agendamento, o resultado final indica qual ação operacional cabe ao **NIR**. O **CHD** apenas toma ciência no sistema.
 
@@ -500,7 +500,7 @@ Passo a passo para o NIR:
 3. clique em **Abrir caso**;
 4. leia a mensagem do CHD na **Comunicação operacional**;
 5. confira os dados do caso e o agendamento anterior;
-6. se for necessário mudar, cancelar ou pedir nova avaliação do agendamento, use a seção **Intercorrência Pós-Agendamento**;
+6. se for necessário mudar, cancelar ou pedir nova avaliação do agendamento, use a seção **Intercorrência Pós-Aceitação**;
 7. selecione o motivo;
 8. escreva uma mensagem explicando o pedido;
 9. clique em **Registrar intercorrência**.
@@ -654,7 +654,7 @@ A fila pode mostrar três tipos principais de item:
 
 1. **Ciência operacional — fluxos sem agendamento** — não devem ser agendados pelo CHD.
 2. **Casos aguardando agendamento** — precisam ser confirmados ou negados.
-3. **Intercorrências pós-agendamento** — precisam de resposta do CHD.
+3. **Intercorrências pós-aceitação (modo agendado)** — precisam de resposta do CHD.
 
 A fila é atualizada automaticamente.
 
@@ -798,7 +798,7 @@ Atenção:
 
 - essa mensagem **não reabre o caso automaticamente**;
 - o CHD não deve tentar resolver esse tipo de mudança apenas por mensagem;
-- depois de receber o aviso, o NIR decide se deve abrir uma **Intercorrência Pós-Agendamento**;
+- depois de receber o aviso, o NIR decide se deve abrir uma **Intercorrência Pós-Aceitação**;
 - se o NIR abrir a intercorrência, o caso voltará para a fila do CHD para resposta estruturada.
 
 Se precisar mencionar outra pessoa além do NIR, o CHD pode incluir a menção na própria mensagem, por exemplo:
@@ -845,7 +845,7 @@ Sempre confira:
 | CHD tomar ciência de fluxo sem agendamento | **Fila do CHD > Confirmar ciência** |
 | NIR executar ação de UTI, enfermaria, vinda imediata ou Pediatria | **Resultado final do caso + rotina operacional NIR** |
 | CHD avisar NIR sobre alteração interna em caso histórico | **Buscar histórico > Detalhes > Comunicar NIR** |
-| NIR registrar intercorrência após agendamento | **Casos Encerrados > Detalhes > Intercorrência Pós-Agendamento** |
+| NIR registrar intercorrência após agendamento | **Casos Encerrados > Detalhes > Intercorrência Pós-Aceitação** |
 | Responder intercorrência | **Fila do CHD/Agendador** |
 | Encerrar caso após resultado | **Confirmar Recebimento** |
 | Corrigir caso anterior | **Reenviar caso corrigido** |

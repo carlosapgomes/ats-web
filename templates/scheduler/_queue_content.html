@@ -77,7 +77,7 @@
     <div class="row g-3">
       {% for c in operational_issue_cases %}
       <div class="col-12">
-        <div class="case-card card p-3 bg-danger bg-opacity-10">
+        <div class="case-card card p-3 bg-danger bg-opacity-10" data-operational-issue-card="{{ c.case_id }}">
           <div class="row">
             <div class="col-lg-8">
               <div class="patient-name mb-1">{{ c.patient_name }}</div>

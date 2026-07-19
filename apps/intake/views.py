@@ -1297,12 +1297,12 @@ def closed_case_detail(request: HttpRequest, case_id: uuid.UUID) -> HttpResponse
                 if issue_context == "operational_notice":
                     messages.success(
                         request,
-                        "Intercorrencia registrada com sucesso. O agendador recebera um aviso para confirmar ciencia.",
+                        "Intercorrência registrada com sucesso. O agendador receberá um aviso para confirmar ciência.",
                     )
                 else:
                     messages.success(
                         request,
-                        "Intercorrencia registrada com sucesso. O caso foi enviado para o agendador.",
+                        "Intercorrência registrada com sucesso. O caso foi enviado para o agendador.",
                     )
                 return redirect("intake:closed_case_detail", case_id=case.case_id)
             except ValueError as exc:

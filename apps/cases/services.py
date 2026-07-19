@@ -924,12 +924,12 @@ def acknowledge_operational_post_acceptance_issue(
         case = Case.objects.select_for_update().get(pk=case.pk)
 
         if case.post_schedule_issue_status != POST_SCHEDULE_ISSUE_STATUS_OPENED:
-            raise ValueError("Caso nao possui intercorrencia aberta para confirmar ciencia.")
+            raise ValueError("Caso não possui intercorrência aberta para confirmar ciência.")
 
         if case.post_acceptance_issue_context != POST_ACCEPTANCE_ISSUE_CONTEXT_OPERATIONAL:
             raise ValueError(f"Contexto incorreto para ACK operacional: '{case.post_acceptance_issue_context}'")
         if case.post_acceptance_issue_cycle_id is None:
-            raise ValueError("Ciclo da intercorrencia nao identificado (cycle_id ausente).")
+            raise ValueError("Ciclo da intercorrência não identificado (cycle_id ausente).")
 
         # Capture BEFORE clearing
         cycle_id = case.post_acceptance_issue_cycle_id
@@ -1528,27 +1528,31 @@ def _format_post_schedule_issue_responded(payload: dict[str, object]) -> str:
 def _format_post_acceptance_issue_opened(payload: dict[str, object]) -> str:
     """Formata corpo para POST_ACCEPTANCE_ISSUE_OPENED.
 
-    Slice 003 C6: para contexto operacional, inclui fluxo de admissao
-    traduzido e cycle_id abreviado do payload. Nao consulta Case nem
+    Slice 003 C6/F1: inclui contexto traduzido, fluxo de admissao
+    traduzido e cycle_id completo do payload. Nao consulta Case nem
     campos ativos.
     """
     from apps.cases.admission import ADMISSION_FLOW_MAP
 
     reason = str(payload.get("reason", "") or "")
     message = str(payload.get("message", "") or "")
-    str(payload.get("context", "") or "")
+    context = str(payload.get("context", "") or "")
     admission_flow = str(payload.get("admission_flow", "") or "")
     cycle_id = str(payload.get("cycle_id", "") or "")
 
     label = get_post_schedule_issue_reason_label(reason)
     flow_label = ADMISSION_FLOW_MAP.get(admission_flow, admission_flow)
-    cycle_id[:8] + "..." if len(cycle_id) > 8 else cycle_id
+    context_label = "apenas para ciência" if context == "operational_notice" else "com agendamento"
 
     parts = ["Intercorrência pós-aceitação aberta pelo NIR"]
     if label:
         parts.append(f"— {label}")
     if flow_label:
         parts.append(f"Fluxo: {flow_label}")
+    if context_label:
+        parts.append(f"Modo: {context_label}")
+    if cycle_id:
+        parts.append(f"Ciclo: {cycle_id}")
     if message:
         parts.append(f"Mensagem: {message}")
     return " ".join(parts).strip()
@@ -1574,17 +1578,24 @@ def _format_post_acceptance_issue_acknowledged(payload: dict[str, object]) -> st
     Incluido (diferente do legado POST_SCHEDULE_ISSUE_ACKNOWLEDGED) pois
     o payload contem cycle_id, context e admission_flow (Slice 002 C6).
 
-    Slice 003 C6: inclui fluxo de admissao traduzido e contexto.
+    Slice 003 C6/F1: inclui contexto traduzido, fluxo de admissao
+    traduzido e cycle_id completo.
     """
     from apps.cases.admission import ADMISSION_FLOW_MAP
 
-    str(payload.get("context", "") or "")
+    context = str(payload.get("context", "") or "")
     admission_flow = str(payload.get("admission_flow", "") or "")
+    cycle_id = str(payload.get("cycle_id", "") or "")
     flow_label = ADMISSION_FLOW_MAP.get(admission_flow, admission_flow)
+    context_label = "apenas para ciência" if context == "operational_notice" else "com agendamento"
 
     parts = ["Ciência da intercorrência pós-aceitação confirmada."]
     if flow_label:
         parts.append(f"Fluxo: {flow_label}.")
+    if context_label:
+        parts.append(f"Modo: {context_label}.")
+    if cycle_id:
+        parts.append(f"Ciclo: {cycle_id}.")
     return " ".join(parts).strip()
 
 
