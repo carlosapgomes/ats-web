@@ -14,6 +14,7 @@ Cobre:
 from __future__ import annotations
 
 import uuid
+from datetime import timedelta
 
 import pytest
 from django.utils import timezone
@@ -459,6 +460,124 @@ class TestNoDuplication:
         qs = unacknowledged_operational_notice_qs()
         assert not qs.filter(pk=case.pk).exists(), "notice inicial nao deve reaparecer apos ACK da issue operacional"
 
+    def test_issue_ack_satisfies_real_pending_initial_notice(self, user, case_factory, advance_to):
+        """C1: notice inicial REAL pendente → issue → ACK → zero pendencias."""
+        from apps.cases.services import (
+            acknowledge_operational_post_acceptance_issue,
+            open_post_acceptance_issue,
+            unacknowledged_operational_notice_qs,
+        )
+
+        case = _build_cleaned_operational(case_factory, advance_to, user, flow="immediate")
+        CaseEvent.objects.create(
+            case=case,
+            actor=user,
+            actor_type="human",
+            event_type="ADMISSION_FLOW_OPERATIONAL_NOTICE",
+            timestamp=timezone.now(),
+        )
+
+        # 1. Antes da issue: notice inicial pendente aparece
+        qs_before = unacknowledged_operational_notice_qs()
+        assert qs_before.filter(pk=case.pk).exists(), "notice inicial deve aparecer antes da issue"
+
+        # 2. Abre issue operacional
+        case = open_post_acceptance_issue(
+            case=case,
+            user=user,
+            reason="patient_absconded",
+            message="Paciente evadiu-se",
+            context="operational_notice",
+        )
+        case = Case.objects.get(pk=case.pk)
+
+        # 3. Com issue ativa: somente a issue
+        qs_during = unacknowledged_operational_notice_qs()
+        assert not qs_during.filter(pk=case.pk).exists(), (
+            "notice inicial nao deve aparecer quando ha issue operacional ativa"
+        )
+
+        # 4. ACK da issue
+        acknowledge_operational_post_acceptance_issue(case=case, user=user)
+
+        # 5. Apos ACK: ambos ausentes — este e o teste que falhava antes da correcao
+        qs_after = unacknowledged_operational_notice_qs()
+        assert not qs_after.filter(pk=case.pk).exists(), (
+            "BUG: notice inicial fantasma reapareceu apos ACK da issue operacional"
+        )
+
+        # 6. Evento inicial permanece no historico
+        assert CaseEvent.objects.filter(case=case, event_type="ADMISSION_FLOW_OPERATIONAL_NOTICE").exists(), (
+            "evento historico nao deve ser apagado"
+        )
+
+    def test_already_acked_notice_does_not_block_new_issue(self, user, case_factory, advance_to):
+        """C1: notice inicial ja confirmado → nova issue continua visivel."""
+        from apps.cases.services import (
+            is_post_acceptance_issue_eligible,
+            open_post_acceptance_issue,
+        )
+
+        case = _build_cleaned_operational(case_factory, advance_to, user, flow="pre_icu")
+        # Marca o notice inicial como ja confirmado
+        CaseEvent.objects.create(
+            case=case,
+            actor=user,
+            actor_type="human",
+            event_type="ADMISSION_FLOW_OPERATIONAL_NOTICE",
+            timestamp=timezone.now() - timedelta(days=1),
+        )
+        CaseEvent.objects.create(
+            case=case,
+            actor=user,
+            actor_type="human",
+            event_type="SCHEDULER_OPERATIONAL_NOTICE_ACK",
+            timestamp=timezone.now(),
+        )
+        case = Case.objects.get(pk=case.pk)
+
+        # Nova issue deve ser possivel apesar do ACK historico
+        assert is_post_acceptance_issue_eligible(case, context="operational_notice")
+
+        case = open_post_acceptance_issue(
+            case=case,
+            user=user,
+            reason="origin_cancelled",
+            message="Cancelado pela origem",
+            context="operational_notice",
+        )
+        assert case.post_schedule_issue_status == "opened"
+
+    def test_second_cycle_visible_after_ack(self, user, case_factory, advance_to):
+        """C1: segundo ciclo depois do ACK → issue reaparece com UUID novo."""
+        from apps.cases.services import (
+            acknowledge_operational_post_acceptance_issue,
+            open_post_acceptance_issue,
+            unacknowledged_operational_issue_qs,
+        )
+
+        case = _build_cleaned_operational(case_factory, advance_to, user, flow="pediatric_em")
+
+        # Ciclo 1: abre e fecha
+        case = open_post_acceptance_issue(case=case, user=user, reason="death", context="operational_notice")
+        case = Case.objects.get(pk=case.pk)
+        acknowledge_operational_post_acceptance_issue(case=case, user=user)
+
+        # Ciclo 2: nova abertura
+        case = Case.objects.get(pk=case.pk)
+        case = open_post_acceptance_issue(
+            case=case,
+            user=user,
+            reason="accepted_elsewhere",
+            message="Transferido",
+            context="operational_notice",
+        )
+
+        # Deve aparecer na query de issues abertas
+        qs = unacknowledged_operational_issue_qs()
+        assert qs.filter(pk=case.pk).exists(), "segundo ciclo deve aparecer na fila"
+        assert case.post_acceptance_issue_cycle_id is not None
+
 
 # ── R7: ACK atomico e idempotente ─────────────────────────────────────
 
@@ -750,6 +869,203 @@ class TestNoRegression:
 
         event = _assert_event_type(case, "CASE_ADMINISTRATIVELY_CLOSED")
         assert event.payload.get("post_acceptance_issue_context") == "operational_notice"
+
+
+# ── C5: Todos os 6 campos appointment_* imutaveis ────────────────────
+
+
+class TestAllAppointmentFieldsImmutable:
+    """C5: Cobertura completa dos 6 campos appointment_* na abertura e ACK."""
+
+    APPOINTMENT_FIELDS = [
+        "appointment_status",
+        "appointment_at",
+        "appointment_location",
+        "appointment_instructions",
+        "appointment_reason",
+        "appointment_decided_at",
+    ]
+
+    def test_all_six_fields_unchanged_after_open(self, user, case_factory, advance_to):
+        from apps.cases.services import open_post_acceptance_issue
+
+        case = _build_cleaned_operational(case_factory, advance_to, user, flow="immediate")
+        sentinel_dt = timezone.now()
+
+        # Preenche valores sentinela
+        Case.objects.filter(pk=case.pk).update(
+            appointment_status="confirmed",
+            appointment_at=sentinel_dt,
+            appointment_location="Hospital Sentinela",
+            appointment_instructions="Jejum 8h",
+            appointment_reason="Motivo sentinela",
+            appointment_decided_at=sentinel_dt,
+        )
+        case = Case.objects.get(pk=case.pk)
+
+        # Snapshot antes
+        snap_before = {f: getattr(case, f) for f in self.APPOINTMENT_FIELDS}
+
+        case = open_post_acceptance_issue(
+            case=case,
+            user=user,
+            reason="patient_absconded",
+            message="Evadiu-se",
+            context="operational_notice",
+        )
+        case = Case.objects.get(pk=case.pk)
+
+        snap_after = {f: getattr(case, f) for f in self.APPOINTMENT_FIELDS}
+        assert snap_after == snap_before, f"Campos appointment_* mudaram: before={snap_before}, after={snap_after}"
+        assert case.status == CaseStatus.CLEANED
+
+    def test_all_six_fields_unchanged_after_ack_service(self, user, case_factory, advance_to):
+        from apps.cases.services import (
+            acknowledge_operational_post_acceptance_issue,
+            open_post_acceptance_issue,
+        )
+
+        case = _build_cleaned_operational(case_factory, advance_to, user, flow="pre_icu")
+        sentinel_dt = timezone.now()
+
+        Case.objects.filter(pk=case.pk).update(
+            appointment_status="confirmed",
+            appointment_at=sentinel_dt,
+            appointment_location="UTI Sentinela",
+            appointment_instructions="Preparo especial",
+            appointment_reason="Razao sentinela",
+            appointment_decided_at=sentinel_dt,
+        )
+        case = Case.objects.get(pk=case.pk)
+
+        case = open_post_acceptance_issue(
+            case=case,
+            user=user,
+            reason="death",
+            context="operational_notice",
+        )
+        case = Case.objects.get(pk=case.pk)
+
+        snap_before_ack = {f: getattr(case, f) for f in self.APPOINTMENT_FIELDS}
+
+        acknowledge_operational_post_acceptance_issue(case=case, user=user)
+        case = Case.objects.get(pk=case.pk)
+
+        snap_after_ack = {f: getattr(case, f) for f in self.APPOINTMENT_FIELDS}
+        assert snap_after_ack == snap_before_ack, (
+            f"Campos appointment_* mudaram apos ACK: before={snap_before_ack}, after={snap_after_ack}"
+        )
+        assert case.status == CaseStatus.CLEANED
+
+
+# ── C6: System notices com payload flow/cycle ─────────────────────────
+
+
+class TestSystemNoticesOperational:
+    """C6: System notices operacionais auditaveis pelo payload."""
+
+    def test_opened_notice_includes_flow_in_body(self, user, case_factory, advance_to):
+        """C6: OPENED notice inclui fluxo de admissao no corpo."""
+        from apps.cases.services import (
+            create_system_communication_notice_for_event,
+            open_post_acceptance_issue,
+        )
+
+        case = _build_cleaned_operational(case_factory, advance_to, user, flow="ward_icu_backup")
+        case = open_post_acceptance_issue(
+            case=case,
+            user=user,
+            reason="accepted_elsewhere",
+            message="Transferido",
+            context="operational_notice",
+        )
+
+        event = case.events.filter(event_type="POST_ACCEPTANCE_ISSUE_OPENED").first()
+        assert event is not None
+
+        msg = create_system_communication_notice_for_event(event)
+        assert msg is not None
+        assert msg.message_type == "system"
+        # Deve mencionar o fluxo
+        assert "Enfermaria" in msg.body or "enfermaria" in msg.body.lower()
+
+    def test_opened_notice_stable_after_storage_cleared(self, user, case_factory, advance_to):
+        """C6: Body da notice nao muda apos limpar storage ativo."""
+        from apps.cases.services import (
+            acknowledge_operational_post_acceptance_issue,
+            create_system_communication_notice_for_event,
+            open_post_acceptance_issue,
+        )
+
+        case = _build_cleaned_operational(case_factory, advance_to, user, flow="pediatric_em")
+        case = open_post_acceptance_issue(
+            case=case,
+            user=user,
+            reason="patient_absconded",
+            message="Evadiu-se",
+            context="operational_notice",
+        )
+        case = Case.objects.get(pk=case.pk)
+
+        event = case.events.filter(event_type="POST_ACCEPTANCE_ISSUE_OPENED").first()
+        assert event is not None
+
+        msg_before = create_system_communication_notice_for_event(event)
+        assert msg_before is not None
+        body_before = msg_before.body
+
+        # Limpa storage ativo
+        acknowledge_operational_post_acceptance_issue(case=case, user=user)
+
+        # Mensagem historica nao muda
+        msg_after = create_system_communication_notice_for_event(event)
+        assert msg_after is not None
+        assert msg_after.body == body_before
+
+    def test_ack_notice_includes_flow(self, user, case_factory, advance_to):
+        """C6: ACK notice inclui fluxo de admissao no corpo."""
+        from apps.cases.services import (
+            acknowledge_operational_post_acceptance_issue,
+            create_system_communication_notice_for_event,
+            open_post_acceptance_issue,
+        )
+
+        case = _build_cleaned_operational(case_factory, advance_to, user, flow="immediate")
+        case = open_post_acceptance_issue(
+            case=case,
+            user=user,
+            reason="death",
+            context="operational_notice",
+        )
+        case = Case.objects.get(pk=case.pk)
+
+        acknowledge_operational_post_acceptance_issue(case=case, user=user)
+
+        ack_event = case.events.filter(event_type="POST_ACCEPTANCE_ISSUE_ACKNOWLEDGED").first()
+        assert ack_event is not None
+
+        msg = create_system_communication_notice_for_event(ack_event)
+        assert msg is not None
+        assert "Vinda" in msg.body or "imediata" in msg.body.lower()
+
+    def test_opened_notice_does_not_create_user_notification(self, user, case_factory, advance_to):
+        """C6: System notice nao cria UserNotification."""
+        from apps.accounts.models import UserNotification
+        from apps.cases.services import open_post_acceptance_issue
+
+        # Conta notificacoes antes
+        before = UserNotification.objects.count()
+
+        case = _build_cleaned_operational(case_factory, advance_to, user, flow="immediate")
+        open_post_acceptance_issue(
+            case=case,
+            user=user,
+            reason="death",
+            context="operational_notice",
+        )
+
+        after = UserNotification.objects.count()
+        assert after == before, f"System notice criou UserNotification: before={before}, after={after}"
 
 
 # ── Concorrencia ────────────────────────────────────────────────────────

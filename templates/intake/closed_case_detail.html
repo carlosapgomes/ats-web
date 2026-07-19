@@ -38,7 +38,13 @@
     <div class="col-md-6 text-md-end mt-3 mt-md-0">
       <span class="status-badge {{ status_css }} fs-6">{{ status_label }}</span>
       {% if case.post_schedule_issue_status == "opened" %}
-      <div class="mt-2"><span class="badge bg-warning text-dark px-3 py-2">⚠️ Intercorrência em avaliação</span></div>
+      <div class="mt-2">
+        {% if case.post_acceptance_issue_context == "operational_notice" %}
+        <span class="badge bg-warning text-dark px-3 py-2">⚠️ Aguardando ciência do CHD</span>
+        {% else %}
+        <span class="badge bg-warning text-dark px-3 py-2">⚠️ Intercorrência em avaliação</span>
+        {% endif %}
+      </div>
       {% elif case.post_schedule_issue_status == "responded" %}
       <div class="mt-2"><span class="badge bg-info text-dark px-3 py-2">↻ Intercorrência respondida</span></div>
       {% endif %}
@@ -207,7 +213,10 @@
           Descreva o motivo da intercorrência. Campo obrigatório para
           <strong>sem condição clínica</strong>,
           <strong>transporte indisponível</strong>,
-          <strong>solicitação de reagendamento</strong> e
+          <strong>solicitação de reagendamento</strong>,
+          <strong>evasão da unidade de origem</strong>,
+          <strong>aceite/transferência para unidade mais próxima</strong>,
+          <strong>cancelamento pela unidade de origem</strong> e
           <strong>outro</strong>.
         </div>
       </div>
