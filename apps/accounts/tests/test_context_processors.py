@@ -1,5 +1,7 @@
 """Tests for accounts context processors."""
 
+from datetime import timedelta
+
 import pytest
 from django.contrib.auth import get_user_model
 from django.http import HttpRequest
@@ -111,6 +113,30 @@ class TestQueueCounts:
         request.session = {"active_role": "scheduler"}
         result = queue_counts(request)
         assert result == {"queue_count": 0}
+
+    def test_scheduler_counts_yesterday_notice(self, rf: RequestFactory) -> None:
+        """Scheduler badge inclui notice de ontem sem ACK."""
+        user = User.objects.create_user(username="scheduler-yesterday@test.com", password="testpass")
+        yesterday = timezone.now() - timedelta(days=1, hours=12)
+        case = Case.objects.create(
+            created_by=user,
+            status=CaseStatus.WAIT_R1_CLEANUP_THUMBS,
+            doctor_admission_flow="immediate",
+        )
+        event = CaseEvent.objects.create(
+            case=case,
+            actor_type="human",
+            actor=user,
+            event_type="IMMEDIATE_ADMISSION_OPERATIONAL_NOTICE",
+        )
+        # Contorna auto_now_add=True no timestamp
+        CaseEvent.objects.filter(pk=event.pk).update(timestamp=yesterday)
+
+        request = rf.get("/")
+        request.user = user
+        request.session = {"active_role": "scheduler"}
+        result = queue_counts(request)
+        assert result == {"queue_count": 1}
 
     def test_nir_returns_empty(self, rf: RequestFactory) -> None:
         """NIR role returns empty dict (no queue for this role)."""

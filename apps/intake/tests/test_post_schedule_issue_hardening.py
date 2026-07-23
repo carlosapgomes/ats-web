@@ -104,7 +104,12 @@ class TestTimelineEvents:
         return events_found
 
     def test_timeline_shows_opened_label(self, client, case_factory, advance_to) -> None:
-        """Timeline exibe label amigável para POST_SCHEDULE_ISSUE_OPENED."""
+        """Timeline exibe label amigável para POST_ACCEPTANCE_ISSUE_OPENED.
+
+        Wrappers legados agora delegam à API pós-aceitação e emitem eventos
+        POST_ACCEPTANCE_ISSUE_OPENED. O label renderizado contém
+        'Intercorrência pós-aceitação aberta'.
+        """
         client, user = _nir_client(client)
         case = _build_cleaned_confirmed(case_factory, advance_to, user)
         case = open_post_schedule_issue(case=case, user=user, reason="transport_unavailable", message="Sem transporte.")
@@ -114,7 +119,11 @@ class TestTimelineEvents:
         assert opened_labels, f"Nenhum label de abertura encontrado em {events}"
 
     def test_timeline_shows_responded_label(self, client, case_factory, advance_to) -> None:
-        """Timeline exibe label amigável para POST_SCHEDULE_ISSUE_RESPONDED."""
+        """Timeline exibe label amigável para POST_ACCEPTANCE_ISSUE_RESPONDED.
+
+        Wrappers legados agora emitem POST_ACCEPTANCE_ISSUE_RESPONDED.
+        O label renderizado contém 'Intercorrência pós-aceitação respondida'.
+        """
         client, user = _nir_client(client)
         case = _build_cleaned_confirmed(case_factory, advance_to, user)
         case = open_post_schedule_issue(case=case, user=user, reason="death")
@@ -125,7 +134,11 @@ class TestTimelineEvents:
         assert responded_labels, f"Nenhum label de resposta encontrado em {events}"
 
     def test_timeline_shows_acknowledged_label(self, client, case_factory, advance_to) -> None:
-        """POST_SCHEDULE_ISSUE_ACKNOWLEDGED registra evento com label via EVENT_LABELS."""
+        """POST_ACCEPTANCE_ISSUE_ACKNOWLEDGED tem label amigável no EVENT_LABELS.
+
+        Wrappers legados agora emitem evento pós-aceitação com label
+        'Ciência de intercorrência pós-aceitação confirmada'.
+        """
         client, user = _nir_client(client)
         case = _build_cleaned_confirmed(case_factory, advance_to, user)
         case = open_post_schedule_issue(case=case, user=user, reason="death")
@@ -148,15 +161,113 @@ class TestTimelineEvents:
         # Verificar label no evento via EVENT_LABELS
         from apps.intake.views import EVENT_LABELS
 
-        assert EVENT_LABELS.get("POST_SCHEDULE_ISSUE_ACKNOWLEDGED") == "Ciência de intercorrência confirmada"
+        assert (
+            EVENT_LABELS.get("POST_ACCEPTANCE_ISSUE_ACKNOWLEDGED")
+            == "Ciência de intercorrência pós-aceitação confirmada"
+        )
         event = CaseEvent.objects.filter(
             case=case,
-            event_type="POST_SCHEDULE_ISSUE_ACKNOWLEDGED",
+            event_type="POST_ACCEPTANCE_ISSUE_ACKNOWLEDGED",
         ).first()
         assert event is not None
         # Verificar que o template renderizaria o label corretamente
         label = EVENT_LABELS.get(event.event_type, event.event_type)
         assert "Ciência" in label
+
+    def test_legacy_acknowledged_label_still_exists(self) -> None:
+        """POST_SCHEDULE_ISSUE_ACKNOWLEDGED legado preserva label/dot CSS.
+
+        Eventos históricos não são apagados; o label e dot CSS do ACK
+        legado devem continuar disponíveis para renderização de casos antigos.
+        """
+        from apps.intake.views import EVENT_DOT_CSS, EVENT_LABELS
+
+        label = EVENT_LABELS.get("POST_SCHEDULE_ISSUE_ACKNOWLEDGED")
+        assert label is not None, "Legacy ACK must have a timeline label"
+        assert "ciência" in label.lower() or "Ciência" in label
+
+        dot = EVENT_DOT_CSS.get("POST_SCHEDULE_ISSUE_ACKNOWLEDGED")
+        assert dot is not None, "Legacy ACK must have a dot CSS class"
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# Legacy event timeline rendering (T3)
+# ═══════════════════════════════════════════════════════════════════════════
+
+
+class TestLegacyEventTimelineRendering:
+    """Eventos legados POST_SCHEDULE_ISSUE_* aparecem na timeline com labels.
+
+    Eventos são criados manualmente — wrappers não são usados.
+    """
+
+    def _events_from_detail(self, client, case) -> list[str]:
+        import re
+
+        response = client.get(reverse("intake:closed_case_detail", args=[case.case_id]))
+        assert response.status_code == 200
+        content = response.content.decode()
+        timeline_start = content.find("Linha do Tempo")
+        assert timeline_start >= 0
+        return re.findall(
+            r'<div class="timeline-event__title">([^<]+)</div>',
+            content[timeline_start:],
+        )
+
+    def test_legacy_opened_label_in_timeline(self, client, case_factory, advance_to) -> None:
+        """Label de POST_SCHEDULE_ISSUE_OPENED aparece na timeline renderizada."""
+        from apps.cases.models import CaseEvent
+
+        client, user = _nir_client(client)
+        case = _build_cleaned_confirmed(case_factory, advance_to, user)
+        CaseEvent.objects.create(
+            case=case,
+            event_type="POST_SCHEDULE_ISSUE_OPENED",
+            payload={"reason": "death", "message": "Óbito", "admission_flow": "scheduled"},
+            actor=user,
+        )
+
+        events = self._events_from_detail(client, case)
+        opened = [e for e in events if "Intercorrência" in e]
+        assert opened, f"Label de abertura não encontrado em {events}"
+
+    def test_legacy_responded_label_in_timeline(self, client, case_factory, advance_to) -> None:
+        """Label de POST_SCHEDULE_ISSUE_RESPONDED aparece na timeline renderizada."""
+        from apps.cases.models import CaseEvent
+
+        client, user = _nir_client(client)
+        case = _build_cleaned_confirmed(case_factory, advance_to, user)
+        CaseEvent.objects.create(
+            case=case,
+            event_type="POST_SCHEDULE_ISSUE_RESPONDED",
+            payload={
+                "action": "cancel",
+                "response_message": "Cancelado",
+                "admission_flow": "scheduled",
+            },
+            actor=user,
+        )
+
+        events = self._events_from_detail(client, case)
+        responded = [e for e in events if "respondida" in e.lower() or "Respondida" in e]
+        assert responded, f"Label de resposta não encontrado em {events}"
+
+    def test_legacy_acknowledged_label_in_timeline(self, client, case_factory, advance_to) -> None:
+        """Label de POST_SCHEDULE_ISSUE_ACKNOWLEDGED aparece na timeline renderizada."""
+        from apps.cases.models import CaseEvent
+
+        client, user = _nir_client(client)
+        case = _build_cleaned_confirmed(case_factory, advance_to, user)
+        CaseEvent.objects.create(
+            case=case,
+            event_type="POST_SCHEDULE_ISSUE_ACKNOWLEDGED",
+            payload={},
+            actor=user,
+        )
+
+        events = self._events_from_detail(client, case)
+        acked = [e for e in events if "ciência" in e.lower() or "Ciência" in e]
+        assert acked, f"Label de ciência não encontrado em {events}"
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -212,13 +323,13 @@ class TestMultiCycle:
         assert case.status == CaseStatus.CLEANED
 
         # Verificar eventos de ambos os ciclos
-        opened_events = CaseEvent.objects.filter(case=case, event_type="POST_SCHEDULE_ISSUE_OPENED").order_by(
+        opened_events = CaseEvent.objects.filter(case=case, event_type="POST_ACCEPTANCE_ISSUE_OPENED").order_by(
             "timestamp"
         )
-        responded_events = CaseEvent.objects.filter(case=case, event_type="POST_SCHEDULE_ISSUE_RESPONDED").order_by(
+        responded_events = CaseEvent.objects.filter(case=case, event_type="POST_ACCEPTANCE_ISSUE_RESPONDED").order_by(
             "timestamp"
         )
-        acked_events = CaseEvent.objects.filter(case=case, event_type="POST_SCHEDULE_ISSUE_ACKNOWLEDGED").order_by(
+        acked_events = CaseEvent.objects.filter(case=case, event_type="POST_ACCEPTANCE_ISSUE_ACKNOWLEDGED").order_by(
             "timestamp"
         )
 
@@ -387,7 +498,7 @@ class TestNormalFlowsPreserved:
         response = client.get(reverse("scheduler:queue"))
         assert response.status_code == 200
         content = response.content.decode()
-        assert "Intercorrência pós-agendamento" not in content
+        assert "Intercorrência pós-aceitação" not in content
 
     def test_normal_nir_timeline_no_issue_events(self, client, case_factory, advance_to) -> None:
         """Timeline NIR normal não mostra eventos de intercorrência."""

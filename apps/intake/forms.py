@@ -32,6 +32,9 @@ REASON_CHOICES = [
     ("transport_unavailable", "Transporte indisponível pela unidade de origem"),
     ("external_regulation", "Exame realizado pela regulação estadual em outro serviço"),
     ("reschedule_request", "Solicitação de reagendamento pela unidade de origem"),
+    ("patient_absconded", "Paciente evadiu-se da unidade de origem"),
+    ("accepted_elsewhere", "Paciente aceito/transferido para unidade mais próxima"),
+    ("origin_cancelled", "Demanda cancelada pela unidade de origem"),
     ("other", "Outro"),
 ]
 

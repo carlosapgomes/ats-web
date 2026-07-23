@@ -121,7 +121,7 @@ class TestOpenPostScheduleIssue:
         assert case.status == CaseStatus.WAIT_APPT
 
     def test_registra_evento_com_snapshot(self, user, case_factory, advance_to) -> None:
-        """Abertura registra POST_SCHEDULE_ISSUE_OPENED com payload."""
+        """Abertura registra POST_ACCEPTANCE_ISSUE_OPENED com payload."""
         from apps.cases.services import open_post_schedule_issue
 
         case = _build_cleaned_confirmed(case_factory, advance_to, user)
@@ -131,7 +131,7 @@ class TestOpenPostScheduleIssue:
 
         case = open_post_schedule_issue(case=case, user=user, reason="death")
 
-        event = _assert_event_type(case, "POST_SCHEDULE_ISSUE_OPENED")
+        event = _assert_event_type(case, "POST_ACCEPTANCE_ISSUE_OPENED")
         payload = event.payload
         assert payload.get("reason") == "death"
         assert payload.get("message") == ""
@@ -319,7 +319,7 @@ class TestRespondPostScheduleIssue:
             respond_post_schedule_issue(case=case, user=user, action="cancel")
 
     def test_resposta_registra_evento(self, user, case_factory, advance_to) -> None:
-        """Resposta registra POST_SCHEDULE_ISSUE_RESPONDED."""
+        """Resposta registra POST_ACCEPTANCE_ISSUE_RESPONDED."""
         from apps.cases.services import respond_post_schedule_issue
 
         case = self._open_and_fetch(case_factory, advance_to, user)
@@ -330,7 +330,7 @@ class TestRespondPostScheduleIssue:
             response_message="Agendamento cancelado",
         )
 
-        event = _assert_event_type(case, "POST_SCHEDULE_ISSUE_RESPONDED")
+        event = _assert_event_type(case, "POST_ACCEPTANCE_ISSUE_RESPONDED")
         payload = event.payload
         assert payload.get("action") == "cancel"
         assert payload.get("response_message") == "Agendamento cancelado"
@@ -359,13 +359,13 @@ class TestAcknowledgePostScheduleIssue:
         assert case.post_schedule_issue_reason == ""
 
     def test_ciencia_registra_evento(self, user, case_factory, advance_to) -> None:
-        """Ciência registra POST_SCHEDULE_ISSUE_ACKNOWLEDGED."""
+        """Ciência registra POST_ACCEPTANCE_ISSUE_ACKNOWLEDGED."""
         from apps.cases.services import acknowledge_post_schedule_issue
 
         case = self._open_and_respond(case_factory, advance_to, user)
         case = acknowledge_post_schedule_issue(case=case, user=user)
 
-        _assert_event_type(case, "POST_SCHEDULE_ISSUE_ACKNOWLEDGED")
+        _assert_event_type(case, "POST_ACCEPTANCE_ISSUE_ACKNOWLEDGED")
 
     def test_ciencia_sem_issue_respondida_falha(self, user, case_factory, advance_to) -> None:
         """Ciencia sem issue responded falha."""
@@ -402,14 +402,14 @@ class TestAcknowledgePostScheduleIssue:
         assert after == before, "CLEANUP_COMPLETED não deve ser criado no acknowledge"
 
     def test_ciencia_cria_exatamente_um_acknowledged(self, user, case_factory, advance_to) -> None:
-        """acknowledge cria exatamente um POST_SCHEDULE_ISSUE_ACKNOWLEDGED."""
+        """acknowledge cria exatamente um POST_ACCEPTANCE_ISSUE_ACKNOWLEDGED."""
         from apps.cases.services import acknowledge_post_schedule_issue
 
         case = self._open_and_respond(case_factory, advance_to, user)
-        before = CaseEvent.objects.filter(case=case, event_type="POST_SCHEDULE_ISSUE_ACKNOWLEDGED").count()
+        before = CaseEvent.objects.filter(case=case, event_type="POST_ACCEPTANCE_ISSUE_ACKNOWLEDGED").count()
         case = acknowledge_post_schedule_issue(case=case, user=user)
-        after = CaseEvent.objects.filter(case=case, event_type="POST_SCHEDULE_ISSUE_ACKNOWLEDGED").count()
-        assert after - before == 1, "deve criar exatamente 1 POST_SCHEDULE_ISSUE_ACKNOWLEDGED"
+        after = CaseEvent.objects.filter(case=case, event_type="POST_ACCEPTANCE_ISSUE_ACKNOWLEDGED").count()
+        assert after - before == 1, "deve criar exatamente 1 POST_ACCEPTANCE_ISSUE_ACKNOWLEDGED"
 
 
 # ── Ciclos múltiplos ────────────────────────────────────────────────────
@@ -449,13 +449,13 @@ class TestMultipleCycles:
         assert case.post_schedule_issue_status == ""
 
         # Verifica que foram registrados 2 ciclos completos de eventos
-        opened_events = CaseEvent.objects.filter(case=case, event_type="POST_SCHEDULE_ISSUE_OPENED")
+        opened_events = CaseEvent.objects.filter(case=case, event_type="POST_ACCEPTANCE_ISSUE_OPENED")
         assert opened_events.count() == 2
 
-        responded_events = CaseEvent.objects.filter(case=case, event_type="POST_SCHEDULE_ISSUE_RESPONDED")
+        responded_events = CaseEvent.objects.filter(case=case, event_type="POST_ACCEPTANCE_ISSUE_RESPONDED")
         assert responded_events.count() == 2
 
-        acknowledged_events = CaseEvent.objects.filter(case=case, event_type="POST_SCHEDULE_ISSUE_ACKNOWLEDGED")
+        acknowledged_events = CaseEvent.objects.filter(case=case, event_type="POST_ACCEPTANCE_ISSUE_ACKNOWLEDGED")
         assert acknowledged_events.count() == 2
 
 

@@ -156,7 +156,7 @@
     <div class="d-flex align-items-center gap-3 mb-3">
       <span class="badge bg-warning text-dark fs-6 px-3 py-2">↯ Agendamento cancelado após intercorrência</span>
     </div>
-    <p class="mb-3">O agendamento anterior foi cancelado após resposta de intercorrência pós-agendamento.</p>
+    <p class="mb-3">O agendamento anterior foi cancelado após resposta de intercorrência pós-aceitação.</p>
     {% if result_info.doctor_display %}
     <div class="mb-3">
       <p class="mb-1 text-muted small">Médico responsável</p>
@@ -216,7 +216,7 @@
     <p class="mb-0 text-muted">Ocorreu uma falha durante o processamento deste caso.</p>
   {% elif result_info.type == "post_schedule_issue_responded" %}
     <div class="d-flex align-items-center gap-3 mb-3">
-      <span class="badge bg-info fs-6 px-3 py-2">↻ Intercorrência Pós-Agendamento</span>
+      <span class="badge bg-info fs-6 px-3 py-2">↻ Intercorrência Pós-Aceitação</span>
     </div>
 
     <!-- NIR original reason and message -->

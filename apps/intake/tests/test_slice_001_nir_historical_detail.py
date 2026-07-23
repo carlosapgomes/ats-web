@@ -282,8 +282,8 @@ class TestIntercurrenceInsideDetail:
         assert fresh_case.status == CaseStatus.WAIT_APPT
         assert fresh_case.post_schedule_issue_status == "opened"
 
-        # Deve ter evento POST_SCHEDULE_ISSUE_OPENED
-        assert CaseEvent.objects.filter(case=case, event_type="POST_SCHEDULE_ISSUE_OPENED").exists()
+        # Deve ter evento POST_ACCEPTANCE_ISSUE_OPENED
+        assert CaseEvent.objects.filter(case=case, event_type="POST_ACCEPTANCE_ISSUE_OPENED").exists()
 
     def test_second_active_issue_is_blocked_from_detail(self, client: Any, case_factory: Any, advance_to: Any) -> None:
         """Se já houver intercorrência ativa, detalhe não permite abrir outra."""
@@ -333,8 +333,8 @@ class TestInvalidPostHandling:
 
         content = response.content.decode("utf-8")
 
-        # 2. Formulário ainda visível (título "Intercorrência Pós-Agendamento")
-        assert "Intercorrência Pós-Agendamento" in content
+        # 2. Formulário ainda visível (título "Intercorrência Pós-Aceitação")
+        assert "Intercorrência Pós-Aceitação" in content
         # 3. Botão "Registrar intercorrência" ainda visível
         assert "Registrar intercorrência" in content
         # 4. Mensagem de erro do form visível
@@ -346,8 +346,8 @@ class TestInvalidPostHandling:
         assert fresh_case.status == CaseStatus.CLEANED
         assert fresh_case.post_schedule_issue_status == ""
 
-        # 6. Nenhum evento POST_SCHEDULE_ISSUE_OPENED criado
-        assert not CaseEvent.objects.filter(case=case, event_type="POST_SCHEDULE_ISSUE_OPENED").exists()
+        # 6. Nenhum evento POST_ACCEPTANCE_ISSUE_OPENED criado
+        assert not CaseEvent.objects.filter(case=case, event_type="POST_ACCEPTANCE_ISSUE_OPENED").exists()
 
 
 class TestCommunicationInDetail:

@@ -422,6 +422,15 @@ POST_SCHEDULE_ISSUE_STATUS_NONE = ""
 POST_SCHEDULE_ISSUE_STATUS_OPENED = "opened"
 POST_SCHEDULE_ISSUE_STATUS_RESPONDED = "responded"
 
+# ── Post-acceptance intercurrence constants (Slice 002) ──────────────────
+
+POST_ACCEPTANCE_ISSUE_CONTEXT_SCHEDULED = "scheduled"
+POST_ACCEPTANCE_ISSUE_CONTEXT_OPERATIONAL = "operational_notice"
+POST_ACCEPTANCE_ISSUE_CONTEXTS: tuple[str, str] = (
+    POST_ACCEPTANCE_ISSUE_CONTEXT_SCHEDULED,
+    POST_ACCEPTANCE_ISSUE_CONTEXT_OPERATIONAL,
+)
+
 
 # Official NIR reasons
 POST_SCHEDULE_ISSUE_REASONS: tuple[str, ...] = (
@@ -430,6 +439,9 @@ POST_SCHEDULE_ISSUE_REASONS: tuple[str, ...] = (
     "transport_unavailable",
     "external_regulation",
     "reschedule_request",
+    "patient_absconded",
+    "accepted_elsewhere",
+    "origin_cancelled",
     "other",
 )
 
@@ -455,6 +467,9 @@ POST_SCHEDULE_ISSUE_REASON_LABELS: dict[str, str] = {
     "transport_unavailable": "Transporte indisponível pela unidade de origem",
     "external_regulation": "Exame realizado pela regulação estadual em outro serviço",
     "reschedule_request": "Solicitação de reagendamento pela unidade de origem",
+    "patient_absconded": "Paciente evadiu-se da unidade de origem",
+    "accepted_elsewhere": "Paciente aceito/transferido para unidade mais próxima",
+    "origin_cancelled": "Demanda cancelada pela unidade de origem",
     "other": "Outro",
 }
 
@@ -471,33 +486,13 @@ def get_post_schedule_issue_reason_label(reason: str) -> str:
 
 
 def is_post_schedule_issue_eligible(case: Case) -> bool:
-    """Check if a case is eligible for opening a post-schedule issue."""
-    # Check active issue FIRST — status may have changed after opening
-    if case.post_schedule_issue_status:
-        return False
-    return (
-        case.status == CaseStatus.CLEANED
-        and case.doctor_decision == "accept"
-        and case.doctor_admission_flow == "scheduled"
-        and case.appointment_status == "confirmed"
-    )
+    """Legacy wrapper — delegates to is_post_acceptance_issue_eligible with context='scheduled'."""
+    return is_post_acceptance_issue_eligible(case, context=POST_ACCEPTANCE_ISSUE_CONTEXT_SCHEDULED)
 
 
 def get_post_schedule_issue_ineligibility_reason(case: Case) -> str:
-    """Return a human-readable reason why the case is not eligible."""
-    # Check active issue FIRST so the status change after opening doesn't
-    # mask the real reason
-    if case.post_schedule_issue_status:
-        return "Já existe uma intercorrência ativa neste caso."
-    if case.status != CaseStatus.CLEANED:
-        return "Caso não está encerrado (CLEANED)."
-    if case.doctor_decision != "accept":
-        return "Caso não foi aceito pelo médico."
-    if case.doctor_admission_flow != "scheduled":
-        return "Fluxo de admissão não é agendado."
-    if case.appointment_status != "confirmed":
-        return "Agendamento não está confirmado."
-    return "Motivo desconhecido."
+    """Legacy wrapper — delegates to get_post_acceptance_issue_ineligibility_reason."""
+    return get_post_acceptance_issue_ineligibility_reason(case, context=POST_ACCEPTANCE_ISSUE_CONTEXT_SCHEDULED)
 
 
 def open_post_schedule_issue(
@@ -507,13 +502,130 @@ def open_post_schedule_issue(
     reason: str,
     message: str = "",
 ) -> Case:
-    """Open a post-schedule intercurrence for an eligible case.
+    """Legacy wrapper — delegates to open_post_acceptance_issue with context='scheduled'.
+
+    All new cycles persist context, UUID and POST_ACCEPTANCE_ISSUE_* events.
+    POST_SCHEDULE_ISSUE_* events are only for reading historical data.
+    """
+    return open_post_acceptance_issue(
+        case=case,
+        user=user,
+        reason=reason,
+        message=message,
+        context=POST_ACCEPTANCE_ISSUE_CONTEXT_SCHEDULED,
+    )
+
+
+def respond_post_schedule_issue(
+    *,
+    case: Case,
+    user: Any,
+    action: str,
+    response_message: str = "",
+    appointment_at: str | None = None,
+    appointment_location: str = "",
+    appointment_instructions: str = "",
+) -> Case:
+    """Legacy wrapper — delegates to respond_scheduled_post_acceptance_issue.
+
+    All new responses record POST_ACCEPTANCE_ISSUE_RESPONDED with
+    before/after snapshots. POST_SCHEDULE_ISSUE_RESPONDED is only for
+    reading historical data.
+    """
+    return respond_scheduled_post_acceptance_issue(
+        case=case,
+        user=user,
+        action=action,
+        response_message=response_message,
+        appointment_at=appointment_at,
+        appointment_location=appointment_location,
+        appointment_instructions=appointment_instructions,
+    )
+
+
+def acknowledge_post_schedule_issue(
+    *,
+    case: Case,
+    user: Any,
+) -> Case:
+    """Legacy wrapper — delegates to acknowledge_scheduled_post_acceptance_issue.
+
+    All new acknowledgements record POST_ACCEPTANCE_ISSUE_ACKNOWLEDGED
+    with cycle/context. POST_SCHEDULE_ISSUE_ACKNOWLEDGED is only for
+    reading historical data.
+    """
+    return acknowledge_scheduled_post_acceptance_issue(case=case, user=user)
+
+
+# ── Post-acceptance issue services (Slice 002) ────────────────────────────
+
+
+def is_post_acceptance_issue_eligible(case: Case, *, context: str = "") -> bool:
+    """Check if a case is eligible for opening a post-acceptance issue.
 
     Args:
-        case: The case (must be CLEANED and eligible).
+        case: The case to check.
+        context: Required context ("scheduled" or "operational_notice").
+                 If empty, uses legacy fallback (scheduled only, same as before).
+    """
+    # Check active issue FIRST
+    if case.post_schedule_issue_status:
+        return False
+
+    base_eligible = case.status == CaseStatus.CLEANED and case.doctor_decision == "accept"
+    if not base_eligible:
+        return False
+
+    # Context-specific checks
+    if context == POST_ACCEPTANCE_ISSUE_CONTEXT_SCHEDULED or not context:
+        return case.doctor_admission_flow == "scheduled" and case.appointment_status == "confirmed"
+
+    if context == POST_ACCEPTANCE_ISSUE_CONTEXT_OPERATIONAL:
+        return case.doctor_admission_flow in OPERATIONAL_NOTICE_FLOWS
+
+    return False
+
+
+def get_post_acceptance_issue_ineligibility_reason(case: Case, *, context: str = "") -> str:
+    """Return a human-readable reason why the case is not eligible."""
+    if case.post_schedule_issue_status:
+        return "Já existe uma intercorrência ativa neste caso."
+    if case.status != CaseStatus.CLEANED:
+        return "Caso não está encerrado (CLEANED)."
+    if case.doctor_decision != "accept":
+        return "Caso não foi aceito pelo médico."
+
+    effective_context = context or POST_ACCEPTANCE_ISSUE_CONTEXT_SCHEDULED
+    if effective_context == POST_ACCEPTANCE_ISSUE_CONTEXT_SCHEDULED:
+        if case.doctor_admission_flow != "scheduled":
+            return "Fluxo de admissão não é agendado."
+        if case.appointment_status != "confirmed":
+            return "Agendamento não está confirmado."
+
+    if effective_context == POST_ACCEPTANCE_ISSUE_CONTEXT_OPERATIONAL:
+        if case.doctor_admission_flow not in OPERATIONAL_NOTICE_FLOWS:
+            return "Fluxo de admissão não é elegível para intercorrência operacional."
+        return "Caso elegível para intercorrência operacional."
+
+    return "Motivo desconhecido."
+
+
+def open_post_acceptance_issue(
+    *,
+    case: Case,
+    user: Any,
+    reason: str,
+    message: str = "",
+    context: str = POST_ACCEPTANCE_ISSUE_CONTEXT_SCHEDULED,
+) -> Case:
+    """Open a post-acceptance intercurrence for an eligible case.
+
+    Args:
+        case: The case (must be CLEANED and eligible for the given context).
         user: The user opening the issue.
         reason: One of POST_SCHEDULE_ISSUE_REASONS.
         message: Optional/required message depending on reason.
+        context: "scheduled" or "operational_notice".
 
     Returns:
         The case with updated fields, saved.
@@ -528,15 +640,23 @@ def open_post_schedule_issue(
     if reason not in POST_SCHEDULE_ISSUE_REASONS_MESSAGE_OPTIONAL and not message.strip():
         raise ValueError(f"Mensagem é obrigatória para o motivo '{reason}'.")
 
+    if context not in POST_ACCEPTANCE_ISSUE_CONTEXTS:
+        raise ValueError(
+            f"Contexto inválido: '{context}'. Contextos válidos: {', '.join(POST_ACCEPTANCE_ISSUE_CONTEXTS)}"
+        )
+
     with transaction.atomic():
         case = Case.objects.select_for_update().get(pk=case.pk)
 
-        if not is_post_schedule_issue_eligible(case):
-            reason_text = get_post_schedule_issue_ineligibility_reason(case)
+        if not is_post_acceptance_issue_eligible(case, context=context):
+            reason_text = get_post_acceptance_issue_ineligibility_reason(case, context=context)
             raise ValueError(f"Caso não elegível para intercorrência: {reason_text}")
 
+        # Generate cycle id and snapshot
+        cycle_id = uuid.uuid4()
+
         # Take a snapshot of current appointment state
-        appointment_snapshot = {
+        appointment_snapshot: dict[str, object] = {
             "status": case.appointment_status,
             "appointment_at": case.appointment_at.isoformat() if case.appointment_at else None,
             "appointment_location": case.appointment_location or "",
@@ -544,6 +664,8 @@ def open_post_schedule_issue(
         }
 
         now = timezone.now()
+
+        # Fill legacy storage fields
         case.post_schedule_issue_status = POST_SCHEDULE_ISSUE_STATUS_OPENED
         case.post_schedule_issue_reason = reason
         case.post_schedule_issue_message = message
@@ -554,18 +676,28 @@ def open_post_schedule_issue(
         case.post_schedule_issue_responded_by = None
         case.post_schedule_issue_responded_at = None
 
-        # FSM transition CLEANED → WAIT_APPT
-        case.open_post_schedule_issue(user=user)
+        # Fill new generic fields
+        case.post_acceptance_issue_context = context
+        case.post_acceptance_issue_cycle_id = cycle_id
+
+        if context == POST_ACCEPTANCE_ISSUE_CONTEXT_SCHEDULED:
+            # FSM transition CLEANED → WAIT_APPT (scheduled only)
+            case.open_post_schedule_issue(user=user)
+        # operational_notice: stay CLEANED, no FSM transition
+
         case.save()
 
-        # Record the audit event with appointment snapshot
+        # Record the new generic audit event with appointment snapshot
         _record_event(
             case,
-            "POST_SCHEDULE_ISSUE_OPENED",
+            "POST_ACCEPTANCE_ISSUE_OPENED",
             user,
             {
                 "reason": reason,
                 "message": message,
+                "context": context,
+                "cycle_id": str(cycle_id),
+                "admission_flow": case.doctor_admission_flow,
                 "appointment_snapshot": appointment_snapshot,
             },
         )
@@ -573,7 +705,7 @@ def open_post_schedule_issue(
     return Case.objects.get(pk=case.pk)
 
 
-def respond_post_schedule_issue(
+def respond_scheduled_post_acceptance_issue(
     *,
     case: Case,
     user: Any,
@@ -583,7 +715,7 @@ def respond_post_schedule_issue(
     appointment_location: str = "",
     appointment_instructions: str = "",
 ) -> Case:
-    """Respond to an opened post-schedule intercurrence.
+    """Respond to an opened scheduled post-acceptance intercurrence.
 
     Args:
         case: The case with an opened issue.
@@ -612,8 +744,23 @@ def respond_post_schedule_issue(
         if case.post_schedule_issue_status != POST_SCHEDULE_ISSUE_STATUS_OPENED:
             raise ValueError("Caso não possui intercorrência aberta para responder.")
 
+        # Domain defense: validate context and cycle_id (Slice 002 C4)
+        if case.post_acceptance_issue_context != POST_ACCEPTANCE_ISSUE_CONTEXT_SCHEDULED:
+            raise ValueError(f"Contexto incorreto para resposta scheduled: '{case.post_acceptance_issue_context}'")
+        if case.post_acceptance_issue_cycle_id is None:
+            raise ValueError("Ciclo da intercorrência não identificado (cycle_id ausente).")
+
         now = timezone.now()
 
+        # Snapshot BEFORE
+        appointment_before: dict[str, object] = {
+            "status": case.appointment_status,
+            "appointment_at": case.appointment_at.isoformat() if case.appointment_at else None,
+            "appointment_location": case.appointment_location or "",
+            "appointment_instructions": case.appointment_instructions or "",
+        }
+
+        # Apply action
         if action == "cancel":
             case.appointment_status = "cancelled"
         elif action == "reschedule":
@@ -634,8 +781,18 @@ def respond_post_schedule_issue(
         elif action == "maintain":
             case.appointment_status = "confirmed"
         elif action == "deny":
-            # Preserve appointment_status="confirmed" and current data
             case.appointment_status = "confirmed"
+
+        # Snapshot AFTER
+        appointment_after: dict[str, object] = {
+            "status": case.appointment_status,
+            "appointment_at": case.appointment_at.isoformat() if case.appointment_at else None,
+            "appointment_location": case.appointment_location or "",
+            "appointment_instructions": case.appointment_instructions or "",
+        }
+
+        cycle_id = case.post_acceptance_issue_cycle_id
+        admission_flow = case.doctor_admission_flow
 
         case.post_schedule_issue_status = POST_SCHEDULE_ISSUE_STATUS_RESPONDED
         case.post_schedule_issue_response_action = action
@@ -647,30 +804,35 @@ def respond_post_schedule_issue(
         case.final_reply_posted(user=user)
         case.save()
 
-        # Record the audit event
+        # Record new generic audit event with before/after snapshots
         _record_event(
             case,
-            "POST_SCHEDULE_ISSUE_RESPONDED",
+            "POST_ACCEPTANCE_ISSUE_RESPONDED",
             user,
             {
                 "action": action,
                 "response_message": response_message,
+                "context": POST_ACCEPTANCE_ISSUE_CONTEXT_SCHEDULED,
+                "cycle_id": str(cycle_id) if cycle_id else None,
+                "admission_flow": admission_flow,
+                "appointment_before": appointment_before,
+                "appointment_after": appointment_after,
             },
         )
 
     return Case.objects.get(pk=case.pk)
 
 
-def acknowledge_post_schedule_issue(
+def acknowledge_scheduled_post_acceptance_issue(
     *,
     case: Case,
     user: Any,
 ) -> Case:
-    """Acknowledge a responded post-schedule intercurrence and close the cycle.
+    """Acknowledge a responded scheduled post-acceptance intercurrence.
 
-    Uses a direct FSM transition WAIT_R1_CLEANUP_THUMBS → CLEANED without
-    passing through CLEANUP_RUNNING, since there is no real cleanup to perform.
-    The POST_SCHEDULE_ISSUE_ACKNOWLEDGED event is created by the FSM transition.
+    Uses direct FSM transition WAIT_R1_CLEANUP_THUMBS → CLEANED.
+    Records POST_ACCEPTANCE_ISSUE_ACKNOWLEDGED with cycle/context
+    in payload BEFORE clearing the active fields.
 
     Args:
         case: The case with a responded issue.
@@ -688,7 +850,18 @@ def acknowledge_post_schedule_issue(
         if case.post_schedule_issue_status != POST_SCHEDULE_ISSUE_STATUS_RESPONDED:
             raise ValueError("Caso não possui intercorrência respondida para confirmar ciência.")
 
-        # Clear issue fields
+        # Domain defense: validate context and cycle_id (Slice 002 C4)
+        if case.post_acceptance_issue_context != POST_ACCEPTANCE_ISSUE_CONTEXT_SCHEDULED:
+            raise ValueError(f"Contexto incorreto para ACK scheduled: '{case.post_acceptance_issue_context}'")
+        if case.post_acceptance_issue_cycle_id is None:
+            raise ValueError("Ciclo da intercorrência não identificado (cycle_id ausente).")
+
+        # Capture cycle/context BEFORE clearing
+        cycle_id = case.post_acceptance_issue_cycle_id
+        context = case.post_acceptance_issue_context or POST_ACCEPTANCE_ISSUE_CONTEXT_SCHEDULED
+        admission_flow = case.doctor_admission_flow
+
+        # Clear legacy issue fields
         case.post_schedule_issue_status = POST_SCHEDULE_ISSUE_STATUS_NONE
         case.post_schedule_issue_reason = ""
         case.post_schedule_issue_message = ""
@@ -699,11 +872,116 @@ def acknowledge_post_schedule_issue(
         case.post_schedule_issue_responded_by = None
         case.post_schedule_issue_responded_at = None
 
-        # FSM transition WAIT_R1_CLEANUP_THUMBS → CLEANED (direct, no cleanup)
+        # Clear new generic fields
+        case.post_acceptance_issue_context = ""
+        case.post_acceptance_issue_cycle_id = None
+
+        # FSM transition WAIT_R1_CLEANUP_THUMBS → CLEANED
+        # Use the legacy method to avoid duplicate events
         case.post_schedule_issue_acknowledged(user=user)
         case.save()
 
+        # Record new generic audit event WITH cycle/context BEFORE clearing
+        _record_event(
+            case,
+            "POST_ACCEPTANCE_ISSUE_ACKNOWLEDGED",
+            user,
+            {
+                "context": context,
+                "cycle_id": str(cycle_id) if cycle_id else None,
+                "admission_flow": admission_flow,
+            },
+        )
+
     return Case.objects.get(pk=case.pk)
+
+
+# ── Operational post-acceptance issue (Slice 003) ───────────────────────
+
+
+def acknowledge_operational_post_acceptance_issue(
+    *,
+    case: Case,
+    user: Any,
+) -> Case:
+    """Acknowledge an opened operational post-acceptance intercurrence.
+
+    Stays CLEANED throughout. No FSM transition. No appointment changes.
+    Records POST_ACCEPTANCE_ISSUE_ACKNOWLEDGED with cycle/context/flux
+    BEFORE clearing active fields.
+
+    Args:
+        case: The case with an opened operational issue.
+        user: The scheduler user acknowledging.
+
+    Returns:
+        The case with cleared issue fields, still CLEANED.
+
+    Raises:
+        ValueError: If no opened operational issue exists or context mismatch.
+    """
+    with transaction.atomic():
+        case = Case.objects.select_for_update().get(pk=case.pk)
+
+        if case.post_schedule_issue_status != POST_SCHEDULE_ISSUE_STATUS_OPENED:
+            raise ValueError("Caso não possui intercorrência aberta para confirmar ciência.")
+
+        if case.post_acceptance_issue_context != POST_ACCEPTANCE_ISSUE_CONTEXT_OPERATIONAL:
+            raise ValueError(f"Contexto incorreto para ACK operacional: '{case.post_acceptance_issue_context}'")
+        if case.post_acceptance_issue_cycle_id is None:
+            raise ValueError("Ciclo da intercorrência não identificado (cycle_id ausente).")
+
+        # Capture BEFORE clearing
+        cycle_id = case.post_acceptance_issue_cycle_id
+        context = case.post_acceptance_issue_context
+        admission_flow = case.doctor_admission_flow
+
+        # Clear legacy issue fields
+        case.post_schedule_issue_status = POST_SCHEDULE_ISSUE_STATUS_NONE
+        case.post_schedule_issue_reason = ""
+        case.post_schedule_issue_message = ""
+        case.post_schedule_issue_opened_by = None
+        case.post_schedule_issue_opened_at = None
+        case.post_schedule_issue_response_action = ""
+        case.post_schedule_issue_response_message = ""
+        case.post_schedule_issue_responded_by = None
+        case.post_schedule_issue_responded_at = None
+
+        # Clear new generic fields
+        case.post_acceptance_issue_context = ""
+        case.post_acceptance_issue_cycle_id = None
+
+        # Stay CLEANED — no FSM transition
+        case.save()
+
+        # Record ACK event WITH cycle/context BEFORE clearing
+        _record_event(
+            case,
+            "POST_ACCEPTANCE_ISSUE_ACKNOWLEDGED",
+            user,
+            {
+                "context": context,
+                "cycle_id": str(cycle_id) if cycle_id else None,
+                "admission_flow": admission_flow,
+            },
+        )
+
+    return Case.objects.get(pk=case.pk)
+
+
+def unacknowledged_operational_issue_qs() -> QuerySet[Case]:
+    """Casos com intercorrencia operacional aberta aguardando ciencia do CHD.
+
+    Fonte unica do criterio "fila de ciencia operacional pós-aceitação",
+    compartilhada entre renderizacao da fila do scheduler e contador do badge.
+
+    - post_schedule_issue_status == 'opened'
+    - post_acceptance_issue_context == 'operational_notice'
+    """
+    return Case.objects.filter(
+        post_schedule_issue_status=POST_SCHEDULE_ISSUE_STATUS_OPENED,
+        post_acceptance_issue_context=POST_ACCEPTANCE_ISSUE_CONTEXT_OPERATIONAL,
+    )
 
 
 # ── Case communication services ──────────────────────────────────────────────
@@ -901,6 +1179,10 @@ def administratively_close_case(
             "had_lock": had_lock,
             "previous_lock": previous_lock,
             "post_schedule_issue_status": case.post_schedule_issue_status,
+            "post_acceptance_issue_context": case.post_acceptance_issue_context,
+            "post_acceptance_issue_cycle_id": str(case.post_acceptance_issue_cycle_id)
+            if case.post_acceptance_issue_cycle_id
+            else None,
         }
 
         # Limpa lock
@@ -923,6 +1205,9 @@ def administratively_close_case(
             case.post_schedule_issue_response_message = ""
             case.post_schedule_issue_responded_by = None
             case.post_schedule_issue_responded_at = None
+            # Clean new generic fields too
+            case.post_acceptance_issue_context = ""
+            case.post_acceptance_issue_cycle_id = None
 
         # FSM transition CLEANED
         case.administratively_close(user=user, payload=payload)
@@ -1136,12 +1421,16 @@ SUPPORTED_SYSTEM_NOTICE_EVENT_TYPES: frozenset[str] = frozenset(
         "CASE_ATTACHMENT_SUPPLEMENT_ADDED",
         "CASE_CORRECTION_CREATED",
         "CASE_MARKED_SUPERSEDED",
-        # Slice 002 — eventos operacionais estruturados
+        # Slice 002 — eventos operacionais estruturados (legados + novos)
         "POST_SCHEDULE_ISSUE_OPENED",
         "POST_SCHEDULE_ISSUE_RESPONDED",
+        "POST_ACCEPTANCE_ISSUE_OPENED",
+        "POST_ACCEPTANCE_ISSUE_RESPONDED",
+        "POST_ACCEPTANCE_ISSUE_ACKNOWLEDGED",
         "CASE_ADMINISTRATIVELY_CLOSED",
-        # POST_SCHEDULE_ISSUE_ACKNOWLEDGED omitido: é ruído na thread,
-        # pois o NIR ver a resposta do agendador já é a 'ciência'.
+        # POST_SCHEDULE_ISSUE_ACKNOWLEDGED omitido: payload legado vazio,
+        # é ruído na thread. POST_ACCEPTANCE_ISSUE_ACKNOWLEDGED incluído
+        # pois possui cycle_id, context e admission_flow úteis (Slice 002 C6).
     }
 )
 """Eventos suportados que geram mensagens sistêmicas na thread.
@@ -1203,11 +1492,11 @@ def _format_marked_superseded(payload: dict[str, object]) -> str:
 
 
 def _format_post_schedule_issue_opened(payload: dict[str, object]) -> str:
-    """Formata corpo para POST_SCHEDULE_ISSUE_OPENED."""
+    """Formata corpo para POST_SCHEDULE_ISSUE_OPENED (legado)."""
     reason = str(payload.get("reason", "") or "")
     message = str(payload.get("message", "") or "")
     label = get_post_schedule_issue_reason_label(reason)
-    parts = ["Intercorrência pós-agendamento aberta pelo NIR"]
+    parts = ["Intercorrência pós-aceitação aberta pelo NIR"]
     if label:
         parts.append(f"— {label}")
     if message:
@@ -1224,7 +1513,7 @@ POST_SCHEDULE_ISSUE_ACTION_LABELS: dict[str, str] = {
 
 
 def _format_post_schedule_issue_responded(payload: dict[str, object]) -> str:
-    """Formata corpo para POST_SCHEDULE_ISSUE_RESPONDED."""
+    """Formata corpo para POST_SCHEDULE_ISSUE_RESPONDED (legado)."""
     action = str(payload.get("action", "") or "")
     response_message = str(payload.get("response_message", "") or "")
     action_label = POST_SCHEDULE_ISSUE_ACTION_LABELS.get(action, action)
@@ -1233,6 +1522,80 @@ def _format_post_schedule_issue_responded(payload: dict[str, object]) -> str:
         parts.append(f"— {action_label}")
     if response_message:
         parts.append(f"Mensagem: {response_message}")
+    return " ".join(parts).strip()
+
+
+def _format_post_acceptance_issue_opened(payload: dict[str, object]) -> str:
+    """Formata corpo para POST_ACCEPTANCE_ISSUE_OPENED.
+
+    Slice 003 C6/F1: inclui contexto traduzido, fluxo de admissao
+    traduzido e cycle_id completo do payload. Nao consulta Case nem
+    campos ativos.
+    """
+    from apps.cases.admission import ADMISSION_FLOW_MAP
+
+    reason = str(payload.get("reason", "") or "")
+    message = str(payload.get("message", "") or "")
+    context = str(payload.get("context", "") or "")
+    admission_flow = str(payload.get("admission_flow", "") or "")
+    cycle_id = str(payload.get("cycle_id", "") or "")
+
+    label = get_post_schedule_issue_reason_label(reason)
+    flow_label = ADMISSION_FLOW_MAP.get(admission_flow, admission_flow)
+    context_label = "apenas para ciência" if context == "operational_notice" else "com agendamento"
+
+    parts = ["Intercorrência pós-aceitação aberta pelo NIR"]
+    if label:
+        parts.append(f"— {label}")
+    if flow_label:
+        parts.append(f"Fluxo: {flow_label}")
+    if context_label:
+        parts.append(f"Modo: {context_label}")
+    if cycle_id:
+        parts.append(f"Ciclo: {cycle_id}")
+    if message:
+        parts.append(f"Mensagem: {message}")
+    return " ".join(parts).strip()
+
+
+def _format_post_acceptance_issue_responded(payload: dict[str, object]) -> str:
+    """Formata corpo para POST_ACCEPTANCE_ISSUE_RESPONDED."""
+    action = str(payload.get("action", "") or "")
+    response_message = str(payload.get("response_message", "") or "")
+    action_label = POST_SCHEDULE_ISSUE_ACTION_LABELS.get(action, action)
+    parts = ["Intercorrência respondida pelo agendador"]
+    if action:
+        parts.append(f"— {action_label}")
+    if response_message:
+        parts.append(f"Mensagem: {response_message}")
+    return " ".join(parts).strip()
+
+
+def _format_post_acceptance_issue_acknowledged(payload: dict[str, object]) -> str:
+    """Formata corpo para POST_ACCEPTANCE_ISSUE_ACKNOWLEDGED.
+
+    Projecao pura do payload — nao consulta Case.appointment_at mutavel.
+    Incluido (diferente do legado POST_SCHEDULE_ISSUE_ACKNOWLEDGED) pois
+    o payload contem cycle_id, context e admission_flow (Slice 002 C6).
+
+    Slice 003 C6/F1: inclui contexto traduzido, fluxo de admissao
+    traduzido e cycle_id completo.
+    """
+    from apps.cases.admission import ADMISSION_FLOW_MAP
+
+    context = str(payload.get("context", "") or "")
+    admission_flow = str(payload.get("admission_flow", "") or "")
+    cycle_id = str(payload.get("cycle_id", "") or "")
+    flow_label = ADMISSION_FLOW_MAP.get(admission_flow, admission_flow)
+    context_label = "apenas para ciência" if context == "operational_notice" else "com agendamento"
+
+    parts = ["Ciência da intercorrência pós-aceitação confirmada."]
+    if flow_label:
+        parts.append(f"Fluxo: {flow_label}.")
+    if context_label:
+        parts.append(f"Modo: {context_label}.")
+    if cycle_id:
+        parts.append(f"Ciclo: {cycle_id}.")
     return " ".join(parts).strip()
 
 
@@ -1257,9 +1620,12 @@ _SYSTEM_NOTICE_FORMATTERS: dict[str, Callable[[dict[str, object]], str]] = {
     "CASE_ATTACHMENT_SUPPLEMENT_ADDED": _format_attachment_supplement_added,
     "CASE_CORRECTION_CREATED": _format_correction_created,
     "CASE_MARKED_SUPERSEDED": _format_marked_superseded,
-    # Slice 002
+    # Slice 002 — legados + novos
     "POST_SCHEDULE_ISSUE_OPENED": _format_post_schedule_issue_opened,
     "POST_SCHEDULE_ISSUE_RESPONDED": _format_post_schedule_issue_responded,
+    "POST_ACCEPTANCE_ISSUE_OPENED": _format_post_acceptance_issue_opened,
+    "POST_ACCEPTANCE_ISSUE_RESPONDED": _format_post_acceptance_issue_responded,
+    "POST_ACCEPTANCE_ISSUE_ACKNOWLEDGED": _format_post_acceptance_issue_acknowledged,
     "CASE_ADMINISTRATIVELY_CLOSED": _format_administratively_closed,
 }
 
@@ -1348,30 +1714,41 @@ def local_day_bounds(day: date | None = None) -> tuple[datetime, datetime]:
     return start, end
 
 
-def unacknowledged_operational_notice_qs(day: date | None = None) -> QuerySet[Case]:
-    """Casos com aviso operacional (fluxo sem agendamento) aguardando ciência do CHD.
+def unacknowledged_operational_notice_qs() -> QuerySet[Case]:
+    """Casos com aviso operacional (fluxo sem agendamento) aguardando ciencia do CHD.
 
-    Fonte única do critério "fila de ciência operacional", compartilhada entre
-    a renderização da fila do scheduler e o contador do badge/avatar — assim
+    Fonte unica do criterio "fila de ciencia operacional", compartilhada entre
+    a renderizacao da fila do scheduler e o contador do badge/avatar — assim
     badge e fila nunca divergem.
+
+    Slice 001: o filtro diario foi removido para que notices operacionais
+    iniciais persistam ate ACK, independentemente da data de criacao.
+    O historico "ciencias confirmadas hoje" continua filtrado pelo timestamp
+    do ACK, nao pelo timestamp do notice.
+
+    Slice 003: exclui casos com intercorrencia operacional ativa
+    (post_acceptance_issue_context='operational_notice' + opened) para
+    evitar duplicidade — o card mais recente substitui o inicial.
 
     - fluxo em ``OPERATIONAL_NOTICE_FLOWS``
       (immediate/pre_icu/ward_icu_backup/pediatric_em);
     - existe evento de aviso (novo ``ADMISSION_FLOW_OPERATIONAL_NOTICE`` ou
-      legado ``IMMEDIATE_ADMISSION_OPERATIONAL_NOTICE``) dentro do dia local;
-    - caso não está em ``WAIT_APPT``;
+      legado ``IMMEDIATE_ADMISSION_OPERATIONAL_NOTICE``) sem restricao de data;
+    - caso nao esta em ``WAIT_APPT``;
     - sem evento de ack (novo ``SCHEDULER_OPERATIONAL_NOTICE_ACK`` ou legado
-      ``SCHEDULER_IMMEDIATE_ACK``).
+      ``SCHEDULER_IMMEDIATE_ACK``);
+    - sem intercorrencia operacional ativa (evita duplicidade Slice 003).
     """
-    start, end = local_day_bounds(day)
     return (
         Case.objects.filter(
             doctor_admission_flow__in=OPERATIONAL_NOTICE_FLOWS,
             events__event_type__in=OPERATIONAL_NOTICE_EVENT_TYPES,
-            events__timestamp__gte=start,
-            events__timestamp__lt=end,
         )
         .exclude(status=CaseStatus.WAIT_APPT)
         .exclude(events__event_type__in=OPERATIONAL_NOTICE_ACK_EVENT_TYPES)
+        .exclude(
+            post_schedule_issue_status=POST_SCHEDULE_ISSUE_STATUS_OPENED,
+            post_acceptance_issue_context=POST_ACCEPTANCE_ISSUE_CONTEXT_OPERATIONAL,
+        )
         .distinct()
     )
