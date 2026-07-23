@@ -128,18 +128,25 @@ confirmado, a intercorrência permite ao CHD:
 O caso volta para a fila do CHD (`WAIT_APPT`) e depois retorna ao NIR para
 confirmação do recebimento.
 
-Motivos disponíveis para o NIR:
-- óbito;
-- paciente sem condição clínica;
-- transporte indisponível;
-- exame realizado em outro serviço;
-- solicitação de reagendamento;
-- paciente evadiu-se da unidade de origem;
-- paciente aceito/transferido para unidade mais próxima;
-- demanda cancelada pela unidade de origem;
-- outro motivo operacional.
+Todos os motivos disponíveis e se exigem mensagem obrigatória:
 
-**Modo apenas para ciência (operational_notice)**:
+| Motivo | Label exibido | Mensagem obrigatória? |
+| --- | --- | --- |
+| `death` | Paciente faleceu | Não |
+| `clinical_condition` | Paciente sem condição clínica de transporte | Sim |
+| `transport_unavailable` | Transporte indisponível pela unidade de origem | Sim |
+| `external_regulation` | Exame realizado pela regulação estadual em outro serviço | Não |
+| `reschedule_request` | Solicitação de reagendamento pela unidade de origem | Sim |
+| `patient_absconded` | Paciente evadiu-se da unidade de origem | Sim |
+| `accepted_elsewhere` | Paciente aceito/transferido para unidade mais próxima | Sim |
+| `origin_cancelled` | Demanda cancelada pela unidade de origem | Sim |
+| `other` | Outro | Sim |
+
+Se o NIR enviar sem preencher a mensagem obrigatória, o formulário
+retorna com o erro **"Mensagem é obrigatória"** e a intercorrência
+não é registrada.
+
+**Modo apenas para ciência (operacional)**:
 
 Quando o caso foi aceito em um fluxo **sem agendamento** (`Vinda imediata`,
 `Pré-UTI`, `Enfermaria + retaguarda UTI` ou `EM pediátrica`), a intercorrência
@@ -147,16 +154,21 @@ serve apenas para o CHD tomar ciência de uma mudança operacional.
 
 Nesse modo:
 
-1. **NIR** localizar o caso em **Casos Encerrados**.
-2. **NIR** abrir os **Detalhes** do caso.
-3. **NIR** registrar a intercorrência com o motivo e a mensagem.
-4. O caso **permanece `CLEANED`** — não volta para fila de agendamento.
-5. O **CHD** recebe um card específico na fila com o aviso **"Intercorrência
-   pós-aceitação — apenas para ciência"**.
-6. **CHD** clicar em **Confirmar ciência**.
-7. A pendência some da fila. O caso continua encerrado.
-8. Nenhum campo de agendamento é criado ou alterado.
-9. O NIR pode abrir nova intercorrência futuramente (novo ciclo).
+1. **NIR** acessa **Casos Encerrados** e pesquisa por registro ou nome do paciente.
+2. **NIR** clica em **Detalhes** no resultado da busca.
+3. **NIR** preenche o formulário na seção **Intercorrência Pós-Aceitação**:
+   escolhe o motivo e escreve a mensagem (obrigatória para 7 dos 9 motivos).
+4. Ao enviar, aparece a mensagem verde: **"Intercorrência registrada com
+   sucesso. O agendador receberá um aviso para confirmar ciência."**
+5. O badge do caso muda para **⚠️ Aguardando ciência do CHD**.
+6. O caso **permanece `CLEANED`** — não volta para fila de agendamento.
+7. O **CHD** recebe um card específico na fila com o título **"⚠️
+   Intercorrência pós-aceitação — apenas para ciência"** e o aviso *"O CHD
+   deve apenas confirmar ciência. Não abrir agendamento."*
+8. **CHD** clica em **Confirmar ciência**.
+9. A pendência some da fila. O caso continua encerrado.
+10. Nenhum campo de agendamento é criado ou alterado.
+11. O NIR pode abrir nova intercorrência futuramente (novo ciclo).
 
 Motivos disponíveis são os mesmos do modo agendado, com atenção especial para:
 
@@ -471,18 +483,26 @@ Pré-UTI, Enfermaria + retaguarda UTI ou EM pediátrica):
 
 1. acesse **Casos Encerrados**;
 2. busque pelo nome do paciente ou número de registro/ocorrência;
-3. abra **Detalhes** do caso correto;
-4. na seção **Intercorrência Pós-Aceitação**, preencha o formulário;
-5. selecione o motivo (os três novos motivos exigem mensagem);
-6. escreva a mensagem descrevendo a situação;
-7. clique em **Registrar intercorrência**.
+3. encontre o caso na lista de resultados e clique em **Detalhes**;
+4. na seção **Intercorrência Pós-Aceitação**, selecione o motivo;
+5. escreva a mensagem descrevendo a situação (obrigatória para 7 dos 9
+   motivos — veja tabela na seção 1.7);
+6. clique em **Registrar intercorrência**.
 
-O caso **permanece encerrado** (`CLEANED`). O status mostrará **"Aguardando
-ciência do CHD"**. O CHD recebe um card específico apenas para confirmar
-ciência, sem abrir agendamento. Nenhum campo de agendamento é criado ou
-alterado.
+Após o envio:
 
-Motivos novos (exigem mensagem):
+- aparece a mensagem verde: **"Intercorrência registrada com sucesso.
+  O agendador receberá um aviso para confirmar ciência."**
+- o status do caso mostra o badge amarelo **⚠️ Aguardando ciência do CHD**;
+- o caso **permanece encerrado** (`CLEANED`);
+- o CHD recebe um card na fila com os dados da intercorrência e um único
+  botão: **Confirmar ciência**.
+
+Quando o CHD confirmar a ciência, o badge desaparece e o caso volta ao
+estado normal. Nenhum campo de agendamento é criado ou alterado em nenhum
+momento.
+
+Motivos novos que exigem mensagem obrigatória:
 - **Paciente evadiu-se da unidade de origem** — informe o contexto;
 - **Paciente aceito/transferido para unidade mais próxima** — informe o
   destino ou serviço para onde o paciente foi;
@@ -490,7 +510,8 @@ Motivos novos (exigem mensagem):
   pela origem.
 
 A pendência **não expira na virada do dia** — o CHD continua vendo o card
-até confirmar a ciência.
+até confirmar a ciência, mesmo que a intercorrência tenha sido aberta há
+vários dias.
 
 ---
 
@@ -674,7 +695,14 @@ A fila é atualizada automaticamente.
 
 ## 5.2 Confirmar ciência de fluxos sem agendamento
 
-Quando aparecer a seção de **ciência operacional**:
+O CHD pode receber dois tipos de card de ciência na fila:
+
+1. **Notice operacional inicial** — aviso original da decisão médica em
+   fluxo sem agendamento.
+2. **Intercorrência pós-aceitação operacional** — card gerado quando o NIR
+   registra uma mudança em caso já aceito e encerrado (ver seção 5.5).
+
+Em ambos os casos, o procedimento é o mesmo:
 
 1. ler os dados do caso;
 2. conferir o fluxo escolhido pelo médico;
@@ -764,19 +792,42 @@ Depois da resposta, o resultado volta para o NIR, que deve confirmar o recebimen
 
 Quando o NIR registra uma intercorrência em fluxo **sem agendamento**
 (Vinda imediata, Pré-UTI, Enfermaria + retaguarda UTI ou EM pediátrica),
-o card aparece na seção **⚠️ Intercorrência pós-aceitação — apenas para
-ciência**.
+o card aparece na fila do CHD dentro da seção:
 
-Nesse modo:
+> ⚠️ **Intercorrência pós-aceitação — apenas para ciência**
+>
+> *O CHD deve apenas confirmar ciência. Não abrir agendamento.*
 
-1. o card exibe motivo, mensagem do NIR, fluxo de admissão e quem abriu;
-2. o CHD **apenas confirma ciência** — não há ações de agendamento;
-3. clique em **Confirmar ciência**;
-4. o card desaparece da fila;
-5. o caso permanece encerrado (`CLEANED`), sem alteração de agendamento.
+O card exibe:
 
-> A pendência **não expira na virada do dia**. O CHD continua vendo o card
-> até confirmar a ciência.
+- nome do paciente e número de registro;
+- unidade de origem (hospital e unidade);
+- badge amarelo **⚠️ Intercorrência pós-aceitação**;
+- **Motivo** da intercorrência (ex.: "Paciente evadiu-se da unidade de origem");
+- **Mensagem do NIR** com a descrição da situação;
+- diagnóstico, suporte necessário e fluxo de admissão;
+- médico responsável, se houver;
+- quem abriu a intercorrência e quando (data/hora);
+- badge **Não agendar**;
+- botão **Confirmar ciência**.
+
+Ações do CHD:
+
+1. ler o motivo e a mensagem do NIR;
+2. clicar em **Confirmar ciência** (única ação possível);
+3. o card desaparece da fila;
+4. o caso permanece encerrado (`CLEANED`), sem alteração de agendamento;
+5. a confirmação fica registrada para auditoria (quem confirmou, quando,
+   qual fluxo e ciclo).
+
+> O card operacional **não** contém botões de agendamento (Agendar,
+> Cancelar agendamento, Reagendar, Manter agendamento, Negar solicitação)
+> nem campos de data/hora/local. A única ação possível é **Confirmar
+> ciência**.
+>
+> A pendência **não expira na virada do dia**. O CHD continua vendo o
+> card até confirmar a ciência, mesmo que a intercorrência tenha sido
+> aberta há vários dias.
 
 ---
 
