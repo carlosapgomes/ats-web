@@ -154,10 +154,10 @@ serve apenas para o CHD tomar ciência de uma mudança operacional.
 
 Nesse modo:
 
-1. **NIR** acessa **Casos Encerrados** e pesquisa por registro ou nome do paciente.
-2. **NIR** clica em **Detalhes** no resultado da busca.
-3. **NIR** preenche o formulário na seção **Intercorrência Pós-Aceitação**:
-   escolhe o motivo e escreve a mensagem (obrigatória para 7 dos 9 motivos).
+1. **NIR** acessar **Casos Encerrados** e pesquisar por registro ou nome do paciente.
+2. **NIR** clicar em **Detalhes** no resultado da busca.
+3. **NIR** preencher o formulário na seção **Intercorrência Pós-Aceitação**:
+   escolher o motivo e escrever a mensagem (obrigatória para 7 dos 9 motivos).
 4. Ao enviar, aparece a mensagem verde: **"Intercorrência registrada com
    sucesso. O agendador receberá um aviso para confirmar ciência."**
 5. O badge do caso muda para **⚠️ Aguardando ciência do CHD**.
@@ -165,7 +165,7 @@ Nesse modo:
 7. O **CHD** recebe um card específico na fila com o título **"⚠️
    Intercorrência pós-aceitação — apenas para ciência"** e o aviso *"O CHD
    deve apenas confirmar ciência. Não abrir agendamento."*
-8. **CHD** clica em **Confirmar ciência**.
+8. **CHD** clicar em **Confirmar ciência**.
 9. A pendência some da fila. O caso continua encerrado.
 10. Nenhum campo de agendamento é criado ou alterado.
 11. O NIR pode abrir nova intercorrência futuramente (novo ciclo).
@@ -481,13 +481,13 @@ O NIR deve abrir o caso, conferir a resposta e clicar em
 Use quando o caso foi aceito em fluxo **sem agendamento** (Vinda imediata,
 Pré-UTI, Enfermaria + retaguarda UTI ou EM pediátrica):
 
-1. acesse **Casos Encerrados**;
-2. busque pelo nome do paciente ou número de registro/ocorrência;
-3. encontre o caso na lista de resultados e clique em **Detalhes**;
-4. na seção **Intercorrência Pós-Aceitação**, selecione o motivo;
-5. escreva a mensagem descrevendo a situação (obrigatória para 7 dos 9
+1. acessar **Casos Encerrados**;
+2. buscar pelo nome do paciente ou número de registro/ocorrência;
+3. encontrar o caso na lista de resultados e clique em **Detalhes**;
+4. na seção **Intercorrência Pós-Aceitação**, selecionar o motivo;
+5. escrever a mensagem descrevendo a situação (obrigatória para 7 dos 9
    motivos — veja tabela na seção 1.7);
-6. clique em **Registrar intercorrência**.
+6. clicar em **Registrar intercorrência**.
 
 Após o envio:
 
@@ -697,7 +697,7 @@ A fila é atualizada automaticamente.
 
 O CHD pode receber dois tipos de card de ciência na fila:
 
-1. **Notice operacional inicial** — aviso original da decisão médica em
+1. **Nota operacional inicial** — aviso original da decisão médica em
    fluxo sem agendamento.
 2. **Intercorrência pós-aceitação operacional** — card gerado quando o NIR
    registra uma mudança em caso já aceito e encerrado (ver seção 5.5).
@@ -727,9 +727,9 @@ Na prática, o encaminhamento operacional desses casos é conduzido pelo **NIR**
 
 Para agendar um caso:
 
-1. na fila, clique em **Agendar**;
+1. na fila, clicar em **Agendar**;
 2. revisar os dados do caso;
-3. revissar a decisão médica;
+3. revisar a decisão médica;
 4. conferir suporte necessário e orientações médicas;
 5. selecionar **Confirmar Agendamento**;
 6. informar **Data** e **Horário**;
