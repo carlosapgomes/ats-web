@@ -300,8 +300,8 @@ class TestPostScheduleIssueForm:
         assert case.post_schedule_issue_reason == "reschedule_request"
         assert case.post_schedule_issue_message == "Unidade solicita nova data"
 
-        # Verifica evento
-        event = CaseEvent.objects.filter(case=case, event_type="POST_SCHEDULE_ISSUE_OPENED").first()
+        # Verifica evento (novo tipo pós-aceitação)
+        event = CaseEvent.objects.filter(case=case, event_type="POST_ACCEPTANCE_ISSUE_OPENED").first()
         assert event is not None
         assert event.payload.get("reason") == "reschedule_request"
 

@@ -127,6 +127,10 @@ class Case(models.Model):
     )
     post_schedule_issue_responded_at = models.DateTimeField(null=True, blank=True)
 
+    # Post-acceptance intercurrence (new generic concept, Slice 002)
+    post_acceptance_issue_context = models.CharField(max_length=30, blank=True, default="")
+    post_acceptance_issue_cycle_id = models.UUIDField(null=True, blank=True)
+
     # Corrected resubmission linkage
     corrects_case = models.ForeignKey(
         "self",
@@ -452,7 +456,9 @@ class Case(models.Model):
         target=CaseStatus.CLEANED,
     )
     def post_schedule_issue_acknowledged(self, user=None):
-        self._record_event("POST_SCHEDULE_ISSUE_ACKNOWLEDGED", user=user)
+        # Event is created by the calling service function
+        # to avoid duplicate old/new events (Slice 002).
+        pass
 
     @transition(
         field=status,

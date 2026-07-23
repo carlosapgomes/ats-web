@@ -31,7 +31,7 @@ class TestOfficialManualExists:
             "Ações do usuário CHD",
             "CHD/Agendador",
             "Comunicação operacional",
-            "Intercorrência Pós-Agendamento",
+            "Intercorrência Pós-Aceitação",
             "Buscar histórico",
             "Comunicar NIR",
         ]
@@ -41,7 +41,7 @@ class TestOfficialManualExists:
 
         # For intercurrence terms, use case-insensitive matching
         intercurrence_variants = [
-            "intercorrência pós-agendamento",
+            "intercorrência pós-aceitação",
             "intercorrência após agendamento",
         ]
         intercurrence_found = any(v.lower() in content_lower for v in intercurrence_variants)
@@ -52,7 +52,7 @@ class TestOfficialManualExists:
             if t not in intercurrence_variants  # handled separately
         ]
         if not intercurrence_found:
-            missing.append("Intercorrência (pós-agendamento / após agendamento)")
+            missing.append("Intercorrência (pós-aceitação / após agendamento)")
 
         assert not missing, f"Required terms not found in manual: {missing}"
 
