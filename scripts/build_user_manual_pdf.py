@@ -118,10 +118,16 @@ class PdfDocument:
         width: float,
         fontname: str = FONT_REGULAR,
     ) -> float:
-        """Word-wrap and render text, return final y position."""
+        """Word-wrap and render text, return final y position.
+
+        Renders starting from the current self._y position.
+        After each wrapped line, self._y is updated so that a
+        page break mid-paragraph resets the rendering origin.
+        """
         line_height = font_size * 1.4
         page = self._ensure_page()
         y = self._y + font_size
+        first_line = True
 
         words = text.split()
         line_parts: list[str] = []
@@ -134,12 +140,18 @@ class PdfDocument:
             else:
                 line_text = " ".join(line_parts)
                 y = _render_mixed_line(page, line_text, x_start, y, font_size)
+                line_parts = [word]
+                line_advance = y - self._y
+                self._y += line_advance
                 self._check_overflow(line_height)
                 page = self._ensure_page()
-                line_parts = [word]
+                y = self._y + font_size
+                first_line = False
 
         if line_parts:
             y = _render_mixed_line(page, " ".join(line_parts), x_start, y, font_size)
+            if first_line:
+                self._y = y - font_size * 0.5
 
         return y + font_size * 0.5  # bottom padding
 
@@ -228,30 +240,19 @@ class PdfDocument:
         width = PAGE_WIDTH - indent - MARGIN_RIGHT
         line_height = FONT_SIZE_BODY * 1.4
 
-        self._check_overflow(line_height)
-        y = self._y + FONT_SIZE_BODY
-
         for item in items:
-            bullet_text = f"• {item}"
-            y = self._word_wrap_render(bullet_text, FONT_SIZE_BODY, indent, width)
             self._check_overflow(line_height)
-            self._ensure_page()
-
-        self._y = y
+            bullet_text = f"• {item}"
+            self._y = self._word_wrap_render(bullet_text, FONT_SIZE_BODY, indent, width)
 
     def add_numbered_list(self, items: list[str]) -> None:
         """Render numbered list items (each with prefix like '1. ')."""
         indent = MARGIN_LEFT + 10
         width = PAGE_WIDTH - indent - MARGIN_RIGHT
-        self._check_overflow(FONT_SIZE_BODY * 1.4)
-        y = self._y + FONT_SIZE_BODY
 
         for item in items:
-            y = self._word_wrap_render(item, FONT_SIZE_BODY, indent, width)
             self._check_overflow(FONT_SIZE_BODY * 1.4)
-            self._ensure_page()
-
-        self._y = y
+            self._y = self._word_wrap_render(item, FONT_SIZE_BODY, indent, width)
 
     def add_toc(self, entries: list[tuple[int, str]]) -> None:
         """Render an 'Índice' section listing headings (level 1 and 2)."""
