@@ -9,6 +9,7 @@ from pathlib import Path
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 DOCKERFILE_PATH = PROJECT_ROOT / "Dockerfile"
+DOCKERIGNORE_PATH = PROJECT_ROOT / ".dockerignore"
 
 
 def _read_dockerfile() -> str:
@@ -22,6 +23,18 @@ def _line_of(content: str, fragment: str) -> int:
         if fragment in line and not line.strip().startswith("#"):
             return idx
     raise ValueError(f"Fragment {fragment!r} not found in Dockerfile")
+
+
+def test_docker_build_context_excludes_all_environment_files() -> None:
+    """Neither .env nor examples/variants may be copied by COPY . ."""
+    patterns = {
+        line.strip()
+        for line in DOCKERIGNORE_PATH.read_text(encoding="utf-8").splitlines()
+        if line.strip() and not line.lstrip().startswith("#")
+    }
+
+    assert ".env" in patterns
+    assert ".env.*" in patterns
 
 
 def test_production_sync_excludes_dev_dependencies() -> None:
