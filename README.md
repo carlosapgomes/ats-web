@@ -9,6 +9,7 @@ Sistema de triagem automatizada para EDA (Endoscopia Digestiva Alta) — reimpla
 - `ROADMAP.md` — fases de implementação
 - `docs/DOMAIN_ANALYSIS.md` — análise de domínio completa
 - `docs/adr/` — decisões arquiteturais
+- `docs/releases/README.md` — runbook de releases, prereleases e imagens GHCR
 
 ## Stack
 
@@ -281,6 +282,14 @@ Se `queued` crescer com `running` saturado, aumentar `workers` em
 `deploy.replicas` no compose (mais containers). Se `queued` fica baixo e
 `running` raramente satura, o gargalo é outro (ex.: rate limit da OpenAI),
 e aumentar workers não vai ajudar.
+
+## Releases
+
+A publicação de uma GitHub Release dispara automaticamente o build da imagem de
+produção e o envio para `ghcr.io/carlosapgomes/ats-web`. Prereleases preservam
+os aliases estáveis; releases estáveis atualizam a versão, o alias `major.minor`
+e `latest`. Consulte o passo a passo e os comandos de verificação em
+`docs/releases/README.md`.
 
 ## Quality Gate
 
