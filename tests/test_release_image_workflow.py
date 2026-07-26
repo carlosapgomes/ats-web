@@ -70,7 +70,7 @@ def test_workflow_uses_minimum_package_permissions() -> None:
 def test_workflow_logs_in_to_ghcr_with_github_token() -> None:
     """Login must use ghcr.io, github.actor and GITHUB_TOKEN only."""
     content = _read_workflow()
-    assert "docker/login-action@v3" in content, "Must use docker/login-action@v3."
+    assert "docker/login-action@v4" in content, "Must use docker/login-action@v4 (Node 24)."
     assert "ghcr.io" in content, "Registry must be ghcr.io."
     assert "github.actor" in content, "Login username must use ${{ github.actor }}."
     assert "secrets.GITHUB_TOKEN" in content, "Login password must use ${{ secrets.GITHUB_TOKEN }}."
@@ -92,7 +92,7 @@ def test_workflow_tags_stable_and_prerelease_channels_safely() -> None:
     """
     content = _read_workflow()
     # Must use docker/metadata-action
-    assert "docker/metadata-action@v5" in content, "Must use docker/metadata-action@v5."
+    assert "docker/metadata-action@v6" in content, "Must use docker/metadata-action@v6 (Node 24)."
     # Exact tag
     assert "tag_name" in content, "Must include the exact release tag name."
     # SemVer normalized version
@@ -119,7 +119,7 @@ def test_workflow_tags_stable_and_prerelease_channels_safely() -> None:
 def test_workflow_builds_and_pushes_root_dockerfile_for_amd64_with_cache() -> None:
     """Build must use root Dockerfile, push/pull true, linux/amd64 and GHA cache."""
     content = _read_workflow()
-    assert "docker/build-push-action@v6" in content, "Must use docker/build-push-action@v6."
+    assert "docker/build-push-action@v7" in content, "Must use docker/build-push-action@v7 (Node 24)."
     assert "context: ." in content, "Build context must be '.' (project root)."
     assert "file: ./Dockerfile" in content, "Dockerfile must be './Dockerfile'."
     assert "push: true" in content, "Push must be enabled (push: true)."
@@ -137,14 +137,30 @@ def test_workflow_builds_and_pushes_root_dockerfile_for_amd64_with_cache() -> No
 
 
 def test_workflow_uses_expected_action_major_versions() -> None:
-    """All used actions must be at the expected major version."""
+    """All used actions must be at the expected Node 24 major version.
+
+    Each target action must declare using: node24 (proved via external API).
+    Legacy Node 20 refs are explicitly forbidden in the workflow.
+    """
     content = _read_workflow()
-    action_checks = {
-        "actions/checkout@v4": "actions/checkout@v4 is required.",
-        "docker/setup-buildx-action@v3": "docker/setup-buildx-action@v3 is required.",
-        "docker/login-action@v3": "docker/login-action@v3 is required.",
-        "docker/metadata-action@v5": "docker/metadata-action@v5 is required.",
-        "docker/build-push-action@v6": "docker/build-push-action@v6 is required.",
+    # Required Node 24 refs
+    required_refs = {
+        "actions/checkout@v7": "actions/checkout@v7 is required for Node 24 runtime.",
+        "docker/setup-buildx-action@v4": "docker/setup-buildx-action@v4 is required for Node 24 runtime.",
+        "docker/login-action@v4": "docker/login-action@v4 is required for Node 24 runtime.",
+        "docker/metadata-action@v6": "docker/metadata-action@v6 is required for Node 24 runtime.",
+        "docker/build-push-action@v7": "docker/build-push-action@v7 is required for Node 24 runtime.",
     }
-    for action_ref, msg in action_checks.items():
+    for action_ref, msg in required_refs.items():
         assert action_ref in content, msg
+
+    # Forbidden legacy Node 20 refs — must NOT appear in workflow
+    legacy_refs = {
+        "actions/checkout@v4",
+        "docker/setup-buildx-action@v3",
+        "docker/login-action@v3",
+        "docker/metadata-action@v5",
+        "docker/build-push-action@v6",
+    }
+    for legacy_ref in legacy_refs:
+        assert legacy_ref not in content, f"Legacy Node 20 ref '{legacy_ref}' must be removed from workflow."

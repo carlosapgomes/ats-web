@@ -2,13 +2,14 @@
 
 ## Status
 
-**COMPLETED — Slice 001 implementado e verificado.**
+**IN PROGRESS — Slice 001 e hardening da imagem concluídos; Slice 002 Node.js 24 planejado.**
 
 ## Slices verticais
 
 - [x] Slice 001 — GitHub Release → build e publicação versionada no GHCR (`slices/slice-001-release-image-to-ghcr.md`)
+- [ ] Slice 002 — Atualizar actions para runtime Node.js 24 (`slices/slice-002-upgrade-actions-node24.md`)
 
-Apenas um slice foi planejado porque workflow + teste de contrato formam a menor entrega vertical verificável. Dividir trigger, login, metadata e build criaria slices horizontais incapazes de publicar uma imagem isoladamente.
+O Slice 001 entregou o fluxo vertical original. O Slice 002 é um follow-up vertical motivado pela annotation real da prerelease `v0.1.0-rc.1`: remove o fallback de actions Node.js 20 sem adicionar Node ao projeto nem alterar o comportamento de publicação.
 
 ## Definition of Done do change
 
@@ -66,6 +67,19 @@ Apenas um slice foi planejado porque workflow + teste de contrato formam a menor
 - [x] Runtime Django/Gunicorn funciona com network none e sem sync.
 - [x] Quality gate completo passa.
 
+## Follow-up Slice 002 — actions com runtime Node.js 24
+
+- [x] `actions/checkout@v7` usa Node.js 24.
+- [x] `docker/setup-buildx-action@v4` usa Node.js 24.
+- [x] `docker/login-action@v4` usa Node.js 24.
+- [x] `docker/metadata-action@v6` usa Node.js 24.
+- [x] `docker/build-push-action@v7` usa Node.js 24.
+- [x] Refs legados Node.js 20 estão ausentes do workflow e proibidos pelo teste.
+- [x] Nenhum `actions/setup-node`, package/lockfile Node ou dependência Node foi adicionado.
+- [x] Contratos existentes do workflow permanecem inalterados.
+- [x] Quality gate completo passa.
+- [x] Relatório `/tmp/publish-release-container-to-ghcr-slice-002-node24-actions-report.md` criado, commit e push realizados.
+
 ## Regra de parada
 
-Após concluir o Slice 001, retornar `REPORT_PATH=/tmp/publish-release-container-to-ghcr-slice-001-report.md` e **PARAR** para revisão do planner/terceiro LLM. Não iniciar hardening, consumo no Compose ou automação de deploy sem novo change e confirmação explícita.
+Após concluir o Slice 002, retornar `REPORT_PATH=/tmp/publish-release-container-to-ghcr-slice-002-node24-actions-report.md` e **PARAR** para revisão do planner/terceiro LLM. Não publicar nova release, iniciar consumo no Compose ou automatizar deploy sem confirmação explícita.
