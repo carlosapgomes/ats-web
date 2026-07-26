@@ -10,6 +10,43 @@ import subprocess
 import sys
 from typing import Any, cast
 
+# ── Constantes ─────────────────────────────────────────────────────────────
+
+_CONTROLLED_ENV_KEYS = frozenset(
+    {
+        "DATABASE_URL",
+        "DB_HOST",
+        "DB_PORT",
+        "DB_NAME",
+        "DB_USER",
+        "DB_PASSWORD",
+        "DB_PASSWORD_FILE",
+        "DB_CONN_MAX_AGE",
+        "DB_APPLICATION_NAME",
+        "TEST_DATABASE_URL",
+        "POSTGRES_TEST_HOST_PORT",
+        "DJANGO_SETTINGS_MODULE",
+    }
+)
+
+
+def _build_probe_environment(overrides: dict[str, str] | None = None) -> dict[str, str]:
+    """Monta ambiente limpo para subprocesso de probe.
+
+    1. Copia ``os.environ``.
+    2. Remove todas as variáveis controladas herdadas (evita contaminação).
+    3. Aplica ``overrides`` explícitos do cenário.
+    4. Força ``DJANGO_SETTINGS_MODULE=config.settings.test``.
+    """
+    env = os.environ.copy()
+    for key in _CONTROLLED_ENV_KEYS:
+        env.pop(key, None)
+    if overrides:
+        env.update(overrides)
+    env["DJANGO_SETTINGS_MODULE"] = "config.settings.test"
+    return env
+
+
 _PROBE_CODE = r"""
 import json
 import os
@@ -30,31 +67,82 @@ print(json.dumps({key: cfg.get(key) for key in ("ENGINE", "HOST", "PORT", "NAME"
 def _run_probe(env: dict[str, str] | None = None) -> dict[str, Any]:
     """Executa o probe em subprocesso e retorna o dict JSON de saída.
 
-    Usa sys.executable e DJANGO_SETTINGS_MODULE para isolar
-    completamente o ambiente de settings do processo atual.
+    Usa ``_build_probe_environment`` para isolar o ambiente.
     """
-    merged = os.environ.copy()
-    merged.setdefault("DJANGO_SETTINGS_MODULE", "config.settings.test")
-    if env:
-        merged.update(env)
-
-    # Remove variáveis genéricas hostis que possam vazar do processo pai
-    # (o subprocesso as receberá explicitamente nos testes)
-    for hostile_key in ["DATABASE_URL", "DB_HOST", "DB_PORT", "DB_NAME", "DB_USER", "DB_PASSWORD"]:
-        merged.pop(hostile_key, None)
-
+    probe_env = _build_probe_environment(env)
     result = subprocess.run(
         [sys.executable, "-c", _PROBE_CODE],
         capture_output=True,
         text=True,
         timeout=15,
-        env=merged,
+        env=probe_env,
     )
     if result.returncode != 0:
         raise RuntimeError(
             f"Subprocesso falhou (exit={result.returncode}):\nstdout: {result.stdout}\nstderr: {result.stderr}"
         )
     return cast(dict[str, Any], json.loads(result.stdout.strip()))
+
+
+class TestBuildProbeEnvironment:
+    """Testes unitários do helper de ambiente (sem subprocesso)."""
+
+    def test_removes_controlled_vars_from_parent_except_dsm(self) -> None:
+        """Variáveis controladas herdadas (exceto DJANGO_SETTINGS_MODULE) são removidas.
+
+        DJANGO_SETTINGS_MODULE é intencionalmente forçado pela função.
+        """
+        env = _build_probe_environment()
+        for key in _CONTROLLED_ENV_KEYS:
+            if key == "DJANGO_SETTINGS_MODULE":
+                assert env[key] == "config.settings.test"
+            else:
+                assert key not in env
+
+    def test_applies_explicit_overrides(self) -> None:
+        """Overrides explícitos permanecem após sanitização."""
+        env = _build_probe_environment(
+            overrides={
+                "DATABASE_URL": "postgres://u:p@h:9999/db",
+                "DB_HOST": "myhost",
+                "DB_PORT": "8888",
+            }
+        )
+        assert env["DATABASE_URL"] == "postgres://u:p@h:9999/db"
+        assert env["DB_HOST"] == "myhost"
+        assert env["DB_PORT"] == "8888"
+
+    def test_removes_inherited_test_database_url_when_not_overridden(self) -> None:
+        """TEST_DATABASE_URL herdada do pai é removida quando o cenário não a fornece."""
+        env = _build_probe_environment()
+        assert "TEST_DATABASE_URL" not in env
+
+    def test_keeps_explicit_test_database_url(self) -> None:
+        """TEST_DATABASE_URL fornecida explicitamente permanece."""
+        env = _build_probe_environment(overrides={"TEST_DATABASE_URL": "postgres://tu:tp@td:6543/ct"})
+        assert env["TEST_DATABASE_URL"] == "postgres://tu:tp@td:6543/ct"
+
+    def test_django_settings_module_is_forced(self) -> None:
+        """DJANGO_SETTINGS_MODULE final é sempre config.settings.test."""
+        env = _build_probe_environment()
+        assert env["DJANGO_SETTINGS_MODULE"] == "config.settings.test"
+
+    def test_django_settings_module_override_not_possible(self) -> None:
+        """Mesmo se passado como override, DJANGO_SETTINGS_MODULE é forçado."""
+        env = _build_probe_environment(overrides={"DJANGO_SETTINGS_MODULE": "config.settings.dev"})
+        assert env["DJANGO_SETTINGS_MODULE"] == "config.settings.test"
+
+    def test_inherited_db_vars_do_not_leak(self) -> None:
+        """DB_* herdados do pai são removidos antes dos overrides."""
+        env = _build_probe_environment(
+            overrides={
+                "DB_HOST": "override-host",
+            }
+        )
+        # O override deve estar presente
+        assert env["DB_HOST"] == "override-host"
+        # E nenhum DB_* não overrideado deve estar presente
+        assert "DB_NAME" not in env
 
 
 class TestTestSettings:
@@ -68,7 +156,7 @@ class TestTestSettings:
             }
         )
         assert cfg["HOST"] == "localhost"
-        assert cfg["PORT"] == 5433 or str(cfg["PORT"]) == "5433"
+        assert str(cfg["PORT"]) == "5433"
         assert cfg["NAME"] == "ats_web_test"
         assert cfg["USER"] == "ats_web"
 
@@ -80,7 +168,6 @@ class TestTestSettings:
                 "POSTGRES_TEST_HOST_PORT": "5433",
             }
         )
-        # Deve ignorar DATABASE_URL e usar default test
         assert cfg["HOST"] == "localhost"
         assert cfg["NAME"] == "ats_web_test"
 
@@ -97,7 +184,7 @@ class TestTestSettings:
             }
         )
         assert cfg["HOST"] == "localhost"
-        assert cfg["PORT"] == 5433 or str(cfg["PORT"]) == "5433"
+        assert str(cfg["PORT"]) == "5433"
         assert cfg["NAME"] == "ats_web_test"
         assert cfg["USER"] == "ats_web"
 
@@ -116,6 +203,6 @@ class TestTestSettings:
             }
         )
         assert cfg["HOST"] == "test-db"
-        assert cfg["PORT"] == 6543 or str(cfg["PORT"]) == "6543"
+        assert str(cfg["PORT"]) == "6543"
         assert cfg["NAME"] == "custom_test"
         assert cfg["USER"] == "test_user"

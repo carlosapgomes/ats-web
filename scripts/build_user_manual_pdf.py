@@ -51,7 +51,7 @@ def _resolve_bold(text: str) -> list[tuple[str, str]]:
 
 def _get_mixed_text_length(text: str, fontsize: float) -> float:
     """Measure text width, ignoring **bold** markers."""
-    return fitz.get_text_length(text.replace("**", ""), fontname=FONT_REGULAR, fontsize=fontsize)
+    return float(fitz.get_text_length(text.replace("**", ""), fontname=FONT_REGULAR, fontsize=fontsize))
 
 
 def _render_mixed_line(
@@ -74,9 +74,7 @@ def _render_mixed_line(
     """
     line_height = font_size * 1.4
     plain = text.replace("**", "")
-    page.insert_text(
-        fitz.Point(x, y), plain, fontname=FONT_REGULAR, fontsize=font_size, color=color
-    )
+    page.insert_text(fitz.Point(x, y), plain, fontname=FONT_REGULAR, fontsize=font_size, color=color)
     return y + line_height
 
 
