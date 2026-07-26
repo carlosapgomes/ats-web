@@ -58,6 +58,14 @@ Apenas um slice foi planejado porque workflow + teste de contrato formam a menor
 - [x] `tasks.md` só é marcado após todos os itens anteriores passarem.
 - [x] Commit rastreável criado e push realizado na branch atual.
 
+## Follow-up QUICK — imagem de produção sem dependências dev
+
+- [x] `UV_NO_SYNC=1` definido após sync de produção e antes de collectstatic.
+- [x] Teste de contrato do Dockerfile passa.
+- [x] Imagem inspecionada sem pytest/mypy/ruff/django-stubs.
+- [x] Runtime Django/Gunicorn funciona com network none e sem sync.
+- [x] Quality gate completo passa.
+
 ## Regra de parada
 
 Após concluir o Slice 001, retornar `REPORT_PATH=/tmp/publish-release-container-to-ghcr-slice-001-report.md` e **PARAR** para revisão do planner/terceiro LLM. Não iniciar hardening, consumo no Compose ou automação de deploy sem novo change e confirmação explícita.

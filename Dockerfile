@@ -22,6 +22,8 @@ COPY pyproject.toml uv.lock* ./
 # Install dependencies (production only)
 RUN uv sync --frozen --no-dev --no-install-project
 
+ENV UV_NO_SYNC=1
+
 # Copy project source
 COPY . .
 
