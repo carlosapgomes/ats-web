@@ -196,7 +196,7 @@ DEFAULT_FROM_EMAIL = os.environ.get("DEFAULT_FROM_EMAIL", "no-reply@app.example.
 
 # URLs for password reset emails
 PUBLIC_APP_BASE_URL = os.environ.get("PUBLIC_APP_BASE_URL", "https://app.example.com")
-INTERNAL_APP_BASE_URL = os.environ.get("INTERNAL_APP_BASE_URL", "https://10.17.175.38")
+INTERNAL_APP_BASE_URL = os.environ.get("INTERNAL_APP_BASE_URL", "http://web:8000")
 
 # Rate limit for password reset (POST only)
 # Number of allowed attempts per IP/email per window

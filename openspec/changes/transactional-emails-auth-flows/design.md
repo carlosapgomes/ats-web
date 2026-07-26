@@ -44,11 +44,11 @@ EMAIL_PORT=587
 EMAIL_USE_TLS=true
 EMAIL_HOST_USER=...
 EMAIL_HOST_PASSWORD=...
-DEFAULT_FROM_EMAIL=noreply@example.com
+DEFAULT_FROM_EMAIL=no-reply@app.example.com
 PASSWORD_RESET_TIMEOUT=86400
 ```
 
-Ohio/SES é exemplo (`region-private`), mas `EMAIL_HOST` deve ser totalmente configurável.
+`EMAIL_HOST` deve ser totalmente configurável e mantido fora do repositório.
 
 ### D4. Rate limit simples para password reset
 

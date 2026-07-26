@@ -73,7 +73,7 @@ Adicionar emails transacionais mínimos, síncronos e baseados em infraestrutura
 - O remetente padrão será `no-reply@app.example.com`.
 - O envio será síncrono neste change.
 - A URL pública padrão é `https://app.example.com`.
-- A URL interna padrão é `https://10.17.175.38`.
+- A URL interna padrão é `http://web:8000`.
 - O link interno usa HTTPS com certificado self-signed.
 
 ## Critérios de sucesso

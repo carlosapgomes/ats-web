@@ -111,20 +111,17 @@ docker compose -f docker-compose.yml -f docker-compose.prod.yml exec web \
 faz build nem cria PostgreSQL. `ATS_WEB_IMAGE` deve apontar para uma tag estável
 explícita, por exemplo `ghcr.io/carlosapgomes/ats-web:v0.1.0`.
 
-A topologia confirmada usa database `ats_web`, alias `postgres`, rede
-`postgres-network` e rede Cloudflared `edge-network`. Os processos permanentes
+Os nomes de database, aliases, redes e roles permanecem somente no `.env`
+privado. `.env.example` contém valores fictícios e portáveis. Os processos
 
 As senhas não ficam no `.env`. O Compose encaminha `DB_PASSWORD_FILE` e monta
 somente o secret necessário em cada processo:
 
-```text
-/srv/apps/ats-web/secrets/database-runtime-password.txt
-/srv/apps/ats-web/secrets/database-migrator-password.txt
+```dotenv
 ```
 
 Os containers usam `read_only`, `cap_drop: ALL`, `no-new-privileges`, `/tmp` em
 tmpfs e rotação de logs. O web permanece acessível somente em localhost e em
-`edge-network`; workers e migrator usam apenas a rede do banco. Consulte o
 
 Operação inicial:
 
