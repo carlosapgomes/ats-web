@@ -108,60 +108,47 @@ docker compose -f docker-compose.yml -f docker-compose.prod.yml exec web \
 ```
 
 
-administrado separadamente. Esse arquivo é autônomo: não o combine com
-`docker-compose.yml` ou com os demais overrides.
+faz build nem cria PostgreSQL. `ATS_WEB_IMAGE` deve apontar para uma tag estável
+explícita, por exemplo `ghcr.io/carlosapgomes/ats-web:v0.1.0`.
 
-O deploy contém somente `web`, `worker` e `pdf_worker`, todos usando
-`ghcr.io/carlosapgomes/ats-web:latest`. Não existe build local nem container de
-banco. Como a imagem usa `pull_policy: always`, cada `up` consulta novamente o
-alias da release estável mais recente no GHCR.
+A topologia confirmada usa database `ats_web`, alias `postgres`, rede
+`postgres-network` e rede Cloudflared `edge-network`. Os processos permanentes
 
-Pré-requisitos externos ao Compose:
+As senhas não ficam no `.env`. O Compose encaminha `DB_PASSWORD_FILE` e monta
+somente o secret necessário em cada processo:
 
-2. O PostgreSQL deve estar conectado a essa rede com nome ou alias DNS igual a
-   `DB_HOST`.
-3. Database, usuário, permissões e extensão `unaccent` devem ter sido criados no
-4. A rede externa `edge-network` deve existir e conter o Cloudflared. O túnel
-   pode apontar para `http://ats-web:8000`.
-5. Copie `.env.example` para `.env`, substitua todos os placeholders e restrinja
-   `DB_HOST`, `DB_PORT`, `DB_NAME`, `DB_USER`, `DB_PASSWORD`,
-   `DJANGO_SECRET_KEY` e `OPENAI_API_KEY`. Configure também `ALLOWED_HOSTS` e
-   `CSRF_TRUSTED_ORIGINS` para o hostname HTTPS servido pelo túnel.
+```text
+/srv/apps/ats-web/secrets/database-runtime-password.txt
+/srv/apps/ats-web/secrets/database-migrator-password.txt
+```
 
-O serviço web participa das duas redes Docker. Os workers participam apenas da
-rede do PostgreSQL. Além do túnel, o Gunicorn fica disponível exclusivamente em
-`127.0.0.1:${WEB_HOST_PORT:-8000}` no host; esse bind não pode ser promovido para
-`0.0.0.0` por variável de ambiente.
+Os containers usam `read_only`, `cap_drop: ALL`, `no-new-privileges`, `/tmp` em
+tmpfs e rotação de logs. O web permanece acessível somente em localhost e em
+`edge-network`; workers e migrator usam apenas a rede do banco. Consulte o
 
 Operação inicial:
 
 ```bash
-# Validar se as redes externas existem
-docker network inspect postgres-network
-docker network inspect edge-network
+# Validar configuração sem imprimir secrets
+docker compose --profile migration --env-file .env \
 
-# Baixar explicitamente a imagem estável mais recente
+# Baixar a tag estável configurada
+docker compose --profile migration --env-file .env \
 
-# Subir aplicação e workers
+# Aplicar migrations com a role privilegiada temporária
+docker compose --profile migration --env-file .env \
 
-  uv run python manage.py migrate --settings=config.settings.prod
-
-# Verificar serviços e logs
+# Criar prompts com a role runtime e subir os processos permanentes
+  uv run python manage.py seed_prompts --settings=config.settings.prod
 ```
 
-Atualização após uma nova release estável:
-
-```bash
-  uv run python manage.py migrate --settings=config.settings.prod
-```
-
-Para desligar sem apagar a mídia:
+Para atualizar, altere `ATS_WEB_IMAGE` para a nova tag estável, execute `pull`, o
+serviço `migrate` e depois `up -d`. Para desligar sem apagar PDFs:
 
 ```bash
 ```
 
-Não use `down -v`: o volume `media_prod` contém os PDFs locais. O comando `down`
-normal preserva esse volume. O ciclo de vida, backup e disponibilidade do
+Não use `down -v`, pois `media_prod` contém os uploads locais.
 
 ## Upload Múltiplo com Extração PDF Assíncrona
 

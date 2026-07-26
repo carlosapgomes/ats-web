@@ -3,6 +3,7 @@
 prompts/
 .env
 *.secret
+secrets/
 tmp/
 .tmp/
 # openspec changes are tracked; only archive is excluded
