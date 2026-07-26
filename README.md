@@ -107,6 +107,62 @@ docker compose -f docker-compose.yml -f docker-compose.prod.yml exec web \
   uv run python manage.py collectstatic --noinput --settings=config.settings.prod
 ```
 
+
+administrado separadamente. Esse arquivo é autônomo: não o combine com
+`docker-compose.yml` ou com os demais overrides.
+
+O deploy contém somente `web`, `worker` e `pdf_worker`, todos usando
+`ghcr.io/carlosapgomes/ats-web:latest`. Não existe build local nem container de
+banco. Como a imagem usa `pull_policy: always`, cada `up` consulta novamente o
+alias da release estável mais recente no GHCR.
+
+Pré-requisitos externos ao Compose:
+
+2. O PostgreSQL deve estar conectado a essa rede com nome ou alias DNS igual a
+   `DB_HOST`.
+3. Database, usuário, permissões e extensão `unaccent` devem ter sido criados no
+4. A rede externa `edge-network` deve existir e conter o Cloudflared. O túnel
+   pode apontar para `http://ats-web:8000`.
+5. Copie `.env.example` para `.env`, substitua todos os placeholders e restrinja
+   `DB_HOST`, `DB_PORT`, `DB_NAME`, `DB_USER`, `DB_PASSWORD`,
+   `DJANGO_SECRET_KEY` e `OPENAI_API_KEY`. Configure também `ALLOWED_HOSTS` e
+   `CSRF_TRUSTED_ORIGINS` para o hostname HTTPS servido pelo túnel.
+
+O serviço web participa das duas redes Docker. Os workers participam apenas da
+rede do PostgreSQL. Além do túnel, o Gunicorn fica disponível exclusivamente em
+`127.0.0.1:${WEB_HOST_PORT:-8000}` no host; esse bind não pode ser promovido para
+`0.0.0.0` por variável de ambiente.
+
+Operação inicial:
+
+```bash
+# Validar se as redes externas existem
+docker network inspect postgres-network
+docker network inspect edge-network
+
+# Baixar explicitamente a imagem estável mais recente
+
+# Subir aplicação e workers
+
+  uv run python manage.py migrate --settings=config.settings.prod
+
+# Verificar serviços e logs
+```
+
+Atualização após uma nova release estável:
+
+```bash
+  uv run python manage.py migrate --settings=config.settings.prod
+```
+
+Para desligar sem apagar a mídia:
+
+```bash
+```
+
+Não use `down -v`: o volume `media_prod` contém os PDFs locais. O comando `down`
+normal preserva esse volume. O ciclo de vida, backup e disponibilidade do
+
 ## Upload Múltiplo com Extração PDF Assíncrona
 
 O sistema suporta upload simultâneo de múltiplos PDFs com processamento
