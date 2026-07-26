@@ -107,46 +107,6 @@ docker compose -f docker-compose.yml -f docker-compose.prod.yml exec web \
   uv run python manage.py collectstatic --noinput --settings=config.settings.prod
 ```
 
-
-faz build nem cria PostgreSQL. `ATS_WEB_IMAGE` deve apontar para uma tag estável
-explícita, por exemplo `ghcr.io/carlosapgomes/ats-web:v0.1.0`.
-
-Os nomes de database, aliases, redes e roles permanecem somente no `.env`
-privado. `.env.example` contém valores fictícios e portáveis. Os processos
-
-As senhas não ficam no `.env`. O Compose encaminha `DB_PASSWORD_FILE` e monta
-somente o secret necessário em cada processo:
-
-```dotenv
-```
-
-Os containers usam `read_only`, `cap_drop: ALL`, `no-new-privileges`, `/tmp` em
-tmpfs e rotação de logs. O web permanece acessível somente em localhost e em
-
-Operação inicial:
-
-```bash
-# Validar configuração sem imprimir secrets
-docker compose --profile migration --env-file .env \
-
-# Baixar a tag estável configurada
-docker compose --profile migration --env-file .env \
-
-# Aplicar migrations com a role privilegiada temporária
-docker compose --profile migration --env-file .env \
-
-# Criar prompts com a role runtime e subir os processos permanentes
-  uv run python manage.py seed_prompts --settings=config.settings.prod
-```
-
-Para atualizar, altere `ATS_WEB_IMAGE` para a nova tag estável, execute `pull`, o
-serviço `migrate` e depois `up -d`. Para desligar sem apagar PDFs:
-
-```bash
-```
-
-Não use `down -v`, pois `media_prod` contém os uploads locais.
-
 ## Upload Múltiplo com Extração PDF Assíncrona
 
 O sistema suporta upload simultâneo de múltiplos PDFs com processamento

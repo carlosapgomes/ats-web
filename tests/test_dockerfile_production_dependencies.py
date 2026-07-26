@@ -25,8 +25,8 @@ def _line_of(content: str, fragment: str) -> int:
     raise ValueError(f"Fragment {fragment!r} not found in Dockerfile")
 
 
-def test_docker_build_context_excludes_all_environment_files() -> None:
-    """Neither .env nor examples/variants may be copied by COPY . ."""
+def test_docker_build_context_excludes_deployment_configuration() -> None:
+    """Environment files and Compose manifests must not enter the image."""
     patterns = {
         line.strip()
         for line in DOCKERIGNORE_PATH.read_text(encoding="utf-8").splitlines()
@@ -35,6 +35,7 @@ def test_docker_build_context_excludes_all_environment_files() -> None:
 
     assert ".env" in patterns
     assert ".env.*" in patterns
+    assert "docker-compose*.yml" in patterns
 
 
 def test_production_sync_excludes_dev_dependencies() -> None:
