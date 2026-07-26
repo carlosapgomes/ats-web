@@ -2,12 +2,12 @@
 
 ## Status
 
-**IN PROGRESS — Slice 001 e hardening da imagem concluídos; Slice 002 Node.js 24 planejado.**
+**COMPLETED — Slice 001 + hardening + Slice 002 Node.js 24 concluídos.**
 
 ## Slices verticais
 
 - [x] Slice 001 — GitHub Release → build e publicação versionada no GHCR (`slices/slice-001-release-image-to-ghcr.md`)
-- [ ] Slice 002 — Atualizar actions para runtime Node.js 24 (`slices/slice-002-upgrade-actions-node24.md`)
+- [x] Slice 002 — Atualizar actions para runtime Node.js 24 (`slices/slice-002-upgrade-actions-node24.md`)
 
 O Slice 001 entregou o fluxo vertical original. O Slice 002 é um follow-up vertical motivado pela annotation real da prerelease `v0.1.0-rc.1`: remove o fallback de actions Node.js 20 sem adicionar Node ao projeto nem alterar o comportamento de publicação.
 
