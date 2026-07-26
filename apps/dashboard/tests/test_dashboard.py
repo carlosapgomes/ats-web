@@ -1,6 +1,6 @@
 """Testes do dashboard — Slice 1: App dashboard + view + template + case detail admin."""
 
-from datetime import datetime, time, timedelta
+from datetime import UTC, datetime, time, timedelta
 
 import pytest
 from django.contrib.auth import get_user_model
@@ -4405,14 +4405,22 @@ class TestDashboardBadgeCompactoProximoPasso:
         assert "Ver detalhes" in content
 
     def test_regression_date_time_present(self, client) -> None:
-        """R4: Data/hora continua presente nos cards."""
+        """R4: Data/hora continua presente nos cards — instante fixo determinístico."""
         user = _login_as(client, "manager")
         case = _create_case(created_by=user, status=CaseStatus.NEW, agency_record_number="REG-DATE")
-        created_str = case.created_at.strftime("%d/%m/%Y")
+
+        # Fixa created_at em 2026-07-26 00:37 UTC (fronteira UTC/local)
+        fixed_utc = datetime(2026, 7, 26, 0, 37, tzinfo=UTC)
+        Case.objects.filter(pk=case.pk).update(created_at=fixed_utc)
+
+        # Expectativa LOCAL (America/Bahia = UTC-3)
+        expected_local = timezone.localtime(fixed_utc).strftime("%d/%m/%Y %H:%M")
+        assert expected_local == "25/07/2026 21:37"
+
         response = client.get("/dashboard/")
         assert response.status_code == 200
         content = response.content.decode()
-        assert created_str in content
+        assert expected_local in content
 
     def test_regression_attention_badge_present(self, client) -> None:
         """R4: Badge 'Atenção necessária' continua presente quando aplicável."""

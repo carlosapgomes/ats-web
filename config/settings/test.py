@@ -13,7 +13,7 @@ Usage:
 
 import os
 
-from config.settings.db import get_db_config
+import dj_database_url
 
 from .base import *  # noqa: F401,F403
 
@@ -24,13 +24,11 @@ ALLOWED_HOSTS = ["testserver"]
 postgres_test_host_port = os.environ.get("POSTGRES_TEST_HOST_PORT", "5433")
 
 DATABASES = {
-    "default": get_db_config(
-        default_db_host="localhost",
-        default_db_port=postgres_test_host_port,
-        default_db_name="ats_web_test",
-        default_db_password="ats_web_dev",
+    "default": dj_database_url.config(
+        default=(f"postgres://ats_web:ats_web_dev@localhost:{postgres_test_host_port}/ats_web_test"),
         conn_max_age=0,
         conn_health_checks=False,
+        env="TEST_DATABASE_URL",
     )
 }
 
