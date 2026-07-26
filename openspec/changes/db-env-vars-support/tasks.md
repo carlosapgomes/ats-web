@@ -2,7 +2,7 @@
 
 ## Slices verticais
 
-- [ ] Slice 001 — Helper `get_db_config()` + aplicação em dev/test/prod (`slices/slice-001-individual-db-env-vars.md`)
+- [x] Slice 001 — Helper `get_db_config()` + aplicação em dev/test/prod (`slices/slice-001-individual-db-env-vars.md`)
 
 Apenas 1 slice porque o change é pequeno e coeso — não há como entregar valor parcial sem o helper + uso nos 3 settings simultaneamente.
 

@@ -154,8 +154,14 @@ class TestGetDbConfig:
         config = get_db_config()
         assert config["HOST"] == "db"
 
-    def test_missing_password_raises_when_no_default(self, monkeypatch):
-        """Sem DATABASE_URL, sem DB_PASSWORD, sem DB_PASSWORD_FILE, sem default → erro."""
+    def test_missing_password_returns_empty_dict(self, monkeypatch):
+        """Sem DATABASE_URL, sem DB_PASSWORD, sem DB_PASSWORD_FILE, sem default → {}.
+
+        Match dj_database_url.config() behaviour: when no credentials are
+        available (e.g. during Docker build collectstatic), return empty
+        dict instead of raising. Django will fail later with a connection
+        error at runtime if credentials are truly missing.
+        """
         monkeypatch.delenv("DATABASE_URL", raising=False)
         monkeypatch.delenv("DB_PASSWORD", raising=False)
         monkeypatch.delenv("DB_PASSWORD_FILE", raising=False)
@@ -163,9 +169,9 @@ class TestGetDbConfig:
         monkeypatch.delenv("DB_NAME", raising=False)
         monkeypatch.delenv("DB_USER", raising=False)
 
-        # default_db_password=None (padrão) → deve falhar
-        with pytest.raises(ImproperlyConfigured):
-            get_db_config()
+        # default_db_password=None (padrão) → retorna dict vazio
+        config = get_db_config()
+        assert config == {}
 
     # ── DB_CONN_MAX_AGE ───────────────────────────────────────────────
 

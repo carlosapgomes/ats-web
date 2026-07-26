@@ -41,7 +41,7 @@ def _environment_or_file(name: str, default: str | None = None) -> str:
     if default is not None:
         return default
 
-    raise ImproperlyConfigured(f"Defina {name} ou {name}_FILE para configurar o banco de dados.")
+    return ""
 
 
 def get_db_config(
@@ -87,6 +87,11 @@ def get_db_config(
     db_name = os.environ.get("DB_NAME", default_db_name)
     db_user = os.environ.get("DB_USER", default_db_user)
     db_password = _environment_or_file("DB_PASSWORD", default=default_db_password)
+
+    # Match dj_database_url.config() behaviour: return empty dict when no
+    # credentials are available (e.g. during Docker build collectstatic).
+    if not db_password:
+        return {}
 
     resolved_conn_max_age = int(os.environ.get("DB_CONN_MAX_AGE", str(conn_max_age)))
 
