@@ -129,6 +129,10 @@ module = "apps.cases.models"
 disable_error_code = ["no-untyped-def", "untyped-decorator", "no-any-return"]
 
 [[tool.mypy.overrides]]
+module = "config.settings.tests.*"
+disable_error_code = ["no-untyped-def", "no-untyped-call", "assignment"]
+
+[[tool.mypy.overrides]]
 module = ["django_fsm", "django_fsm.*"]
 ignore_missing_imports = true
 

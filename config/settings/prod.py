@@ -7,7 +7,7 @@ Usage (Docker):
 
 import os
 
-import dj_database_url
+from config.settings.db import get_db_config
 
 from .base import *  # noqa: F401,F403
 
@@ -16,12 +16,7 @@ _build_secret = "build-time-secret-not-for-use"
 SECRET_KEY = os.environ.get("DJANGO_SECRET_KEY", _build_secret) or _build_secret
 ALLOWED_HOSTS = os.environ.get("ALLOWED_HOSTS", "").split(",")
 
-DATABASES = {
-    "default": dj_database_url.config(
-        conn_max_age=600,
-        conn_health_checks=True,
-    )
-}
+DATABASES = {"default": get_db_config(conn_max_age=600, conn_health_checks=True)}
 
 # Security
 CSRF_COOKIE_SECURE = True
