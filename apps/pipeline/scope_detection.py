@@ -194,30 +194,84 @@ def _contains_boundary_safe_eus(*, normalized_text: str) -> bool:
     return re.search(r"\beus\b", normalized_text) is not None
 
 
-_EUS_LOCAL_REQUEST_PATTERN = re.compile(
-    r"\beus\b[^.\n]{0,40}?\b(motivo|solicit|exame|encaminhamento|procedimento)\w*\b"
-    r"|\b(motivo|solicit|exame|encaminhamento|procedimento)\w*\b\s*:?\s*\beus\b"
+# Sentence/clause boundaries that bound the local context of an EUS mention.
+_EUS_CLAUSE_BOUNDARY_PATTERN = re.compile(r"[.;:!?]|\n")
+
+# Explicit request-oriented stems before EUS with natural connectors:
+# 'solicito EUS', 'solicitacao de EUS', 'solicito realizacao de EUS',
+# 'encaminhamento/encaminhado para EUS', 'indicado para EUS'.
+_EUS_REQUEST_BEFORE_PATTERN = re.compile(r"\b(solicit|encaminh|indic)\w*\b\s*(?:realizacao\s+de|de|para)?\s*\beus\b")
+
+# Exam/procedure context directly qualifying EUS: 'exame de EUS',
+# 'procedimento de EUS'.
+_EUS_EXAM_BEFORE_PATTERN = re.compile(r"\b(exame|procedimento)\b\s*(?:de|para)?\s*\beus\b")
+
+# Request stems after EUS: 'EUS solicitado', 'EUS indicado', 'EUS encaminhado'.
+_EUS_REQUEST_AFTER_PATTERN = re.compile(r"\beus\b\s*(?:solicit|indic|encaminh)\w*\b")
+
+# Historical constructions that qualify the EUS mention itself, as opposed
+# to unrelated historical wording elsewhere in the clause:
+# 'EUS realizado/realizada', 'realizou EUS', 'EUS previo/previa',
+# 'exame anterior: EUS', 'solicitacao previa de EUS'.
+_EUS_HISTORICAL_PATTERN = re.compile(
+    r"\beus\b\s+(realizad[oa]|previo|previa|anterior)\b"
+    r"|\b(?:realizou)\b\s+\beus\b"
+    r"|\b(?:previo|previa|anterior)\b\s+(?:de\s+)?\beus\b"
 )
 
-_EUS_HISTORICAL_MARKER_PATTERN = re.compile(r"\b(realiz(?:ad[oa]|ou)|previo|previa|anterior)\w*\b")
+
+def _extract_eus_local_clause(
+    *,
+    normalized_text: str,
+    eus_start: int,
+    eus_end: int,
+) -> str:
+    """Return the bounded clause containing the EUS occurrence."""
+
+    left_boundaries = list(_EUS_CLAUSE_BOUNDARY_PATTERN.finditer(normalized_text, 0, eus_start))
+    clause_start = left_boundaries[-1].end() if left_boundaries else 0
+    right_boundary = _EUS_CLAUSE_BOUNDARY_PATTERN.search(normalized_text, eus_end)
+    clause_end = right_boundary.start() if right_boundary else len(normalized_text)
+    return normalized_text[clause_start:clause_end]
+
+
+def _is_historical_eus_mention(*, clause: str) -> bool:
+    """Return True when the clause qualifies the EUS mention as historical."""
+
+    return _EUS_HISTORICAL_PATTERN.search(clause) is not None
+
+
+def _is_explicit_eus_request(*, clause: str) -> bool:
+    """Return True when the clause explicitly requests/examines EUS."""
+
+    return (
+        _EUS_REQUEST_BEFORE_PATTERN.search(clause) is not None
+        or _EUS_EXAM_BEFORE_PATTERN.search(clause) is not None
+        or _EUS_REQUEST_AFTER_PATTERN.search(clause) is not None
+    )
 
 
 def _contains_eus_with_local_request_context(*, normalized_text: str) -> bool:
-    """Return True when EUS appears near a local request-oriented expression.
+    """Return True when EUS appears in a local request/exam/procedure context.
 
-    The request word must be close to the EUS occurrence (same short window,
-    no sentence boundary) and not cancelled by a clearly historical marker
-    such as 'realizado em 2024'. A distant 'Motivo'/'exame'/'procedimento'
-    anywhere else in the candidate is not sufficient.
+    Context is bounded to the clause containing each EUS occurrence. An
+    explicit request wins over unrelated historical wording in another
+    clause; only constructions that qualify the EUS mention itself as
+    historical cancel the signal. A distant 'Motivo'/'exame'/'procedimento'
+    anywhere else in the report is not sufficient.
     """
 
     if not _contains_boundary_safe_eus(normalized_text=normalized_text):
         return False
     for eus_match in re.finditer(r"\beus\b", normalized_text):
-        window = normalized_text[max(0, eus_match.start() - 12) : eus_match.end() + 40]
-        if _EUS_HISTORICAL_MARKER_PATTERN.search(window) is not None:
+        clause = _extract_eus_local_clause(
+            normalized_text=normalized_text,
+            eus_start=eus_match.start(),
+            eus_end=eus_match.end(),
+        )
+        if _is_historical_eus_mention(clause=clause):
             continue
-        if _EUS_LOCAL_REQUEST_PATTERN.search(window) is not None:
+        if _is_explicit_eus_request(clause=clause):
             return True
     return False
 

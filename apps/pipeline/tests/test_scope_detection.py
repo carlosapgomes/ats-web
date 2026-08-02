@@ -12,6 +12,8 @@ from __future__ import annotations
 import importlib
 from typing import cast
 
+import pytest
+
 
 def _classify(
     *,
@@ -216,6 +218,64 @@ def test_structured_name_bare_eus_is_procedural_context() -> None:
         "eda": {"requested_procedure": {"name": "EUS", "subtype": "unknown"}},
     }
     result = _classify(llm1_structured_data=llm1, cleaned_text="")
+    assert result is None
+
+
+# ── EUS natural local phrases (Slice 001, second corrective) ──────────
+
+
+@pytest.mark.parametrize(
+    "request_text",
+    [
+        "Encaminhamento para EUS para avaliar lesao.",
+        "Encaminhado para EUS para avaliar lesao.",
+        "Solicitacao de EUS para avaliar lesao.",
+        "Procedimento de EUS indicado.",
+        "Exame de EUS indicado.",
+        "Solicito realizacao de EUS para avaliar lesao.",
+        "Solicito EUS para avaliar lesao.",
+        "EUS solicitado para avaliar lesao.",
+    ],
+)
+def test_eus_natural_local_request_phrases_follow_eda(request_text: str) -> None:
+    """C4: frases locais naturais de solicitação/exame/procedimento → EDA."""
+
+    llm1: dict[str, object] = {"preop_screening": {"exam_type": "unknown"}}
+    result = _classify(llm1_structured_data=llm1, cleaned_text=request_text)
+    assert result is None
+
+
+@pytest.mark.parametrize(
+    "historical_text",
+    [
+        "Exame anterior: EUS realizado em 2024.",
+        "Procedimento realizado: EUS em 2024.",
+        "Solicitacao previa de EUS foi cancelada.",
+        "Paciente realizou EUS em 2024, sem intercorrencias.",
+    ],
+)
+def test_eus_historical_qualifying_phrases_stay_manual(historical_text: str) -> None:
+    """C5: construções que qualificam EUS como histórico → revisão manual."""
+
+    llm1: dict[str, object] = {"preop_screening": {"exam_type": "unknown"}}
+    result = _classify(llm1_structured_data=llm1, cleaned_text=historical_text)
+    assert result is not None
+    assert result["reason_code"] == "unknown_exam_type"
+
+
+@pytest.mark.parametrize(
+    "mixed_text",
+    [
+        "Solicito EUS; exame anterior sem alteracoes.",
+        "Solicito EUS para controle de procedimento realizado em 2024.",
+        "EUS solicitado para comparar com exame anterior.",
+    ],
+)
+def test_eus_unrelated_historical_wording_does_not_cancel_request(mixed_text: str) -> None:
+    """C5: histórico não relacionado em outra cláusula não cancela pedido atual."""
+
+    llm1: dict[str, object] = {"preop_screening": {"exam_type": "unknown"}}
+    result = _classify(llm1_structured_data=llm1, cleaned_text=mixed_text)
     assert result is None
 
 
