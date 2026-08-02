@@ -163,6 +163,57 @@ class TestResolvePrioritySignals:
         rulebook_signals["eda_subtype"] = "foreign_body"
         assert _codes(payload, source_text="Relatório anterior: sem corpo estranho.") == ["foreign_body"]
 
+    # ── Históricos/negações não geram sinal (D1) ────────────────────
+
+    @pytest.mark.parametrize(
+        "historical_text",
+        [
+            "Ecoendoscopia realizada em 2023.",
+            "Sem indicação de ecoendoscopia.",
+            "Dilatação esofágica prévia em 2022.",
+            "Sem indicação de dilatação esofágica.",
+            "Retirada de corpo estranho realizada em 2022.",
+        ],
+    )
+    def test_historical_or_negated_mentions_do_not_signal(self, historical_text: str) -> None:
+        assert _codes(source_text=historical_text) == []
+
+    # ── Corpo estranho misto histórico + atual (D2) ──────────────────
+
+    @pytest.mark.parametrize(
+        "mixed_text",
+        [
+            "Corpo estranho descartado em 2022. Suspeita atual de corpo estranho no esôfago.",
+            "Suspeita atual de corpo estranho no esôfago. Corpo estranho descartado em 2022.",
+        ],
+    )
+    def test_foreign_body_mixed_historical_and_current_keeps_signal(self, mixed_text: str) -> None:
+        assert _codes(source_text=mixed_text) == ["foreign_body"]
+
+    def test_foreign_body_historical_clause_does_not_cancel_current_request(self) -> None:
+        text = "Retirada de corpo estranho realizada em 2022. Suspeita atual de corpo estranho no esôfago."
+        assert _codes(source_text=text) == ["foreign_body"]
+
+    # ── Boundaries (D3) ──────────────────────────────────────────────
+
+    @pytest.mark.parametrize(
+        "substring_text",
+        ["microecoendoscopia", "predilatacao esofagica"],
+    )
+    def test_substring_inside_larger_word_is_not_signal(self, substring_text: str) -> None:
+        assert _codes(source_text=substring_text) == []
+
+    def test_echoendoscopy_historical_clause_does_not_cancel_current_request(self) -> None:
+        text = "Ecoendoscopia realizada em 2023. Solicito nova ecoendoscopia para controle."
+        assert _codes(source_text=text) == ["echoendoscopy"]
+
+    def test_dilation_historical_clause_does_not_cancel_current_request(self) -> None:
+        text = "Dilatação esofágica prévia em 2022. Indicação atual de dilatação esofágica."
+        assert _codes(source_text=text) == ["esophageal_dilation"]
+
+    def test_echoendoscopy_not_indicada_is_not_signal(self) -> None:
+        assert _codes(source_text="Ecoendoscopia não indicada neste caso.") == []
+
     # ── Ingestão cáustica ─────────────────────────────────────────────
 
     def test_caustic_positive_with_time_detail(self) -> None:

@@ -113,13 +113,25 @@ class TestBackfillFunctionDirect:
         assert first == second
         assert [s["code"] for s in second] == ["foreign_body", "pediatric"]
 
-    def test_case_without_structured_data_stays_empty(self, user, case_factory, advance_to) -> None:
+    def test_case_without_structured_data_resolves_text(self, user, case_factory, advance_to) -> None:
+        """Caso aberto sem structured_data recebe sinal textual (fallback {})."""
         case = advance_to(case_factory(user), CaseStatus.WAIT_DOCTOR)
-        case.extracted_text = "Paciente com corpo estranho."
+        case.structured_data = None
+        case.extracted_text = "Suspeita atual de corpo estranho em esôfago."
         case.save()
         self._backfill()
         case = Case.objects.get(pk=case.pk)
-        assert case.priority_signals == []
+        assert [s["code"] for s in case.priority_signals] == ["foreign_body"]
+
+    def test_case_with_malformed_structured_data_resolves_text(self, user, case_factory, advance_to) -> None:
+        """structured_data malformado não impede backfill textual."""
+        case = advance_to(case_factory(user), CaseStatus.WAIT_DOCTOR)
+        case.structured_data = "not a dict"
+        case.extracted_text = "Paciente ingeriu soda cáustica há 2 dias."
+        case.save()
+        self._backfill()
+        case = Case.objects.get(pk=case.pk)
+        assert [s["code"] for s in case.priority_signals] == ["caustic_ingestion"]
 
 
 @pytest.mark.django_db(transaction=True)
@@ -214,7 +226,11 @@ class TestMigrationForwardReal:
         assert ("cases", _MIGRATION_NAME) in applied
 
     def test_snapshot_equivalence_with_runtime_resolver(self) -> None:
-        """O snapshot v1 da migration é equivalente ao resolvedor runtime nos seis códigos."""
+        """O snapshot v1 da migration equivale ao resolvedor runtime com payload completo.
+
+        Compara code, category, detail, version e ordem — não somente códigos.
+        Inclui os cenários corretivos (histórico/negação/boundary/misto).
+        """
         module = importlib.import_module(_MIGRATION_MODULE)
         snapshot = module._snapshot_resolve_priority_signals
 
@@ -226,16 +242,34 @@ class TestMigrationForwardReal:
             ({"patient": {"age": 30}}, "Suspeita de corpo estranho em esôfago."),
             # corpo estranho textual negado
             ({"patient": {"age": 30}}, "Sem corpo estranho."),
+            # corpo estranho histórico
+            ({"patient": {"age": 30}}, "Retirada de corpo estranho realizada em 2022."),
+            # corpo estranho misto histórico + atual
+            (
+                {"patient": {"age": 30}},
+                "Corpo estranho descartado em 2022. Suspeita atual de corpo estranho no esôfago.",
+            ),
             # ingestão cáustica com tempo
             ({"patient": {"age": 30}}, "Paciente ingeriu soda cáustica há 3 semanas."),
             # ecoendoscopia termo completo
             ({"patient": {"age": 30}}, "Solicito ecoendoscopia."),
+            # ecoendoscopia histórica
+            ({"patient": {"age": 30}}, "Ecoendoscopia realizada em 2023."),
+            # ecoendoscopia negada
+            ({"patient": {"age": 30}}, "Sem indicação de ecoendoscopia."),
             # EUS contextual
             ({"patient": {"age": 30}}, "Solicito EUS para avaliar lesão."),
             # dilatação esofágica
             ({"patient": {"age": 30}}, "Dilatação esofágica indicada."),
+            # dilatação histórica
+            ({"patient": {"age": 30}}, "Dilatação esofágica prévia em 2022."),
+            # dilatação negada
+            ({"patient": {"age": 30}}, "Sem indicação de dilatação esofágica."),
             # dilatação genérica NÃO sinaliza
             ({"patient": {"age": 30}}, "Solicito dilatação."),
+            # boundary NÃO sinaliza (substring em palavra maior)
+            ({"patient": {"age": 30}}, "microecoendoscopia"),
+            ({"patient": {"age": 30}}, "predilatacao esofagica"),
             # gastrostomia com contexto
             ({"patient": {"age": 30}}, "Solicito gastrostomia."),
             # gastrostomia histórica NÃO sinaliza
@@ -256,9 +290,9 @@ class TestMigrationForwardReal:
                 "preop_screening": {"rulebook_signals": {"eda_subtype": "standard"}},
             }
             structured.update(overrides)
-            runtime_codes = [s["code"] for s in resolve_priority_signals(structured_data=structured, source_text=text)]
-            snapshot_codes = [s["code"] for s in snapshot(structured_data=structured, source_text=text)]
-            assert snapshot_codes == runtime_codes, f"Equivalência falhou para {structured!r} / {text!r}"
+            runtime = resolve_priority_signals(structured_data=structured, source_text=text)
+            snapshot_result = snapshot(structured_data=structured, source_text=text)
+            assert snapshot_result == runtime, f"Payload divergente para {structured!r} / {text!r}"
 
         # corpo estranho via subtipo estruturado
         subtype_payload = {
@@ -271,6 +305,10 @@ class TestMigrationForwardReal:
             },
             "preop_screening": {"rulebook_signals": {"eda_subtype": "foreign_body"}},
         }
-        runtime_codes = [s["code"] for s in resolve_priority_signals(structured_data=subtype_payload, source_text="")]
-        snapshot_codes = [s["code"] for s in snapshot(structured_data=subtype_payload, source_text="")]
-        assert snapshot_codes == runtime_codes == ["foreign_body"]
+        runtime = resolve_priority_signals(structured_data=subtype_payload, source_text="")
+        snapshot_result = snapshot(structured_data=subtype_payload, source_text="")
+        assert (
+            snapshot_result
+            == runtime
+            == [{"code": "foreign_body", "category": "clinical_alert", "detail": "", "version": 1}]
+        )

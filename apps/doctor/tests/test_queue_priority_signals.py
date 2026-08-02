@@ -6,6 +6,8 @@ nenhum texto bruto é redetectado na view; caso vazio não renderiza container.
 
 from __future__ import annotations
 
+import uuid
+
 import pytest
 from django.contrib.auth import get_user_model
 
@@ -52,8 +54,12 @@ class TestQueuePrioritySignalBadges:
         *,
         priority_signals: list[object],
         extracted_text: str = "",
+        username: str | None = None,
     ) -> Case:
-        nir_user = User.objects.create_user(username="nir_sig@test.com", password="testpass123")
+        nir_user = User.objects.create_user(
+            username=username or f"nir_sig_{uuid.uuid4().hex[:8]}@test.com",
+            password="testpass123",
+        )
         nir_user.roles.add(_create_role("nir"))
         case = Case.objects.create(
             created_by=nir_user,
@@ -96,9 +102,25 @@ class TestQueuePrioritySignalBadges:
         self._make_wait_doctor_case(priority_signals=[])
         self._login_as_doctor(client)
         content = client.get("/doctor/").content.decode()
-        assert "priority-signals" not in content
+        assert "data-priority-signals" not in content
         assert "Suspeita de corpo estranho" not in content
         assert "Pediatria" not in content
+
+    def test_queue_two_cards_with_signals_have_no_duplicate_ids(self, client) -> None:
+        """Dois cards com sinais não geram id fixo duplicado (D5/C7)."""
+        self._make_wait_doctor_case(priority_signals=[_signal("foreign_body")])
+        self._make_wait_doctor_case(priority_signals=[_signal("pediatric", "8 anos")])
+        self._login_as_doctor(client)
+        content = client.get("/doctor/").content.decode()
+        assert 'id="priority-signals"' not in content
+        # Cada container usa o marcador data-*; dois cards com sinais ⇒ 2 marcadores.
+        assert content.count("data-priority-signals") == 2
+
+    def test_queue_single_card_container_marker_appears_once(self, client) -> None:
+        self._make_wait_doctor_case(priority_signals=[_signal("foreign_body")])
+        self._login_as_doctor(client)
+        content = client.get("/doctor/").content.decode()
+        assert content.count("data-priority-signals") == 1
 
     def test_queue_uses_persisted_value_not_raw_text(self, client) -> None:
         """Texto bruto com sinal mas valor persistido vazio → nenhum badge."""

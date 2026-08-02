@@ -13,6 +13,11 @@ Persisted payload contract (version 1):
 
 Only known codes are persisted; labels/CSS are a presentation projection and
 are never stored. Signals are deduplicated by ``code`` and ordered canonically.
+
+Textual fallbacks are conservative and per-occurrence: a negation or
+historical qualifier cancels only the occurrence it qualifies, a current
+request occurrence survives, and terms are matched with word boundaries
+(never bare substring).
 """
 
 from __future__ import annotations
@@ -110,6 +115,64 @@ def _eda_subtype(structured_data: dict[str, object]) -> str:
     return ""
 
 
+# ── Shared per-occurrence machinery (conservative, local) ──────────────────
+#
+# Clause boundaries: '.', ';', '!', '?' or newline. ':' is intentionally NOT
+# a boundary so immediate labels ('Exame: ecoendoscopia') stay in the local
+# clause of the occurrence.
+
+_CLAUSE_BOUNDARY_PATTERN = re.compile(r"[.;!?]|\n")
+
+# Request/exam/procedure intent qualifying a procedural occurrence. Word
+# boundaries protect against 'contraindicada' (no boundary before 'indic').
+_REQUEST_CONTEXT_PATTERN = re.compile(r"\b(solicit|encaminh|indic|exame|procedimento)\w*\b")
+
+# Historical qualifiers attached to a specific occurrence.
+_HISTORICAL_AFTER_PATTERN = re.compile(r"^\s*(?:realizad[oa]|realizado|realizada|previo|previa|anterior)\b")
+_HISTORICAL_BEFORE_PATTERN = re.compile(
+    r"\b(?:realizou|realizad[oa])\b\s+$"
+    r"|\b(?:previo|previa|anterior)\b\s*(?:de\s*)?:?\s*$"
+)
+
+# Negation qualifiers attached to a specific occurrence.
+_NEGATION_BEFORE_PATTERN = re.compile(
+    r"\bsem\s+indicacao\s+de\b\s*$"
+    r"|\bsem\b\s*$"
+    r"|\bnega\s+(?:a\s+)?ingestao\s+de\b\s*$"
+    r"|\bnao\s+ha\b\s*$"
+)
+_NEGATION_AFTER_PATTERN = re.compile(
+    r"^\s*(?:descartad[oa]|negad[oa]|ausente)\b"
+    r"|^\s*nao\s+(?:foi\s+)?(?:indicad[oa]|recomendad[oa]|solicitad[oa])\b"
+    r"|^\s*sem\s+indicac\w*\b"
+)
+
+
+def _occurrence_contexts(normalized_text: str, pattern: re.Pattern[str]) -> list[tuple[str, str]]:
+    """Return (prefix, suffix) local clause contexts for each boundary-safe match."""
+    contexts: list[tuple[str, str]] = []
+    for match in pattern.finditer(normalized_text):
+        left_boundaries = list(_CLAUSE_BOUNDARY_PATTERN.finditer(normalized_text, 0, match.start()))
+        clause_start = left_boundaries[-1].end() if left_boundaries else 0
+        right_boundary = _CLAUSE_BOUNDARY_PATTERN.search(normalized_text, match.end())
+        clause_end = right_boundary.start() if right_boundary else len(normalized_text)
+        contexts.append((normalized_text[clause_start : match.start()], normalized_text[match.end() : clause_end]))
+    return contexts
+
+
+def _is_historical_occurrence(prefix: str, suffix: str) -> bool:
+    return _HISTORICAL_AFTER_PATTERN.match(suffix) is not None or _HISTORICAL_BEFORE_PATTERN.search(prefix) is not None
+
+
+def _is_negated_occurrence(prefix: str, suffix: str) -> bool:
+    return _NEGATION_BEFORE_PATTERN.search(prefix) is not None or _NEGATION_AFTER_PATTERN.match(suffix) is not None
+
+
+def _is_current_request_occurrence(prefix: str, suffix: str) -> bool:
+    """True when the local clause carries request/exam/procedure intent."""
+    return _REQUEST_CONTEXT_PATTERN.search(f"{prefix} {suffix}") is not None
+
+
 # ── Pediatric ──────────────────────────────────────────────────────────────
 
 
@@ -132,12 +195,7 @@ def _resolve_pediatric(structured_data: dict[str, object]) -> list[dict[str, obj
 # ── Foreign body ───────────────────────────────────────────────────────────
 
 
-_FOREIGN_BODY_NEGATION_PATTERNS: tuple[re.Pattern[str], ...] = (
-    re.compile(r"\bsem\s+corpo\s+estranho\b"),
-    re.compile(r"\bcorpo\s+estranho\s+descartad[oa]\b"),
-    re.compile(r"\bnega\s+(?:a\s+)?ingestao\s+de\s+corpo\s+estranho\b"),
-    re.compile(r"\bnao\s+ha\s+corpo\s+estranho\b"),
-)
+_FOREIGN_BODY_TERM_PATTERN = re.compile(r"\bcorpo\s+estranho\b")
 
 
 def _has_structured_foreign_body(structured_data: dict[str, object]) -> bool:
@@ -151,20 +209,31 @@ def _has_structured_foreign_body(structured_data: dict[str, object]) -> bool:
     return False
 
 
+def _has_positive_foreign_body_occurrence(normalized_text: str) -> bool:
+    """True when at least one body-foreign occurrence is a current positive.
+
+    A negation or historical qualifier cancels only its own occurrence; a
+    distinct current mention (suspeita/solicitação/achado) survives.
+    """
+    for prefix, suffix in _occurrence_contexts(normalized_text, _FOREIGN_BODY_TERM_PATTERN):
+        if _is_historical_occurrence(prefix, suffix):
+            continue
+        if _is_negated_occurrence(prefix, suffix):
+            continue
+        return True
+    return False
+
+
 def _resolve_foreign_body(
     structured_data: dict[str, object],
     normalized_text: str,
 ) -> list[dict[str, object]]:
     # Precedence: a structured positive signal validated by LLM1 represents
-    # the current request and prevails over a negated textual fallback
-    # (e.g. a historical mention). The textual fallback alone never fires
-    # when an explicit negation is present.
+    # the current request and prevails over any negated/historical textual
+    # fallback mention.
     if _has_structured_foreign_body(structured_data):
         return [_signal("foreign_body")]
-    for pattern in _FOREIGN_BODY_NEGATION_PATTERNS:
-        if pattern.search(normalized_text):
-            return []
-    if re.search(r"\bcorpo\s+estranho\b", normalized_text):
+    if _has_positive_foreign_body_occurrence(normalized_text):
         return [_signal("foreign_body")]
     return []
 
@@ -251,18 +320,18 @@ def resolve_caustic_ingestion(source_text: str) -> dict[str, object] | None:
 # ── Echoendoscopy ─────────────────────────────────────────────────────────
 
 
-_ECHOENDOSCOPY_TERMS: tuple[str, ...] = (
-    "ecoendoscopia",
-    "eco endoscopia",
-    "eco-endoscopia",
-    "ultrassonografia endoscopica",
-    "ultrassom endoscopico",
+_ECHOENDOSCOPY_TERM_PATTERN = re.compile(
+    r"\becoendoscopia\b"
+    r"|\beco\s+endoscopia\b"
+    r"|\beco-endoscopia\b"
+    r"|\bultrassonografia\s+endoscopica\b"
+    r"|\bultrassom\s+endoscopico\b"
 )
 
-# Conservative per-occurrence local context for the EUS acronym. Mirrors the
-# scope detector's contract; kept here because apps.cases must not import
-# from apps.pipeline (layering: pipeline depends on cases).
-_EUS_CLAUSE_BOUNDARY_PATTERN = re.compile(r"[.;!?]|\n")
+# Conservative per-occurrence local context for the EUS acronym (Slice 001
+# contract). Mirrors the scope detector; kept here because apps.cases must
+# not import from apps.pipeline (layering: pipeline depends on cases).
+_EUS_PATTERN = re.compile(r"\beus\b")
 _EUS_REQUEST_BEFORE_PATTERN = re.compile(r"\b(solicit|encaminh|indic)\w*\b\s*(?:realizacao\s+de|de|para|:)?\s*$")
 _EUS_EXAM_BEFORE_PATTERN = re.compile(r"\b(exame|procedimento)\b\s*(?:de|para|:)?\s*$")
 _EUS_REQUEST_AFTER_PATTERN = re.compile(r"^\s*(?:solicit|indic|encaminh)\w*\b")
@@ -276,15 +345,7 @@ def _contains_eus_with_request_context(normalized: str) -> bool:
     Each occurrence is classified independently against its own bounded
     clause; a historical occurrence cancels only itself.
     """
-    if re.search(r"\beus\b", normalized) is None:
-        return False
-    for eus_match in re.finditer(r"\beus\b", normalized):
-        left_boundaries = list(_EUS_CLAUSE_BOUNDARY_PATTERN.finditer(normalized, 0, eus_match.start()))
-        clause_start = left_boundaries[-1].end() if left_boundaries else 0
-        right_boundary = _EUS_CLAUSE_BOUNDARY_PATTERN.search(normalized, eus_match.end())
-        clause_end = right_boundary.start() if right_boundary else len(normalized)
-        prefix = normalized[clause_start : eus_match.start()]
-        suffix = normalized[eus_match.end() : clause_end]
+    for prefix, suffix in _occurrence_contexts(normalized, _EUS_PATTERN):
         if _EUS_HISTORICAL_AFTER_PATTERN.match(suffix) is not None:
             continue
         if _EUS_HISTORICAL_BEFORE_PATTERN.search(prefix) is not None:
@@ -304,8 +365,12 @@ def _resolve_echoendoscopy(
 ) -> list[dict[str, object]]:
     if _eda_subtype(structured_data) == "echoendoscopy":
         return [_signal("echoendoscopy")]
-    for term in _ECHOENDOSCOPY_TERMS:
-        if term in normalized_text:
+    # Full names require a current request/exam/procedure context and are
+    # matched with word boundaries; historical/negated mentions are ignored.
+    for prefix, suffix in _occurrence_contexts(normalized_text, _ECHOENDOSCOPY_TERM_PATTERN):
+        if _is_historical_occurrence(prefix, suffix) or _is_negated_occurrence(prefix, suffix):
+            continue
+        if _is_current_request_occurrence(prefix, suffix):
             return [_signal("echoendoscopy")]
     if _contains_eus_with_request_context(normalized_text):
         return [_signal("echoendoscopy")]
@@ -315,11 +380,11 @@ def _resolve_echoendoscopy(
 # ── Esophageal dilation ───────────────────────────────────────────────────
 
 
-_ESOPHAGEAL_DILATION_TERMS: tuple[str, ...] = (
-    "dilatacao esofagica",
-    "dilatacao do esofago",
-    "dilatacao de esofago",
-    "dilatacao endoscopica esofagica",
+_ESOPHAGEAL_DILATION_TERM_PATTERN = re.compile(
+    r"\bdilatacao\s+esofagica\b"
+    r"|\bdilatacao\s+do\s+esofago\b"
+    r"|\bdilatacao\s+de\s+esofago\b"
+    r"|\bdilatacao\s+endoscopica\s+esofagica\b"
 )
 
 
@@ -329,9 +394,12 @@ def _resolve_esophageal_dilation(
 ) -> list[dict[str, object]]:
     if _eda_subtype(structured_data) == "esophageal_dilation":
         return [_signal("esophageal_dilation")]
-    # Conservative: never accept the isolated word "dilatação".
-    for term in _ESOPHAGEAL_DILATION_TERMS:
-        if term in normalized_text:
+    # Conservative: never accept the isolated word "dilatação" nor substring
+    # matches; current-request context required per occurrence.
+    for prefix, suffix in _occurrence_contexts(normalized_text, _ESOPHAGEAL_DILATION_TERM_PATTERN):
+        if _is_historical_occurrence(prefix, suffix) or _is_negated_occurrence(prefix, suffix):
+            continue
+        if _is_current_request_occurrence(prefix, suffix):
             return [_signal("esophageal_dilation")]
     return []
 
@@ -339,14 +407,9 @@ def _resolve_esophageal_dilation(
 # ── Gastrostomy ───────────────────────────────────────────────────────────
 
 
-_GASTROSTOMY_TERMS: tuple[str, ...] = (
-    "gtt",
-    "gastrostomia",
-    "gastrostomy",
-    "peg",
-)
+_GASTROSTOMY_TERM_PATTERN = re.compile(r"\b(?:gtt|gastrostomia|gastrostomy|peg)\b")
 
-# Request/exam/procedure intent near the gastrostomy term.
+# Request/exam/procedure intent near the gastrostomy term (clause-local).
 _GASTROSTOMY_CONTEXT_PATTERN = re.compile(
     r"\b(solicit\w*|indic\w*|exame\w*|procedimento\w*|\beda\b|endoscopi\w*|confeccao\w*|programar\w*|realizac\w*)\b"
 )
@@ -363,13 +426,11 @@ def _resolve_gastrostomy(
 ) -> list[dict[str, object]]:
     if _eda_subtype(structured_data) == "gastrostomy":
         return [_signal("gastrostomy")]
-    for term in _GASTROSTOMY_TERMS:
-        for match in re.finditer(rf"\b{re.escape(term)}\b", normalized_text):
-            window = normalized_text[max(0, match.start() - 40) : match.end() + 40]
-            if _GASTROSTOMY_HISTORICAL_PATTERN.search(window):
-                continue
-            if _GASTROSTOMY_CONTEXT_PATTERN.search(window):
-                return [_signal("gastrostomy")]
+    for prefix, suffix in _occurrence_contexts(normalized_text, _GASTROSTOMY_TERM_PATTERN):
+        if _GASTROSTOMY_HISTORICAL_PATTERN.search(f"{prefix} {suffix}"):
+            continue
+        if _GASTROSTOMY_CONTEXT_PATTERN.search(f"{prefix} {suffix}"):
+            return [_signal("gastrostomy")]
     return []
 
 

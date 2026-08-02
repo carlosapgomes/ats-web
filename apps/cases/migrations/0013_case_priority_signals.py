@@ -7,8 +7,9 @@ Snapshot note (historical stability): migrations must be self-contained, so
 this module carries a copy of the v1 resolver from
 ``apps/cases/priority_signals.py``. The copy is covered by an equivalence
 test (``test_priority_signals_migration.py``) against the runtime resolver
-for the six canonical codes. When the resolver evolves (v2+), this snapshot
-stays frozen so historical backfills remain reproducible.
+for the six canonical codes — comparing full payloads (code, category,
+detail, version, order), not only codes. When the resolver evolves (v2+),
+this snapshot stays frozen so historical backfills remain reproducible.
 """
 
 import re
@@ -36,16 +37,63 @@ CATEGORY_BY_CODE = {
     "gastrostomy": "special_procedure",
 }
 
-_SUPPORTED_SUBTYPES = frozenset(
-    {"foreign_body", "echoendoscopy", "esophageal_dilation", "gastrostomy"}
+_SUPPORTED_SUBTYPES = frozenset({"foreign_body", "echoendoscopy", "esophageal_dilation", "gastrostomy"})
+
+# ── Shared per-occurrence machinery (mirror of apps/cases/priority_signals.py) ──
+
+_CLAUSE_BOUNDARY_PATTERN = re.compile(r"[.;!?]|\n")
+
+_REQUEST_CONTEXT_PATTERN = re.compile(r"\b(solicit|encaminh|indic|exame|procedimento)\w*\b")
+
+_HISTORICAL_AFTER_PATTERN = re.compile(r"^\s*(?:realizad[oa]|realizado|realizada|previo|previa|anterior)\b")
+_HISTORICAL_BEFORE_PATTERN = re.compile(
+    r"\b(?:realizou|realizad[oa])\b\s+$"
+    r"|\b(?:previo|previa|anterior)\b\s*(?:de\s*)?:?\s*$"
 )
 
-_FOREIGN_BODY_NEGATION_PATTERNS = (
-    re.compile(r"\bsem\s+corpo\s+estranho\b"),
-    re.compile(r"\bcorpo\s+estranho\s+descartad[oa]\b"),
-    re.compile(r"\bnega\s+(?:a\s+)?ingestao\s+de\s+corpo\s+estranho\b"),
-    re.compile(r"\bnao\s+ha\s+corpo\s+estranho\b"),
+_NEGATION_BEFORE_PATTERN = re.compile(
+    r"\bsem\s+indicacao\s+de\b\s*$"
+    r"|\bsem\b\s*$"
+    r"|\bnega\s+(?:a\s+)?ingestao\s+de\b\s*$"
+    r"|\bnao\s+ha\b\s*$"
 )
+_NEGATION_AFTER_PATTERN = re.compile(
+    r"^\s*(?:descartad[oa]|negad[oa]|ausente)\b"
+    r"|^\s*nao\s+(?:foi\s+)?(?:indicad[oa]|recomendad[oa]|solicitad[oa])\b"
+    r"|^\s*sem\s+indicac\w*\b"
+)
+
+_FOREIGN_BODY_TERM_PATTERN = re.compile(r"\bcorpo\s+estranho\b")
+
+_ECHOENDOSCOPY_TERM_PATTERN = re.compile(
+    r"\becoendoscopia\b"
+    r"|\beco\s+endoscopia\b"
+    r"|\beco-endoscopia\b"
+    r"|\bultrassonografia\s+endoscopica\b"
+    r"|\bultrassom\s+endoscopico\b"
+)
+
+_ESOPHAGEAL_DILATION_TERM_PATTERN = re.compile(
+    r"\bdilatacao\s+esofagica\b"
+    r"|\bdilatacao\s+do\s+esofago\b"
+    r"|\bdilatacao\s+de\s+esofago\b"
+    r"|\bdilatacao\s+endoscopica\s+esofagica\b"
+)
+
+_GASTROSTOMY_TERM_PATTERN = re.compile(r"\b(?:gtt|gastrostomia|gastrostomy|peg)\b")
+_GASTROSTOMY_CONTEXT_PATTERN = re.compile(
+    r"\b(solicit\w*|indic\w*|exame\w*|procedimento\w*|\beda\b|endoscopi\w*|confeccao\w*|programar\w*|realizac\w*)\b"
+)
+_GASTROSTOMY_HISTORICAL_PATTERN = re.compile(
+    r"\b(previo|previa|anterior|portador\w*|realizou|realizad[oa]|em\s+uso|ja\s+(tem|possui))\b"
+)
+
+_EUS_PATTERN = re.compile(r"\beus\b")
+_EUS_REQUEST_BEFORE_PATTERN = re.compile(r"\b(solicit|encaminh|indic)\w*\b\s*(?:realizacao\s+de|de|para|:)?\s*$")
+_EUS_EXAM_BEFORE_PATTERN = re.compile(r"\b(exame|procedimento)\b\s*(?:de|para|:)?\s*$")
+_EUS_REQUEST_AFTER_PATTERN = re.compile(r"^\s*(?:solicit|indic|encaminh)\w*\b")
+_EUS_HISTORICAL_AFTER_PATTERN = re.compile(r"^\s*(realizad[oa]|previo|previa|anterior)\b")
+_EUS_HISTORICAL_BEFORE_PATTERN = re.compile(r"\b(?:realizou)\b\s+$|\b(?:previo|previa|anterior)\b\s+(?:de\s+)?$")
 
 _CAUSTIC_KEYWORDS = ("caustic", "corrosiv", "soda caustica", "acido")
 _INGESTION_VERBS = ("ingeriu", "ingestao", "ingerir", "ingerido")
@@ -69,36 +117,6 @@ _CAUSTIC_TIME_PATTERNS = (
         re.IGNORECASE,
     ),
 )
-
-_ECHOENDOSCOPY_TERMS = (
-    "ecoendoscopia",
-    "eco endoscopia",
-    "eco-endoscopia",
-    "ultrassonografia endoscopica",
-    "ultrassom endoscopico",
-)
-
-_ESOPHAGEAL_DILATION_TERMS = (
-    "dilatacao esofagica",
-    "dilatacao do esofago",
-    "dilatacao de esofago",
-    "dilatacao endoscopica esofagica",
-)
-
-_GASTROSTOMY_TERMS = ("gtt", "gastrostomia", "gastrostomy", "peg")
-_GASTROSTOMY_CONTEXT_PATTERN = re.compile(
-    r"\b(solicit\w*|indic\w*|exame\w*|procedimento\w*|\beda\b|endoscopi\w*|confeccao\w*|programar\w*|realizac\w*)\b"
-)
-_GASTROSTOMY_HISTORICAL_PATTERN = re.compile(
-    r"\b(previo|previa|anterior|portador\w*|realizou|realizad[oa]|em\s+uso|ja\s+(tem|possui))\b"
-)
-
-_EUS_CLAUSE_BOUNDARY_PATTERN = re.compile(r"[.;!?]|\n")
-_EUS_REQUEST_BEFORE_PATTERN = re.compile(r"\b(solicit|encaminh|indic)\w*\b\s*(?:realizacao\s+de|de|para|:)?\s*$")
-_EUS_EXAM_BEFORE_PATTERN = re.compile(r"\b(exame|procedimento)\b\s*(?:de|para|:)?\s*$")
-_EUS_REQUEST_AFTER_PATTERN = re.compile(r"^\s*(?:solicit|indic|encaminh)\w*\b")
-_EUS_HISTORICAL_AFTER_PATTERN = re.compile(r"^\s*(realizad[oa]|previo|previa|anterior)\b")
-_EUS_HISTORICAL_BEFORE_PATTERN = re.compile(r"\b(?:realizou)\b\s+$|\b(?:previo|previa|anterior)\b\s+(?:de\s+)?$")
 
 
 def _normalize_text(value):
@@ -160,6 +178,30 @@ def _eda_subtype(structured_data):
     return ""
 
 
+def _occurrence_contexts(normalized_text, pattern):
+    """Return (prefix, suffix) local clause contexts for each boundary-safe match."""
+    contexts = []
+    for match in pattern.finditer(normalized_text):
+        left_boundaries = list(_CLAUSE_BOUNDARY_PATTERN.finditer(normalized_text, 0, match.start()))
+        clause_start = left_boundaries[-1].end() if left_boundaries else 0
+        right_boundary = _CLAUSE_BOUNDARY_PATTERN.search(normalized_text, match.end())
+        clause_end = right_boundary.start() if right_boundary else len(normalized_text)
+        contexts.append((normalized_text[clause_start : match.start()], normalized_text[match.end() : clause_end]))
+    return contexts
+
+
+def _is_historical_occurrence(prefix, suffix):
+    return _HISTORICAL_AFTER_PATTERN.match(suffix) is not None or _HISTORICAL_BEFORE_PATTERN.search(prefix) is not None
+
+
+def _is_negated_occurrence(prefix, suffix):
+    return _NEGATION_BEFORE_PATTERN.search(prefix) is not None or _NEGATION_AFTER_PATTERN.match(suffix) is not None
+
+
+def _is_current_request_occurrence(prefix, suffix):
+    return _REQUEST_CONTEXT_PATTERN.search("%s %s" % (prefix, suffix)) is not None
+
+
 def _resolve_pediatric(structured_data):
     patient = _get_dict(structured_data, "patient")
     age = _get_int(patient, "age")
@@ -184,13 +226,20 @@ def _has_structured_foreign_body(structured_data):
     return False
 
 
+def _has_positive_foreign_body_occurrence(normalized_text):
+    for prefix, suffix in _occurrence_contexts(normalized_text, _FOREIGN_BODY_TERM_PATTERN):
+        if _is_historical_occurrence(prefix, suffix):
+            continue
+        if _is_negated_occurrence(prefix, suffix):
+            continue
+        return True
+    return False
+
+
 def _resolve_foreign_body(structured_data, normalized_text):
     if _has_structured_foreign_body(structured_data):
         return [_signal("foreign_body")]
-    for pattern in _FOREIGN_BODY_NEGATION_PATTERNS:
-        if pattern.search(normalized_text):
-            return []
-    if re.search(r"\bcorpo\s+estranho\b", normalized_text):
+    if _has_positive_foreign_body_occurrence(normalized_text):
         return [_signal("foreign_body")]
     return []
 
@@ -229,15 +278,7 @@ def _resolve_caustic(source_text):
 
 
 def _contains_eus_with_request_context(normalized):
-    if re.search(r"\beus\b", normalized) is None:
-        return False
-    for eus_match in re.finditer(r"\beus\b", normalized):
-        left_boundaries = list(_EUS_CLAUSE_BOUNDARY_PATTERN.finditer(normalized, 0, eus_match.start()))
-        clause_start = left_boundaries[-1].end() if left_boundaries else 0
-        right_boundary = _EUS_CLAUSE_BOUNDARY_PATTERN.search(normalized, eus_match.end())
-        clause_end = right_boundary.start() if right_boundary else len(normalized)
-        prefix = normalized[clause_start : eus_match.start()]
-        suffix = normalized[eus_match.end() : clause_end]
+    for prefix, suffix in _occurrence_contexts(normalized, _EUS_PATTERN):
         if _EUS_HISTORICAL_AFTER_PATTERN.match(suffix) is not None:
             continue
         if _EUS_HISTORICAL_BEFORE_PATTERN.search(prefix) is not None:
@@ -254,8 +295,10 @@ def _contains_eus_with_request_context(normalized):
 def _resolve_echoendoscopy(structured_data, normalized_text):
     if _eda_subtype(structured_data) == "echoendoscopy":
         return [_signal("echoendoscopy")]
-    for term in _ECHOENDOSCOPY_TERMS:
-        if term in normalized_text:
+    for prefix, suffix in _occurrence_contexts(normalized_text, _ECHOENDOSCOPY_TERM_PATTERN):
+        if _is_historical_occurrence(prefix, suffix) or _is_negated_occurrence(prefix, suffix):
+            continue
+        if _is_current_request_occurrence(prefix, suffix):
             return [_signal("echoendoscopy")]
     if _contains_eus_with_request_context(normalized_text):
         return [_signal("echoendoscopy")]
@@ -265,8 +308,10 @@ def _resolve_echoendoscopy(structured_data, normalized_text):
 def _resolve_esophageal_dilation(structured_data, normalized_text):
     if _eda_subtype(structured_data) == "esophageal_dilation":
         return [_signal("esophageal_dilation")]
-    for term in _ESOPHAGEAL_DILATION_TERMS:
-        if term in normalized_text:
+    for prefix, suffix in _occurrence_contexts(normalized_text, _ESOPHAGEAL_DILATION_TERM_PATTERN):
+        if _is_historical_occurrence(prefix, suffix) or _is_negated_occurrence(prefix, suffix):
+            continue
+        if _is_current_request_occurrence(prefix, suffix):
             return [_signal("esophageal_dilation")]
     return []
 
@@ -274,18 +319,16 @@ def _resolve_esophageal_dilation(structured_data, normalized_text):
 def _resolve_gastrostomy(structured_data, normalized_text):
     if _eda_subtype(structured_data) == "gastrostomy":
         return [_signal("gastrostomy")]
-    for term in _GASTROSTOMY_TERMS:
-        for match in re.finditer(r"\b%s\b" % re.escape(term), normalized_text):
-            window = normalized_text[max(0, match.start() - 40) : match.end() + 40]
-            if _GASTROSTOMY_HISTORICAL_PATTERN.search(window):
-                continue
-            if _GASTROSTOMY_CONTEXT_PATTERN.search(window):
-                return [_signal("gastrostomy")]
+    for prefix, suffix in _occurrence_contexts(normalized_text, _GASTROSTOMY_TERM_PATTERN):
+        if _GASTROSTOMY_HISTORICAL_PATTERN.search("%s %s" % (prefix, suffix)):
+            continue
+        if _GASTROSTOMY_CONTEXT_PATTERN.search("%s %s" % (prefix, suffix)):
+            return [_signal("gastrostomy")]
     return []
 
 
 def _snapshot_resolve_priority_signals(structured_data, source_text):
-    """Snapshot v1 — equivalente ao resolvedor runtime (teste dedicado)."""
+    """Snapshot v1 — payload equivalente ao resolvedor runtime (teste dedicado)."""
     normalized_text = _normalize_text(source_text or "")
     signals = []
     signals.extend(_resolve_pediatric(structured_data))
@@ -312,6 +355,7 @@ def backfill_priority_signals(apps, schema_editor):
 
     - status != CLEANED;
     - lista ainda vazia (não sobrescreve valores existentes);
+    - structured_data ausente/malformado vira {} e o texto é resolvido;
     - sem LLM, sem eventos, sem mudança de status/decisão/agenda;
     - idempotente (chunks razoáveis).
     """
@@ -328,7 +372,7 @@ def backfill_priority_signals(apps, schema_editor):
     for case in qs.iterator(chunk_size=500):
         structured_data = case.structured_data
         if not isinstance(structured_data, dict):
-            continue
+            structured_data = {}
         signals = _snapshot_resolve_priority_signals(
             structured_data=structured_data,
             source_text=case.extracted_text or "",
@@ -339,7 +383,6 @@ def backfill_priority_signals(apps, schema_editor):
 
 
 class Migration(migrations.Migration):
-
     dependencies = [
         ("cases", "0012_post_acceptance_issue_fields"),
     ]
