@@ -188,23 +188,38 @@ def _extract_scope_keyword_candidate_texts(
     return candidate_texts
 
 
-def _contains_eus_in_context(*, normalized_text: str) -> bool:
-    """Return True when the EUS acronym appears with request/exam/procedure context.
+def _contains_boundary_safe_eus(*, normalized_text: str) -> bool:
+    """Return True when the EUS acronym appears as a standalone word."""
 
-    Context words match by prefix so that inflected forms (solicito,
-    solicitacao, exames, procedimento) are recognized conservatively.
+    return re.search(r"\beus\b", normalized_text) is not None
+
+
+_EUS_LOCAL_REQUEST_PATTERN = re.compile(
+    r"\beus\b[^.\n]{0,40}?\b(motivo|solicit|exame|encaminhamento|procedimento)\w*\b"
+    r"|\b(motivo|solicit|exame|encaminhamento|procedimento)\w*\b\s*:?\s*\beus\b"
+)
+
+_EUS_HISTORICAL_MARKER_PATTERN = re.compile(r"\b(realiz(?:ad[oa]|ou)|previo|previa|anterior)\w*\b")
+
+
+def _contains_eus_with_local_request_context(*, normalized_text: str) -> bool:
+    """Return True when EUS appears near a local request-oriented expression.
+
+    The request word must be close to the EUS occurrence (same short window,
+    no sentence boundary) and not cancelled by a clearly historical marker
+    such as 'realizado em 2024'. A distant 'Motivo'/'exame'/'procedimento'
+    anywhere else in the candidate is not sufficient.
     """
 
-    if re.search(r"\beus\b", normalized_text) is None:
+    if not _contains_boundary_safe_eus(normalized_text=normalized_text):
         return False
-    has_request_context = (
-        re.search(
-            r"\b(motivo|solicit|exame|encaminhamento|procedimento)\w*\b",
-            normalized_text,
-        )
-        is not None
-    )
-    return has_request_context
+    for eus_match in re.finditer(r"\beus\b", normalized_text):
+        window = normalized_text[max(0, eus_match.start() - 12) : eus_match.end() + 40]
+        if _EUS_HISTORICAL_MARKER_PATTERN.search(window) is not None:
+            continue
+        if _EUS_LOCAL_REQUEST_PATTERN.search(window) is not None:
+            return True
+    return False
 
 
 def _detect_supported_eda_scope_keyword_in_text(
@@ -213,7 +228,8 @@ def _detect_supported_eda_scope_keyword_in_text(
 ) -> tuple[str | None, str | None]:
     """Search one normalized text for supported EDA subtype keywords.
 
-    Returns (subtype, matched_term) or (None, None).
+    Returns (subtype, matched_term) or (None, None). EUS is only accepted
+    with local request-oriented context; full names need no extra context.
     """
 
     for term in _SCOPE_FOREIGN_BODY_TERMS:
@@ -228,7 +244,7 @@ def _detect_supported_eda_scope_keyword_in_text(
     for term in _SCOPE_ECHOENDOSCOPY_TERMS:
         if _contains_scope_term(normalized_text=normalized_text, term=term):
             return "echoendoscopy", term
-    if _contains_eus_in_context(normalized_text=normalized_text):
+    if _contains_eus_with_local_request_context(normalized_text=normalized_text):
         return "echoendoscopy", "EUS"
     return None, None
 
@@ -275,12 +291,18 @@ def _extract_motivo_solicitacao_text(*, cleaned_text: str) -> str | None:
 
 
 def _motive_mentions_supported_eda(*, normalized_motive: str) -> bool:
-    """Return True when the motive text asks for supported EDA/echoendoscopy."""
+    """Return True when the motive text asks for supported EDA/echoendoscopy.
+
+    The extracted 'Motivo da Solicitação' value is current-request evidence
+    by provenance, so a bare boundary-safe EUS counts as echoendoscopy here.
+    """
 
     for term in _SCOPE_EXPLICIT_EDA_TERMS:
         if _contains_scope_term(normalized_text=normalized_motive, term=term):
             return True
     if _contains_eda_acronym(normalized_text=normalized_motive):
+        return True
+    if _contains_boundary_safe_eus(normalized_text=normalized_motive):
         return True
     subtype, _ = _detect_supported_eda_scope_keyword_in_text(normalized_text=normalized_motive)
     return subtype is not None
@@ -320,6 +342,10 @@ def _detect_current_request_eda_signal(
     if not isinstance(requested_name, str) or not requested_name.strip():
         return False
     normalized_name = _normalize_scope_keyword_text(value=requested_name)
+    # The structured procedure name supplies procedural context by provenance,
+    # so a bare boundary-safe EUS counts as echoendoscopy.
+    if _contains_boundary_safe_eus(normalized_text=normalized_name):
+        return True
     subtype_from_name, _ = _detect_supported_eda_scope_keyword_in_text(
         normalized_text=normalized_name,
     )

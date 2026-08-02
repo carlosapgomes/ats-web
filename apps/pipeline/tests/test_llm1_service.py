@@ -919,7 +919,13 @@ class TestLlm1EchoendoscopySubtype:
         assert "não criam subtipo novo" in lowered or "nao criam subtipo novo" in lowered
 
     def test_render_user_prompt_asks_echoendoscopy_mention_in_summary(self) -> None:
-        """Prompt instrui mencionar ecoendoscopia no summary.one_liner/bullets."""
+        """Prompt instrui mencionar ecoendoscopia no summary.one_liner/bullets.
+
+        A asserção exige ecoendoscopia e resumo na mesma instrução: o fragmento
+        'mencionar ecoendoscopia no summary.one_liner' não casa com a instrução
+        antiga de ingestão cáustica ('mencione esse evento no summary.one_liner'),
+        então o teste não passa sem a regra específica de ecoendoscopia.
+        """
         prompt = _render_user_prompt(
             template="Template base",
             case_id="case-echo-005",
@@ -927,9 +933,8 @@ class TestLlm1EchoendoscopySubtype:
             clean_text="Texto clinico.",
         )
         lowered = prompt.lower()
-        assert "summary.one_liner" in prompt
-        assert "summary.bullet_points" in prompt
-        assert "mencionar ecoendoscopia" in lowered or "mencione" in lowered
+        assert "mencionar ecoendoscopia no summary.one_liner" in lowered
+        assert "summary.bullet_points" in lowered
 
     def test_forbidden_term_in_bullet_points_triggers_retry(self) -> None:
         """Termo proibido em bullet_points também dispara retry."""

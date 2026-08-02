@@ -181,6 +181,44 @@ def test_eus_isolated_without_context_returns_manual_review() -> None:
     assert result["reason_code"] == "unknown_exam_type"
 
 
+# ── EUS provenance corrections (Slice 001 corrective) ────────────────
+
+
+def test_motivo_bare_eus_overrides_non_eda() -> None:
+    """'Motivo da Solicitação: EUS ...' é solicitação atual mesmo com LLM1 non_eda."""
+
+    llm1: dict[str, object] = {"preop_screening": {"exam_type": "non_eda"}}
+    result = _classify(
+        llm1_structured_data=llm1,
+        cleaned_text="Motivo da Solicitacao: EUS para avaliar lesao. Unid. X.",
+    )
+    assert result is None
+
+
+def test_historical_eus_with_unrelated_context_stays_manual() -> None:
+    """EUS histórico no Complemento não vira EDA por 'Motivo' longe no relatório."""
+
+    llm1: dict[str, object] = {"preop_screening": {"exam_type": "unknown"}}
+    cleaned_text = (
+        "Motivo da Solicitacao: Avaliacao de lesao pancreatica. Unid. X. "
+        "Complemento da Solicitacao: EUS realizado em 2024."
+    )
+    result = _classify(llm1_structured_data=llm1, cleaned_text=cleaned_text)
+    assert result is not None
+    assert result["reason_code"] == "unknown_exam_type"
+
+
+def test_structured_name_bare_eus_is_procedural_context() -> None:
+    """requested_procedure.name='EUS' fornece contexto procedimental por si só."""
+
+    llm1: dict[str, object] = {
+        "preop_screening": {"exam_type": "unknown"},
+        "eda": {"requested_procedure": {"name": "EUS", "subtype": "unknown"}},
+    }
+    result = _classify(llm1_structured_data=llm1, cleaned_text="")
+    assert result is None
+
+
 def test_requested_procedure_name_echoendoscopy_with_puncture_returns_none_eda() -> None:
     """Nome estruturado ecoendoscopia com punção → EDA; modificador não muda subtipo."""
 
