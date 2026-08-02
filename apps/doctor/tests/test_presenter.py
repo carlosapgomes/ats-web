@@ -1155,6 +1155,61 @@ class TestDoctorReportPrioritySignals:
             )
             assert presenter._resolve_canonical_procedure_name() == expected
 
+    @pytest.mark.parametrize(
+        "structured_data, signals",
+        [
+            # Subtipo principal via eda.requested_procedure.subtype
+            (
+                {"eda": {"requested_procedure": {"subtype": "foreign_body"}}},
+                [_signal("foreign_body"), _signal("echoendoscopy")],
+            ),
+            (
+                {"eda": {"requested_procedure": {"subtype": "foreign_body"}}},
+                [_signal("foreign_body"), _signal("esophageal_dilation")],
+            ),
+            (
+                {"eda": {"requested_procedure": {"subtype": "foreign_body"}}},
+                [_signal("foreign_body"), _signal("gastrostomy")],
+            ),
+            (
+                {"eda": {"requested_procedure": {"subtype": "foreign_body"}}},
+                [
+                    _signal("foreign_body"),
+                    _signal("echoendoscopy"),
+                    _signal("esophageal_dilation"),
+                ],
+            ),
+            (
+                {"eda": {"requested_procedure": {"subtype": "foreign_body"}}},
+                [
+                    _signal("foreign_body"),
+                    _signal("echoendoscopy"),
+                    _signal("esophageal_dilation"),
+                    _signal("gastrostomy"),
+                ],
+            ),
+            # Subtipo principal via rulebook_signals
+            (
+                {"preop_screening": {"rulebook_signals": {"eda_subtype": "foreign_body"}}},
+                [_signal("foreign_body"), _signal("echoendoscopy")],
+            ),
+        ],
+    )
+    def test_foreign_body_primary_procedure_wins_over_coexisting_signals(self, structured_data, signals):
+        """Corpo estranho como subtipo principal preserva o nome procedimental
+        mesmo com sinais procedimentais coexistindo (badges continuam visíveis)."""
+        presenter = DoctorReportPresenter(
+            structured_data=structured_data,
+            summary_text="",
+            suggested_action={},
+            priority_signals=signals,
+        )
+        assert presenter._resolve_canonical_procedure_name() == "EDA para retirada de corpo estranho"
+        report = presenter.build_report()
+        badge_codes = [badge["code"] for badge in report["priority_signal_badges"]]
+        assert "foreign_body" in badge_codes
+        assert any("corpo estranho" in line.lower() for line in report["blocks"]["achados_criticos"])
+
     def test_text_report_contains_contexts_and_alerts(self):
         """build_text_report contém as mesmas linhas determinísticas da tela."""
         presenter = DoctorReportPresenter(

@@ -574,12 +574,17 @@ class DoctorReportPresenter:
     def _resolve_canonical_procedure_name(self) -> str:
         """Resolve the canonical procedure name.
 
-        Procedural persisted signals coexist without a combined enum: when two or
-        more of ecoendoscopia/dilatação/gastrostomia are present the line joins
-        them in fixed order (ecoendoscopia → dilatação esofágica → gastrostomia).
-        A single signal and the structured subtype keep the existing names, and
-        corpo estranho stays a procedural name when it is the main signal.
+        Corpo estranho as the primary subtype (requested procedure or rulebook)
+        always keeps its procedural name, even when ecoendoscopia/dilatação/
+        gastrostomia signals coexist; the coexisting signals remain visible in
+        badges, alerts and context line. Otherwise procedural signals coexist
+        without a combined enum (ecoendoscopia → dilatação esofágica →
+        gastrostomia), and single signals/structured subtypes keep existing names.
         """
+        subtype = self._extract_eda_subtype()
+        if subtype == "foreign_body":
+            return "EDA para retirada de corpo estranho"
+
         procedural_codes = [code for code, _ in self._PROCEDURE_FRAGMENT_ORDER if self._has_signal(code)]
         if procedural_codes:
             if len(procedural_codes) == 1:
@@ -594,13 +599,10 @@ class DoctorReportPresenter:
             return "EDA com " + ", ".join(fragment_names[:-1]) + f" e {fragment_names[-1]}"
         if self._has_signal("foreign_body"):
             return "EDA para retirada de corpo estranho"
-        subtype = self._extract_eda_subtype()
         if subtype == "gastrostomy":
             return "EDA para gastrostomia"
         if subtype == "esophageal_dilation":
             return "EDA para dilatação esofágica"
-        if subtype == "foreign_body":
-            return "EDA para retirada de corpo estranho"
         if subtype == "echoendoscopy":
             return "EDA com ecoendoscopia"
         return "EDA"
