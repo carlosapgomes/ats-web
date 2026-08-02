@@ -3689,3 +3689,473 @@ class TestPostCaseCommunicationAllowCleaned:
         )
         assert msg is not None
         assert msg.body == "Teste com opt-in explícito."
+
+
+@pytest.mark.django_db
+class TestSchedulerPrioritySignalBadges:
+    """Slice 004: badges persistidos acompanham o caso no CHD.
+
+    Todos os contextos scheduler (fila pendente, ciências operacionais,
+    intercorrências, processados, confirmação e detalhe) projetam badges
+    exclusivamente de Case.priority_signals via build_priority_signal_badges.
+    Nenhum texto bruto é redetectado; caso vazio/malformado não renderiza
+    container; locks/forms/permissões/ordenação/contadores permanecem intactos.
+    """
+
+    def _create_role(self, name: str):
+        role, _ = Role.objects.get_or_create(name=name)
+        return role
+
+    def _login_as(self, client, role_name: str, username: str | None = None) -> Any:
+        final_username = username or f"{role_name}@priosig.test"
+        user = User.objects.create_user(username=final_username, password="testpass123")
+        user.roles.add(self._create_role(role_name))
+        client.force_login(user)
+        session = client.session
+        session["active_role"] = role_name
+        session.save()
+        return user
+
+    @staticmethod
+    def _signal(code: str, detail: str = "") -> dict[str, object]:
+        return {
+            "code": code,
+            "category": {
+                "foreign_body": "clinical_alert",
+                "caustic_ingestion": "clinical_alert",
+                "pediatric": "special_population",
+                "echoendoscopy": "special_procedure",
+                "esophageal_dilation": "special_procedure",
+                "gastrostomy": "special_procedure",
+            }[code],
+            "detail": detail,
+            "version": 1,
+        }
+
+    def _make_nir(self, username: str = "nir_priosig@test.com") -> Any:
+        nir = User.objects.create_user(username=username, password="testpass123")
+        nir.roles.add(self._create_role("nir"))
+        return nir
+
+    def _make_wait_appt(self, *, priority_signals: object, name: str = "Paciente Sinal", **overrides: Any) -> Case:
+        nir = self._make_nir(f"nir_{uuid.uuid4().hex[:8]}@test.com")
+        defaults: dict[str, Any] = {
+            "created_by": nir,
+            "status": CaseStatus.WAIT_APPT,
+            "doctor_decision": "accept",
+            "doctor_admission_flow": "scheduled",
+            "priority_signals": priority_signals,
+            "structured_data": {"patient": {"name": name, "age": 40, "gender": "Feminino"}},
+        }
+        defaults.update(overrides)
+        case = Case.objects.create(**defaults)
+        case.save()
+        return case
+
+    # ── R2: Fila pendente (WAIT_APPT) ─────────────────────────────────
+
+    def test_pending_card_shows_multiple_labels_in_canonical_order(self, client) -> None:
+        """Card pendente mostra múltiplos badges na ordem canônica."""
+        self._make_wait_appt(
+            priority_signals=[
+                self._signal("gastrostomy"),
+                self._signal("caustic_ingestion", "há 2 dias"),
+                self._signal("foreign_body"),
+            ],
+            name="Paciente Ordem",
+        )
+        self._login_as(client, "scheduler")
+        content = client.get("/scheduler/").content.decode()
+        assert "Paciente Ordem" in content
+        idx_fb = content.index("Suspeita de corpo estranho")
+        idx_ci = content.index("Ingestão cáustica/corrosiva")
+        idx_gs = content.index("Gastrostomia")
+        assert idx_fb < idx_ci < idx_gs
+
+    def test_pending_card_hides_container_without_signals(self, client) -> None:
+        """Caso sem sinais não renderiza container de badges."""
+        self._make_wait_appt(priority_signals=[], name="Paciente Sem Sinal")
+        self._login_as(client, "scheduler")
+        content = client.get("/scheduler/").content.decode()
+        assert "Paciente Sem Sinal" in content
+        assert "data-priority-signals" not in content
+        assert "Suspeita de corpo estranho" not in content
+
+    def test_pending_card_uses_persisted_value_not_raw_text(self, client) -> None:
+        """Texto bruto com sinal mas valor persistido vazio → nenhum badge."""
+        self._make_wait_appt(
+            priority_signals=[],
+            extracted_text="Suspeita de corpo estranho em esôfago.",
+            name="Paciente Texto",
+        )
+        self._login_as(client, "scheduler")
+        content = client.get("/scheduler/").content.decode()
+        assert "data-priority-signals" not in content
+        assert "Suspeita de corpo estranho" not in content
+
+    def test_pending_card_shows_persisted_badge_without_text(self, client) -> None:
+        """Valor persistido com sinal mas texto vazio → badge é exibido."""
+        self._make_wait_appt(priority_signals=[self._signal("foreign_body")], name="Paciente Persistido")
+        self._login_as(client, "scheduler")
+        content = client.get("/scheduler/").content.decode()
+        assert "Suspeita de corpo estranho" in content
+
+    def test_malformed_payload_no_500_and_no_container(self, client) -> None:
+        """Payload malformado/desconhecido não causa 500 nem renderiza badges."""
+        self._make_wait_appt(priority_signals="não-lista", name="Paciente Malformado")
+        self._make_wait_appt(
+            priority_signals=[
+                "junk",
+                None,
+                {"code": "unknown_signal", "version": 1},
+                {"code": "foreign_body", "version": 999},
+            ],
+            name="Paciente Lixo",
+        )
+        self._login_as(client, "scheduler")
+        response = client.get("/scheduler/")
+        assert response.status_code == 200
+        content = response.content.decode()
+        assert "Paciente Malformado" in content
+        assert "Paciente Lixo" in content
+        assert "data-priority-signals" not in content
+
+    # ── R2: Ciências operacionais e intercorrências ───────────────────
+
+    def test_immediate_notice_card_shows_badges(self, client) -> None:
+        """Card de ciência operacional (fluxo sem agendamento) mostra badges."""
+        nir = self._make_nir("nir_immed_prio@test.com")
+        case = Case.objects.create(
+            created_by=nir,
+            status=CaseStatus.WAIT_R1_CLEANUP_THUMBS,
+            doctor_decision="accept",
+            doctor_admission_flow="immediate",
+            priority_signals=[self._signal("pediatric", "8 anos")],
+            structured_data={"patient": {"name": "Vinda Imediata Sinal", "age": 8, "gender": "M"}},
+        )
+        CaseEvent.objects.create(
+            case=case,
+            actor_type="human",
+            actor=nir,
+            event_type="IMMEDIATE_ADMISSION_OPERATIONAL_NOTICE",
+            timestamp=timezone.now(),
+        )
+        self._login_as(client, "scheduler")
+        content = client.get("/scheduler/").content.decode()
+        assert "Vinda Imediata Sinal" in content
+        assert 'data-priority-signal-code="pediatric"' in content
+        assert "8 anos" in content
+
+    def test_operational_issue_card_shows_badges(self, client) -> None:
+        """Card de intercorrência pós-aceitação mostra badges."""
+        self._make_nir("nir_issue_prio@test.com")
+        Case.objects.create(
+            created_by=self._make_nir("nir_issue_prio2@test.com"),
+            status=CaseStatus.WAIT_APPT,
+            doctor_decision="accept",
+            doctor_admission_flow="scheduled",
+            priority_signals=[self._signal("foreign_body")],
+            post_schedule_issue_status="opened",
+            post_acceptance_issue_context="operational_notice",
+            structured_data={"patient": {"name": "Intercorrência Sinal", "age": 55, "gender": "F"}},
+        )
+        self._login_as(client, "scheduler")
+        content = client.get("/scheduler/").content.decode()
+        assert "Intercorrência Sinal" in content
+        assert 'data-priority-signal-code="foreign_body"' in content
+
+    def test_acknowledged_notice_card_shows_badges(self, client) -> None:
+        """Card de ciência confirmada hoje mostra badges."""
+        nir = self._make_nir("nir_ack_prio@test.com")
+        scheduler_user = self._login_as(client, "scheduler")
+        case = Case.objects.create(
+            created_by=nir,
+            status=CaseStatus.WAIT_R1_CLEANUP_THUMBS,
+            doctor_decision="accept",
+            doctor_admission_flow="immediate",
+            priority_signals=[self._signal("caustic_ingestion")],
+            structured_data={"patient": {"name": "Ciência Confirmada Sinal", "age": 60, "gender": "F"}},
+        )
+        CaseEvent.objects.create(
+            case=case,
+            actor_type="human",
+            actor=scheduler_user,
+            event_type="SCHEDULER_OPERATIONAL_NOTICE_ACK",
+            timestamp=timezone.now(),
+        )
+        content = client.get("/scheduler/?tab=processed").content.decode()
+        assert "Ciência Confirmada Sinal" in content
+        assert 'data-priority-signal-code="caustic_ingestion"' in content
+
+    # ── R2: Processados ────────────────────────────────────────────────
+
+    def test_processed_card_preserves_labels(self, client) -> None:
+        """Card processado hoje preserva badges persistidos."""
+        scheduler_user = self._login_as(client, "scheduler")
+        nir = self._make_nir("nir_proc_prio@test.com")
+        Case.objects.create(
+            created_by=nir,
+            status=CaseStatus.WAIT_R1_CLEANUP_THUMBS,
+            doctor_decision="accept",
+            doctor_admission_flow="scheduled",
+            scheduler=scheduler_user,
+            appointment_status="confirmed",
+            appointment_decided_at=timezone.now(),
+            priority_signals=[self._signal("gastrostomy")],
+            structured_data={"patient": {"name": "Processado Sinal", "age": 70, "gender": "M"}},
+        )
+        content = client.get("/scheduler/?tab=processed").content.decode()
+        assert "Processado Sinal" in content
+        assert 'data-priority-signal-code="gastrostomy"' in content
+        assert "Gastrostomia" in content
+
+    def test_processed_card_hides_container_without_signals(self, client) -> None:
+        """Card processado sem sinais não renderiza container."""
+        scheduler_user = self._login_as(client, "scheduler")
+        nir = self._make_nir("nir_proc_nosig@test.com")
+        Case.objects.create(
+            created_by=nir,
+            status=CaseStatus.WAIT_R1_CLEANUP_THUMBS,
+            doctor_decision="accept",
+            doctor_admission_flow="scheduled",
+            scheduler=scheduler_user,
+            appointment_status="confirmed",
+            appointment_decided_at=timezone.now(),
+            priority_signals=[],
+            structured_data={"patient": {"name": "Processado Sem Sinal", "age": 70, "gender": "M"}},
+        )
+        content = client.get("/scheduler/?tab=processed").content.decode()
+        assert "Processado Sem Sinal" in content
+        assert "data-priority-signals" not in content
+
+    # ── R3: Confirmação ────────────────────────────────────────────────
+
+    def test_confirm_shows_badges_before_diagnosis(self, client) -> None:
+        """Confirmação mostra badges antes da tabela de dados/diagnóstico."""
+        self._login_as(client, "scheduler")
+        case = self._make_wait_appt(
+            priority_signals=[self._signal("caustic_ingestion", "há 1 semana"), self._signal("pediatric", "10 anos")],
+            name="Confirmar Sinal",
+        )
+        case.summary_text = "Diagnóstico alvo da confirmação"
+        case.save()
+        response = client.get(f"/scheduler/{case.case_id}/")
+        assert response.status_code == 200
+        content = response.content.decode()
+        assert "data-priority-signals" in content
+        assert 'data-priority-signal-code="caustic_ingestion"' in content
+        idx_badges = content.index("data-priority-signals")
+        idx_diagnosis = content.index("Diagnóstico alvo da confirmação")
+        assert idx_badges < idx_diagnosis
+
+    def test_confirm_hides_container_without_signals(self, client) -> None:
+        """Confirmação sem sinais não renderiza container."""
+        self._login_as(client, "scheduler")
+        case = self._make_wait_appt(priority_signals=[], name="Confirmar Sem Sinal")
+        response = client.get(f"/scheduler/{case.case_id}/")
+        assert response.status_code == 200
+        content = response.content.decode()
+        assert "data-priority-signals" not in content
+
+    def test_confirm_post_schedule_issue_shows_badges(self, client) -> None:
+        """Template de intercorrência pós-aceitação mantém badges no topo."""
+        self._login_as(client, "scheduler")
+        case = self._make_wait_appt(
+            priority_signals=[self._signal("echoendoscopy")],
+            name="PSI Sinal",
+            post_schedule_issue_status="opened",
+        )
+        response = client.get(f"/scheduler/{case.case_id}/")
+        assert response.status_code == 200
+        content = response.content.decode()
+        assert "Intercorrência Pós-Aceitação" in content  # template PSI renderizado
+        assert 'data-priority-signal-code="echoendoscopy"' in content
+
+    # ── R4: Detalhes ───────────────────────────────────────────────────
+
+    def test_processed_detail_shows_badges_at_top(self, client) -> None:
+        """Detalhe processado (read-only) mostra badges no topo."""
+        scheduler_user = self._login_as(client, "scheduler")
+        nir = self._make_nir("nir_detail_proc@test.com")
+        case = Case.objects.create(
+            created_by=nir,
+            status=CaseStatus.WAIT_R1_CLEANUP_THUMBS,
+            doctor_decision="accept",
+            doctor_admission_flow="scheduled",
+            scheduler=scheduler_user,
+            appointment_status="confirmed",
+            appointment_decided_at=timezone.now(),
+            priority_signals=[self._signal("foreign_body"), self._signal("gastrostomy")],
+            structured_data={"patient": {"name": "Detalhe Processado Sinal", "age": 65, "gender": "F"}},
+        )
+        case.summary_text = "Diagnóstico alvo do detalhe processado"
+        case.save()
+        response = client.get(f"/scheduler/processed/{case.case_id}/")
+        assert response.status_code == 200
+        content = response.content.decode()
+        assert "data-priority-signals" in content
+        idx_badges = content.index("data-priority-signals")
+        idx_diag = content.index("Diagnóstico alvo do detalhe processado")
+        assert idx_badges < idx_diag
+        assert 'data-priority-signal-code="foreign_body"' in content
+        assert 'data-priority-signal-code="gastrostomy"' in content
+
+    def test_contextual_detail_shows_badges_at_top(self, client) -> None:
+        """Detalhe contextual (por notificação) mostra badges no topo."""
+        from apps.accounts.models import UserNotification
+
+        scheduler_user = self._login_as(client, "scheduler")
+        nir = self._make_nir("nir_ctx_prio@test.com")
+        case = Case.objects.create(
+            created_by=nir,
+            status=CaseStatus.WAIT_R1_CLEANUP_THUMBS,
+            doctor_decision="accept",
+            doctor_admission_flow="scheduled",
+            appointment_status="confirmed",
+            priority_signals=[self._signal("esophageal_dilation")],
+            structured_data={"patient": {"name": "Contexto Sinal", "age": 50, "gender": "M"}},
+        )
+        UserNotification.objects.create(
+            recipient=scheduler_user,
+            case=case,
+            title="Você foi mencionado em um caso",
+            body_preview="teste",
+        )
+        response = client.get(f"/scheduler/context/{case.case_id}/")
+        assert response.status_code == 200
+        content = response.content.decode()
+        assert "data-priority-signals" in content
+        assert 'data-priority-signal-code="esophageal_dilation"' in content
+
+    def test_contextual_detail_historical_shows_badges(self, client) -> None:
+        """Detalhe histórico/read-only autorizado mostra badges."""
+        self._login_as(client, "scheduler")
+        nir = self._make_nir("nir_hist_prio@test.com")
+        case = Case.objects.create(
+            created_by=nir,
+            status=CaseStatus.APPT_CONFIRMED,
+            doctor_decision="accept",
+            doctor_admission_flow="scheduled",
+            appointment_status="confirmed",
+            priority_signals=[self._signal("caustic_ingestion")],
+            structured_data={"patient": {"name": "Histórico Sinal", "age": 44, "gender": "F"}},
+        )
+        response = client.get(f"/scheduler/context/{case.case_id}/")
+        assert response.status_code == 200
+        content = response.content.decode()
+        assert "data-priority-signals" in content
+        assert 'data-priority-signal-code="caustic_ingestion"' in content
+
+    def test_detail_hides_container_without_signals(self, client) -> None:
+        """Detalhe processado sem sinais não renderiza container."""
+        scheduler_user = self._login_as(client, "scheduler")
+        nir = self._make_nir("nir_detail_nosig@test.com")
+        case = Case.objects.create(
+            created_by=nir,
+            status=CaseStatus.WAIT_R1_CLEANUP_THUMBS,
+            doctor_decision="accept",
+            doctor_admission_flow="scheduled",
+            scheduler=scheduler_user,
+            appointment_status="confirmed",
+            appointment_decided_at=timezone.now(),
+            priority_signals=[],
+            structured_data={"patient": {"name": "Detalhe Sem Sinal", "age": 65, "gender": "F"}},
+        )
+        response = client.get(f"/scheduler/processed/{case.case_id}/")
+        assert response.status_code == 200
+        content = response.content.decode()
+        assert "Detalhe Sem Sinal" in content
+        assert "data-priority-signals" not in content
+
+    # ── R5: Escaping ───────────────────────────────────────────────────
+
+    def test_detail_escapes_malicious_badge_content(self, client) -> None:
+        """Detail com conteúdo malicioso continua escapado pelo template."""
+        scheduler_user = self._login_as(client, "scheduler")
+        nir = self._make_nir("nir_xss_prio@test.com")
+        case = Case.objects.create(
+            created_by=nir,
+            status=CaseStatus.WAIT_R1_CLEANUP_THUMBS,
+            doctor_decision="accept",
+            doctor_admission_flow="scheduled",
+            scheduler=scheduler_user,
+            appointment_status="confirmed",
+            appointment_decided_at=timezone.now(),
+            priority_signals=[
+                {
+                    "code": "caustic_ingestion",
+                    "category": "clinical_alert",
+                    "detail": "<script>alert(1)</script>",
+                    "version": 1,
+                }
+            ],
+            structured_data={"patient": {"name": "XSS Detail", "age": 30, "gender": "M"}},
+        )
+        response = client.get(f"/scheduler/processed/{case.case_id}/")
+        assert response.status_code == 200
+        content = response.content.decode()
+        assert "&lt;script&gt;alert(1)&lt;/script&gt;" in content
+        assert "<script>alert(1)</script>" not in content
+
+    # ── R6: Não regressão ──────────────────────────────────────────────
+
+    def test_confirm_preserves_lock_token_form_action_and_fields(self, client) -> None:
+        """Lock token, action POST, csrf e campos existentes permanecem."""
+        self._login_as(client, "scheduler")
+        case = self._make_wait_appt(priority_signals=[self._signal("foreign_body")], name="Lock Sinal")
+        response = client.get(f"/scheduler/{case.case_id}/")
+        assert response.status_code == 200
+        content = response.content.decode()
+        assert 'id="work-lock-config"' in content
+        assert "data-lock-token=" in content
+        assert 'data-lock-token=""' not in content  # token preenchido
+        assert f'action="/scheduler/{case.case_id}/submit/"' in content
+        assert 'name="lock_token"' in content
+        assert 'name="decision"' in content
+        assert 'name="appointment_date"' in content
+        assert 'name="appointment_time"' in content
+        assert "csrfmiddlewaretoken" in content
+
+    def test_confirm_still_blocks_doctor_and_nir(self, client) -> None:
+        """Permissões scheduler continuam bloqueando papéis indevidos."""
+        for role_name in ("doctor", "nir"):
+            self._login_as(client, role_name, username=f"{role_name}_priosig@test.com")
+            case = self._make_wait_appt(
+                priority_signals=[self._signal("foreign_body")],
+                name=f"Bloqueio {role_name}",
+            )
+            response = client.get(f"/scheduler/{case.case_id}/")
+            assert response.status_code == 302
+            assert response.url == "/"
+
+    def test_queue_counters_and_ordering_preserved_with_signals(self, client) -> None:
+        """Sinais não alteram ordenação por dias em tela nem contadores."""
+        nir = self._make_nir("nir_count_prio@test.com")
+        now = timezone.now()
+        case_a = Case.objects.create(
+            created_by=nir,
+            status=CaseStatus.WAIT_APPT,
+            regulation_days_on_screen=10,
+            doctor_decision="accept",
+            doctor_admission_flow="scheduled",
+            priority_signals=[self._signal("foreign_body")],
+            structured_data={"patient": {"name": "Count A Sinal", "age": 40, "gender": "M"}},
+        )
+        Case.objects.filter(case_id=case_a.case_id).update(created_at=now - timedelta(hours=2))
+        case_b = Case.objects.create(
+            created_by=nir,
+            status=CaseStatus.WAIT_APPT,
+            regulation_days_on_screen=2,
+            doctor_decision="accept",
+            doctor_admission_flow="scheduled",
+            priority_signals=[self._signal("pediatric", "9 anos")],
+            structured_data={"patient": {"name": "Count B Sinal", "age": 9, "gender": "F"}},
+        )
+        Case.objects.filter(case_id=case_b.case_id).update(created_at=now - timedelta(hours=1))
+        self._login_as(client, "scheduler")
+        content = client.get("/scheduler/").content.decode()
+        pos_a = content.index("Count A Sinal")
+        pos_b = content.index("Count B Sinal")
+        assert pos_a < pos_b
+        # Contador permanece inalterado (pluralização pré-existente do template).
+        assert "2 solicitaçãoções aguardando confirmação" in content

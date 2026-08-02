@@ -26,6 +26,7 @@ from apps.cases.admission import (
 )
 from apps.cases.models import Case, CaseEvent, CaseStatus
 from apps.cases.navigation import resolve_safe_next_url
+from apps.cases.priority_signals import build_priority_signal_badges
 from apps.cases.services import (
     CASE_COMMUNICATION_MAX_LENGTH,
     CaseCommunicationError,
@@ -140,6 +141,9 @@ def _build_case_card(case: Case, wait_minutes: int, user: Any = None) -> dict[st
         "has_doctor_observation": case.has_doctor_observation,
         "doctor_observation": case.doctor_observation,
         "wait_minutes": wait_minutes,
+        # Badges projetados exclusivamente do valor persistido (Slice 004) —
+        # a view nunca redetecta sinais a partir de texto bruto.
+        "priority_signal_badges": build_priority_signal_badges(case.priority_signals),
         # Lock fields
         **compute_lock_display(case, user=user),
         # Post-schedule intercurrence fields
@@ -295,6 +299,8 @@ def _build_processed_card(case: Case) -> dict[str, Any]:
         "appointment_decided_at": case.appointment_decided_at,
         "appointment_at": case.appointment_at,
         "appointment_reason": case.appointment_reason or "",
+        # Badges projetados exclusivamente do valor persistido (Slice 004).
+        "priority_signal_badges": build_priority_signal_badges(case.priority_signals),
     }
 
 
@@ -562,6 +568,8 @@ def _build_scheduler_detail_context(
         "created_at": case.created_at,
         "status_label": STATUS_LABELS.get(case.status, case.get_status_display()),
         "status_css": STATUS_CSS_CLASS.get(case.status, "status-pending"),
+        # Badges projetados exclusivamente do valor persistido (Slice 004).
+        "priority_signal_badges": build_priority_signal_badges(case.priority_signals),
         # Timeline
         "events": enriched_events,
         "steps": steps,
@@ -717,6 +725,8 @@ def _build_confirm_context(
         "support_flag_display": _get_support_flag_display(case),
         "admission_flow_display": _get_admission_flow_display(case),
         "origin_unit": case.get_origin_unit_display(compact=False),
+        # Badges projetados exclusivamente do valor persistido (Slice 004).
+        "priority_signal_badges": build_priority_signal_badges(case.priority_signals),
         # Communication thread context
         "communication_messages": case.communication_messages.select_related("author").all(),
         "can_post_communication": case.status != CaseStatus.CLEANED,

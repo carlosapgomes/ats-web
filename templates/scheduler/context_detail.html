@@ -24,6 +24,7 @@
           Caso {{ case.case_id|truncatechars:12 }}
         {% endif %}
       </h4>
+      {% include "cases/_priority_signals.html" with priority_signal_badges=priority_signal_badges %}
       <p class="text-muted mb-1">
         Registro: <strong>{{ agency_record_number|default:"—" }}</strong>
       </p>

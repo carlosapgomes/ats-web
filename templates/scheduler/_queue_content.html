@@ -34,6 +34,7 @@
                 {{ c.patient_gender }}
                 {% if c.origin_unit %} · 🏥 {{ c.origin_unit }}{% endif %}
               </div>
+              {% include "cases/_priority_signals.html" with priority_signal_badges=c.priority_signal_badges %}
               <div class="alert alert-warning py-2 px-3 mb-2 small">
                 <strong>{{ c.notice_title }}</strong><br>{{ c.notice_body }}
               </div>
@@ -88,6 +89,7 @@
                 {{ c.patient_gender }}
                 {% if c.origin_unit %} · 🏥 {{ c.origin_unit }}{% endif %}
               </div>
+              {% include "cases/_priority_signals.html" with priority_signal_badges=c.priority_signal_badges %}
               <div class="alert alert-warning py-2 px-3 mb-2 small">
                 <strong>Motivo:</strong> {{ c.issue_reason_label }}
                 {% if c.issue_message %}
@@ -153,6 +155,7 @@
             </div>
             {% endif %}
             <div class="case-meta mb-2">{% if c.agency_record_number %}Reg. {{ c.agency_record_number }} · {% endif %}{% if c.patient_age %}{{ c.patient_age }} anos · {% endif %}{{ c.patient_gender }}{% if c.origin_unit %} · 🏥 {{ c.origin_unit }}{% endif %}</div>
+            {% include "cases/_priority_signals.html" with priority_signal_badges=c.priority_signal_badges %}
             <div class="summary-box mb-2">
               <div class="row">
                 <div class="col-sm-4 mb-2"><div class="summary-label">Diagnóstico</div><div class="summary-value">{{ c.diagnosis|default:"—" }}</div></div>
@@ -201,6 +204,7 @@
               {{ c.patient_gender }}
               {% if c.origin_unit %} · 🏥 {{ c.origin_unit }}{% endif %}
             </div>
+            {% include "cases/_priority_signals.html" with priority_signal_badges=c.priority_signal_badges %}
             <div class="summary-box mb-2">
               <div class="row">
                 <div class="col-sm-4 mb-2"><div class="summary-label">Diagnóstico</div><div class="summary-value">{{ c.diagnosis|default:"—" }}</div></div>
@@ -253,6 +257,7 @@
                 {% if c.agency_record_number %}Reg. {{ c.agency_record_number }} · {% endif %}
                 {% if c.origin_unit %}🏥 {{ c.origin_unit }}{% endif %}
               </div>
+              {% include "cases/_priority_signals.html" with priority_signal_badges=c.priority_signal_badges %}
               <div class="summary-box mb-2">
                 <div class="row">
                   <div class="col-sm-3 mb-2"><div class="summary-label">Fluxo</div><div class="summary-value">{{ c.admission_flow_display }}</div></div>

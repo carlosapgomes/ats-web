@@ -25,6 +25,7 @@
   <div class="col-lg-5">
     <div class="card p-4 mb-3">
       <h5 class="mb-3">📋 Dados do Caso</h5>
+      {% include "cases/_priority_signals.html" with priority_signal_badges=priority_signal_badges %}
       <table class="table table-sm mb-0">
         <tr><td class="text-muted" style="width:40%;">Paciente</td><td><strong>{{ patient_name }}</strong></td></tr>
         <tr><td class="text-muted">Registro</td><td>{{ case.agency_record_number|default:case.case_id|truncatechars:20 }}</td></tr>
