@@ -1775,3 +1775,398 @@ class TestCaseDetailCorrectionVisibility:
         content = response.content.decode()
         assert "Reenvio corrigido criado" in content
         assert "Caso corrigido por novo envio" in content
+
+
+@pytest.mark.django_db
+class TestNirPrioritySignalBadges:
+    """Slice 005: badges persistidos acompanham o caso no NIR.
+
+    Lista "Meus Casos", detalhe operacional/resultado e detalhe encerrado
+    projetam badges exclusivamente de Case.priority_signals via
+    build_priority_signal_badges + partial compartilhado. Nenhum texto bruto
+    é redetectado; payload vazio/malformado não renderiza container nem causa
+    500; locks/confirmação/filtros/permissões/histórico permanecem intactos.
+    """
+
+    @staticmethod
+    def _signal(code: str, detail: str = "") -> dict[str, object]:
+        category = {
+            "foreign_body": "clinical_alert",
+            "caustic_ingestion": "clinical_alert",
+            "pediatric": "special_population",
+            "echoendoscopy": "special_procedure",
+            "esophageal_dilation": "special_procedure",
+            "gastrostomy": "special_procedure",
+        }[code]
+        return {"code": code, "category": category, "detail": detail, "version": 1}
+
+    def _open_detail(self, client, user, *, priority_signals, status=CaseStatus.WAIT_DOCTOR, **overrides):
+        case = Case.objects.create(
+            created_by=user,
+            agency_record_number="NIR-BADGE-001",
+            status=status,
+            priority_signals=priority_signals,
+            structured_data={"patient": {"name": "Paciente Badge"}},
+            **overrides,
+        )
+        return client.get(reverse("intake:case_detail", args=[case.case_id])), case
+
+    def _closed_detail(self, client, user, *, priority_signals, **overrides):
+        defaults = {
+            "created_by": user,
+            "agency_record_number": "NIR-CLEAN-001",
+            "status": CaseStatus.CLEANED,
+            "doctor_decision": "accept",
+            "doctor_admission_flow": "scheduled",
+            "appointment_status": "confirmed",
+            "priority_signals": priority_signals,
+            "structured_data": {"patient": {"name": "Paciente Encerrado"}},
+        }
+        defaults.update(overrides)
+        case = Case.objects.create(**defaults)
+        return client.get(reverse("intake:closed_case_detail", args=[case.case_id])), case
+
+    # ── R1: "Meus Casos" ───────────────────────────────────────────────
+
+    def test_my_cases_shows_multiple_badges_in_canonical_order(self, client) -> None:
+        """Lista mostra múltiplos sinais persistidos na ordem canônica."""
+        client, user = _nir_client(client)
+        Case.objects.create(
+            created_by=user,
+            agency_record_number="ORDEM-001",
+            status=CaseStatus.WAIT_DOCTOR,
+            priority_signals=[
+                self._signal("gastrostomy"),
+                self._signal("caustic_ingestion", "há 2 dias"),
+                self._signal("foreign_body"),
+            ],
+            structured_data={"patient": {"name": "Paciente Ordem"}},
+        )
+        response = client.get(reverse("intake:my_cases"))
+        assert response.status_code == 200
+        content = response.content.decode()
+        assert "Paciente Ordem" in content
+        idx_fb = content.index("Suspeita de corpo estranho")
+        idx_ci = content.index("Ingestão cáustica/corrosiva")
+        idx_gs = content.index("Gastrostomia")
+        assert idx_fb < idx_ci < idx_gs
+
+    def test_my_cases_hides_container_without_signals(self, client) -> None:
+        """Caso sem sinais persistidos não renderiza container de badges."""
+        client, user = _nir_client(client)
+        Case.objects.create(
+            created_by=user,
+            agency_record_number="SEM-SINAL",
+            status=CaseStatus.WAIT_DOCTOR,
+            priority_signals=[],
+            structured_data={"patient": {"name": "Paciente Sem Sinal"}},
+        )
+        content = client.get(reverse("intake:my_cases")).content.decode()
+        assert "Paciente Sem Sinal" in content
+        assert "data-priority-signals" not in content
+        assert "Suspeita de corpo estranho" not in content
+
+    def test_my_cases_uses_persisted_value_not_raw_text(self, client) -> None:
+        """Texto bruto com sinal mas valor persistido vazio → nenhum badge."""
+        client, user = _nir_client(client)
+        Case.objects.create(
+            created_by=user,
+            agency_record_number="TEXTO-SINAL",
+            status=CaseStatus.WAIT_DOCTOR,
+            priority_signals=[],
+            extracted_text="Suspeita de corpo estranho em esôfago.",
+            structured_data={"patient": {"name": "Paciente Texto"}},
+        )
+        content = client.get(reverse("intake:my_cases")).content.decode()
+        assert "data-priority-signals" not in content
+        assert "Suspeita de corpo estranho" not in content
+
+    def test_my_cases_shows_persisted_badge_without_text(self, client) -> None:
+        """Valor persistido com sinal mas sem texto extraído → badge exibido."""
+        client, user = _nir_client(client)
+        Case.objects.create(
+            created_by=user,
+            agency_record_number="PERSISTIDO",
+            status=CaseStatus.WAIT_DOCTOR,
+            priority_signals=[self._signal("foreign_body")],
+            structured_data={"patient": {"name": "Paciente Persistido"}},
+        )
+        content = client.get(reverse("intake:my_cases")).content.decode()
+        assert "Suspeita de corpo estranho" in content
+
+    # ── R2: Detalhe operacional / resultado ────────────────────────────
+
+    def test_case_detail_shows_badges_at_top_before_stepper_and_result(self, client) -> None:
+        """Detalhe aberto mostra badges no card superior, antes de stepper e resultado."""
+        client, user = _nir_client(client)
+        response, _ = self._open_detail(
+            client,
+            user,
+            priority_signals=[self._signal("caustic_ingestion", "há 3 semanas"), self._signal("echoendoscopy")],
+            status=CaseStatus.APPT_CONFIRMED,
+            appointment_at=timezone.now(),
+            doctor_support_flag="anesthesist",
+            doctor_admission_flow="scheduled",
+        )
+        assert response.status_code == 200
+        content = response.content.decode()
+        assert "data-priority-signals" in content
+        assert 'data-priority-signal-code="caustic_ingestion"' in content
+        assert 'data-priority-signal-code="echoendoscopy"' in content
+        idx_badges = content.index("data-priority-signals")
+        assert idx_badges < content.index("Progresso do Caso")
+        assert idx_badges < content.index("Resultado Final")
+
+    def test_case_detail_hides_container_without_signals(self, client) -> None:
+        """Detalhe aberto sem sinais não renderiza container."""
+        client, user = _nir_client(client)
+        response, _ = self._open_detail(client, user, priority_signals=[])
+        assert response.status_code == 200
+        content = response.content.decode()
+        assert "data-priority-signals" not in content
+
+    @pytest.mark.parametrize(
+        ("result_type", "status", "overrides", "expected_label"),
+        [
+            (
+                "accepted_scheduled",
+                CaseStatus.APPT_CONFIRMED,
+                {"doctor_support_flag": "anesthesist", "doctor_admission_flow": "scheduled"},
+                "Agendamento Confirmado",
+            ),
+            (
+                "accepted_immediate",
+                CaseStatus.WAIT_R1_CLEANUP_THUMBS,
+                {
+                    "doctor_decision": "accept",
+                    "doctor_support_flag": "anesthesist",
+                    "doctor_admission_flow": "immediate",
+                },
+                "Vinda Imediata Autorizada",
+            ),
+            (
+                "doctor_denied",
+                CaseStatus.DOCTOR_DENIED,
+                {"doctor_decision": "deny", "doctor_reason": "Faltam exames"},
+                "Recusado pelo Médico",
+            ),
+            (
+                "appt_denied",
+                CaseStatus.APPT_DENIED,
+                {
+                    "appointment_reason": "Vaga indisponível",
+                    "doctor_decision": "accept",
+                    "doctor_admission_flow": "scheduled",
+                },
+                "Agendamento Negado",
+            ),
+            ("failed", CaseStatus.FAILED, {}, "Falha no Processamento"),
+            (
+                "manual_review_required",
+                CaseStatus.WAIT_R1_CLEANUP_THUMBS,
+                {
+                    "suggested_action": {
+                        "decision": "manual_review_required",
+                        "reason_code": "outside_scope",
+                        "reason_text": "Exame fora de escopo",
+                    }
+                },
+                "Revisão Manual Obrigatória",
+            ),
+            (
+                "receipt_scheduled",
+                CaseStatus.WAIT_R1_CLEANUP_THUMBS,
+                {"doctor_decision": "accept", "doctor_support_flag": "none", "doctor_admission_flow": "scheduled"},
+                "Agendamento Confirmado",
+            ),
+        ],
+    )
+    def test_case_detail_single_top_badge_for_each_result_type(
+        self, client, result_type: str, status: str, overrides: dict[str, object], expected_label: str
+    ) -> None:
+        """Cada tipo de resultado mantém o badge no topo sem include duplicado."""
+        client, user = _nir_client(client)
+        overrides = dict(overrides)
+        if result_type in ("accepted_scheduled", "receipt_scheduled"):
+            overrides.setdefault("appointment_at", timezone.now())
+        response, _ = self._open_detail(
+            client,
+            user,
+            priority_signals=[self._signal("foreign_body")],
+            status=status,
+            **overrides,
+        )
+        assert response.status_code == 200
+        content = response.content.decode()
+        assert expected_label in content
+        # O include vive fora dos branches de resultado → badge aparece uma única vez.
+        assert content.count('data-priority-signal-code="foreign_body"') == 1
+
+    # ── R3: Detalhe encerrado ──────────────────────────────────────────
+
+    def test_closed_case_detail_shows_badges_for_cleaned_with_signals(self, client) -> None:
+        """Caso novo encerrado com sinais persistidos mostra badges no histórico."""
+        client, user = _nir_client(client)
+        response, _ = self._closed_detail(
+            client,
+            user,
+            priority_signals=[self._signal("pediatric", "10 anos"), self._signal("gastrostomy")],
+        )
+        assert response.status_code == 200
+        content = response.content.decode()
+        assert "Paciente Encerrado" in content
+        assert "data-priority-signals" in content
+        assert 'data-priority-signal-code="pediatric"' in content
+        assert 'data-priority-signal-code="gastrostomy"' in content
+        assert "10 anos" in content
+
+    def test_closed_case_detail_hides_container_for_old_cleaned_without_signals(self, client) -> None:
+        """Caso CLEANED antigo sem backfill ([]) não mostra nenhum container."""
+        client, user = _nir_client(client)
+        response, _ = self._closed_detail(client, user, priority_signals=[])
+        assert response.status_code == 200
+        content = response.content.decode()
+        assert "data-priority-signals" not in content
+        assert "Suspeita de corpo estranho" not in content
+
+    def test_closed_case_detail_does_not_reclassify_historical_cleaned(self, client) -> None:
+        """Abrir histórico não classifica tardiamente nem muta priority_signals."""
+        client, user = _nir_client(client)
+        response, case = self._closed_detail(
+            client,
+            user,
+            priority_signals=[],
+            extracted_text="Suspeita de corpo estranho em esôfago. Ecoendoscopia com punção.",
+        )
+        assert response.status_code == 200
+        content = response.content.decode()
+        assert "data-priority-signals" not in content
+        fresh = Case.objects.get(pk=case.pk)
+        assert fresh.priority_signals == []
+
+    # ── R4: Segurança (malformado + escaping) ──────────────────────────
+
+    def test_malformed_payload_no_500_and_no_container(self, client) -> None:
+        """Payload malformado/desconhecido não causa 500 nem renderiza badges."""
+        client, user = _nir_client(client)
+        Case.objects.create(
+            created_by=user,
+            agency_record_number="MALF-1",
+            status=CaseStatus.WAIT_DOCTOR,
+            priority_signals="não-lista",
+            structured_data={"patient": {"name": "Paciente Malformado"}},
+        )
+        Case.objects.create(
+            created_by=user,
+            agency_record_number="MALF-2",
+            status=CaseStatus.WAIT_DOCTOR,
+            priority_signals=[
+                "junk",
+                None,
+                {"code": "unknown_signal", "version": 1},
+                {"code": "foreign_body", "version": 999},
+            ],
+            structured_data={"patient": {"name": "Paciente Lixo"}},
+        )
+        response = client.get(reverse("intake:my_cases"))
+        assert response.status_code == 200
+        content = response.content.decode()
+        assert "Paciente Malformado" in content
+        assert "Paciente Lixo" in content
+        assert "data-priority-signals" not in content
+        # Detalhe aberto com payload lixo também não quebra.
+        detail_case = Case.objects.create(
+            created_by=user,
+            agency_record_number="MALF-3",
+            status=CaseStatus.WAIT_DOCTOR,
+            priority_signals=[{"code": "gastrostomy", "version": 2}],
+            structured_data={"patient": {"name": "Paciente Versão"}},
+        )
+        detail_response = client.get(reverse("intake:case_detail", args=[detail_case.case_id]))
+        assert detail_response.status_code == 200
+        assert "data-priority-signals" not in detail_response.content.decode()
+
+    def test_case_detail_escapes_malicious_badge_content(self, client) -> None:
+        """Detail malicioso é escapado pelo template (autoescape)."""
+        client, user = _nir_client(client)
+        response, _ = self._open_detail(
+            client,
+            user,
+            priority_signals=[
+                {
+                    "code": "caustic_ingestion",
+                    "category": "clinical_alert",
+                    "detail": "<script>alert(1)</script>",
+                    "version": 1,
+                }
+            ],
+        )
+        assert response.status_code == 200
+        content = response.content.decode()
+        assert "&lt;script&gt;alert(1)&lt;/script&gt;" in content
+        assert "<script>alert(1)</script>" not in content
+
+    # ── R5: Não regressão ──────────────────────────────────────────────
+
+    def test_nir_permissions_preserved_doctor_blocked(self, client) -> None:
+        """Doctor continua bloqueado do detalhe NIR; NIR continua autorizado."""
+        client, user = _nir_client(client)
+        case = Case.objects.create(
+            created_by=user,
+            agency_record_number="PERM-001",
+            status=CaseStatus.WAIT_DOCTOR,
+            priority_signals=[self._signal("foreign_body")],
+            structured_data={"patient": {"name": "Paciente Permissão"}},
+        )
+        client, _ = _doctor_client(client)
+        response = client.get(reverse("intake:case_detail", args=[case.case_id]))
+        assert response.status_code in (302, 404)
+        # Volta como NIR: autorizado (mesmo usuário NIR de volta).
+        client.force_login(user)
+        session = client.session
+        session["active_role"] = "nir"
+        session.save()
+        response = client.get(reverse("intake:case_detail", args=[case.case_id]))
+        assert response.status_code == 200
+
+    def test_receipt_confirmation_preserved_for_wait_r1(self, client) -> None:
+        """WAIT_R1 com sinais mantém confirmação de recebimento e lock."""
+        client, user = _nir_client(client)
+        case = Case.objects.create(
+            created_by=user,
+            agency_record_number="RECEIPT-001",
+            status=CaseStatus.WAIT_R1_CLEANUP_THUMBS,
+            doctor_decision="accept",
+            doctor_admission_flow="scheduled",
+            appointment_at=timezone.now(),
+            priority_signals=[self._signal("echoendoscopy")],
+            structured_data={"patient": {"name": "Paciente Recebimento"}},
+        )
+        response = client.get(reverse("intake:case_detail", args=[case.case_id]))
+        assert response.status_code == 200
+        content = response.content.decode()
+        # Lock adquirido pela view (token presente) e botão de confirmação visível.
+        assert 'id="work-lock-config"' in content
+        assert "data-lock-token=" in content
+        assert 'name="lock_token"' in content
+        assert "Confirmar Recebimento" in content
+        assert 'data-priority-signal-code="echoendoscopy"' in content
+
+    def test_my_cases_filters_links_and_polling_preserved(self, client) -> None:
+        """Filtros, links, polling e locks da lista permanecem com sinais."""
+        client, user = _nir_client(client)
+        Case.objects.create(
+            created_by=user,
+            agency_record_number="FILTRO-001",
+            status=CaseStatus.WAIT_DOCTOR,
+            priority_signals=[self._signal("gastrostomy")],
+            structured_data={"patient": {"name": "Paciente Filtro"}},
+        )
+        response = client.get(reverse("intake:my_cases") + "?q=FILTRO")
+        assert response.status_code == 200
+        content = response.content.decode()
+        assert "Paciente Filtro" in content
+        assert 'hx-get="/cases/my-cases/partial/?q=FILTRO"' in content
+        assert 'hx-trigger="every 20s"' in content
+        assert "Casos Encerrados" in content
+        assert "Aguardando médico" in content

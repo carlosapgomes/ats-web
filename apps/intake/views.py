@@ -22,6 +22,7 @@ from apps.cases.admission import (
 )
 from apps.cases.models import Case, CaseAttachment, CaseStatus
 from apps.cases.navigation import resolve_safe_next_url
+from apps.cases.priority_signals import build_priority_signal_badges
 from apps.cases.services import (
     CASE_COMMUNICATION_MAX_LENGTH,
     ELIGIBLE_SUPPLEMENTAL_STATUSES,
@@ -342,6 +343,9 @@ def _my_cases_context(request: HttpRequest) -> dict[str, object]:
             "has_doctor_observation": c.has_doctor_observation,
             "created_by_other_nir": c.created_by_id != user.pk,
             "created_by_display": c.created_by.get_full_name() or c.created_by.username,
+            # Badges projetados exclusivamente do valor persistido (Slice 005) —
+            # a view nunca redetecta sinais a partir de texto bruto.
+            "priority_signal_badges": build_priority_signal_badges(c.priority_signals),
             # Lock info for WAIT_R1_CLEANUP_THUMBS cases (other statuses: all clear)
             **(
                 compute_lock_display(c, user=user)
@@ -637,6 +641,9 @@ def case_detail(request: HttpRequest, case_id: uuid.UUID) -> HttpResponse:
             "result_info": result_info,
             "patient_name": patient_name,
             "prior_case_lookup": prior_case_lookup,
+            # Badges persistidos no topo do detalhe (Slice 005) — projeção
+            # compartilhada; nunca reexecuta detecção/LLM.
+            "priority_signal_badges": build_priority_signal_badges(case.priority_signals),
             # Parametrização para template compartilhado
             "show_intake_nav": True,
             "back_url": reverse("intake:my_cases"),
@@ -1381,6 +1388,9 @@ def closed_case_detail(request: HttpRequest, case_id: uuid.UUID) -> HttpResponse
         "result_info": result_info,
         "patient_name": patient_name,
         "origin_unit": origin_unit,
+        # Badges persistidos no histórico (Slice 005) — projeção compartilhada;
+        # casos CLEANED antigos sem backfill não exibem container.
+        "priority_signal_badges": build_priority_signal_badges(case.priority_signals),
         # Comunicação operacional (read-only)
         **_closed_detail_communication_context(case, request),
         # Intercorrência

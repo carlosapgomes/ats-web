@@ -24,6 +24,7 @@
               {% if item.patient_gender %} · {{ item.patient_gender }}{% endif %}
               {% if item.origin_unit %} · 🏥 {{ item.origin_unit }}{% endif %}
             </div>
+            {% include "cases/_priority_signals.html" with priority_signal_badges=item.priority_signal_badges %}
             {% if item.created_by_other_nir %}
             <div class="mt-1">
               <span class="badge bg-secondary-subtle text-secondary-emphasis">👤 Criado por {{ item.created_by_display }}</span>

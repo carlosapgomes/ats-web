@@ -2,7 +2,7 @@
 
 ## Status
 
-- [ ] Pendente
+- [x] Concluído (evidência em `/tmp/eda-priority-signals-slice-005-report.md`)
 
 ## Handoff para implementador LLM com contexto zero
 
