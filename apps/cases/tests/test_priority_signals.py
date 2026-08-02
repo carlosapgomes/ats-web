@@ -403,6 +403,62 @@ class TestResolvePrioritySignals:
     def test_eus_current_request_forms_still_signal(self, positive_eus_text: str) -> None:
         assert _codes(source_text=positive_eus_text) == ["echoendoscopy"]
 
+    # ── Quarta correção: negação/histórico abrangem a lista fechada (C20–C22) ──
+
+    @pytest.mark.parametrize(
+        "negated_mixed_text",
+        [
+            "Nega indicação de CPRE e EUS.",
+            "Nega a indicação de colonoscopia e ecoendoscopia.",
+            "Sem indicação de CPRE e EUS.",
+            "Não há indicação de CPRE e EUS.",
+            "Ausência de indicação de colonoscopia e ecoendoscopia.",
+        ],
+    )
+    def test_negation_spans_mixed_list_does_not_signal(self, negated_mixed_text: str) -> None:
+        assert _codes(source_text=negated_mixed_text) == []
+
+    @pytest.mark.parametrize(
+        "negated_mixed_text",
+        [
+            "Sem indicação de colonoscopia e ecoendoscopia.",
+            "Não há indicação de CPRE e dilatação esofágica.",
+            "Ausência de indicação de colonoscopia e gastrostomia.",
+        ],
+    )
+    def test_negation_spans_mixed_list_other_signal_types(self, negated_mixed_text: str) -> None:
+        assert _codes(source_text=negated_mixed_text) == []
+
+    @pytest.mark.parametrize(
+        "historical_mixed_text",
+        [
+            "Histórico de solicitação de EUS.",
+            "Histórico de solicitação de ecoendoscopia.",
+            "Histórico de solicitação de dilatação esofágica.",
+            "Histórico de solicitação de CPRE e EUS.",
+            "Histórico de indicação de colonoscopia e ecoendoscopia.",
+            "Histórico de encaminhamento para CPRE e dilatação esofágica.",
+        ],
+    )
+    def test_history_wrapping_request_stem_does_not_signal(self, historical_mixed_text: str) -> None:
+        assert _codes(source_text=historical_mixed_text) == []
+
+    def test_negated_mixed_list_does_not_cancel_distinct_current_request(self) -> None:
+        assert _codes(source_text="Nega indicação de CPRE e EUS. Solicito EUS agora.") == ["echoendoscopy"]
+
+    def test_historical_mixed_list_does_not_cancel_distinct_current_request(self) -> None:
+        assert _codes(source_text="Histórico de solicitação de CPRE e EUS. Solicito EUS agora.") == ["echoendoscopy"]
+
+    @pytest.mark.parametrize(
+        "negated_fb_text",
+        [
+            "Nega indicação de CPRE e corpo estranho.",
+            "Sem indicação de colonoscopia e corpo estranho.",
+        ],
+    )
+    def test_foreign_body_negation_in_recognized_list_does_not_alert(self, negated_fb_text: str) -> None:
+        assert _codes(source_text=negated_fb_text) == []
+
     # ── Ingestão cáustica ─────────────────────────────────────────────
 
     def test_caustic_positive_with_time_detail(self) -> None:

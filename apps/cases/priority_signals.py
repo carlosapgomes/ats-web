@@ -143,17 +143,21 @@ _REQUEST_LIST_TERM_SOURCE = (
     r"|cpre|colonoscopia"
 )
 
+# Zero or more requested-list items ('CPRE e', 'colonoscopia,') preceding the
+# target occurrence. ONE shared grammar: request, negation and history all
+# span the same closed chain, so a qualifier can never be short-circuited by
+# an internal request stem ('indicação de CPRE e …' stays negated/historical).
+_REQUEST_LIST_PREFIX_SOURCE = r"(?:\s+(?:" + _REQUEST_LIST_TERM_SOURCE + r")\b(?:\s+(?:e\b|,))?)*"
+
 # Request stem before the occurrence, with approved connectors (fully
 # optional, so 'Solicitação: EUS' and 'Solicito EUS' both anchor), an
-# optional ':' and an optional small chain of requested-list terms
+# optional ':' and the shared closed list chain
 # ('Solicito EDA com ecoendoscopia e dilatação esofágica',
 # 'Solicito CPRE e ecoendoscopia').
 _REQUEST_BEFORE_OCCURRENCE_PATTERN = re.compile(
     r"\b(?:solicit|encaminh|indic|programar|confeccao)\w*\b"
     r"(?:\s*:?\s*(?:realizacao\s+de|nov[oa]|atual\s+de|de|para)?)"
-    r"(?:\s+\beda\b\s+(?:com|para))?"
-    r"(?:\s+(?:" + _REQUEST_LIST_TERM_SOURCE + r")\b(?:\s+(?:e\b|,))?)*"
-    r"\s*$"
+    r"(?:\s+\beda\b\s+(?:com|para))?" + _REQUEST_LIST_PREFIX_SOURCE + r"\s*$"
 )
 
 # Immediate labels before the occurrence: 'Exame: X', 'Procedimento: X',
@@ -173,30 +177,36 @@ _HISTORICAL_AFTER_OCCURRENCE_PATTERN = re.compile(
     r"|^\s*(?:previo|previa|anterior|previamente)\b"
     r"|^\s*no\s+historico\b"
 )
+# 'histórico de solicitação/indicação de' and 'histórico de encaminhamento
+# para' wrap the same closed list chain (C22), so an internal request stem
+# ('solicitação de CPRE e …') cannot become a current request.
 _HISTORICAL_BEFORE_OCCURRENCE_PATTERN = re.compile(
     r"\b(?:realizou)\b\s+$"
     r"|\b(?:previo|previa|anterior|previamente)\b\s*(?:de\s*)?:?\s*$"
     r"|\bhistorico\s+de\b\s*$"
+    r"|\bhistorico\s+de\b\s+(?:solicitacao|indicacao)\s+de\b" + _REQUEST_LIST_PREFIX_SOURCE + r"\s*$"
+    r"|\bhistorico\s+de\b\s+encaminhamento\s+para\b" + _REQUEST_LIST_PREFIX_SOURCE + r"\s*$"
 )
 
 # Negation qualifiers attached to this occurrence (after or before).
-# 'não solicito' spans the same small requested-list chain as the request
-# pattern ('Não solicito CPRE e EUS.'), with an optional ':'.
+# The 'indicação de' / 'não solicito' forms span the SAME closed list chain
+# as the request (C21), anchored at the end of the prefix, so items before
+# the occurrence ('CPRE e …') cannot resurrect an internal request stem.
 _NEGATION_BEFORE_OCCURRENCE_PATTERN = re.compile(
-    r"\bsem\s+indicacao\s+de\b\s*$"
+    r"\bsem\s+indicacao\s+de\b" + _REQUEST_LIST_PREFIX_SOURCE + r"\s*$"
     r"|\bsem\s+evidencia\s+de\b\s*$"
     r"|\bsem\b\s*$"
-    r"|\bnega\s+(?:a\s+)?indicacao\s+de\b\s*$"
+    r"|\bnega\s+(?:a\s+)?indicacao\s+de\b" + _REQUEST_LIST_PREFIX_SOURCE + r"\s*$"
     r"|\bnega\s+(?:a\s+)?ingestao\s+de\b\s*$"
     r"|\bnega\b\s*$"
-    r"|\bnao\s+ha\s+indicacao\s+de\b\s*$"
+    r"|\bnao\s+ha\s+indicacao\s+de\b" + _REQUEST_LIST_PREFIX_SOURCE + r"\s*$"
     r"|\bnao\s+ha\s+evidencia\s+de\b\s*$"
-    r"|\bnao\s+solicit\w*\b(?:\s*:?\s*(?:realizacao\s+de|nov[oa]|atual\s+de|de|para)?)(?:\s+(?:"
-    + _REQUEST_LIST_TERM_SOURCE
-    + r")\b(?:\s+(?:e\b|,))?)*\s*:?\s*$"
+    r"|\bnao\s+solicit\w*\b(?:\s*:?\s*(?:realizacao\s+de|nov[oa]|atual\s+de|de|para)?)"
+    + _REQUEST_LIST_PREFIX_SOURCE
+    + r"\s*:?\s*$"
     r"|\bnao\s+foi\s+identificad[oa]\b\s*$"
     r"|\bnao\s+ha\b\s*$"
-    r"|\bausencia\s+de\s+indicacao\s+de\b\s*$"
+    r"|\bausencia\s+de\s+indicacao\s+de\b" + _REQUEST_LIST_PREFIX_SOURCE + r"\s*$"
     r"|\bausencia\s+de\b\s*$"
 )
 _NEGATION_AFTER_OCCURRENCE_PATTERN = re.compile(

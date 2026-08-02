@@ -321,6 +321,27 @@ class TestMigrationForwardReal:
             ({"patient": {"age": 30}}, "Não solicito EUS. Solicito EUS agora."),
             ({"patient": {"age": 30}}, "Exame de EUS já realizado. Solicito novo EUS."),
             ({"patient": {"age": 30}}, "Não solicito CPRE e EUS."),
+            # quarta correção — C20/C21: negação com lista mista fechada
+            ({"patient": {"age": 30}}, "Nega indicação de CPRE e EUS."),
+            ({"patient": {"age": 30}}, "Nega a indicação de colonoscopia e ecoendoscopia."),
+            ({"patient": {"age": 30}}, "Sem indicação de CPRE e EUS."),
+            ({"patient": {"age": 30}}, "Não há indicação de CPRE e EUS."),
+            ({"patient": {"age": 30}}, "Ausência de indicação de colonoscopia e ecoendoscopia."),
+            ({"patient": {"age": 30}}, "Sem indicação de colonoscopia e ecoendoscopia."),
+            ({"patient": {"age": 30}}, "Não há indicação de CPRE e dilatação esofágica."),
+            ({"patient": {"age": 30}}, "Ausência de indicação de colonoscopia e gastrostomia."),
+            ({"patient": {"age": 30}}, "Nega indicação de CPRE e corpo estranho."),
+            ({"patient": {"age": 30}}, "Sem indicação de colonoscopia e corpo estranho."),
+            # quarta correção — C22: histórico envolvendo stems internos de pedido
+            ({"patient": {"age": 30}}, "Histórico de solicitação de EUS."),
+            ({"patient": {"age": 30}}, "Histórico de solicitação de ecoendoscopia."),
+            ({"patient": {"age": 30}}, "Histórico de solicitação de dilatação esofágica."),
+            ({"patient": {"age": 30}}, "Histórico de solicitação de CPRE e EUS."),
+            ({"patient": {"age": 30}}, "Histórico de indicação de colonoscopia e ecoendoscopia."),
+            ({"patient": {"age": 30}}, "Histórico de encaminhamento para CPRE e dilatação esofágica."),
+            # quarta correção — C22: ocorrência atual distinta sobrevive
+            ({"patient": {"age": 30}}, "Nega indicação de CPRE e EUS. Solicito EUS agora."),
+            ({"patient": {"age": 30}}, "Histórico de solicitação de CPRE e EUS. Solicito EUS agora."),
         ]
 
         for overrides, text in scenarios:
