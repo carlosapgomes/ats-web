@@ -40,25 +40,60 @@ CATEGORY_BY_CODE = {
 _SUPPORTED_SUBTYPES = frozenset({"foreign_body", "echoendoscopy", "esophageal_dilation", "gastrostomy"})
 
 # ── Shared per-occurrence machinery (mirror of apps/cases/priority_signals.py) ──
+# Anchored: before-patterns end at the prefix ('$'), after-patterns start at
+# the suffix ('^'); context is never borrowed from another procedure in the
+# clause.
 
 _CLAUSE_BOUNDARY_PATTERN = re.compile(r"[.;!?]|\n")
 
-_REQUEST_CONTEXT_PATTERN = re.compile(r"\b(solicit|encaminh|indic|exame|procedimento)\w*\b")
-
-_HISTORICAL_AFTER_PATTERN = re.compile(r"^\s*(?:realizad[oa]|realizado|realizada|previo|previa|anterior)\b")
-_HISTORICAL_BEFORE_PATTERN = re.compile(
-    r"\b(?:realizou|realizad[oa])\b\s+$"
-    r"|\b(?:previo|previa|anterior)\b\s*(?:de\s*)?:?\s*$"
+_PROCEDURE_TERM_SOURCE = (
+    r"ecoendoscopia|eco\s+endoscopia|eco-endoscopia"
+    r"|ultrassonografia\s+endoscopica|ultrassom\s+endoscopico"
+    r"|dilatacao\s+esofagica|dilatacao\s+do\s+esofago|dilatacao\s+de\s+esofago"
+    r"|dilatacao\s+endoscopica\s+esofagica"
+    r"|gastrostomia|gastrostomy|gtt|peg"
 )
 
-_NEGATION_BEFORE_PATTERN = re.compile(
+_REQUEST_BEFORE_OCCURRENCE_PATTERN = re.compile(
+    r"\b(?:solicit|encaminh|indic|programar|confeccao)\w*\b"
+    r"(?:\s+(?:realizacao\s+de|nova|atual\s+de|de|para))?"
+    r"(?:\s+\beda\b\s+(?:com|para))?"
+    r"(?:\s+(?:" + _PROCEDURE_TERM_SOURCE + r")\b(?:\s+(?:e\b|,))?)*"
+    r"\s*$"
+)
+
+_LABEL_BEFORE_OCCURRENCE_PATTERN = re.compile(
+    r"\b(?:exame|procedimento)\b\s*(?:de|para|:)?\s*$"
+    r"|\bmotivo\s+da\s+solicitacao\b\s*:?\s*(?:eda\s+(?:com|para))?\s*$"
+)
+
+_REQUEST_AFTER_OCCURRENCE_PATTERN = re.compile(r"^\s*(?:solicit|indic|encaminh)\w*\b")
+
+_HISTORICAL_AFTER_OCCURRENCE_PATTERN = re.compile(
+    r"^\s*(?:foi\s+)?realizad[oa]\b"
+    r"|^\s*(?:previo|previa|anterior|previamente)\b"
+    r"|^\s*no\s+historico\b"
+)
+_HISTORICAL_BEFORE_OCCURRENCE_PATTERN = re.compile(
+    r"\b(?:realizou)\b\s+$"
+    r"|\b(?:previo|previa|anterior|previamente)\b\s*(?:de\s*)?:?\s*$"
+    r"|\bhistorico\s+de\b\s*$"
+)
+
+_NEGATION_BEFORE_OCCURRENCE_PATTERN = re.compile(
     r"\bsem\s+indicacao\s+de\b\s*$"
+    r"|\bsem\s+evidencia\s+de\b\s*$"
     r"|\bsem\b\s*$"
+    r"|\bnega\s+indicacao\s+de\b\s*$"
     r"|\bnega\s+(?:a\s+)?ingestao\s+de\b\s*$"
+    r"|\bnega\b\s*$"
+    r"|\bnao\s+solicit\w*\b\s*$"
+    r"|\bnao\s+foi\s+identificad[oa]\b\s*$"
     r"|\bnao\s+ha\b\s*$"
+    r"|\bausencia\s+de\b\s*$"
 )
-_NEGATION_AFTER_PATTERN = re.compile(
-    r"^\s*(?:descartad[oa]|negad[oa]|ausente)\b"
+_NEGATION_AFTER_OCCURRENCE_PATTERN = re.compile(
+    r"^\s*(?:descartad[oa]|negad[oa]|ausente|contraindicad[oa])\b"
     r"|^\s*nao\s+(?:foi\s+)?(?:indicad[oa]|recomendad[oa]|solicitad[oa])\b"
     r"|^\s*sem\s+indicac\w*\b"
 )
@@ -81,9 +116,6 @@ _ESOPHAGEAL_DILATION_TERM_PATTERN = re.compile(
 )
 
 _GASTROSTOMY_TERM_PATTERN = re.compile(r"\b(?:gtt|gastrostomia|gastrostomy|peg)\b")
-_GASTROSTOMY_CONTEXT_PATTERN = re.compile(
-    r"\b(solicit\w*|indic\w*|exame\w*|procedimento\w*|\beda\b|endoscopi\w*|confeccao\w*|programar\w*|realizac\w*)\b"
-)
 _GASTROSTOMY_HISTORICAL_PATTERN = re.compile(
     r"\b(previo|previa|anterior|portador\w*|realizou|realizad[oa]|em\s+uso|ja\s+(tem|possui))\b"
 )
@@ -191,15 +223,25 @@ def _occurrence_contexts(normalized_text, pattern):
 
 
 def _is_historical_occurrence(prefix, suffix):
-    return _HISTORICAL_AFTER_PATTERN.match(suffix) is not None or _HISTORICAL_BEFORE_PATTERN.search(prefix) is not None
+    return (
+        _HISTORICAL_AFTER_OCCURRENCE_PATTERN.match(suffix) is not None
+        or _HISTORICAL_BEFORE_OCCURRENCE_PATTERN.search(prefix) is not None
+    )
 
 
 def _is_negated_occurrence(prefix, suffix):
-    return _NEGATION_BEFORE_PATTERN.search(prefix) is not None or _NEGATION_AFTER_PATTERN.match(suffix) is not None
+    return (
+        _NEGATION_BEFORE_OCCURRENCE_PATTERN.search(prefix) is not None
+        or _NEGATION_AFTER_OCCURRENCE_PATTERN.match(suffix) is not None
+    )
 
 
 def _is_current_request_occurrence(prefix, suffix):
-    return _REQUEST_CONTEXT_PATTERN.search("%s %s" % (prefix, suffix)) is not None
+    return (
+        _REQUEST_BEFORE_OCCURRENCE_PATTERN.search(prefix) is not None
+        or _LABEL_BEFORE_OCCURRENCE_PATTERN.search(prefix) is not None
+        or _REQUEST_AFTER_OCCURRENCE_PATTERN.match(suffix) is not None
+    )
 
 
 def _resolve_pediatric(structured_data):
@@ -320,9 +362,11 @@ def _resolve_gastrostomy(structured_data, normalized_text):
     if _eda_subtype(structured_data) == "gastrostomy":
         return [_signal("gastrostomy")]
     for prefix, suffix in _occurrence_contexts(normalized_text, _GASTROSTOMY_TERM_PATTERN):
-        if _GASTROSTOMY_HISTORICAL_PATTERN.search("%s %s" % (prefix, suffix)):
+        if _is_historical_occurrence(prefix, suffix):
             continue
-        if _GASTROSTOMY_CONTEXT_PATTERN.search("%s %s" % (prefix, suffix)):
+        if _GASTROSTOMY_HISTORICAL_PATTERN.search(prefix + " " + suffix):
+            continue
+        if _is_current_request_occurrence(prefix, suffix):
             return [_signal("gastrostomy")]
     return []
 

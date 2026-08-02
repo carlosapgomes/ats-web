@@ -270,6 +270,28 @@ class TestMigrationForwardReal:
             # boundary NÃO sinaliza (substring em palavra maior)
             ({"patient": {"age": 30}}, "microecoendoscopia"),
             ({"patient": {"age": 30}}, "predilatacao esofagica"),
+            # negações diretas (2ª correção — C8)
+            ({"patient": {"age": 30}}, "Não solicito ecoendoscopia."),
+            ({"patient": {"age": 30}}, "Nega indicação de ecoendoscopia."),
+            ({"patient": {"age": 30}}, "Não solicito dilatação esofágica."),
+            ({"patient": {"age": 30}}, "Nega corpo estranho."),
+            ({"patient": {"age": 30}}, "Não foi identificado corpo estranho."),
+            ({"patient": {"age": 30}}, "Ausência de corpo estranho."),
+            ({"patient": {"age": 30}}, "Sem evidência de corpo estranho."),
+            # históricos/contexto emprestado (2ª correção — C9/C10)
+            ({"patient": {"age": 30}}, "Exame de ecoendoscopia foi realizado em 2023."),
+            ({"patient": {"age": 30}}, "Procedimento de dilatação esofágica foi realizado em 2022."),
+            ({"patient": {"age": 30}}, "Histórico de corpo estranho em 2022."),
+            ({"patient": {"age": 30}}, "Solicito colonoscopia e registro de ecoendoscopia no histórico."),
+            # positivos ancorados e coexistência (2ª correção — C10)
+            ({"patient": {"age": 30}}, "Motivo da Solicitação: ecoendoscopia."),
+            ({"patient": {"age": 30}}, "Ecoendoscopia solicitada."),
+            ({"patient": {"age": 30}}, "Procedimento: dilatação esofágica."),
+            ({"patient": {"age": 30}}, "Solicito EDA com ecoendoscopia e dilatação esofágica."),
+            # ocorrência atual distinta sobrevive (2ª correção — C9/C11)
+            ({"patient": {"age": 30}}, "Nega corpo estranho. Suspeita atual de corpo estranho."),
+            ({"patient": {"age": 30}}, "Histórico de corpo estranho. Suspeita atual de corpo estranho."),
+            ({"patient": {"age": 30}}, "Ecoendoscopia foi realizada em 2023. Solicito nova ecoendoscopia."),
             # gastrostomia com contexto
             ({"patient": {"age": 30}}, "Solicito gastrostomia."),
             # gastrostomia histórica NÃO sinaliza

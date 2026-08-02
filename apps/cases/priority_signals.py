@@ -17,7 +17,9 @@ are never stored. Signals are deduplicated by ``code`` and ordered canonically.
 Textual fallbacks are conservative and per-occurrence: a negation or
 historical qualifier cancels only the occurrence it qualifies, a current
 request occurrence survives, and terms are matched with word boundaries
-(never bare substring).
+(never bare substring). Request context is anchored to the occurrence
+(before-patterns end at the prefix, after-patterns start at the suffix)
+and is never borrowed from another procedure in the same clause.
 """
 
 from __future__ import annotations
@@ -115,34 +117,77 @@ def _eda_subtype(structured_data: dict[str, object]) -> str:
     return ""
 
 
-# ── Shared per-occurrence machinery (conservative, local) ──────────────────
+# ── Shared per-occurrence machinery (conservative, anchored) ────────────────
 #
 # Clause boundaries: '.', ';', '!', '?' or newline. ':' is intentionally NOT
 # a boundary so immediate labels ('Exame: ecoendoscopia') stay in the local
 # clause of the occurrence.
+#
+# Every qualifier below is ANCHORED to the occurrence: before-patterns end at
+# the end of the prefix ('$'), after-patterns start at the beginning of the
+# suffix ('^'). Context is never borrowed from another procedure in the same
+# clause, and word boundaries protect against 'contraindicada'/'micro...'.
 
 _CLAUSE_BOUNDARY_PATTERN = re.compile(r"[.;!?]|\n")
 
-# Request/exam/procedure intent qualifying a procedural occurrence. Word
-# boundaries protect against 'contraindicada' (no boundary before 'indic').
-_REQUEST_CONTEXT_PATTERN = re.compile(r"\b(solicit|encaminh|indic|exame|procedimento)\w*\b")
-
-# Historical qualifiers attached to a specific occurrence.
-_HISTORICAL_AFTER_PATTERN = re.compile(r"^\s*(?:realizad[oa]|realizado|realizada|previo|previa|anterior)\b")
-_HISTORICAL_BEFORE_PATTERN = re.compile(
-    r"\b(?:realizou|realizad[oa])\b\s+$"
-    r"|\b(?:previo|previa|anterior)\b\s*(?:de\s*)?:?\s*$"
+# Supported EDA procedure terms that may appear in a small requested chain
+# ('Solicito EDA com ecoendoscopia e dilatação esofágica').
+_PROCEDURE_TERM_SOURCE = (
+    r"ecoendoscopia|eco\s+endoscopia|eco-endoscopia"
+    r"|ultrassonografia\s+endoscopica|ultrassom\s+endoscopico"
+    r"|dilatacao\s+esofagica|dilatacao\s+do\s+esofago|dilatacao\s+de\s+esofago"
+    r"|dilatacao\s+endoscopica\s+esofagica"
+    r"|gastrostomia|gastrostomy|gtt|peg"
 )
 
-# Negation qualifiers attached to a specific occurrence.
-_NEGATION_BEFORE_PATTERN = re.compile(
+# Request stem before the occurrence, with approved connectors and an
+# optional small chain of supported EDA procedures ('... e ...' / ',').
+_REQUEST_BEFORE_OCCURRENCE_PATTERN = re.compile(
+    r"\b(?:solicit|encaminh|indic|programar|confeccao)\w*\b"
+    r"(?:\s+(?:realizacao\s+de|nova|atual\s+de|de|para))?"
+    r"(?:\s+\beda\b\s+(?:com|para))?"
+    r"(?:\s+(?:" + _PROCEDURE_TERM_SOURCE + r")\b(?:\s+(?:e\b|,))?)*"
+    r"\s*$"
+)
+
+# Immediate labels before the occurrence: 'Exame: X', 'Procedimento: X',
+# 'Motivo da Solicitação: X' — with an optional 'EDA com/para' chain after
+# the label ('Motivo da Solicitação: EDA com ecoendoscopia').
+_LABEL_BEFORE_OCCURRENCE_PATTERN = re.compile(
+    r"\b(?:exame|procedimento)\b\s*(?:de|para|:)?\s*$"
+    r"|\bmotivo\s+da\s+solicitacao\b\s*:?\s*(?:eda\s+(?:com|para))?\s*$"
+)
+
+# Request stem immediately after the occurrence: 'X solicitado', 'X indicado'.
+_REQUEST_AFTER_OCCURRENCE_PATTERN = re.compile(r"^\s*(?:solicit|indic|encaminh)\w*\b")
+
+# Historical qualifiers attached to this occurrence (after or before).
+_HISTORICAL_AFTER_OCCURRENCE_PATTERN = re.compile(
+    r"^\s*(?:foi\s+)?realizad[oa]\b"
+    r"|^\s*(?:previo|previa|anterior|previamente)\b"
+    r"|^\s*no\s+historico\b"
+)
+_HISTORICAL_BEFORE_OCCURRENCE_PATTERN = re.compile(
+    r"\b(?:realizou)\b\s+$"
+    r"|\b(?:previo|previa|anterior|previamente)\b\s*(?:de\s*)?:?\s*$"
+    r"|\bhistorico\s+de\b\s*$"
+)
+
+# Negation qualifiers attached to this occurrence (after or before).
+_NEGATION_BEFORE_OCCURRENCE_PATTERN = re.compile(
     r"\bsem\s+indicacao\s+de\b\s*$"
+    r"|\bsem\s+evidencia\s+de\b\s*$"
     r"|\bsem\b\s*$"
+    r"|\bnega\s+indicacao\s+de\b\s*$"
     r"|\bnega\s+(?:a\s+)?ingestao\s+de\b\s*$"
+    r"|\bnega\b\s*$"
+    r"|\bnao\s+solicit\w*\b\s*$"
+    r"|\bnao\s+foi\s+identificad[oa]\b\s*$"
     r"|\bnao\s+ha\b\s*$"
+    r"|\bausencia\s+de\b\s*$"
 )
-_NEGATION_AFTER_PATTERN = re.compile(
-    r"^\s*(?:descartad[oa]|negad[oa]|ausente)\b"
+_NEGATION_AFTER_OCCURRENCE_PATTERN = re.compile(
+    r"^\s*(?:descartad[oa]|negad[oa]|ausente|contraindicad[oa])\b"
     r"|^\s*nao\s+(?:foi\s+)?(?:indicad[oa]|recomendad[oa]|solicitad[oa])\b"
     r"|^\s*sem\s+indicac\w*\b"
 )
@@ -161,16 +206,31 @@ def _occurrence_contexts(normalized_text: str, pattern: re.Pattern[str]) -> list
 
 
 def _is_historical_occurrence(prefix: str, suffix: str) -> bool:
-    return _HISTORICAL_AFTER_PATTERN.match(suffix) is not None or _HISTORICAL_BEFORE_PATTERN.search(prefix) is not None
+    return (
+        _HISTORICAL_AFTER_OCCURRENCE_PATTERN.match(suffix) is not None
+        or _HISTORICAL_BEFORE_OCCURRENCE_PATTERN.search(prefix) is not None
+    )
 
 
 def _is_negated_occurrence(prefix: str, suffix: str) -> bool:
-    return _NEGATION_BEFORE_PATTERN.search(prefix) is not None or _NEGATION_AFTER_PATTERN.match(suffix) is not None
+    return (
+        _NEGATION_BEFORE_OCCURRENCE_PATTERN.search(prefix) is not None
+        or _NEGATION_AFTER_OCCURRENCE_PATTERN.match(suffix) is not None
+    )
 
 
 def _is_current_request_occurrence(prefix: str, suffix: str) -> bool:
-    """True when the local clause carries request/exam/procedure intent."""
-    return _REQUEST_CONTEXT_PATTERN.search(f"{prefix} {suffix}") is not None
+    """True when the occurrence is directly anchored to request/exam/procedure intent.
+
+    Before-patterns are anchored at the end of the prefix and after-patterns
+    at the start of the suffix; context is never borrowed from another
+    procedure elsewhere in the clause.
+    """
+    return (
+        _REQUEST_BEFORE_OCCURRENCE_PATTERN.search(prefix) is not None
+        or _LABEL_BEFORE_OCCURRENCE_PATTERN.search(prefix) is not None
+        or _REQUEST_AFTER_OCCURRENCE_PATTERN.match(suffix) is not None
+    )
 
 
 # ── Pediatric ──────────────────────────────────────────────────────────────
@@ -409,11 +469,6 @@ def _resolve_esophageal_dilation(
 
 _GASTROSTOMY_TERM_PATTERN = re.compile(r"\b(?:gtt|gastrostomia|gastrostomy|peg)\b")
 
-# Request/exam/procedure intent near the gastrostomy term (clause-local).
-_GASTROSTOMY_CONTEXT_PATTERN = re.compile(
-    r"\b(solicit\w*|indic\w*|exame\w*|procedimento\w*|\beda\b|endoscopi\w*|confeccao\w*|programar\w*|realizac\w*)\b"
-)
-
 # A clearly pre-existing/historical gastrostomy is not a current signal.
 _GASTROSTOMY_HISTORICAL_PATTERN = re.compile(
     r"\b(previo|previa|anterior|portador\w*|realizou|realizad[oa]|em\s+uso|ja\s+(tem|possui))\b"
@@ -427,9 +482,12 @@ def _resolve_gastrostomy(
     if _eda_subtype(structured_data) == "gastrostomy":
         return [_signal("gastrostomy")]
     for prefix, suffix in _occurrence_contexts(normalized_text, _GASTROSTOMY_TERM_PATTERN):
-        if _GASTROSTOMY_HISTORICAL_PATTERN.search(f"{prefix} {suffix}"):
+        if _is_historical_occurrence(prefix, suffix):
             continue
-        if _GASTROSTOMY_CONTEXT_PATTERN.search(f"{prefix} {suffix}"):
+        if _GASTROSTOMY_HISTORICAL_PATTERN.search(prefix + " " + suffix):
+            continue
+        # Current request anchored to the occurrence (shared anchored context).
+        if _is_current_request_occurrence(prefix, suffix):
             return [_signal("gastrostomy")]
     return []
 

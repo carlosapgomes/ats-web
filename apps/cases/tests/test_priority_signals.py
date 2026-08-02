@@ -214,6 +214,106 @@ class TestResolvePrioritySignals:
     def test_echoendoscopy_not_indicada_is_not_signal(self) -> None:
         assert _codes(source_text="Ecoendoscopia não indicada neste caso.") == []
 
+    # ── Segunda correção: negações diretas (C8) ──────────────────────
+
+    @pytest.mark.parametrize(
+        "negated_text",
+        [
+            "Não solicito ecoendoscopia.",
+            "Nega indicação de ecoendoscopia.",
+            "Não solicito dilatação esofágica.",
+            "Nega corpo estranho.",
+            "Não foi identificado corpo estranho.",
+            "Ausência de corpo estranho.",
+            "Sem evidência de corpo estranho.",
+        ],
+    )
+    def test_direct_negations_do_not_signal(self, negated_text: str) -> None:
+        assert _codes(source_text=negated_text) == []
+
+    # ── Segunda correção: históricos/contexto emprestado (C9/C10) ────
+
+    @pytest.mark.parametrize(
+        "historical_text",
+        [
+            "Exame de ecoendoscopia foi realizado em 2023.",
+            "Procedimento de dilatação esofágica foi realizado em 2022.",
+            "Histórico de corpo estranho em 2022.",
+            "Solicito colonoscopia e registro de ecoendoscopia no histórico.",
+        ],
+    )
+    def test_historical_or_borrowed_context_does_not_signal(self, historical_text: str) -> None:
+        assert _codes(source_text=historical_text) == []
+
+    # ── Segunda correção: positivos ancorados e coexistência (C10) ───
+
+    @pytest.mark.parametrize(
+        "positive_text",
+        [
+            "Solicito ecoendoscopia.",
+            "Solicito eco-endoscopia.",
+            "Indicada ultrassonografia endoscópica.",
+            "Exame: ultrassom endoscópico.",
+            "Motivo da Solicitação: ecoendoscopia.",
+            "Ecoendoscopia solicitada.",
+            "Dilatação esofágica indicada.",
+            "Solicito dilatação do esôfago.",
+            "Indicação de dilatação de esôfago.",
+            "Procedimento: dilatação esofágica.",
+        ],
+    )
+    def test_positive_request_phrases_still_signal(self, positive_text: str) -> None:
+        assert _codes(source_text=positive_text) != []
+
+    def test_coexistence_echoendoscopy_and_dilation(self) -> None:
+        assert _codes(source_text="Solicito EDA com ecoendoscopia e dilatação esofágica.") == [
+            "echoendoscopy",
+            "esophageal_dilation",
+        ]
+
+    # ── Segunda correção: ocorrência atual distinta sobrevive (C9/C11) ──
+
+    def test_negated_occurrence_does_not_cancel_distinct_current(self) -> None:
+        assert _codes(source_text="Nega corpo estranho. Suspeita atual de corpo estranho.") == ["foreign_body"]
+
+    def test_historical_occurrence_does_not_cancel_distinct_current(self) -> None:
+        assert _codes(source_text="Histórico de corpo estranho. Suspeita atual de corpo estranho.") == ["foreign_body"]
+
+    def test_historical_echo_does_not_cancel_current_request(self) -> None:
+        assert _codes(source_text="Ecoendoscopia foi realizada em 2023. Solicito nova ecoendoscopia.") == [
+            "echoendoscopy"
+        ]
+
+    # ── Segunda correção: estruturado positivo prevalece (C12) ────────
+
+    def test_structured_foreign_body_prevails_over_direct_negation(self) -> None:
+        payload = _structured()
+        eda = payload["eda"]
+        assert isinstance(eda, dict)
+        requested = eda["requested_procedure"]
+        assert isinstance(requested, dict)
+        requested["subtype"] = "foreign_body"
+        rulebook = payload["preop_screening"]
+        assert isinstance(rulebook, dict)
+        rulebook_signals = rulebook["rulebook_signals"]
+        assert isinstance(rulebook_signals, dict)
+        rulebook_signals["eda_subtype"] = "foreign_body"
+        assert _codes(payload, source_text="Nega corpo estranho.") == ["foreign_body"]
+
+    def test_structured_echoendoscopy_prevails_over_historical(self) -> None:
+        payload = _structured()
+        eda = payload["eda"]
+        assert isinstance(eda, dict)
+        requested = eda["requested_procedure"]
+        assert isinstance(requested, dict)
+        requested["subtype"] = "echoendoscopy"
+        rulebook = payload["preop_screening"]
+        assert isinstance(rulebook, dict)
+        rulebook_signals = rulebook["rulebook_signals"]
+        assert isinstance(rulebook_signals, dict)
+        rulebook_signals["eda_subtype"] = "echoendoscopy"
+        assert _codes(payload, source_text="Ecoendoscopia foi realizada em 2023.") == ["echoendoscopy"]
+
     # ── Ingestão cáustica ─────────────────────────────────────────────
 
     def test_caustic_positive_with_time_detail(self) -> None:
