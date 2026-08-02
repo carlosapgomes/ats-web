@@ -279,6 +279,59 @@ def test_eus_unrelated_historical_wording_does_not_cancel_request(mixed_text: st
     assert result is None
 
 
+# ── EUS occurrence-specific + colon labels (Slice 001, third corrective) ──
+
+
+@pytest.mark.parametrize(
+    "mixed_text",
+    [
+        "Paciente realizou EUS em 2023 e solicita EUS agora.",
+        "Solicito EUS agora e paciente realizou EUS em 2023.",
+        "EUS realizado em 2023 e EUS solicitado agora.",
+    ],
+)
+def test_eus_mixed_historical_and_current_occurrences_follow_eda(mixed_text: str) -> None:
+    """C7: uma ocorrência histórica não cancela pedido atual distinto na mesma cláusula."""
+
+    llm1: dict[str, object] = {"preop_screening": {"exam_type": "unknown"}}
+    result = _classify(llm1_structured_data=llm1, cleaned_text=mixed_text)
+    assert result is None
+
+
+@pytest.mark.parametrize(
+    "label_text",
+    [
+        "Procedimento: EUS",
+        "Exame: EUS",
+        "Solicitacao: EUS",
+    ],
+)
+def test_eus_immediate_colon_labels_follow_eda(label_text: str) -> None:
+    """C8: rótulos imediatos antes de ':' fornecem contexto local positivo."""
+
+    llm1: dict[str, object] = {"preop_screening": {"exam_type": "unknown"}}
+    result = _classify(llm1_structured_data=llm1, cleaned_text=label_text)
+    assert result is None
+
+
+@pytest.mark.parametrize(
+    "historical_text",
+    [
+        "EUS realizado em 2022 e EUS previo em 2023.",
+        "Exame anterior: EUS realizado em 2024.",
+        "Procedimento realizado: EUS em 2024.",
+        "Solicitacao previa: EUS cancelado.",
+    ],
+)
+def test_eus_all_historical_occurrences_stay_manual(historical_text: str) -> None:
+    """C9: ocorrências todas históricas/rotuladas-históricas → revisão manual."""
+
+    llm1: dict[str, object] = {"preop_screening": {"exam_type": "unknown"}}
+    result = _classify(llm1_structured_data=llm1, cleaned_text=historical_text)
+    assert result is not None
+    assert result["reason_code"] == "unknown_exam_type"
+
+
 def test_requested_procedure_name_echoendoscopy_with_puncture_returns_none_eda() -> None:
     """Nome estruturado ecoendoscopia com punção → EDA; modificador não muda subtipo."""
 
