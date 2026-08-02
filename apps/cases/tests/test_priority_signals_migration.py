@@ -298,6 +298,29 @@ class TestMigrationForwardReal:
             ({"patient": {"age": 30}}, "Paciente com gastrostomia prévia."),
             # EUS isolado NÃO sinaliza
             ({"patient": {"age": 30}}, "EUS"),
+            # terceira correção — C15: EUS negado/histórico
+            ({"patient": {"age": 30}}, "Não solicito EUS."),
+            ({"patient": {"age": 30}}, "Nega indicação de EUS."),
+            ({"patient": {"age": 30}}, "Sem indicação de EUS."),
+            ({"patient": {"age": 30}}, "Exame de EUS já realizado em 2023."),
+            # terceira correção — C16: solicitação mista atual
+            ({"patient": {"age": 30}}, "Solicito colonoscopia e ecoendoscopia."),
+            ({"patient": {"age": 30}}, "Solicito CPRE e ecoendoscopia."),
+            ({"patient": {"age": 30}}, "Solicito colonoscopia e dilatação esofágica."),
+            ({"patient": {"age": 30}}, "Solicito CPRE e EUS."),
+            # terceira correção — C17: equivalentes explícitos
+            ({"patient": {"age": 30}}, "Não há indicação de ecoendoscopia."),
+            ({"patient": {"age": 30}}, "Não há evidência de corpo estranho."),
+            ({"patient": {"age": 30}}, "Nega a indicação de ecoendoscopia."),
+            ({"patient": {"age": 30}}, "Ausência de indicação de ecoendoscopia."),
+            ({"patient": {"age": 30}}, "Exame de ecoendoscopia já realizado em 2023."),
+            ({"patient": {"age": 30}}, "Procedimento de dilatação esofágica já realizado em 2022."),
+            ({"patient": {"age": 30}}, "Corpo estranho não identificado."),
+            # terceira correção — caracterizações (C15/C16)
+            ({"patient": {"age": 30}}, "Solicito CPRE e registro de EUS no histórico."),
+            ({"patient": {"age": 30}}, "Não solicito EUS. Solicito EUS agora."),
+            ({"patient": {"age": 30}}, "Exame de EUS já realizado. Solicito novo EUS."),
+            ({"patient": {"age": 30}}, "Não solicito CPRE e EUS."),
         ]
 
         for overrides, text in scenarios:

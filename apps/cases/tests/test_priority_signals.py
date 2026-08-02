@@ -314,6 +314,95 @@ class TestResolvePrioritySignals:
         rulebook_signals["eda_subtype"] = "echoendoscopy"
         assert _codes(payload, source_text="Ecoendoscopia foi realizada em 2023.") == ["echoendoscopy"]
 
+    # ── Terceira correção: EUS negado/histórico (C15) ─────────────────
+
+    @pytest.mark.parametrize(
+        "negated_eus_text",
+        [
+            "Não solicito EUS.",
+            "Nega indicação de EUS.",
+            "Sem indicação de EUS.",
+            "Exame de EUS já realizado em 2023.",
+        ],
+    )
+    def test_negated_or_historical_eus_does_not_signal(self, negated_eus_text: str) -> None:
+        assert _codes(source_text=negated_eus_text) == []
+
+    # ── Terceira correção: solicitação mista atual (C16) ──────────────
+
+    @pytest.mark.parametrize(
+        ("mixed_text", "expected_codes"),
+        [
+            ("Solicito colonoscopia e ecoendoscopia.", ["echoendoscopy"]),
+            ("Solicito CPRE e ecoendoscopia.", ["echoendoscopy"]),
+            ("Solicito colonoscopia e dilatação esofágica.", ["esophageal_dilation"]),
+            ("Solicito CPRE e EUS.", ["echoendoscopy"]),
+        ],
+    )
+    def test_current_mixed_request_keeps_supported_signal(self, mixed_text: str, expected_codes: list[str]) -> None:
+        assert _codes(source_text=mixed_text) == expected_codes
+
+    # ── Terceira correção: equivalentes explícitos (C17) ──────────────
+
+    @pytest.mark.parametrize(
+        "explicit_text",
+        [
+            "Não há indicação de ecoendoscopia.",
+            "Não há evidência de corpo estranho.",
+            "Nega a indicação de ecoendoscopia.",
+            "Ausência de indicação de ecoendoscopia.",
+            "Exame de ecoendoscopia já realizado em 2023.",
+            "Procedimento de dilatação esofágica já realizado em 2022.",
+            "Corpo estranho não identificado.",
+        ],
+    )
+    def test_direct_equivalents_do_not_signal(self, explicit_text: str) -> None:
+        assert _codes(source_text=explicit_text) == []
+
+    # ── Terceira correção: caracterizações (C15/C16/C18) ──────────────
+
+    def test_mixed_historical_request_stays_empty(self) -> None:
+        assert _codes(source_text="Solicito CPRE e registro de EUS no histórico.") == []
+
+    def test_negated_eus_clause_does_not_cancel_distinct_current_eus(self) -> None:
+        assert _codes(source_text="Não solicito EUS. Solicito EUS agora.") == ["echoendoscopy"]
+
+    def test_historical_eus_clause_does_not_cancel_distinct_current_eus(self) -> None:
+        assert _codes(source_text="Exame de EUS já realizado. Solicito novo EUS.") == ["echoendoscopy"]
+
+    def test_structured_echoendoscopy_prevails_over_negated_eus_text(self) -> None:
+        payload = _structured()
+        eda = payload["eda"]
+        assert isinstance(eda, dict)
+        requested = eda["requested_procedure"]
+        assert isinstance(requested, dict)
+        requested["subtype"] = "echoendoscopy"
+        rulebook = payload["preop_screening"]
+        assert isinstance(rulebook, dict)
+        rulebook_signals = rulebook["rulebook_signals"]
+        assert isinstance(rulebook_signals, dict)
+        rulebook_signals["eda_subtype"] = "echoendoscopy"
+        assert _codes(payload, source_text="Não solicito EUS.") == ["echoendoscopy"]
+
+    def test_negated_mixed_list_does_not_signal(self) -> None:
+        assert _codes(source_text="Não solicito CPRE e EUS.") == []
+        assert _codes(source_text="Não solicito EUS e gastrostomia.") == []
+
+    @pytest.mark.parametrize(
+        "positive_eus_text",
+        [
+            "Encaminhamento para EUS.",
+            "Solicitação de EUS.",
+            "Solicitação: EUS.",
+            "Procedimento de EUS indicado.",
+            "Exame: EUS.",
+            "EUS solicitado.",
+            "EUS realizado em 2022 e EUS solicitado agora.",
+        ],
+    )
+    def test_eus_current_request_forms_still_signal(self, positive_eus_text: str) -> None:
+        assert _codes(source_text=positive_eus_text) == ["echoendoscopy"]
+
     # ── Ingestão cáustica ─────────────────────────────────────────────
 
     def test_caustic_positive_with_time_detail(self) -> None:

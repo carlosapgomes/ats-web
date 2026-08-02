@@ -46,19 +46,29 @@ _SUPPORTED_SUBTYPES = frozenset({"foreign_body", "echoendoscopy", "esophageal_di
 
 _CLAUSE_BOUNDARY_PATTERN = re.compile(r"[.;!?]|\n")
 
-_PROCEDURE_TERM_SOURCE = (
+# Terms accepted as items in a small requested list. EDA procedures resolve
+# as signals; 'cpre' and 'colonoscopia' are CONTEXT tokens only (the list
+# remains a current request) and never produce signals themselves.
+_REQUEST_LIST_TERM_SOURCE = (
     r"ecoendoscopia|eco\s+endoscopia|eco-endoscopia"
     r"|ultrassonografia\s+endoscopica|ultrassom\s+endoscopico"
     r"|dilatacao\s+esofagica|dilatacao\s+do\s+esofago|dilatacao\s+de\s+esofago"
     r"|dilatacao\s+endoscopica\s+esofagica"
     r"|gastrostomia|gastrostomy|gtt|peg"
+    r"|eus"
+    r"|cpre|colonoscopia"
 )
 
+# Request stem before the occurrence, with approved connectors (fully
+# optional, so 'Solicitação: EUS' and 'Solicito EUS' both anchor), an
+# optional ':' and an optional small chain of requested-list terms
+# ('Solicito EDA com ecoendoscopia e dilatação esofágica',
+# 'Solicito CPRE e ecoendoscopia').
 _REQUEST_BEFORE_OCCURRENCE_PATTERN = re.compile(
     r"\b(?:solicit|encaminh|indic|programar|confeccao)\w*\b"
-    r"(?:\s+(?:realizacao\s+de|nova|atual\s+de|de|para))?"
+    r"(?:\s*:?\s*(?:realizacao\s+de|nov[oa]|atual\s+de|de|para)?)"
     r"(?:\s+\beda\b\s+(?:com|para))?"
-    r"(?:\s+(?:" + _PROCEDURE_TERM_SOURCE + r")\b(?:\s+(?:e\b|,))?)*"
+    r"(?:\s+(?:" + _REQUEST_LIST_TERM_SOURCE + r")\b(?:\s+(?:e\b|,))?)*"
     r"\s*$"
 )
 
@@ -70,7 +80,7 @@ _LABEL_BEFORE_OCCURRENCE_PATTERN = re.compile(
 _REQUEST_AFTER_OCCURRENCE_PATTERN = re.compile(r"^\s*(?:solicit|indic|encaminh)\w*\b")
 
 _HISTORICAL_AFTER_OCCURRENCE_PATTERN = re.compile(
-    r"^\s*(?:foi\s+)?realizad[oa]\b"
+    r"^\s*(?:ja\s+)?(?:foi\s+)?realizad[oa]\b"
     r"|^\s*(?:previo|previa|anterior|previamente)\b"
     r"|^\s*no\s+historico\b"
 )
@@ -84,17 +94,22 @@ _NEGATION_BEFORE_OCCURRENCE_PATTERN = re.compile(
     r"\bsem\s+indicacao\s+de\b\s*$"
     r"|\bsem\s+evidencia\s+de\b\s*$"
     r"|\bsem\b\s*$"
-    r"|\bnega\s+indicacao\s+de\b\s*$"
+    r"|\bnega\s+(?:a\s+)?indicacao\s+de\b\s*$"
     r"|\bnega\s+(?:a\s+)?ingestao\s+de\b\s*$"
     r"|\bnega\b\s*$"
-    r"|\bnao\s+solicit\w*\b\s*$"
+    r"|\bnao\s+ha\s+indicacao\s+de\b\s*$"
+    r"|\bnao\s+ha\s+evidencia\s+de\b\s*$"
+    r"|\bnao\s+solicit\w*\b(?:\s*:?\s*(?:realizacao\s+de|nov[oa]|atual\s+de|de|para)?)(?:\s+(?:"
+    + _REQUEST_LIST_TERM_SOURCE
+    + r")\b(?:\s+(?:e\b|,))?)*\s*:?\s*$"
     r"|\bnao\s+foi\s+identificad[oa]\b\s*$"
     r"|\bnao\s+ha\b\s*$"
+    r"|\bausencia\s+de\s+indicacao\s+de\b\s*$"
     r"|\bausencia\s+de\b\s*$"
 )
 _NEGATION_AFTER_OCCURRENCE_PATTERN = re.compile(
     r"^\s*(?:descartad[oa]|negad[oa]|ausente|contraindicad[oa])\b"
-    r"|^\s*nao\s+(?:foi\s+)?(?:indicad[oa]|recomendad[oa]|solicitad[oa])\b"
+    r"|^\s*nao\s+(?:foi\s+)?(?:indicad[oa]|recomendad[oa]|solicitad[oa]|identificad[oa])\b"
     r"|^\s*sem\s+indicac\w*\b"
 )
 
@@ -121,11 +136,6 @@ _GASTROSTOMY_HISTORICAL_PATTERN = re.compile(
 )
 
 _EUS_PATTERN = re.compile(r"\beus\b")
-_EUS_REQUEST_BEFORE_PATTERN = re.compile(r"\b(solicit|encaminh|indic)\w*\b\s*(?:realizacao\s+de|de|para|:)?\s*$")
-_EUS_EXAM_BEFORE_PATTERN = re.compile(r"\b(exame|procedimento)\b\s*(?:de|para|:)?\s*$")
-_EUS_REQUEST_AFTER_PATTERN = re.compile(r"^\s*(?:solicit|indic|encaminh)\w*\b")
-_EUS_HISTORICAL_AFTER_PATTERN = re.compile(r"^\s*(realizad[oa]|previo|previa|anterior)\b")
-_EUS_HISTORICAL_BEFORE_PATTERN = re.compile(r"\b(?:realizou)\b\s+$|\b(?:previo|previa|anterior)\b\s+(?:de\s+)?$")
 
 _CAUSTIC_KEYWORDS = ("caustic", "corrosiv", "soda caustica", "acido")
 _INGESTION_VERBS = ("ingeriu", "ingestao", "ingerir", "ingerido")
@@ -320,16 +330,14 @@ def _resolve_caustic(source_text):
 
 
 def _contains_eus_with_request_context(normalized):
+    """EUS usa as mesmas guardas por ocorrência (C15): histórico, negação,
+    depois contexto de pedido/label ancorado."""
     for prefix, suffix in _occurrence_contexts(normalized, _EUS_PATTERN):
-        if _EUS_HISTORICAL_AFTER_PATTERN.match(suffix) is not None:
+        if _is_historical_occurrence(prefix, suffix):
             continue
-        if _EUS_HISTORICAL_BEFORE_PATTERN.search(prefix) is not None:
+        if _is_negated_occurrence(prefix, suffix):
             continue
-        if (
-            _EUS_REQUEST_BEFORE_PATTERN.search(prefix) is not None
-            or _EUS_EXAM_BEFORE_PATTERN.search(prefix) is not None
-            or _EUS_REQUEST_AFTER_PATTERN.match(suffix) is not None
-        ):
+        if _is_current_request_occurrence(prefix, suffix):
             return True
     return False
 
@@ -363,6 +371,8 @@ def _resolve_gastrostomy(structured_data, normalized_text):
         return [_signal("gastrostomy")]
     for prefix, suffix in _occurrence_contexts(normalized_text, _GASTROSTOMY_TERM_PATTERN):
         if _is_historical_occurrence(prefix, suffix):
+            continue
+        if _is_negated_occurrence(prefix, suffix):
             continue
         if _GASTROSTOMY_HISTORICAL_PATTERN.search(prefix + " " + suffix):
             continue
