@@ -625,3 +625,48 @@ def build_priority_signal_badges(priority_signals: object) -> list[dict[str, str
 
     badges.sort(key=lambda b: CANONICAL_ORDER.index(b["code"]))
     return badges
+
+
+# ── Context fragments for the doctor report Resumo clínico line ────────────
+
+
+_CONTEXT_FRAGMENT_CODES: frozenset[str] = frozenset(
+    {"pediatric", "echoendoscopy", "esophageal_dilation", "gastrostomy"}
+)
+
+
+def build_priority_signal_context_fragments(priority_signals: object) -> list[str]:
+    """Project persisted signals into plain context fragments (doctor report).
+
+    Mirrors ``build_priority_signal_badges`` tolerance/ordering but returns
+    plain fragments for the Resumo clínico context line, reusing the same
+    label mapping (single source of presentation labels). Examples:
+    ``["Pediatria — 10 anos", "Ecoendoscopia"]``.
+
+    Never runs detection and never reads raw text.
+    """
+    if not isinstance(priority_signals, list):
+        return []
+
+    fragments: list[tuple[str, str]] = []
+    seen: set[str] = set()
+    for item in priority_signals:
+        if not isinstance(item, dict):
+            continue
+        code = item.get("code")
+        version = item.get("version")
+        if not isinstance(code, str) or code not in _CONTEXT_FRAGMENT_CODES:
+            continue
+        if version != PRIORITY_SIGNAL_VERSION:
+            continue
+        if code in seen:
+            continue
+        seen.add(code)
+        fragment = _BADGE_METADATA[code]["label"]
+        detail = item.get("detail")
+        if isinstance(detail, str) and detail.strip():
+            fragment = f"{fragment} — {detail.strip()}"
+        fragments.append((code, fragment))
+
+    fragments.sort(key=lambda pair: CANONICAL_ORDER.index(pair[0]))
+    return [fragment for _, fragment in fragments]

@@ -73,6 +73,7 @@ def prepare_doctor_case_report(case: Case) -> PreparedDoctorReport:
         suggested_action=case.suggested_action or {},
         recent_denial_context=recent_denial_ctx,
         source_text=case.extracted_text or "",
+        priority_signals=case.priority_signals or [],
     )
 
     return PreparedDoctorReport(

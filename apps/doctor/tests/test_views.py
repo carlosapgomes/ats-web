@@ -2995,3 +2995,127 @@ class TestDoctorLockReleaseOnSubmit:
         case = Case.objects.get(pk=case.case_id)
         assert case.locked_by == scheduler_user
         assert case.lock_context == "scheduler_confirm"
+
+
+# ── Slice 003: badges persistidos na tela de decisão ──────────────────────
+
+
+@pytest.mark.django_db
+class TestDoctorDecisionPrioritySignals:
+    """Slice 003: tela de decisão usa os sinais persistidos no topo e no corpo."""
+
+    def _create_role(self, name: str):
+        from apps.accounts.models import Role
+
+        role, _ = Role.objects.get_or_create(name=name)
+        return role
+
+    def _login_as(self, client, role_name: str):
+        user = User.objects.create_user(username=f"{role_name}@psig.test", password="testpass123")
+        user.roles.add(self._create_role(role_name))
+        client.force_login(user)
+        session = client.session
+        session["active_role"] = role_name
+        session.save()
+        return user
+
+    @staticmethod
+    def _signal(code: str, detail: str = "") -> dict[str, object]:
+        return {
+            "code": code,
+            "category": {
+                "foreign_body": "clinical_alert",
+                "caustic_ingestion": "clinical_alert",
+                "pediatric": "special_population",
+                "echoendoscopy": "special_procedure",
+                "esophageal_dilation": "special_procedure",
+                "gastrostomy": "special_procedure",
+            }[code],
+            "detail": detail,
+            "version": 1,
+        }
+
+    def _make_wait_doctor_case(self, client, *, priority_signals, structured_data=None, extracted_text=""):
+        from apps.accounts.models import Role
+
+        nir_user = User.objects.create_user(
+            username=f"nir_psig_{uuid.uuid4().hex[:8]}@test.com", password="testpass123"
+        )
+        role, _ = Role.objects.get_or_create(name="nir")
+        nir_user.roles.add(role)
+        case = Case.objects.create(
+            created_by=nir_user,
+            status=CaseStatus.WAIT_DOCTOR,
+            priority_signals=priority_signals,
+            extracted_text=extracted_text,
+            structured_data=structured_data or {"patient": {"name": "PSig", "age": 40, "gender": "M"}},
+        )
+        case.agency_record_number = "2026-0901-001"
+        case.save()
+        return case
+
+    def test_decision_shows_badges_at_top_from_persisted_value(self, client) -> None:
+        """Badges aparecem no topo do relatório, após o título."""
+        case = self._make_wait_doctor_case(
+            client,
+            priority_signals=[self._signal("pediatric", "10 anos"), self._signal("foreign_body")],
+        )
+        self._login_as(client, "doctor")
+        content = client.get(f"/doctor/{case.case_id}/").content.decode()
+        assert "Suspeita de corpo estranho" in content
+        assert "Pediatria" in content
+        assert "10 anos" in content
+        report_pos = content.index("Relatório Automático da Regulação")
+        badges_pos = content.index("data-priority-signals")
+        assert report_pos < badges_pos
+
+    def test_decision_empty_signals_no_container(self, client) -> None:
+        """Caso sem sinais não renderiza o container de badges."""
+        case = self._make_wait_doctor_case(client, priority_signals=[])
+        self._login_as(client, "doctor")
+        content = client.get(f"/doctor/{case.case_id}/").content.decode()
+        assert "data-priority-signals" not in content
+
+    def test_decision_uses_persisted_value_not_raw_text(self, client) -> None:
+        """Texto bruto sozinho não cria badges na tela de decisão."""
+        case = self._make_wait_doctor_case(
+            client,
+            priority_signals=[],
+            extracted_text="Suspeita de corpo estranho em esôfago.",
+        )
+        self._login_as(client, "doctor")
+        content = client.get(f"/doctor/{case.case_id}/").content.decode()
+        assert "data-priority-signals" not in content
+        assert 'data-priority-signal-code="foreign_body"' not in content
+
+    def test_decision_alert_lines_before_labs_in_achados(self, client) -> None:
+        """Corpo estranho e cáustico aparecem no início de Achados críticos."""
+        case = self._make_wait_doctor_case(
+            client,
+            priority_signals=[
+                self._signal("foreign_body"),
+                self._signal("caustic_ingestion", "há 2 dias"),
+            ],
+        )
+        self._login_as(client, "doctor")
+        content = client.get(f"/doctor/{case.case_id}/").content.decode()
+        achados_pos = content.index("Achados Críticos")
+        hb_pos = content.index("- Hb:")
+        caustic_pos = content.index("Ingestão cáustica/corrosiva relatada")
+        fb_pos = content.index("Suspeita de corpo estranho: avaliar retirada")
+        assert achados_pos < caustic_pos < hb_pos
+        assert achados_pos < fb_pos < hb_pos
+        assert "há 2 dias" in content
+
+    def test_decision_detail_is_escaped(self, client) -> None:
+        """Conteúdo malicioso em detail é escapado no template."""
+        malicious = '<script>alert("xss")</script>'
+        case = self._make_wait_doctor_case(
+            client,
+            priority_signals=[self._signal("caustic_ingestion", malicious)],
+        )
+        self._login_as(client, "doctor")
+        content = client.get(f"/doctor/{case.case_id}/").content.decode()
+        assert "&lt;script&gt;" in content
+        assert "<script>alert" not in content
+        assert 'data-priority-signal-code="caustic_ingestion"' in content

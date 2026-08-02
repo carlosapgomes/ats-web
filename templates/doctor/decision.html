@@ -98,6 +98,8 @@
   <div class="card p-4 mb-4 doctor-report-card">
     <h5 class="mb-3">⚙️ Relatório Automático da Regulação</h5>
 
+    {% include "cases/_priority_signals.html" with priority_signal_badges=report.priority_signal_badges %}
+
     <div class="report-meta mb-3 small text-muted">
       <div>{{ report.context.procedure }}</div>
       <div>{{ report.context.origin }}</div>
@@ -105,9 +107,6 @@
       {% for line in report.context.transfusion_lines %}<div>{{ line }}</div>{% endfor %}
       {% for line in report.context.tracked_exam_lines %}<div>{{ line }}</div>{% endfor %}
       {% if report.context.pediatric %}<div>{{ report.context.pediatric }}</div>{% endif %}
-      {% for line in report.context.clinical_alert_lines %}
-      <div class="alert alert-warning py-1 px-2 mb-1 small">{{ line }}</div>
-      {% endfor %}
     </div>
 
     <div class="doctor-report-grid">

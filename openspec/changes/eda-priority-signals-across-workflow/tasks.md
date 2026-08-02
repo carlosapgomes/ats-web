@@ -6,7 +6,7 @@ Implementar somente o próximo slice incompleto. Cada slice exige confirmação 
 
 - [x] Slice 001 — Ecoendoscopia percorre contrato, scope, policy padrão e relatório médico (`slices/slice-001-echoendoscopy-eda-flow.md`)
 - [x] Slice 002 — Sinalizações canônicas persistidas, backfill de abertos e badges na fila médica (`slices/slice-002-persisted-signals-doctor-queue.md`)
-- [ ] Slice 003 — Topo e corpo do relatório médico usam os sinais persistidos (`slices/slice-003-doctor-report-priority-signals.md`)
+- [x] Slice 003 — Topo e corpo do relatório médico usam os sinais persistidos (`slices/slice-003-doctor-report-priority-signals.md`)
 - [ ] Slice 004 — Badges persistidos acompanham o caso no CHD (`slices/slice-004-scheduler-priority-signals.md`)
 - [ ] Slice 005 — Badges persistidos acompanham o caso no NIR (`slices/slice-005-nir-priority-signals.md`)
 

@@ -907,242 +907,346 @@ class TestComorbiditiesLine:
         )
 
 
-# ── Caustic ingestion detection ──────────────────────────────────────────────
+# ── Priority signals (Slice 003) ────────────────────────────────────────────
 
 
-class TestCausticIngestionDetection:
-    """Tests for caustic/corrosive ingestion detection in the presenter."""
+def _signal(code: str, detail: str = "") -> dict[str, Any]:
+    """Build a persisted v1 priority signal dict."""
+    return {
+        "code": code,
+        "category": {
+            "foreign_body": "clinical_alert",
+            "caustic_ingestion": "clinical_alert",
+            "pediatric": "special_population",
+            "echoendoscopy": "special_procedure",
+            "esophageal_dilation": "special_procedure",
+            "gastrostomy": "special_procedure",
+        }[code],
+        "detail": detail,
+        "version": 1,
+    }
 
-    def test_alert_detects_soda_caustica_with_relative_time(self):
-        """Detect soda cáustica ingestion with 'há 3 semanas' time expression."""
+
+class TestDoctorReportPrioritySignals:
+    """Slice 003: o relatório médico consome os sinais persistidos."""
+
+    def test_report_exposes_priority_signal_badges(self):
+        """build_report expõe badges projetados do valor persistido."""
         presenter = DoctorReportPresenter(
             structured_data={},
             summary_text="",
             suggested_action={},
+            priority_signals=[_signal("foreign_body"), _signal("echoendoscopy")],
+        )
+        report = presenter.build_report()
+        badges = report["priority_signal_badges"]
+        assert [b["code"] for b in badges] == ["foreign_body", "echoendoscopy"]
+
+    def test_presenter_uses_persisted_signals_without_source_text(self):
+        """Badge e alerta vêm do valor persistido, não do texto bruto."""
+        presenter = DoctorReportPresenter(
+            structured_data={},
+            summary_text="",
+            suggested_action={},
+            priority_signals=[_signal("foreign_body")],
+            source_text="",  # texto vazio — nada deve ser redetectado
+        )
+        report = presenter.build_report()
+        assert [b["code"] for b in report["priority_signal_badges"]] == ["foreign_body"]
+        findings = "\n".join(report["blocks"]["achados_criticos"])
+        assert "corpo estranho" in findings.lower()
+
+    def test_persisted_signal_present_without_raw_text(self):
+        """Sinal persistido aparece mesmo com texto bruto vazio."""
+        presenter = DoctorReportPresenter(
+            structured_data={},
+            summary_text="",
+            suggested_action={},
+            priority_signals=[_signal("caustic_ingestion", "há 3 semanas")],
+            source_text="",
+        )
+        report = presenter.build_report()
+        findings = "\n".join(report["blocks"]["achados_criticos"])
+        assert "ingestão cáustica" in findings.lower()
+        assert "há 3 semanas" in findings
+
+    def test_presenter_without_signals_defaults_safely(self):
+        """Sem priority_signals o presenter funciona com default seguro."""
+        presenter = DoctorReportPresenter(
+            structured_data={},
+            summary_text="",
+            suggested_action={},
+        )
+        report = presenter.build_report()
+        assert report["priority_signal_badges"] == []
+
+    def test_context_prioritarios_appear_once_before_summary(self):
+        """Linha de contextos aparece uma vez, antes do resumo LLM."""
+        presenter = DoctorReportPresenter(
+            structured_data={},
+            summary_text="Paciente com HDA.",
+            suggested_action={},
+            priority_signals=[
+                _signal("echoendoscopy"),
+                _signal("pediatric", "10 anos"),
+                _signal("esophageal_dilation"),
+            ],
+        )
+        report = presenter.build_report()
+        summary = report["blocks"]["resumo_clinico"]
+        assert len(summary) >= 2
+        context_line = summary[0]
+        assert context_line.startswith("Contextos prioritários:")
+        assert "Pediatria — 10 anos" in context_line
+        assert "Ecoendoscopia" in context_line
+        assert "Dilatação esofágica" in context_line
+        context_lines = [line for line in summary if line.startswith("Contextos prioritários:")]
+        assert len(context_lines) == 1
+        assert "Paciente com HDA." in "\n".join(summary[1:])
+
+    def test_context_order_canonical(self):
+        """Ordem canônica: Pediatria → Ecoendoscopia → Dilatação → Gastrostomia."""
+        presenter = DoctorReportPresenter(
+            structured_data={},
+            summary_text="",
+            suggested_action={},
+            priority_signals=[
+                _signal("gastrostomy"),
+                _signal("echoendoscopy"),
+                _signal("pediatric"),
+                _signal("esophageal_dilation"),
+            ],
+        )
+        report = presenter.build_report()
+        context_line = report["blocks"]["resumo_clinico"][0]
+        assert context_line.index("Pediatria") < context_line.index("Ecoendoscopia")
+        assert context_line.index("Ecoendoscopia") < context_line.index("Dilatação esofágica")
+        assert context_line.index("Dilatação esofágica") < context_line.index("Gastrostomia")
+
+    def test_no_context_line_without_context_signals(self):
+        """Sem sinais de contexto, nenhuma linha de contextos é criada."""
+        presenter = DoctorReportPresenter(
+            structured_data={},
+            summary_text="Paciente com HDA.",
+            suggested_action={},
+            priority_signals=[_signal("foreign_body")],
+        )
+        report = presenter.build_report()
+        summary = "\n".join(report["blocks"]["resumo_clinico"])
+        assert "Contextos prioritários" not in summary
+
+    def test_fallback_when_summary_empty_keeps_context_line(self):
+        """Fallback atual com summary vazio mantém a linha de contextos no início."""
+        presenter = DoctorReportPresenter(
+            structured_data={},
+            summary_text="",
+            suggested_action={},
+            priority_signals=[_signal("pediatric", "8 anos")],
+        )
+        report = presenter.build_report()
+        summary = report["blocks"]["resumo_clinico"]
+        assert summary[0].startswith("Contextos prioritários:")
+        assert "Pediatria — 8 anos" in summary[0]
+        assert any("Resumo clínico não informado" in line for line in summary)
+
+    def test_foreign_body_alert_before_labs(self):
+        """Corpo estranho aparece antes de Hb/Plaquetas/INR/ECG."""
+        presenter = DoctorReportPresenter(
+            structured_data={"eda": {"labs": {"hb_g_dl": 8.5, "platelets_per_mm3": 120000, "inr": 1.1}}},
+            summary_text="",
+            suggested_action={},
+            priority_signals=[_signal("foreign_body")],
+        )
+        report = presenter.build_report()
+        findings = report["blocks"]["achados_criticos"]
+        fb_idx = next(i for i, line in enumerate(findings) if "corpo estranho" in line.lower())
+        hb_idx = next(i for i, line in enumerate(findings) if line.startswith("- Hb:"))
+        assert fb_idx < hb_idx
+
+    def test_caustic_alert_with_time_before_labs(self):
+        """Cáustico persistido com detail de tempo aparece antes de Hb."""
+        presenter = DoctorReportPresenter(
+            structured_data={},
+            summary_text="",
+            suggested_action={},
+            priority_signals=[_signal("caustic_ingestion", "há 2 dias")],
+        )
+        report = presenter.build_report()
+        findings = report["blocks"]["achados_criticos"]
+        ci_idx = next(i for i, line in enumerate(findings) if "ingestão cáustica" in line.lower())
+        hb_idx = next(i for i, line in enumerate(findings) if line.startswith("- Hb:"))
+        assert ci_idx < hb_idx
+        assert "há 2 dias" in findings[ci_idx]
+
+    def test_caustic_not_duplicated(self):
+        """Cáustico não aparece duplicado entre context e achados."""
+        presenter = DoctorReportPresenter(
+            structured_data={},
+            summary_text="",
+            suggested_action={},
+            priority_signals=[_signal("caustic_ingestion", "há 2 dias")],
+            source_text="Paciente ingeriu soda cáustica há 2 dias.",
+        )
+        report = presenter.build_report()
+        all_lines: list[str] = list(report["blocks"]["achados_criticos"])
+        all_lines.extend(report["context"].get("clinical_alert_lines", []))
+        count = sum(1 for line in all_lines if "ingestão cáustica" in line.lower())
+        assert count == 1
+
+    def test_raw_text_alone_does_not_create_canonical_highlight(self):
+        """Sem sinal persistido, texto bruto sozinho não cria destaque canônico."""
+        presenter = DoctorReportPresenter(
+            structured_data={},
+            summary_text="",
+            suggested_action={},
+            priority_signals=[],
+            source_text="Paciente ingeriu soda cáustica há 3 semanas. Suspeita de corpo estranho.",
+        )
+        report = presenter.build_report()
+        findings = "\n".join(report["blocks"]["achados_criticos"])
+        assert "ingestão cáustica" not in findings.lower()
+        assert "corpo estranho" not in findings.lower()
+        assert report["priority_signal_badges"] == []
+
+    def test_procedure_name_combination_ordered(self):
+        """Coexistência eco+dilatação+gastro → nome combinado com ordem estável."""
+        presenter = DoctorReportPresenter(
+            structured_data={},
+            summary_text="",
+            suggested_action={},
+            priority_signals=[
+                _signal("gastrostomy"),
+                _signal("echoendoscopy"),
+                _signal("esophageal_dilation"),
+            ],
+        )
+        report = presenter.build_report()
+        assert report["context"]["procedure"] == (
+            "procedimento solicitado: EDA com ecoendoscopia, dilatação esofágica e gastrostomia"
+        )
+
+    def test_procedure_name_two_signal_combination(self):
+        """Eco + dilatação → 'EDA com ecoendoscopia e dilatação esofágica'."""
+        presenter = DoctorReportPresenter(
+            structured_data={},
+            summary_text="",
+            suggested_action={},
+            priority_signals=[_signal("echoendoscopy"), _signal("esophageal_dilation")],
+        )
+        report = presenter.build_report()
+        assert report["context"]["procedure"] == (
+            "procedimento solicitado: EDA com ecoendoscopia e dilatação esofágica"
+        )
+
+    def test_procedure_single_signal_preserves_existing_names(self):
+        """Sinal único preserva os nomes existentes."""
+        cases = [
+            ([_signal("gastrostomy")], "EDA para gastrostomia"),
+            ([_signal("esophageal_dilation")], "EDA para dilatação esofágica"),
+            ([_signal("echoendoscopy")], "EDA com ecoendoscopia"),
+            ([_signal("foreign_body")], "EDA para retirada de corpo estranho"),
+        ]
+        for signals, expected in cases:
+            presenter = DoctorReportPresenter(
+                structured_data={},
+                summary_text="",
+                suggested_action={},
+                priority_signals=signals,
+            )
+            assert presenter._resolve_canonical_procedure_name() == expected
+
+    def test_text_report_contains_contexts_and_alerts(self):
+        """build_text_report contém as mesmas linhas determinísticas da tela."""
+        presenter = DoctorReportPresenter(
+            structured_data={},
+            summary_text="Paciente com HDA.",
+            suggested_action={},
+            priority_signals=[
+                _signal("pediatric", "10 anos"),
+                _signal("foreign_body"),
+                _signal("caustic_ingestion", "há 1 semana"),
+            ],
+        )
+        text = presenter.build_text_report()
+        assert "Contextos prioritários:" in text
+        assert "Pediatria — 10 anos" in text
+        assert "corpo estranho" in text.lower()
+        assert "ingestão cáustica" in text.lower()
+        assert "há 1 semana" in text
+        assert "## Resumo clínico" in text
+        assert "## Achados críticos" in text
+
+
+class TestCausticIngestionAlertInReport:
+    """Slice 003: representação canônica de cáustico em Achados críticos.
+
+    O caminho antigo (detecção no source_text → clinical_alert_lines no meta)
+    foi removido: o detector vive apenas em apps/cases/priority_signals.py e a
+    apresentação canônica é a linha documental no início de Achados críticos,
+    construída exclusivamente do valor persistido.
+    """
+
+    def test_persisted_caustic_with_relative_time(self):
+        """Cáustico persistido com tempo aparece em Achados críticos."""
+        presenter = DoctorReportPresenter(
+            structured_data={},
+            summary_text="",
+            suggested_action={},
+            priority_signals=[_signal("caustic_ingestion", "há 3 semanas")],
+        )
+        report = presenter.build_report()
+        findings = "\n".join(report["blocks"]["achados_criticos"]).lower()
+        assert "ingestão cáustica/corrosiva" in findings
+        assert "há 3 semanas" in findings
+        assert "clinical_alert_lines" not in report["context"]
+
+    def test_persisted_caustic_without_time(self):
+        """Cáustico persistido sem detail ainda gera linha documental."""
+        presenter = DoctorReportPresenter(
+            structured_data={},
+            summary_text="",
+            suggested_action={},
+            priority_signals=[_signal("caustic_ingestion")],
+        )
+        report = presenter.build_report()
+        findings = "\n".join(report["blocks"]["achados_criticos"]).lower()
+        assert "ingestão cáustica/corrosiva" in findings
+
+    def test_source_text_no_longer_triggers_caustic_alert(self):
+        """Compatibilidade: texto bruto sozinho não cria destaque canônico."""
+        presenter = DoctorReportPresenter(
+            structured_data={},
+            summary_text="",
+            suggested_action={},
+            priority_signals=[],
             source_text="Paciente ingeriu soda cáustica há 3 semanas.",
         )
         report = presenter.build_report()
-        alert_lines = report["context"]["clinical_alert_lines"]
-        assert len(alert_lines) >= 1
-        assert any("ingestão cáustica/corrosiva" in line for line in alert_lines)
-        assert any("há 3 semanas" in line for line in alert_lines)
+        findings = "\n".join(report["blocks"]["achados_criticos"]).lower()
+        assert "ingestão cáustica" not in findings.lower()
+        assert report["priority_signal_badges"] == []
 
-    def test_alert_detects_corrosive_substance_with_approximate_time(self):
-        """Detect substância corrosiva ingestion with 'há cerca de 10 dias'."""
+    def test_negated_text_not_signaled(self):
+        """Negação textual continua sem gerar sinal (sem persistência)."""
         presenter = DoctorReportPresenter(
             structured_data={},
             summary_text="",
             suggested_action={},
-            source_text="História de ingestão de substância corrosiva há cerca de 10 dias.",
-        )
-        report = presenter.build_report()
-        alert_lines = report["context"]["clinical_alert_lines"]
-        assert len(alert_lines) >= 1
-        assert any("ingestão cáustica/corrosiva" in line for line in alert_lines)
-        assert any("há cerca de 10 dias" in line for line in alert_lines)
-
-    def test_alert_detects_acid_ingestion_with_date(self):
-        """Detect ácido ingestion with 'em 12/05/2026' date."""
-        presenter = DoctorReportPresenter(
-            structured_data={},
-            summary_text="",
-            suggested_action={},
-            source_text="Relata ingestão de ácido em 12/05/2026.",
-        )
-        report = presenter.build_report()
-        alert_lines = report["context"]["clinical_alert_lines"]
-        assert len(alert_lines) >= 1
-        assert any("ingestão cáustica/corrosiva" in line for line in alert_lines)
-        assert any("em 12/05/2026" in line for line in alert_lines)
-
-    def test_alert_without_time_uses_fallback(self):
-        """When caustic ingestion detected but no time, shows fallback."""
-        presenter = DoctorReportPresenter(
-            structured_data={},
-            summary_text="",
-            suggested_action={},
-            source_text="Paciente ingeriu produto corrosivo.",
-        )
-        report = presenter.build_report()
-        alert_lines = report["context"]["clinical_alert_lines"]
-        assert len(alert_lines) >= 1
-        assert any("ingestão cáustica/corrosiva" in line for line in alert_lines)
-        assert any("não informado no relatório" in line for line in alert_lines)
-
-    def test_alert_absent_when_no_event(self):
-        """No alert when text has no caustic/corrosive ingestion mention."""
-        presenter = DoctorReportPresenter(
-            structured_data={},
-            summary_text="",
-            suggested_action={},
-            source_text="Paciente com HDA. Hb 8.5. Sem comorbidades relevantes.",
-        )
-        report = presenter.build_report()
-        alert_lines = report["context"]["clinical_alert_lines"]
-        assert alert_lines == []
-
-    def test_alert_ignores_explicit_negation(self):
-        """Explicit negation of caustic ingestion does not trigger alert."""
-        presenter = DoctorReportPresenter(
-            structured_data={},
-            summary_text="",
-            suggested_action={},
+            priority_signals=[],
             source_text="Paciente nega ingestão de cáustico.",
         )
         report = presenter.build_report()
-        alert_lines = report["context"]["clinical_alert_lines"]
-        assert alert_lines == []
+        findings = "\n".join(report["blocks"]["achados_criticos"]).lower()
+        assert "ingestão cáustica" not in findings.lower()
 
-    def test_alert_ignores_sem_ingestao_negation(self):
-        """'Sem ingestão de corrosivos' does not trigger alert."""
+    def test_text_report_includes_caustic_from_persisted_signal(self):
+        """build_text_report inclui a linha canônica do cáustico persistido."""
         presenter = DoctorReportPresenter(
             structured_data={},
             summary_text="",
             suggested_action={},
-            source_text="Sem ingestão de corrosivos.",
-        )
-        report = presenter.build_report()
-        alert_lines = report["context"]["clinical_alert_lines"]
-        assert alert_lines == []
-
-    def test_alert_ignores_nao_ingeriu_negation(self):
-        """'Não ingeriu soda cáustica' does not trigger alert."""
-        presenter = DoctorReportPresenter(
-            structured_data={},
-            summary_text="",
-            suggested_action={},
-            source_text="Não ingeriu soda cáustica.",
-        )
-        report = presenter.build_report()
-        alert_lines = report["context"]["clinical_alert_lines"]
-        assert alert_lines == []
-
-    def test_alert_shows_corrosive_acid_time_fallback(self):
-        """Corrosive acid ingestion without explicit time shows fallback."""
-        presenter = DoctorReportPresenter(
-            structured_data={},
-            summary_text="",
-            suggested_action={},
-            source_text="História de ingestão de ácido.",
-        )
-        report = presenter.build_report()
-        alert_lines = report["context"]["clinical_alert_lines"]
-        assert len(alert_lines) >= 1
-        assert any("ingestão cáustica/corrosiva" in line for line in alert_lines)
-        assert any("não informado no relatório" in line for line in alert_lines)
-
-    def test_source_text_default_empty_maintains_compatibility(self):
-        """Presenter without source_text still works (default empty str)."""
-        presenter = DoctorReportPresenter(
-            structured_data={},
-            summary_text="",
-            suggested_action={},
-        )
-        report = presenter.build_report()
-        alert_lines = report["context"]["clinical_alert_lines"]
-        assert alert_lines == []
-
-    def test_text_report_includes_clinical_alert_lines(self):
-        """build_text_report includes clinical alert lines when present."""
-        presenter = DoctorReportPresenter(
-            structured_data={},
-            summary_text="",
-            suggested_action={},
-            source_text="Paciente ingeriu soda cáustica há 3 semanas.",
+            priority_signals=[_signal("caustic_ingestion", "há 3 semanas")],
         )
         text = presenter.build_text_report()
-        assert "ingestão cáustica/corrosiva" in text
+        assert "ingestão cáustica/corrosiva" in text.lower()
         assert "há 3 semanas" in text
-
-    # ── Hardening: unaccented variants ────────────────────────────────
-
-    def test_alert_detects_unaccented_soda_caustica_with_time(self):
-        """Detect unaccented 'soda caustica' with 'ha 3 semanas'."""
-        presenter = DoctorReportPresenter(
-            structured_data={},
-            summary_text="",
-            suggested_action={},
-            source_text="Paciente ingeriu soda caustica ha 3 semanas.",
-        )
-        report = presenter.build_report()
-        alert_lines = report["context"]["clinical_alert_lines"]
-        assert len(alert_lines) >= 1
-        assert any("ingestão cáustica/corrosiva" in line for line in alert_lines)
-        # Time is extracted from original text as literal
-        assert any("ha 3 semanas" in line for line in alert_lines)
-
-    def test_alert_detects_unaccented_ingestao_corrosiva_with_time(self):
-        """Detect unaccented 'ingestao' and 'corrosiva' with 'ha cerca de 10 dias'."""
-        presenter = DoctorReportPresenter(
-            structured_data={},
-            summary_text="",
-            suggested_action={},
-            source_text="Historia de ingestao de substancia corrosiva ha cerca de 10 dias.",
-        )
-        report = presenter.build_report()
-        alert_lines = report["context"]["clinical_alert_lines"]
-        assert len(alert_lines) >= 1
-        assert any("ingestão cáustica/corrosiva" in line for line in alert_lines)
-        assert any("ha cerca de 10 dias" in line for line in alert_lines)
-
-    def test_alert_detects_unaccented_acid_ingestion_with_date(self):
-        """Detect unaccented 'acido' ingestion with 'em 12/05/2026'."""
-        presenter = DoctorReportPresenter(
-            structured_data={},
-            summary_text="",
-            suggested_action={},
-            source_text="Relata ingestao de acido em 12/05/2026.",
-        )
-        report = presenter.build_report()
-        alert_lines = report["context"]["clinical_alert_lines"]
-        assert len(alert_lines) >= 1
-        assert any("ingestão cáustica/corrosiva" in line for line in alert_lines)
-        assert any("em 12/05/2026" in line for line in alert_lines)
-
-    def test_alert_ignores_unaccented_negation(self):
-        """Unaccented negation 'nega ingestao de caustico' does not trigger."""
-        presenter = DoctorReportPresenter(
-            structured_data={},
-            summary_text="",
-            suggested_action={},
-            source_text="Paciente nega ingestao de caustico.",
-        )
-        report = presenter.build_report()
-        alert_lines = report["context"]["clinical_alert_lines"]
-        assert alert_lines == []
-
-    def test_alert_ignores_unaccented_nao_ingeriu_soda_caustica(self):
-        """Unaccented 'Nao ingeriu soda caustica' does not trigger."""
-        presenter = DoctorReportPresenter(
-            structured_data={},
-            summary_text="",
-            suggested_action={},
-            source_text="Nao ingeriu soda caustica.",
-        )
-        report = presenter.build_report()
-        alert_lines = report["context"]["clinical_alert_lines"]
-        assert alert_lines == []
-
-    def test_alert_ignores_soda_caustica_contact_without_ingestion(self):
-        """Contact with soda cáustica without ingestion does not trigger."""
-        presenter = DoctorReportPresenter(
-            structured_data={},
-            summary_text="",
-            suggested_action={},
-            source_text="Contato com soda cáustica, sem ingestão.",
-        )
-        report = presenter.build_report()
-        alert_lines = report["context"]["clinical_alert_lines"]
-        assert alert_lines == []
-
-    def test_alert_ignores_soda_caustica_burn_without_ingestion(self):
-        """Burn by soda caustica without ingestion does not trigger."""
-        presenter = DoctorReportPresenter(
-            structured_data={},
-            summary_text="",
-            suggested_action={},
-            source_text="Queimadura por soda caustica em membro superior.",
-        )
-        report = presenter.build_report()
-        alert_lines = report["context"]["clinical_alert_lines"]
-        assert alert_lines == []

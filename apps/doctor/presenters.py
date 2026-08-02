@@ -10,6 +10,12 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import Any
 
+from apps.cases.priority_signals import (
+    PRIORITY_SIGNAL_VERSION,
+    build_priority_signal_badges,
+    build_priority_signal_context_fragments,
+)
+
 
 def _format_exam_datetime(value: Any) -> str:
     """Parse exam_datetime_iso and return formatted date string, or empty string if invalid.
@@ -114,35 +120,6 @@ def _is_yes_precheck(value: Any) -> bool:
     return isinstance(value, str) and value.strip().lower() == "yes"
 
 
-# ── Caustic ingestion (single runtime implementation in apps.cases) ────────
-#
-# The detector was moved to apps/cases/priority_signals.py (Slice 002). This
-# adapter preserves the legacy alert-line API until Slice 003 consumes the
-# persisted signals; no detection logic lives here anymore.
-
-
-def _detect_caustic_ingestion(text: str) -> list[str]:
-    """Return legacy alert lines for caustic ingestion, reusing the shared detector.
-
-    Returns a list with:
-    - Empty list when no ingestion detected or negation is explicit.
-    - One or two lines with the alert header and time info when positive.
-    """
-    from apps.cases.priority_signals import resolve_caustic_ingestion
-
-    signal = resolve_caustic_ingestion(text or "")
-    if signal is None:
-        return []
-
-    time_text = signal.get("detail") or ""
-    lines: list[str] = ["⚠️ ingestão cáustica/corrosiva relatada: sim"]
-    if time_text:
-        lines.append(f"tempo desde a ingestão: {time_text}")
-    else:
-        lines.append("tempo desde a ingestão: não informado no relatório")
-    return lines
-
-
 def _is_absent_exam_result(value: Any) -> bool:
     """Return True when result_value indicates absence of exam.
 
@@ -197,6 +174,7 @@ class DoctorReportPresenter:
     suggested_action: dict[str, Any] = field(default_factory=dict)
     recent_denial_context: dict[str, Any] | None = None
     source_text: str = ""
+    priority_signals: list[dict[str, Any]] = field(default_factory=list)
 
     # ── Public API ───────────────────────────────────────────────────────
 
@@ -214,18 +192,64 @@ class DoctorReportPresenter:
             "blocks": self._build_all_blocks(),
             "context": self._build_context(),
             "recent_denial": self._build_recent_denial(),
+            "priority_signal_badges": build_priority_signal_badges(self.priority_signals),
         }
 
-    # ── Clinical alert lines ────────────────────────────────────────────
+    # ── Priority signals (persisted — Slice 003) ────────────────────────
 
-    def _build_clinical_alert_lines(self) -> list[str]:
-        """Detect caustic/corrosive ingestion in source_text and return alert lines.
+    # Procedural fragment order for the canonical procedure name: ecoendoscopia
+    # → dilatação esofágica → gastrostomia (design D9).
+    _PROCEDURE_FRAGMENT_ORDER: tuple[tuple[str, str], ...] = (
+        ("echoendoscopy", "ecoendoscopia"),
+        ("esophageal_dilation", "dilatação esofágica"),
+        ("gastrostomy", "gastrostomia"),
+    )
 
-        Returns a list with:
-        - Empty list when no ingestion detected or negation is explicit.
-        - One or two lines with the alert header and time info when positive.
+    def _get_signal(self, code: str) -> dict[str, Any] | None:
+        """Return the compatible persisted signal for a code, or None."""
+        if not isinstance(self.priority_signals, list):
+            return None
+        for item in self.priority_signals:
+            if isinstance(item, dict) and item.get("code") == code and item.get("version") == PRIORITY_SIGNAL_VERSION:
+                return item
+        return None
+
+    def _has_signal(self, code: str) -> bool:
+        """True when a compatible persisted signal exists for the code."""
+        return self._get_signal(code) is not None
+
+    def _build_priority_contexts_line(self) -> str:
+        """Build the deterministic single-line context for Resumo clínico."""
+        fragments = build_priority_signal_context_fragments(self.priority_signals)
+        if not fragments:
+            return ""
+        return "Contextos prioritários: " + "; ".join(fragments) + "."
+
+    def _build_clinical_alert_lines_from_signals(self) -> list[str]:
+        """Return foreign-body/caustic alert lines from persisted signals.
+
+        Canonical order: foreign_body before caustic_ingestion (design D13).
+        Informative tone only — no automatic urgency/denial assertion.
         """
-        return _detect_caustic_ingestion(self.source_text)
+        lines: list[str] = []
+        foreign_body = self._get_signal("foreign_body")
+        if foreign_body is not None:
+            lines.append("- Suspeita de corpo estranho: avaliar retirada.")
+        caustic = self._get_signal("caustic_ingestion")
+        if caustic is not None:
+            lines.append(self._build_caustic_alert_line(caustic))
+        return lines
+
+    @staticmethod
+    def _build_caustic_alert_line(signal: dict[str, Any]) -> str:
+        """Documental caustic line with time detail when persisted."""
+        line = "- Ingestão cáustica/corrosiva relatada."
+        detail = signal.get("detail")
+        if isinstance(detail, str) and detail.strip():
+            line += f" Tempo desde a ingestão: {detail.strip()}."
+        return line
+
+    # ── Block builders ───────────────────────────────────────────────────
 
     def _build_comorbidities_line(self) -> str:
         """Build the comorbidities display line from structured_data.
@@ -279,9 +303,6 @@ class DoctorReportPresenter:
         lines.extend(context["tracked_exam_lines"])
         if context["pediatric"]:
             lines.append(context["pediatric"])
-        if context.get("clinical_alert_lines"):
-            for alert_line in context["clinical_alert_lines"]:
-                lines.append(alert_line)
         if context.get("comorbidities_line"):
             lines.append(context["comorbidities_line"])
         lines.append("")
@@ -323,24 +344,34 @@ class DoctorReportPresenter:
         }
 
     def _build_clinical_summary(self) -> list[str]:
-        """Normalize clinical summary into 2-4 line block."""
+        """Normalize clinical summary into 2-4 line block, with the deterministic
+        priority-context line first when persisted signals provide one."""
         stripped = [line.strip() for line in self.summary_text.splitlines() if line.strip()]
         if not stripped:
-            return [
+            lines = [
                 "Resumo clínico não informado.",
                 "Consulte o relatório original para contexto clínico.",
             ]
-        if len(stripped) >= 2:
-            return stripped[:4]
-        one_liner = stripped[0]
-        words = one_liner.split()
-        if len(words) >= 4:
-            midpoint = len(words) // 2
-            first_half = " ".join(words[:midpoint]).strip()
-            second_half = " ".join(words[midpoint:]).strip()
-            if first_half and second_half:
-                return [first_half, second_half]
-        return [one_liner, f"Base clínica: {one_liner}"]
+        elif len(stripped) >= 2:
+            lines = stripped[:4]
+        else:
+            one_liner = stripped[0]
+            words = one_liner.split()
+            if len(words) >= 4:
+                midpoint = len(words) // 2
+                first_half = " ".join(words[:midpoint]).strip()
+                second_half = " ".join(words[midpoint:]).strip()
+                if first_half and second_half:
+                    lines = [first_half, second_half]
+                else:
+                    lines = [one_liner, f"Base clínica: {one_liner}"]
+            else:
+                lines = [one_liner, f"Base clínica: {one_liner}"]
+
+        context_line = self._build_priority_contexts_line()
+        if context_line:
+            return [context_line, *lines]
+        return lines
 
     def _build_critical_findings(self) -> list[str]:
         hb = _extract_nested(self.structured_data, "eda", "labs", "hb_g_dl")
@@ -348,13 +379,14 @@ class DoctorReportPresenter:
         inr = _extract_nested(self.structured_data, "eda", "labs", "inr")
         ecg_present = _extract_nested(self.structured_data, "eda", "ecg", "report_present")
         ecg_alert = _extract_nested(self.structured_data, "eda", "ecg", "abnormal_flag")
-        return [
+        lab_lines = [
             f"- Hb: {_format_value_or_fallback(hb)}",
             f"- Plaquetas: {_format_value_or_fallback(platelets)}",
             f"- INR: {_format_value_or_fallback(inr)}",
             f"- ECG presente: {_format_value_or_fallback(ecg_present)}",
             f"- ECG sinal de alerta: {_format_unknown_with_evidence(ecg_alert)}",
         ]
+        return [*self._build_clinical_alert_lines_from_signals(), *lab_lines]
 
     def _build_critical_pending(self) -> list[str]:
         labs_pass = _extract_nested(self.structured_data, "policy_precheck", "labs_pass")
@@ -536,11 +568,32 @@ class DoctorReportPresenter:
             "transfusion_lines": self._build_transfusion_lines(),
             "tracked_exam_lines": self._build_tracked_exam_lines(),
             "pediatric": "paciente pediátrico: sim" if self._is_pediatric() else "",
-            "clinical_alert_lines": self._build_clinical_alert_lines(),
             "comorbidities_line": self._build_comorbidities_line(),
         }
 
     def _resolve_canonical_procedure_name(self) -> str:
+        """Resolve the canonical procedure name.
+
+        Procedural persisted signals coexist without a combined enum: when two or
+        more of ecoendoscopia/dilatação/gastrostomia are present the line joins
+        them in fixed order (ecoendoscopia → dilatação esofágica → gastrostomia).
+        A single signal and the structured subtype keep the existing names, and
+        corpo estranho stays a procedural name when it is the main signal.
+        """
+        procedural_codes = [code for code, _ in self._PROCEDURE_FRAGMENT_ORDER if self._has_signal(code)]
+        if procedural_codes:
+            if len(procedural_codes) == 1:
+                code = procedural_codes[0]
+                if code == "echoendoscopy":
+                    return "EDA com ecoendoscopia"
+                if code == "esophageal_dilation":
+                    return "EDA para dilatação esofágica"
+                if code == "gastrostomy":
+                    return "EDA para gastrostomia"
+            fragment_names = [fragment for code, fragment in self._PROCEDURE_FRAGMENT_ORDER if code in procedural_codes]
+            return "EDA com " + ", ".join(fragment_names[:-1]) + f" e {fragment_names[-1]}"
+        if self._has_signal("foreign_body"):
+            return "EDA para retirada de corpo estranho"
         subtype = self._extract_eda_subtype()
         if subtype == "gastrostomy":
             return "EDA para gastrostomia"
