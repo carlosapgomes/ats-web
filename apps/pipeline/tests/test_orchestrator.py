@@ -305,6 +305,71 @@ def _non_eda_llm1_response() -> str:
     )
 
 
+def _priority_signals_llm1_response() -> str:
+    """LLM1 data combining pediatric + foreign_body signals (Slice 002)."""
+    return json.dumps(
+        {
+            "schema_version": "1.1",
+            "language": "pt-BR",
+            "agency_record_number": "12345",
+            "patient": {"name": "Crianca", "age": 10, "sex": "F"},
+            "summary": {
+                "one_liner": "Criança com corpo estranho; EDA com ecoendoscopia indicada.",
+                "bullet_points": ["Ponto 1", "Ponto 2", "Ponto 3"],
+            },
+            "extraction_quality": {"confidence": "alta", "missing_fields": [], "notes": None},
+            "preop_screening": {
+                "exam_type": "eda",
+                "has_cardiovascular_disease": "no",
+                "has_active_respiratory_symptoms": "no",
+                "has_prior_respiratory_disease": "no",
+                "has_ecg_report": "unknown",
+                "has_chest_xray_report": "unknown",
+                "hb_g_dl": 13.0,
+                "platelets_per_mm3": 200000,
+                "inr": 1.0,
+                "rulebook_signals": {
+                    "eda_subtype": "foreign_body",
+                    "minimum_exam_evidence": {
+                        "hb_numeric_present": "yes",
+                        "platelets_numeric_present": "yes",
+                        "tp_inr_rni_numeric_present": "yes",
+                        "ttpa_present": "yes",
+                        "urea_present": "yes",
+                        "creatinine_present": "yes",
+                    },
+                    "conditional_exam_requirements": {},
+                    "clinical_flags": {},
+                },
+            },
+            "policy_precheck": {
+                "excluded_from_eda_flow": False,
+                "exclusion_reason": None,
+                "labs_required": True,
+                "labs_pass": "yes",
+                "labs_failed_items": [],
+                "ecg_required": False,
+                "ecg_present": "unknown",
+                "pediatric_flag": True,
+                "notes": None,
+            },
+            "eda": {
+                "indication_category": "foreign_body",
+                "exclusion_type": "none",
+                "is_pediatric": True,
+                "foreign_body_suspected": True,
+                "requested_procedure": {
+                    "name": "EDA com ecoendoscopia",
+                    "urgency": "eletivo",
+                    "subtype": "foreign_body",
+                },
+                "labs": {"hb_g_dl": 13.0, "platelets_per_mm3": 200000, "inr": 1.0, "source_text_hint": None},
+                "ecg": {"report_present": "unknown", "abnormal_flag": "unknown", "source_text_hint": None},
+            },
+        }
+    )
+
+
 def _low_hb_llm1_response() -> str:
     """LLM1 data with critically low Hb (triggers preop deny)."""
     return json.dumps(
@@ -726,6 +791,92 @@ class TestPipelineSupportSynthesisSaved:
         assert isinstance(asa, dict)
         assert "bucket" in asa
         assert "display_text" in asa
+
+
+@pytest.mark.django_db
+class TestPipelinePrioritySignals:
+    """Slice 002: persistência de sinais canônicos após LLM1 e antes do scope."""
+
+    def _run(self, user, *, extracted_text, llm1_response, llm2_response=None) -> Case:
+        case = _make_case(user, extracted_text=extracted_text)
+        responses = [llm1_response]
+        if llm2_response is not None:
+            responses.append(llm2_response(str(case.case_id)))
+        client = RecordingLlmClient(responses=responses)
+        run_pipeline(
+            case.case_id,
+            llm_client=client,
+            llm1_system_prompt="sp1",
+            llm1_user_template="{case_id}|{agency_record_number}|{extracted_text}",
+            llm2_system_prompt="sp2",
+            llm2_user_template="{case_id}|{agency_record_number}|{llm1_structured_data}",
+        )
+        return _reload(case)
+
+    def test_pipeline_persists_multiple_signals_after_llm1(self, django_user_model) -> None:
+        user = django_user_model.objects.create_user(username="nir_sig1", password="pw")
+        case = self._run(
+            user,
+            extracted_text=(
+                "Motivo da Solicitação: EDA com ecoendoscopia para retirada de corpo estranho "
+                "em paciente de 10 anos. Unid. Origem: HSA."
+            ),
+            llm1_response=_priority_signals_llm1_response(),
+            llm2_response=_eda_llm2_accept_response,
+        )
+        assert case.status == CaseStatus.WAIT_DOCTOR
+        codes = [s["code"] for s in case.priority_signals]
+        assert codes == ["foreign_body", "pediatric", "echoendoscopy"]
+        for signal in case.priority_signals:
+            assert signal["version"] == 1
+            assert signal["category"] in {"clinical_alert", "special_population", "special_procedure"}
+
+    def test_llm1_ok_payload_contains_ordered_priority_signal_codes(self, django_user_model) -> None:
+        user = django_user_model.objects.create_user(username="nir_sig2", password="pw")
+        case = self._run(
+            user,
+            extracted_text=(
+                "Motivo da Solicitação: EDA com ecoendoscopia para retirada de corpo estranho "
+                "em paciente de 10 anos. Unid. Origem: HSA."
+            ),
+            llm1_response=_priority_signals_llm1_response(),
+            llm2_response=_eda_llm2_accept_response,
+        )
+        llm1_ok = CaseEvent.objects.filter(case=case, event_type="LLM1_OK").latest("timestamp")
+        assert llm1_ok.payload["priority_signal_codes"] == [
+            "foreign_body",
+            "pediatric",
+            "echoendoscopy",
+        ]
+        # A auditoria não copia texto clínico adicional (apenas resumo + códigos).
+        assert "extracted_text" not in llm1_ok.payload
+        assert "detail" not in json.dumps(llm1_ok.payload)
+
+    def test_priority_signals_persisted_before_scope_gate(self, django_user_model) -> None:
+        """Casos scope-gated persistem sinais resolvidos após LLM1 (antes do scope)."""
+        user = django_user_model.objects.create_user(username="nir_sig3", password="pw")
+        case = self._run(
+            user,
+            extracted_text="Paciente ingeriu soda cáustica há 2 dias.",
+            llm1_response=_non_eda_llm1_response(),
+        )
+        assert case.status == CaseStatus.WAIT_R1_CLEANUP_THUMBS
+        codes = [s["code"] for s in case.priority_signals]
+        assert codes == ["caustic_ingestion"]
+
+    def test_pipeline_failure_does_not_persist_partial_value(self, django_user_model) -> None:
+        user = django_user_model.objects.create_user(username="nir_sig4", password="pw")
+        case = _make_case(user)
+        client = StaticLlmClient(response_text="not json at all")
+        run_pipeline(
+            case.case_id,
+            llm_client=client,
+            llm1_system_prompt="sp1",
+            llm1_user_template="{case_id}|{agency_record_number}|{extracted_text}",
+        )
+        case = _reload(case)
+        assert case.status == CaseStatus.FAILED
+        assert case.priority_signals == []
 
 
 @pytest.mark.django_db

@@ -68,6 +68,9 @@ class Case(models.Model):
     structured_data = models.JSONField(blank=True, null=True)
     summary_text = models.TextField(blank=True)
     suggested_action = models.JSONField(blank=True, null=True)
+    # Derived canonical priority signals — versioned projection, NOT an LLM
+    # artifact (kept outside structured_data/suggested_action).
+    priority_signals = models.JSONField(default=list, blank=True)
 
     # Doctor decision
     doctor = models.ForeignKey(
@@ -342,10 +345,22 @@ class Case(models.Model):
         source=CaseStatus.LLM_STRUCT,
         target=ReturnState(),
     )
-    def llm1_complete(self, success: bool, user=None):
+    def llm1_complete(
+        self,
+        success: bool,
+        user=None,
+        *,
+        payload: dict[str, object] | None = None,
+    ):
+        """Registra LLM1_OK/LLM1_FAILED com payload opcional de auditoria.
+
+        O payload (ex.: priority_signal_codes) é passado pelo orchestrator;
+        não altera transições/estados — apenas enriquece o evento auditável.
+        """
         self._record_event(
             "LLM1_OK" if success else "LLM1_FAILED",
             user=user,
+            payload=payload or {},
         )
         return CaseStatus.FAILED if not success else CaseStatus.LLM_SUGGEST
 

@@ -187,10 +187,14 @@ class TestMigrationForwardReal:
         """Salva leaf nodes originais e restaura schema após o teste."""
         executor = MigrationExecutor(connection)
         self._leaf_nodes = executor.loader.graph.leaf_nodes()
-        # Substitui cases.0012 por cases.0011 nos leaf nodes
+        # Substitui cases.0012 e a nova leaf 0013 por cases.0011 nos leaf nodes
         self._targets_0011 = [
             ("cases", "0011_dashboard_case_search_indexes")
-            if node == ("cases", "0012_post_acceptance_issue_fields")
+            if node
+            in {
+                ("cases", "0012_post_acceptance_issue_fields"),
+                ("cases", "0013_case_priority_signals"),
+            }
             else node
             for node in self._leaf_nodes
         ]

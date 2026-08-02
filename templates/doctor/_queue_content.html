@@ -29,6 +29,7 @@
                 {{ c.patient_gender }}
                 {% if c.origin_unit %} · 🏥 {{ c.origin_unit }}{% endif %}
               </div>
+              {% include "cases/_priority_signals.html" with priority_signal_badges=c.priority_signal_badges %}
               <div class="summary-box mb-2">
                 <div class="row">
                   <div class="col-sm-6 mb-2">

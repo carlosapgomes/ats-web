@@ -21,6 +21,7 @@ from apps.cases.admission import (
 )
 from apps.cases.models import Case, CaseAttachment, CaseStatus
 from apps.cases.navigation import resolve_safe_next_url
+from apps.cases.priority_signals import build_priority_signal_badges
 from apps.cases.services import (
     CASE_COMMUNICATION_MAX_LENGTH,
     assert_case_lock,
@@ -167,6 +168,9 @@ def _build_case_card(case: Case, wait_minutes: int, user: Any = None) -> dict[st
         "wait_minutes": wait_minutes,
         "is_urgent": wait_minutes <= 15,
         "regulation_days_on_screen": case.regulation_days_on_screen,
+        # Badges projetados exclusivamente do valor persistido (R7) — a view
+        # nunca redetecta sinais a partir de texto bruto.
+        "priority_signal_badges": build_priority_signal_badges(case.priority_signals),
     }
 
     # Lock info

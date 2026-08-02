@@ -1,0 +1,7 @@
+{% if priority_signal_badges %}
+<div class="d-flex flex-wrap gap-2 mb-2" id="priority-signals" aria-label="Sinalizações prioritárias">
+  {% for badge in priority_signal_badges %}
+  <span class="badge {{ badge.css_class }}" data-priority-signal-code="{{ badge.code }}">{{ badge.label }}</span>
+  {% endfor %}
+</div>
+{% endif %}

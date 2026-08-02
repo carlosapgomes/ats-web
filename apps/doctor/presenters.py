@@ -6,8 +6,6 @@ into a standalone Django presenter for the doctor decision screen.
 
 from __future__ import annotations
 
-import re
-import unicodedata
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import Any
@@ -116,130 +114,33 @@ def _is_yes_precheck(value: Any) -> bool:
     return isinstance(value, str) and value.strip().lower() == "yes"
 
 
-# ── Caustic ingestion detection helpers ─────────────────────────────────
-
-
-def _normalize_caustic_text(value: str) -> str:
-    """Normalize text for caustic detection: remove accents, lowercase, collapse whitespace."""
-    # Decompose (NFD) then remove combining characters (category Mn = Mark, Nonspacing)
-    decomposed = unicodedata.normalize("NFD", value)
-    stripped_accents = "".join(ch for ch in decomposed if unicodedata.category(ch) != "Mn")
-    normalized = stripped_accents.lower()
-    # Collapse whitespace
-    return " ".join(normalized.split())
-
-
-_CAUSTIC_KEYWORDS: set[str] = {
-    "caustic",
-    "corrosiv",
-    "soda caustica",
-    "acido",
-}
-
-_INGESTION_VERBS: set[str] = {
-    "ingeriu",
-    "ingestao",
-    "ingerir",
-    "ingerido",
-}
-
-# Negation patterns: compiled on normalized (unaccented, lowercase) text
-# Use unaccented terms since normalization removes accents before matching.
-_CAUSTIC_NEGATION_PATTERNS: list[re.Pattern[str]] = [
-    re.compile(r"nega\s+ingestao\s+de\s+(caustic|corrosiv|soda\s+caustica|acido)", re.IGNORECASE),
-    re.compile(r"sem\s+ingestao\s+de\s+(corrosiv|caustic)", re.IGNORECASE),
-    re.compile(r"nao\s+ingeriu\s+(soda\s+caustica|caustic|corrosiv)", re.IGNORECASE),
-    re.compile(r"nega\s+(ter\s+)?ingerid[oa]\s+(produto\s+)?(caustic|corrosiv|soda\s+caustica|acido)", re.IGNORECASE),
-    # General "sem ingestao" or "sem relato de ingestao" near caustic context
-    re.compile(r"sem\s+(relato\s+de\s+)?ingestao[\s,;.:!?]", re.IGNORECASE),
-]
-
-_CAUSTIC_TIME_PATTERNS: list[re.Pattern[str]] = [
-    # Match both "há" and "ha" (accented and unaccented)
-    re.compile(
-        r"h[aá]\s+(cerca\s+de\s+|aproximadamente\s+)?[\w\s]+?(semanas?|dias?|meses?|anos?|minutos?|horas?)",
-        re.IGNORECASE,
-    ),
-    re.compile(r"em\s+\d{1,2}[/-]\d{1,2}[/-]\d{2,4}", re.IGNORECASE),
-    # Also match "ha ... atras" unaccented
-    re.compile(
-        r"h[aá]\s+(cerca\s+de\s+|aproximadamente\s+)?[\w\s]+?(semanas?|dias?|meses?|anos?|minutos?|horas?)\s+atr[aá]s",
-        re.IGNORECASE,
-    ),
-]
+# ── Caustic ingestion (single runtime implementation in apps.cases) ────────
+#
+# The detector was moved to apps/cases/priority_signals.py (Slice 002). This
+# adapter preserves the legacy alert-line API until Slice 003 consumes the
+# persisted signals; no detection logic lives here anymore.
 
 
 def _detect_caustic_ingestion(text: str) -> list[str]:
-    """Detect caustic/corrosive ingestion in source_text and return alert lines.
+    """Return legacy alert lines for caustic ingestion, reusing the shared detector.
 
     Returns a list with:
     - Empty list when no ingestion detected or negation is explicit.
     - One or two lines with the alert header and time info when positive.
-
-    Detection runs on normalized (unaccented, lowercase) text.
-    Time extraction runs on original text but matches both accented and
-    unaccented variants.
     """
-    if not isinstance(text, str) or not text.strip():
+    from apps.cases.priority_signals import resolve_caustic_ingestion
+
+    signal = resolve_caustic_ingestion(text or "")
+    if signal is None:
         return []
 
-    normalized = _normalize_caustic_text(text)
-
-    # Check for explicit negation first (on normalized text)
-    for pattern in _CAUSTIC_NEGATION_PATTERNS:
-        if pattern.search(normalized):
-            return []
-
-    # Detect caustic/corrosive ingestion (on normalized text)
-    if not _has_caustic_keyword_near_ingestion(normalized):
-        return []
-
-    # Extract time expression from original text (for literal display)
-    time_text = _extract_time_from_text(text)
-
+    time_text = signal.get("detail") or ""
     lines: list[str] = ["⚠️ ingestão cáustica/corrosiva relatada: sim"]
     if time_text:
         lines.append(f"tempo desde a ingestão: {time_text}")
     else:
         lines.append("tempo desde a ingestão: não informado no relatório")
-
     return lines
-
-
-def _has_caustic_keyword_near_ingestion(normalized: str) -> bool:
-    """Return True if text contains caustic/corrosive keyword near an ingestion verb.
-
-    Input must already be normalized (unaccented, lowercase).
-    All keywords and verbs are also unaccented.
-    """
-    # Check for keyword + ingestion verb proximity
-    for keyword in _CAUSTIC_KEYWORDS:
-        if keyword not in normalized:
-            continue
-
-        # Check if there's an ingestion verb near the keyword (within ~80 chars)
-        for verb in _INGESTION_VERBS:
-            for match in re.finditer(re.escape(verb), normalized):
-                start = max(0, match.start() - 20)
-                end = min(len(normalized), match.end() + 80)
-                window = normalized[start:end]
-                if keyword in window:
-                    return True
-
-    return False
-
-
-def _extract_time_from_text(text: str) -> str:
-    """Extract the first time expression from text, or empty string.
-
-    Patterns match both accented and unaccented variants (e.g. "há" and "ha").
-    Returns the matched text from the original source as-is.
-    """
-    for pattern in _CAUSTIC_TIME_PATTERNS:
-        match = pattern.search(text)
-        if match:
-            return match.group(0).strip()
-    return ""
 
 
 def _is_absent_exam_result(value: Any) -> bool:

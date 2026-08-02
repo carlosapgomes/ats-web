@@ -10,6 +10,7 @@ import logging
 import uuid
 
 from apps.cases.models import Case
+from apps.cases.priority_signals import resolve_priority_signals
 from apps.llm.models import PromptTemplate
 from apps.pipeline.llm import LlmClient
 from apps.pipeline.llm1_service import (
@@ -114,11 +115,22 @@ def _run_llm1_step(
 
     case.structured_data = result.structured_data
     case.summary_text = result.summary_text
-    case.save()
-    case._record_event(
-        "LLM1_OK",
-        payload={"summary_text": result.summary_text},
+    # Persist derived canonical signals together with the validated LLM1
+    # artifacts, BEFORE the scope gate/LLM2. Views never redetect signals
+    # from raw text; they consume this persisted projection.
+    case.priority_signals = resolve_priority_signals(
+        structured_data=result.structured_data,
+        source_text=case.extracted_text,
     )
+    case.save()
+
+
+def _build_llm1_ok_payload(case: Case) -> dict[str, object]:
+    """Code-only audit payload for LLM1_OK: summary + signal codes, no raw text."""
+    return {
+        "summary_text": case.summary_text,
+        "priority_signal_codes": [signal["code"] for signal in case.priority_signals],
+    }
 
 
 def _run_scope_and_llm2(
@@ -145,7 +157,8 @@ def _run_scope_and_llm2(
     if scope_result is not None:
         # Non-EDA or unknown — manual review, skip LLM2
         case.suggested_action = scope_result
-        case.save()
+        case._record_event("LLM1_OK", payload=_build_llm1_ok_payload(case))
+        case.save()  # persists suggested_action + LLM1_OK before scope events
         case._record_event(
             "EDA_SCOPE_GATED_MANUAL_REVIEW",
             payload=scope_result,
@@ -160,7 +173,7 @@ def _run_scope_and_llm2(
         return
 
     # ── 2. Transition LLM_STRUCT → LLM_SUGGEST ──────────────────
-    case.llm1_complete(success=True, user=None)
+    case.llm1_complete(success=True, user=None, payload=_build_llm1_ok_payload(case))
     case.save()
 
     # ── 3. Preop policy (deterministic) ─────────────────────────
