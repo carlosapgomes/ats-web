@@ -13,6 +13,26 @@ from apps.cases.models import Case, CaseEvent, CaseStatus
 User = get_user_model()
 
 
+@pytest.mark.parametrize(
+    ("total_minutes", "expected"),
+    [
+        (0, "0 min"),
+        (45, "45 min"),
+        (59, "59 min"),
+        (60, "1 h"),
+        (65, "1 h 05 min"),
+        (120, "2 h"),
+        (125, "2 h 05 min"),
+        (1100, "18 h 20 min"),
+    ],
+)
+def test_format_wait_minutes_canonical(total_minutes: int, expected: str) -> None:
+    """R1: _format_wait_minutes formata minutos inteiros no padrão canônico."""
+    from apps.doctor.views import _format_wait_minutes
+
+    assert _format_wait_minutes(total_minutes) == expected
+
+
 @pytest.mark.django_db
 class TestDoctorQueueView:
     """Tests for the doctor queue view (GET /doctor/)."""
@@ -191,17 +211,20 @@ class TestDoctorQueueView:
         assert "Pendente Silva" in content
         assert "pending" in content.lower() or "Pendentes" in content
 
-    def test_queue_shows_waiting_time(self, client) -> None:
-        """Case cards display waiting time since created_at."""
+    def test_queue_shows_waiting_time(self, client, monkeypatch) -> None:
+        """Case cards display waiting time since created_at (short waits stay in minutes)."""
         nir_user = User.objects.create_user(username="nir@test.com", password="testpass123")
         nir_user.roles.add(self._create_role("nir"))
+
+        now = timezone.now()
+        monkeypatch.setattr(timezone, "now", lambda: now)
 
         # Create a case that has been waiting 45 minutes
         case = Case.objects.create(
             created_by=nir_user,
             status=CaseStatus.WAIT_DOCTOR,
         )
-        case.created_at = timezone.now() - timedelta(minutes=45)
+        case.created_at = now - timedelta(minutes=45)
         case.agency_record_number = "2026-0428-002"
         case.structured_data = {"patient": {"name": "João Teste", "age": 50, "gender": "Masculino"}}
         case.save()
@@ -210,19 +233,22 @@ class TestDoctorQueueView:
         response = client.get("/doctor/")
         assert response.status_code == 200
         content = response.content.decode()
-        assert "45" in content or "min" in content.lower()
+        assert "Aguardando há 45 min" in content
 
-    def test_queue_shows_average_wait_time(self, client) -> None:
-        """Queue page shows average wait time for pending cases."""
+    def test_queue_shows_average_wait_time(self, client, monkeypatch) -> None:
+        """Queue page shows average wait time for pending cases (strict format)."""
         nir_user = User.objects.create_user(username="nir@test.com", password="testpass123")
         nir_user.roles.add(self._create_role("nir"))
+
+        now = timezone.now()
+        monkeypatch.setattr(timezone, "now", lambda: now)
 
         for i, minutes in enumerate([10, 20, 30]):
             case = Case.objects.create(
                 created_by=nir_user,
                 status=CaseStatus.WAIT_DOCTOR,
             )
-            case.created_at = timezone.now() - timedelta(minutes=minutes)
+            case.created_at = now - timedelta(minutes=minutes)
             case.structured_data = {
                 "patient": {
                     "name": f"Paciente {i}",
@@ -237,7 +263,50 @@ class TestDoctorQueueView:
         response = client.get("/doctor/")
         assert response.status_code == 200
         content = response.content.decode()
-        assert "Tempo médio" in content or "Espera" in content or "aguardando" in content.lower()
+        assert "Tempo médio de espera: 20 min." in content
+
+    def test_queue_renders_hour_readable_wait_and_average(self, client, monkeypatch) -> None:
+        """R2+R3: espera determinística de 65 min renderiza '1 h 05 min' no card e no banner."""
+        nir_user = User.objects.create_user(username="nir_hours@test.com", password="testpass123")
+        nir_user.roles.add(self._create_role("nir"))
+
+        now = timezone.now()
+        monkeypatch.setattr(timezone, "now", lambda: now)
+
+        case = Case.objects.create(
+            created_by=nir_user,
+            status=CaseStatus.WAIT_DOCTOR,
+        )
+        case.created_at = now - timedelta(minutes=65)
+        case.structured_data = {"patient": {"name": "Paciente 65min", "age": 50, "gender": "Masculino"}}
+        case.save()
+
+        self._login_as(client, "doctor")
+        response = client.get("/doctor/")
+        assert response.status_code == 200
+        content = response.content.decode()
+        assert "Aguardando há 1 h 05 min" in content
+        assert "Tempo médio de espera: 1 h 05 min." in content
+
+    def test_build_case_card_keeps_wait_minutes_int_and_is_urgent_numeric(self) -> None:
+        """R4: wait_minutes permanece int e is_urgent usa comparação numérica."""
+        from apps.doctor.views import _build_case_card
+
+        nir_user = User.objects.create_user(username="nir_card@test.com", password="testpass123")
+        nir_user.roles.add(self._create_role("nir"))
+        case = Case.objects.create(created_by=nir_user, status=CaseStatus.WAIT_DOCTOR)
+        case.save()
+
+        card = _build_case_card(case, 65)
+        assert isinstance(card["wait_minutes"], int)
+        assert card["wait_minutes"] == 65
+        assert card["wait_display"] == "1 h 05 min"
+        assert card["is_urgent"] is False  # 65 > 15
+
+        urgent_card = _build_case_card(case, 15)
+        assert isinstance(urgent_card["wait_minutes"], int)
+        assert urgent_card["wait_minutes"] == 15
+        assert urgent_card["is_urgent"] is True  # 15 <= 15
 
     def test_queue_shows_patient_details(self, client) -> None:
         """Case cards show patient name, age, gender, registration number."""

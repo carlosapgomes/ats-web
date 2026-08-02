@@ -149,6 +149,22 @@ def _get_doctor_decision_display(case: Case) -> str:
 # ── Card builder ─────────────────────────────────────────────────────────
 
 
+def _format_wait_minutes(total_minutes: int) -> str:
+    """Formata minutos inteiros de espera em texto legível.
+
+    < 60 min          → "N min"
+    60 min            → "1 h"
+    65 min            → "1 h 05 min"
+    múltiplos exatos  → "H h" (sem "00 min")
+    """
+    if total_minutes < 60:
+        return f"{total_minutes} min"
+    hours, minutes = divmod(total_minutes, 60)
+    if minutes == 0:
+        return f"{hours} h"
+    return f"{hours} h {minutes:02d} min"
+
+
 def _build_case_card(case: Case, wait_minutes: int, user: Any = None) -> dict[str, Any]:
     """Build a dict with all display data for a case card."""
     card: dict[str, Any] = {
@@ -166,6 +182,7 @@ def _build_case_card(case: Case, wait_minutes: int, user: Any = None) -> dict[st
         "doctor_decision_display": _get_doctor_decision_display(case),
         "doctor_decided_at": case.doctor_decided_at,
         "wait_minutes": wait_minutes,
+        "wait_display": _format_wait_minutes(wait_minutes),
         "is_urgent": wait_minutes <= 15,
         "regulation_days_on_screen": case.regulation_days_on_screen,
         # Badges projetados exclusivamente do valor persistido (R7) — a view
@@ -214,6 +231,7 @@ def _doctor_queue_context(request: HttpRequest) -> dict[str, Any]:
 
     total_wait = sum(c["wait_minutes"] for c in pending_cards)
     avg_wait = int(total_wait / len(pending_cards)) if pending_cards else 0
+    avg_wait_display = _format_wait_minutes(avg_wait)
 
     # ── Decided today cases ───────────────────────────────────────
     start, end = local_day_bounds()
@@ -235,6 +253,7 @@ def _doctor_queue_context(request: HttpRequest) -> dict[str, Any]:
         "pending_count": len(pending_cards),
         "decided_count": len(decided_cards),
         "avg_wait_minutes": avg_wait,
+        "avg_wait_display": avg_wait_display,
     }
 
 

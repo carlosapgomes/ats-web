@@ -4,7 +4,7 @@
 <div class="alert alert-warning d-flex align-items-center gap-2 mb-4" role="alert">
   <span class="pulse-dot"></span>
   <strong>{{ pending_count }} caso{% if pending_count != 1 %}s{% endif %} aguardando avaliação.</strong>
-  Tempo médio de espera: {{ avg_wait_minutes }} min.
+  Tempo médio de espera: {{ avg_wait_display }}.
 </div>
 {% else %}
 <div class="alert alert-info d-flex align-items-center gap-2 mb-4" role="alert">
@@ -58,7 +58,7 @@
           <span class="badge bg-warning text-dark mb-2">Dias em tela: {{ c.regulation_days_on_screen }}</span>
           {% endif %}
           <div class="waiting-time">
-            ⏱ Aguardando há {{ c.wait_minutes }} min
+            ⏱ Aguardando há {{ c.wait_display }}
           </div>
           {% if c.is_locked_by_current_user %}
           <a href="{% url 'doctor:decision' c.case_id %}" class="btn btn-success mt-2">▶ Continuar Avaliação</a>
