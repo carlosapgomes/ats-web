@@ -115,6 +115,71 @@ def _eda_llm1_response() -> str:
     )
 
 
+def _echoendoscopy_llm1_response() -> str:
+    """LLM1 data for an echoendoscopy case (should follow the EDA flow)."""
+    return json.dumps(
+        {
+            "schema_version": "1.1",
+            "language": "pt-BR",
+            "agency_record_number": "12345",
+            "patient": {"name": "Paciente", "age": 35, "sex": "F"},
+            "summary": {
+                "one_liner": "Ecoendoscopia eletiva indicada.",
+                "bullet_points": ["Ponto 1", "Ponto 2", "Ponto 3"],
+            },
+            "extraction_quality": {"confidence": "alta", "missing_fields": [], "notes": None},
+            "preop_screening": {
+                "exam_type": "eda",
+                "has_cardiovascular_disease": "no",
+                "has_active_respiratory_symptoms": "no",
+                "has_prior_respiratory_disease": "no",
+                "has_ecg_report": "unknown",
+                "has_chest_xray_report": "unknown",
+                "hb_g_dl": 13.0,
+                "platelets_per_mm3": 200000,
+                "inr": 1.0,
+                "rulebook_signals": {
+                    "eda_subtype": "echoendoscopy",
+                    "minimum_exam_evidence": {
+                        "hb_numeric_present": "yes",
+                        "platelets_numeric_present": "yes",
+                        "tp_inr_rni_numeric_present": "yes",
+                        "ttpa_present": "yes",
+                        "urea_present": "yes",
+                        "creatinine_present": "yes",
+                    },
+                    "conditional_exam_requirements": {},
+                    "clinical_flags": {},
+                },
+            },
+            "policy_precheck": {
+                "excluded_from_eda_flow": False,
+                "exclusion_reason": None,
+                "labs_required": True,
+                "labs_pass": "yes",
+                "labs_failed_items": [],
+                "ecg_required": False,
+                "ecg_present": "unknown",
+                "pediatric_flag": False,
+                "notes": None,
+            },
+            "eda": {
+                "indication_category": "dyspepsia",
+                "exclusion_type": "none",
+                "is_pediatric": False,
+                "foreign_body_suspected": False,
+                "requested_procedure": {
+                    "name": "EDA com ecoendoscopia",
+                    "urgency": "eletivo",
+                    "subtype": "echoendoscopy",
+                },
+                "labs": {"hb_g_dl": 13.0, "platelets_per_mm3": 200000, "inr": 1.0, "source_text_hint": None},
+                "ecg": {"report_present": "unknown", "abnormal_flag": "unknown", "source_text_hint": None},
+            },
+        }
+    )
+
+
 def _eda_llm2_accept_response(case_id: str = "case-001") -> str:
     """LLM2 suggestion: accept."""
     return json.dumps(
@@ -468,6 +533,33 @@ class TestPipelineLlm1Failure:
 @pytest.mark.django_db
 class TestPipelineScopeGated:
     """Non-EDA → scope gate ativa → WAIT_R1_CLEANUP_THUMBS sem LLM2."""
+
+    def test_pipeline_echoendoscopy_reaches_doctor_queue(self, django_user_model) -> None:
+        """Ecoendoscopia percorre contrato → scope → policy → LLM2 → WAIT_DOCTOR."""
+        user = django_user_model.objects.create_user(username="nir_echo", password="pw")
+        case = _make_case(user, extracted_text="Motivo da Solicitação: ecoendoscopia. Unid. Origem: HSA.")
+
+        client = RecordingLlmClient(
+            responses=[_echoendoscopy_llm1_response(), _eda_llm2_accept_response(str(case.case_id))]
+        )
+
+        run_pipeline(
+            case.case_id,
+            llm_client=client,
+            llm1_system_prompt="sp1",
+            llm1_user_template="{case_id}|{agency_record_number}|{extracted_text}",
+            llm2_system_prompt="sp2",
+            llm2_user_template="{case_id}|{agency_record_number}|{llm1_structured_data}",
+        )
+
+        case = _reload(case)
+        assert case.status == CaseStatus.WAIT_DOCTOR
+        assert len(client.calls) == 2
+        assert case.suggested_action is not None
+        assert case.suggested_action.get("suggestion") == "accept"
+        event_types = [e.event_type for e in CaseEvent.objects.filter(case=case)]
+        assert "EDA_SCOPE_GATED_MANUAL_REVIEW" not in event_types
+        assert "LLM2_OK" in event_types
 
     def test_pipeline_scope_gated(self, django_user_model) -> None:
         user = django_user_model.objects.create_user(username="nir7", password="pw")

@@ -108,6 +108,192 @@ def test_dilatacao_do_esofago_keyword_returns_none_eda() -> None:
     assert result is None
 
 
+# ── Echoendoscopy keyword (Slice 001) ───────────────────────────────
+
+
+def test_ecoendoscopia_keyword_returns_none_eda() -> None:
+    """'ecoendoscopia' na solicitação → EDA, return None."""
+
+    llm1: dict[str, object] = {"preop_screening": {"exam_type": "unknown"}}
+    result = _classify(
+        llm1_structured_data=llm1,
+        cleaned_text="Paciente encaminhado para ecoendoscopia.",
+    )
+    assert result is None
+
+
+def test_eco_endoscopia_hyphen_keyword_returns_none_eda() -> None:
+    llm1: dict[str, object] = {"preop_screening": {"exam_type": "unknown"}}
+    result = _classify(
+        llm1_structured_data=llm1,
+        cleaned_text="Solicito eco-endoscopia para avaliação de lesão subepitelial.",
+    )
+    assert result is None
+
+
+def test_eco_endoscopia_space_keyword_returns_none_eda() -> None:
+    llm1: dict[str, object] = {"preop_screening": {"exam_type": "unknown"}}
+    result = _classify(
+        llm1_structured_data=llm1,
+        cleaned_text="Indicada eco endoscopia com punção.",
+    )
+    assert result is None
+
+
+def test_ultrassonografia_endoscopica_keyword_returns_none_eda() -> None:
+    llm1: dict[str, object] = {"preop_screening": {"exam_type": "unknown"}}
+    result = _classify(
+        llm1_structured_data=llm1,
+        cleaned_text="Solicito ultrassonografia endoscópica para estadiamento.",
+    )
+    assert result is None
+
+
+def test_ultrassom_endoscopico_keyword_returns_none_eda() -> None:
+    llm1: dict[str, object] = {"preop_screening": {"exam_type": "unknown"}}
+    result = _classify(
+        llm1_structured_data=llm1,
+        cleaned_text="Paciente para ultrassom endoscópico.",
+    )
+    assert result is None
+
+
+def test_eus_with_request_context_returns_none_eda() -> None:
+    """EUS com contexto de solicitação → EDA."""
+
+    llm1: dict[str, object] = {"preop_screening": {"exam_type": "unknown"}}
+    result = _classify(
+        llm1_structured_data=llm1,
+        cleaned_text="Solicito EUS para avaliação de lesão pancreática.",
+    )
+    assert result is None
+
+
+def test_eus_isolated_without_context_returns_manual_review() -> None:
+    """EUS sem contexto de solicitação/exame/procedimento → não basta."""
+
+    llm1: dict[str, object] = {"preop_screening": {"exam_type": "unknown"}}
+    result = _classify(
+        llm1_structured_data=llm1,
+        cleaned_text="Paciente realizou EUS em 2024, sem intercorrências.",
+    )
+    assert result is not None
+    assert result["reason_code"] == "unknown_exam_type"
+
+
+def test_requested_procedure_name_echoendoscopy_with_puncture_returns_none_eda() -> None:
+    """Nome estruturado ecoendoscopia com punção → EDA; modificador não muda subtipo."""
+
+    llm1: dict[str, object] = {
+        "preop_screening": {"exam_type": "unknown"},
+        "eda": {"requested_procedure": {"name": "Ecoendoscopia com punção e PAAF"}},
+    }
+    result = _classify(llm1_structured_data=llm1)
+    assert result is None
+
+
+def test_structured_subtype_echoendoscopy_rulebook_returns_none_eda() -> None:
+    """Subtipo estruturado echoendoscopy (rulebook) → EDA."""
+
+    llm1: dict[str, object] = {
+        "preop_screening": {
+            "exam_type": "unknown",
+            "rulebook_signals": {"eda_subtype": "echoendoscopy"},
+        },
+    }
+    result = _classify(llm1_structured_data=llm1, cleaned_text="Relatório sem termo explícito.")
+    assert result is None
+
+
+def test_structured_subtype_echoendoscopy_requested_returns_none_eda() -> None:
+    """Subtipo estruturado echoendoscopy (requested_procedure) → EDA."""
+
+    llm1: dict[str, object] = {
+        "preop_screening": {"exam_type": "unknown"},
+        "eda": {"requested_procedure": {"subtype": "echoendoscopy", "name": "EUS"}},
+    }
+    result = _classify(llm1_structured_data=llm1, cleaned_text="")
+    assert result is None
+
+
+# ── EDA/echo precedence in mixed requests (R4) ───────────────────────
+
+
+def test_ecoendoscopia_and_cpre_follows_eda() -> None:
+    """Motivo com ecoendoscopia + CPRE → EDA mesmo com LLM1 non_eda."""
+
+    llm1: dict[str, object] = {"preop_screening": {"exam_type": "non_eda"}}
+    cleaned_text = """
+    Motivo da Solicitação:
+    Ecoendoscopia e CPRE para avaliação de via biliar
+    Unid. Origem:
+    HSA - HOSPITAL SANTO ANTONIO
+    """
+    result = _classify(llm1_structured_data=llm1, cleaned_text=cleaned_text)
+    assert result is None
+
+
+def test_ecoendoscopia_and_cpre_follows_eda_via_structured_subtype() -> None:
+    """Subtipo estruturado echoendoscopy prevalece sobre LLM1 non_eda."""
+
+    llm1: dict[str, object] = {
+        "preop_screening": {
+            "exam_type": "non_eda",
+            "rulebook_signals": {"eda_subtype": "echoendoscopy"},
+        },
+        "eda": {"requested_procedure": {"subtype": "echoendoscopy", "name": "Ecoendoscopia"}},
+    }
+    result = _classify(
+        llm1_structured_data=llm1,
+        cleaned_text="Relatório menciona CPRE em avaliação de via biliar.",
+    )
+    assert result is None
+
+
+def test_eda_and_colonoscopia_follows_eda() -> None:
+    """Motivo com EDA + colonoscopia → EDA (EDA suportada prevalece)."""
+
+    llm1: dict[str, object] = {"preop_screening": {"exam_type": "non_eda"}}
+    cleaned_text = """
+    Motivo da Solicitação:
+    EDA diagnóstica e colonoscopia de rastreamento
+    Unid. Origem:
+    HSA - HOSPITAL SANTO ANTONIO
+    """
+    result = _classify(llm1_structured_data=llm1, cleaned_text=cleaned_text)
+    assert result is None
+
+
+def test_only_colonoscopy_with_historical_eda_mention_preserves_manual_review() -> None:
+    """Motivo somente colonoscopia + menção histórica de EDA → revisão manual."""
+
+    llm1: dict[str, object] = {"preop_screening": {"exam_type": "non_eda"}}
+    cleaned_text = """
+    Motivo da Solicitação:
+    Colonoscopia de rastreamento
+    Unid. Origem:
+    HSA - HOSPITAL SANTO ANTONIO
+    Complemento da Solicitação:
+    Paciente com EDA prévia em 2023 sem alterações.
+    """
+    result = _classify(llm1_structured_data=llm1, cleaned_text=cleaned_text)
+    assert result is not None
+    assert result["decision"] == "manual_review_required"
+    assert result["reason_code"] == "non_eda_request"
+
+
+def test_only_cpre_preserves_manual_review() -> None:
+    """Somente CPRE sem EDA/eco atual → revisão manual."""
+
+    llm1: dict[str, object] = {"preop_screening": {"exam_type": "non_eda"}}
+    result = _classify(
+        llm1_structured_data=llm1,
+        cleaned_text="Solicito CPRE para avaliação de via biliar.",
+    )
+    assert result is not None
+    assert result["reason_code"] == "non_eda_request"
+
+
 # ── Foreign body keyword ─────────────────────────────────────────────
 
 

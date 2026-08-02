@@ -17,6 +17,7 @@ SupportedEdaSubtype = Literal[
     "gastrostomy",
     "esophageal_dilation",
     "foreign_body",
+    "echoendoscopy",
 ]
 
 _REQUIRED_MINIMUM_EXAMS: tuple[tuple[str, str, str], ...] = (
@@ -261,7 +262,7 @@ def _extract_supported_eda_subtype(*, structured_data: dict[str, object]) -> Sup
     eda_payload = _extract_dict(structured_data, "eda")
     requested_procedure = _extract_dict(eda_payload, "requested_procedure")
     subtype = _extract_text(requested_procedure, "subtype")
-    if subtype in {"standard", "gastrostomy", "esophageal_dilation", "foreign_body"}:
+    if subtype in {"standard", "gastrostomy", "esophageal_dilation", "foreign_body", "echoendoscopy"}:
         return cast(SupportedEdaSubtype, subtype)
 
     rulebook_signals = _extract_rulebook_signals(structured_data=structured_data)
@@ -271,6 +272,7 @@ def _extract_supported_eda_subtype(*, structured_data: dict[str, object]) -> Sup
         "gastrostomy",
         "esophageal_dilation",
         "foreign_body",
+        "echoendoscopy",
     }:
         return cast(SupportedEdaSubtype, rulebook_subtype)
 

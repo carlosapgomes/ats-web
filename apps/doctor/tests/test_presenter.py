@@ -181,6 +181,36 @@ class TestDoctorReportPresenter:
         )
         assert "EDA para retirada de corpo estranho" in presenter._resolve_canonical_procedure_name()
 
+    def test_procedure_echoendoscopy(self):
+        """echoendoscopy subtype resolves to 'EDA com ecoendoscopia'."""
+        presenter = DoctorReportPresenter(
+            structured_data={"eda": {"requested_procedure": {"subtype": "echoendoscopy"}}},
+            summary_text="",
+            suggested_action={},
+        )
+        assert "EDA com ecoendoscopia" in presenter._resolve_canonical_procedure_name()
+
+    def test_procedure_echoendoscopy_rulebook_fallback(self):
+        """echoendoscopy via rulebook_signals resolves to 'EDA com ecoendoscopia'."""
+        presenter = DoctorReportPresenter(
+            structured_data={
+                "preop_screening": {"rulebook_signals": {"eda_subtype": "echoendoscopy"}},
+            },
+            summary_text="",
+            suggested_action={},
+        )
+        assert "EDA com ecoendoscopia" in presenter._resolve_canonical_procedure_name()
+
+    def test_context_procedure_shows_echoendoscopy(self):
+        """O contexto do relatório exibe 'EDA com ecoendoscopia' no topo."""
+        presenter = DoctorReportPresenter(
+            structured_data={"eda": {"requested_procedure": {"subtype": "echoendoscopy"}}},
+            summary_text="",
+            suggested_action={},
+        )
+        report = presenter.build_report()
+        assert "EDA com ecoendoscopia" in report["context"]["procedure"]
+
     def test_procedure_falls_back_to_rulebook(self):
         """When eda.requested_procedure.subtype is absent, falls back to rulebook."""
         presenter = DoctorReportPresenter(

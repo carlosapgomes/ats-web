@@ -38,7 +38,7 @@ LLM1_DEFAULT_SYSTEM_PROMPT = (
     "Nao use palavras em ingles nos campos narrativos. Nao inclua markdown, "
     "blocos de codigo ou chaves extras. Nao invente fatos; use null/unknown "
     "quando faltar informacao. Classifique o procedimento EDA suportado com "
-    "subtype em standard, gastrostomy, esophageal_dilation ou foreign_body. "
+    "subtype em standard, gastrostomy, esophageal_dilation, foreign_body ou echoendoscopy. "
     "Estime ASA pratico apenas nos buckets I-II, III ou mais, ou "
     "insufficient_data, sempre de forma conservadora e baseada no texto. "
     "Nao inferir Mallampati ou risco OSA. "
@@ -60,7 +60,7 @@ Valores fixos e enums obrigatorios:
 - patient.sex: apenas "M", "F" ou "Outro"; nunca "masculino"/"feminino".
 - Todos os EvidenceFlag devem ser strings "yes", "no" ou "unknown"; nunca true/false.
 - transfusion.had_transfusion: apenas "yes" ou "no".
-- eda.requested_procedure.subtype e preop_screening.rulebook_signals.eda_subtype: standard, gastrostomy, esophageal_dilation, foreign_body ou unknown.
+- eda.requested_procedure.subtype e preop_screening.rulebook_signals.eda_subtype: standard, gastrostomy, esophageal_dilation, foreign_body, echoendoscopy ou unknown.
 - eda.asa.bucket: I-II, III ou mais ou insufficient_data.
 
 Campos obrigatorios por bloco:
@@ -109,6 +109,11 @@ LLM1_DEFAULT_USER_PROMPT = (
     "Se houver ingestao de substancia caustica/corrosiva, soda caustica, "
     "produto corrosivo ou acido em contexto de ingestao, mencione o evento "
     "no resumo e inclua o tempo desde a ingestao quando disponivel. "
+    "Reconhecer ecoendoscopia, eco-endoscopia, ultrassonografia endoscopica, "
+    "ultrassom endoscopico ou EUS em contexto procedimental como subtype "
+    "echoendoscopy. Puncao, PAAF, biopsia, FNA ou FNB associados a "
+    "ecoendoscopia nao criam subtipo novo; mencionar ecoendoscopia no "
+    "summary.one_liner ou summary.bullet_points. "
     "Em tracked_exams, inclua apenas exames efetivamente realizados; "
     "nao inclua entradas com 'Sem Exame', 'nao realizado', 'nao consta', "
     "'ausente' ou equivalentes. "
@@ -262,15 +267,21 @@ def _render_user_prompt(
         "Para hb_g_dl, platelets_per_mm3 e inr sem evidencia numerica, usar null.\n"
         "Incluir preop_screening.evidence_spans com itens {field_path, excerpt}.\n"
         "Preencher eda.requested_procedure.subtype e preop_screening.rulebook_signals.eda_subtype "
-        "com standard, gastrostomy, esophageal_dilation, foreign_body ou unknown.\n"
+        "com standard, gastrostomy, esophageal_dilation, foreign_body, echoendoscopy ou unknown.\n"
         "Para escopo do exame: classificar preop_screening.exam_type=eda para EDA padrao, "
-        "gastrostomia/GTT/PEG, dilatacao esofagica e retirada de corpo estranho; usar non_eda "
+        "gastrostomia/GTT/PEG, dilatacao esofagica, retirada de corpo estranho e ecoendoscopia "
+        "(ecoendoscopia, eco-endoscopia, ultrassonografia endoscopica, ultrassom endoscopico ou "
+        "EUS em contexto procedimental); usar non_eda "
         "apenas para solicitacoes claramente fora de escopo EDA, incluindo CPRE; usar unknown "
         "somente quando o tipo de exame permanecer indefinido.\n"
-        "Quando houver gastrostomia/GTT/PEG, usar subtype gastrostomy; quando houver "
+        "Quando houver ecoendoscopia, eco-endoscopia, ultrassonografia endoscopica, ultrassom "
+        "endoscopico ou EUS em contexto procedimental, usar subtype echoendoscopy; quando houver "
+        "gastrostomia/GTT/PEG, usar subtype gastrostomy; quando houver "
         "dilatacao esofagica, usar subtype esophageal_dilation; quando houver retirada de "
         "corpo estranho, usar subtype foreign_body; nos demais casos suportados, usar "
-        "subtype standard.\n"
+        "subtype standard. Puncao, PAAF, biopsia, FNA ou FNB associados a ecoendoscopia "
+        "nao criam subtipo novo. Mencionar ecoendoscopia no summary.one_liner ou "
+        "summary.bullet_points.\n"
         "Preencher preop_screening.rulebook_signals.minimum_exam_evidence com hb_or_hct_present, "
         "hb_numeric_present, platelets_numeric_present, tp_inr_rni_numeric_present, ttpa_present, "
         "urea_present, creatinine_present, coagulogram_normal_supports_ttpa e "

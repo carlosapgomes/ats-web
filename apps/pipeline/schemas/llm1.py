@@ -46,6 +46,7 @@ EdaRequestedProcedureSubtype = Literal[
     "gastrostomy",
     "esophageal_dilation",
     "foreign_body",
+    "echoendoscopy",
     "unknown",
 ]
 AsaBucket = Literal["I-II", "III ou mais", "insufficient_data"]

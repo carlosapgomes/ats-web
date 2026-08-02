@@ -382,6 +382,65 @@ def test_pediatric_case_sets_flag_and_explicit_reason_text_signal() -> None:
     assert "pedi" in reason_text.lower()
 
 
+# ── Echoendoscopy uses standard policy (R5) ────────────────────────────
+
+
+def _set_echoendoscopy_subtype(payload: dict[str, object]) -> None:
+    """Mark payload as echoendoscopy on both subtype fields."""
+    eda = cast(dict[str, object], payload["eda"])
+    requested_procedure = cast(dict[str, object], eda["requested_procedure"])
+    requested_procedure["subtype"] = "echoendoscopy"
+    requested_procedure["name"] = "EDA com ecoendoscopia"
+    preop = cast(dict[str, object], payload["preop_screening"])
+    rulebook_signals = cast(dict[str, object], preop["rulebook_signals"])
+    rulebook_signals["eda_subtype"] = "echoendoscopy"
+
+
+def test_echoendoscopy_missing_minimum_exam_uses_standard_deny() -> None:
+    """Ecoendoscopia com exame mínimo ausente → mesma negativa da EDA padrão."""
+    payload = _base_llm1_structured_data()
+    _set_echoendoscopy_subtype(payload)
+    eda = cast(dict[str, object], payload["eda"])
+    labs = cast(dict[str, object], eda["labs"])
+    labs["creatinine_mg_dl"] = None
+    preop = cast(dict[str, object], payload["preop_screening"])
+    rulebook_signals = cast(dict[str, object], preop["rulebook_signals"])
+    minimum_exam_evidence = cast(dict[str, object], rulebook_signals["minimum_exam_evidence"])
+    minimum_exam_evidence["creatinine_present"] = "no"
+
+    result = _evaluate_preop_policy(structured_data=payload)
+
+    assert result["decision"] == "deny"
+    assert result["reason_code"] == "missing_minimum_exam_creatinine"
+
+
+def test_echoendoscopy_criteria_met_with_standard_rulebook() -> None:
+    """Ecoendoscopia com critérios padrão atendidos → criteria_met (sem bypass)."""
+    payload = _base_llm1_structured_data()
+    _set_echoendoscopy_subtype(payload)
+
+    result = _evaluate_preop_policy(structured_data=payload)
+
+    assert result["decision"] == "accept"
+    assert result["reason_code"] == "criteria_met"
+
+
+def test_echoendoscopy_does_not_get_foreign_body_exception() -> None:
+    """Ecoendoscopia sem exames não herda a exceção de corpo estranho."""
+    payload = _base_llm1_structured_data()
+    _set_echoendoscopy_subtype(payload)
+    preop = cast(dict[str, object], payload["preop_screening"])
+    rulebook_signals = cast(dict[str, object], preop["rulebook_signals"])
+    minimum_exam_evidence = cast(dict[str, object], rulebook_signals["minimum_exam_evidence"])
+    for key in tuple(minimum_exam_evidence):
+        minimum_exam_evidence[key] = "unknown"
+
+    result = _evaluate_preop_policy(structured_data=payload)
+
+    assert result["decision"] == "deny"
+    assert result["reason_code"] == "missing_minimum_exam_hb_or_ht"
+
+
 @pytest.mark.parametrize(
     ("field_name", "lab_key", "reason_code"),
     [

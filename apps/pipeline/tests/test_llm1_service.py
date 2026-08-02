@@ -14,6 +14,7 @@ from apps.pipeline.llm import RecordingLlmClient, StaticLlmClient
 from apps.pipeline.llm1_service import (
     LLM1_DEFAULT_SYSTEM_PROMPT,
     LLM1_DEFAULT_USER_PROMPT,
+    LLM1_REQUIRED_SCHEMA_INSTRUCTIONS,
     Llm1Result,
     Llm1Service,
     Llm1ValidationError,
@@ -830,6 +831,105 @@ class TestLlm1LanguageRetry:
                 user_prompt_template="UT",
             )
         assert len(client.calls) == 2
+
+
+# ── Echoendoscopy subtype (Slice 001) ─────────────────────────────────────
+
+
+class TestLlm1EchoendoscopySubtype:
+    """R1/R2: echoendoscopy é subtipo LLM1 válido e o prompt reconhece ecoendoscopia."""
+
+    def test_schema_accepts_aligned_echoendoscopy(self) -> None:
+        """requested=echoendoscopy + rulebook=echoendoscopy → validação passa."""
+        payload = _valid_llm1_payload()
+        eda = payload["eda"]
+        rp = eda["requested_procedure"]
+        rp["subtype"] = "echoendoscopy"
+        rp["name"] = "Ecoendoscopia com punção"
+        preop = payload["preop_screening"]
+        preop["rulebook_signals"]["eda_subtype"] = "echoendoscopy"
+        service = _make_service(json.dumps(payload))
+
+        result = service.run(
+            case_id="case-echo-001",
+            agency_record_number="12345",
+            extracted_text="Solicito ecoendoscopia para avaliação de lesão.",
+            system_prompt="SP",
+            user_prompt_template="UT",
+        )
+
+        eda_result = result.structured_data["eda"]
+        assert isinstance(eda_result, dict)
+        requested = eda_result["requested_procedure"]
+        assert isinstance(requested, dict)
+        assert requested["subtype"] == "echoendoscopy"
+
+    def test_schema_rejects_echoendoscopy_vs_divergent_rulebook(self) -> None:
+        """requested=echoendoscopy vs rulebook=standard → erro de alinhamento."""
+        payload = _valid_llm1_payload()
+        eda = payload["eda"]
+        eda["requested_procedure"]["subtype"] = "echoendoscopy"
+        preop = payload["preop_screening"]
+        preop["rulebook_signals"]["eda_subtype"] = "standard"
+        service = _make_service(json.dumps(payload))
+
+        with pytest.raises(Llm1ValidationError, match="subtype"):
+            service.run(
+                case_id="case-echo-002",
+                agency_record_number="12345",
+                extracted_text="...",
+                system_prompt="SP",
+                user_prompt_template="UT",
+            )
+
+    def test_required_schema_instructions_list_echoendoscopy(self) -> None:
+        """Instruções de schema obrigatório listam echoendoscopy como enum válido."""
+        assert "echoendoscopy" in LLM1_REQUIRED_SCHEMA_INSTRUCTIONS
+
+    def test_default_system_prompt_lists_echoendoscopy(self) -> None:
+        """Prompt de sistema canônico lista echoendoscopy entre os subtipos."""
+        assert "echoendoscopy" in LLM1_DEFAULT_SYSTEM_PROMPT
+
+    def test_render_user_prompt_lists_echoendoscopy_and_synonyms(self) -> None:
+        """Prompt renderizado final lista enum, sinônimos e EUS."""
+        prompt = _render_user_prompt(
+            template="Template base",
+            case_id="case-echo-003",
+            agency_record_number="12345",
+            clean_text="Texto clinico.",
+        )
+        lowered = prompt.lower()
+        assert "echoendoscopy" in prompt
+        assert "ecoendoscopia" in lowered
+        assert "eco-endoscopia" in lowered
+        assert "ultrassonografia endoscópica" in lowered or "ultrassonografia endoscopica" in lowered
+        assert "ultrassom endoscópico" in lowered or "ultrassom endoscopico" in lowered
+        assert "eus" in lowered
+
+    def test_render_user_prompt_handles_puncture_modifiers_without_new_subtype(self) -> None:
+        """Punção/PAAF/biópsia/FNA/FNB são modificadores, sem subtipo novo."""
+        prompt = _render_user_prompt(
+            template="Template base",
+            case_id="case-echo-004",
+            agency_record_number="12345",
+            clean_text="Texto clinico.",
+        )
+        lowered = prompt.lower().replace("punção", "puncao").replace("biópsia", "biopsia")
+        assert "puncao" in lowered or "paaf" in lowered or "fna" in lowered or "fnb" in lowered
+        assert "não criam subtipo novo" in lowered or "nao criam subtipo novo" in lowered
+
+    def test_render_user_prompt_asks_echoendoscopy_mention_in_summary(self) -> None:
+        """Prompt instrui mencionar ecoendoscopia no summary.one_liner/bullets."""
+        prompt = _render_user_prompt(
+            template="Template base",
+            case_id="case-echo-005",
+            agency_record_number="12345",
+            clean_text="Texto clinico.",
+        )
+        lowered = prompt.lower()
+        assert "summary.one_liner" in prompt
+        assert "summary.bullet_points" in prompt
+        assert "mencionar ecoendoscopia" in lowered or "mencione" in lowered
 
     def test_forbidden_term_in_bullet_points_triggers_retry(self) -> None:
         """Termo proibido em bullet_points também dispara retry."""

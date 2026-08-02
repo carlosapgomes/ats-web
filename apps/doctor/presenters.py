@@ -647,15 +647,17 @@ class DoctorReportPresenter:
             return "EDA para dilatação esofágica"
         if subtype == "foreign_body":
             return "EDA para retirada de corpo estranho"
+        if subtype == "echoendoscopy":
+            return "EDA com ecoendoscopia"
         return "EDA"
 
     def _extract_eda_subtype(self) -> str:
         requested = _extract_nested(self.structured_data, "eda", "requested_procedure", "subtype")
-        if requested in {"standard", "gastrostomy", "esophageal_dilation", "foreign_body"}:
+        if requested in {"standard", "gastrostomy", "esophageal_dilation", "foreign_body", "echoendoscopy"}:
             return str(requested)
 
         rulebook = _extract_nested(self.structured_data, "preop_screening", "rulebook_signals", "eda_subtype")
-        if rulebook in {"standard", "gastrostomy", "esophageal_dilation", "foreign_body"}:
+        if rulebook in {"standard", "gastrostomy", "esophageal_dilation", "foreign_body", "echoendoscopy"}:
             return str(rulebook)
         return "standard"
 

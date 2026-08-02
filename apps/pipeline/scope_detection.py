@@ -11,7 +11,9 @@ from __future__ import annotations
 import re
 import unicodedata
 
-_SUPPORTED_EDA_SUBTYPES: frozenset[str] = frozenset({"standard", "gastrostomy", "esophageal_dilation", "foreign_body"})
+_SUPPORTED_EDA_SUBTYPES: frozenset[str] = frozenset(
+    {"standard", "gastrostomy", "esophageal_dilation", "foreign_body", "echoendoscopy"}
+)
 
 _SCOPE_GASTROSTOMY_TERMS: tuple[str, ...] = (
     "gtt",
@@ -25,6 +27,14 @@ _SCOPE_ESOPHAGEAL_DILATION_TERMS: tuple[str, ...] = (
     "dilatacao esofagica",
     "dilatacao de esofago",
     "dilatacao do esofago",
+)
+
+_SCOPE_ECHOENDOSCOPY_TERMS: tuple[str, ...] = (
+    "ecoendoscopia",
+    "eco endoscopia",
+    "eco-endoscopia",
+    "ultrassonografia endoscopica",
+    "ultrassom endoscopico",
 )
 
 _SCOPE_FOREIGN_BODY_TERMS: tuple[str, ...] = (
@@ -178,6 +188,51 @@ def _extract_scope_keyword_candidate_texts(
     return candidate_texts
 
 
+def _contains_eus_in_context(*, normalized_text: str) -> bool:
+    """Return True when the EUS acronym appears with request/exam/procedure context.
+
+    Context words match by prefix so that inflected forms (solicito,
+    solicitacao, exames, procedimento) are recognized conservatively.
+    """
+
+    if re.search(r"\beus\b", normalized_text) is None:
+        return False
+    has_request_context = (
+        re.search(
+            r"\b(motivo|solicit|exame|encaminhamento|procedimento)\w*\b",
+            normalized_text,
+        )
+        is not None
+    )
+    return has_request_context
+
+
+def _detect_supported_eda_scope_keyword_in_text(
+    *,
+    normalized_text: str,
+) -> tuple[str | None, str | None]:
+    """Search one normalized text for supported EDA subtype keywords.
+
+    Returns (subtype, matched_term) or (None, None).
+    """
+
+    for term in _SCOPE_FOREIGN_BODY_TERMS:
+        if _contains_scope_term(normalized_text=normalized_text, term=term):
+            return "foreign_body", term
+    for term in _SCOPE_GASTROSTOMY_TERMS:
+        if _contains_scope_term(normalized_text=normalized_text, term=term):
+            return "gastrostomy", term
+    for term in _SCOPE_ESOPHAGEAL_DILATION_TERMS:
+        if _contains_scope_term(normalized_text=normalized_text, term=term):
+            return "esophageal_dilation", term
+    for term in _SCOPE_ECHOENDOSCOPY_TERMS:
+        if _contains_scope_term(normalized_text=normalized_text, term=term):
+            return "echoendoscopy", term
+    if _contains_eus_in_context(normalized_text=normalized_text):
+        return "echoendoscopy", "EUS"
+    return None, None
+
+
 def _detect_supported_eda_scope_keyword(
     *,
     llm1_structured_data: dict[str, object],
@@ -195,15 +250,11 @@ def _detect_supported_eda_scope_keyword(
 
     for candidate in candidate_texts:
         normalized_candidate = _normalize_scope_keyword_text(value=candidate)
-        for term in _SCOPE_FOREIGN_BODY_TERMS:
-            if _contains_scope_term(normalized_text=normalized_candidate, term=term):
-                return "foreign_body", term
-        for term in _SCOPE_GASTROSTOMY_TERMS:
-            if _contains_scope_term(normalized_text=normalized_candidate, term=term):
-                return "gastrostomy", term
-        for term in _SCOPE_ESOPHAGEAL_DILATION_TERMS:
-            if _contains_scope_term(normalized_text=normalized_candidate, term=term):
-                return "esophageal_dilation", term
+        subtype, matched_term = _detect_supported_eda_scope_keyword_in_text(
+            normalized_text=normalized_candidate,
+        )
+        if subtype is not None:
+            return subtype, matched_term
 
     return None, None
 
@@ -221,6 +272,58 @@ def _extract_motivo_solicitacao_text(*, cleaned_text: str) -> str | None:
         return None
     motive = match.group("motive").strip()
     return motive or None
+
+
+def _motive_mentions_supported_eda(*, normalized_motive: str) -> bool:
+    """Return True when the motive text asks for supported EDA/echoendoscopy."""
+
+    for term in _SCOPE_EXPLICIT_EDA_TERMS:
+        if _contains_scope_term(normalized_text=normalized_motive, term=term):
+            return True
+    if _contains_eda_acronym(normalized_text=normalized_motive):
+        return True
+    subtype, _ = _detect_supported_eda_scope_keyword_in_text(normalized_text=normalized_motive)
+    return subtype is not None
+
+
+def _detect_current_request_eda_signal(
+    *,
+    llm1_structured_data: dict[str, object],
+    cleaned_text: str,
+) -> bool:
+    """Return True when the current request explicitly asks for EDA/echoendoscopy.
+
+    Only the 'Motivo da Solicitação' field and structured procedure fields
+    count as current-request evidence. Mentions elsewhere in the clinical
+    body (e.g. historical EDA) must not override a non-EDA classification.
+    """
+
+    motive_text = _extract_motivo_solicitacao_text(cleaned_text=cleaned_text)
+    if motive_text is not None:
+        normalized_motive = _normalize_scope_keyword_text(value=motive_text)
+        if _motive_mentions_supported_eda(normalized_motive=normalized_motive):
+            return True
+
+    subtype = _extract_supported_eda_subtype_from_llm1(
+        llm1_structured_data=llm1_structured_data,
+    )
+    if subtype is not None and subtype != "standard":
+        return True
+
+    eda_payload = llm1_structured_data.get("eda")
+    if not isinstance(eda_payload, dict):
+        return False
+    requested_procedure = eda_payload.get("requested_procedure")
+    if not isinstance(requested_procedure, dict):
+        return False
+    requested_name = requested_procedure.get("name")
+    if not isinstance(requested_name, str) or not requested_name.strip():
+        return False
+    normalized_name = _normalize_scope_keyword_text(value=requested_name)
+    subtype_from_name, _ = _detect_supported_eda_scope_keyword_in_text(
+        normalized_text=normalized_name,
+    )
+    return subtype_from_name is not None
 
 
 def _detect_explicit_non_eda_scope_keyword(
@@ -255,6 +358,15 @@ def _detect_explicit_non_eda_scope_keyword(
     return False, None, None
 
 
+def _contains_eda_acronym(*, normalized_text: str) -> bool:
+    """Return True when the EDA acronym (plain, dotted or hyphenated) is present."""
+
+    return (
+        re.search(r"\beda\b", normalized_text) is not None
+        or re.search(r"\be\s*[.\-]?\s*d\s*[.\-]?\s*a\b", normalized_text) is not None
+    )
+
+
 def _detect_explicit_eda_scope_keyword(
     *,
     llm1_structured_data: dict[str, object],
@@ -277,10 +389,7 @@ def _detect_explicit_eda_scope_keyword(
             if _contains_scope_term(normalized_text=normalized_candidate, term=term):
                 return True, term
 
-        has_eda_acronym = (
-            re.search(r"\beda\b", normalized_candidate) is not None
-            or re.search(r"\be\s*[.\-]?\s*d\s*[.\-]?\s*a\b", normalized_candidate) is not None
-        )
+        has_eda_acronym = _contains_eda_acronym(normalized_text=normalized_candidate)
         has_request_context = (
             re.search(
                 r"\b(motivo|solicit|exame|encaminhamento|procedimento)\b",
@@ -292,24 +401,6 @@ def _detect_explicit_eda_scope_keyword(
             return True, "eda"
 
     return False, None
-
-
-def _append_scope_keyword_evidence_span(
-    *,
-    evidence_spans: list[dict[str, str]],
-    scope_keyword_type: str,
-    matched_term: str,
-) -> list[dict[str, str]]:
-    """Append a scope keyword evidence span, avoiding duplicates."""
-
-    scope_label = "gastrostomia/GTT" if scope_keyword_type == "gastrostomy" else "dilatacao esofagica"
-    keyword_span: dict[str, str] = {
-        "field_path": "scope_detection.keyword",
-        "excerpt": (f"Termo de escopo detectado no relatorio: {matched_term} ({scope_label})."),
-    }
-    if keyword_span in evidence_spans:
-        return evidence_spans
-    return [*evidence_spans, keyword_span]
 
 
 def classify_exam_scope(
@@ -335,27 +426,36 @@ def classify_exam_scope(
     if explicit_non_eda_detected and explicit_non_eda_source == "motivo_da_solicitacao":
         exam_type = "non_eda"
 
-    explicit_eda_detected, _ = _detect_explicit_eda_scope_keyword(
+    # A current-request EDA/echoendoscopy signal wins over a simultaneous
+    # out-of-scope mention (e.g. CPRE/colonoscopia) and over LLM1's non_eda
+    # classification. 'standard' is default schema noise and does not count.
+    if _detect_current_request_eda_signal(
         llm1_structured_data=llm1_structured_data,
         cleaned_text=cleaned_text,
-    )
-
-    # If LLM1 explicitly classified the request as non-EDA, keep that result
-    # authoritative. Real strict-schema runs can still carry default EDA subtype
-    # values (e.g. "standard") in nested fields, and those must not route
-    # colonoscopy/CPRE/etc. to the doctor queue.
-    if exam_type != "non_eda":
-        supported_subtype = _extract_supported_eda_subtype_from_llm1(
+    ):
+        exam_type = "eda"
+    else:
+        explicit_eda_detected, _ = _detect_explicit_eda_scope_keyword(
             llm1_structured_data=llm1_structured_data,
+            cleaned_text=cleaned_text,
         )
-        if supported_subtype is None:
-            supported_subtype, _ = _detect_supported_eda_scope_keyword(
-                llm1_structured_data=llm1_structured_data,
-                cleaned_text=cleaned_text,
-            )
 
-        if supported_subtype is not None or explicit_eda_detected:
-            exam_type = "eda"
+        # If LLM1 explicitly classified the request as non-EDA, keep that result
+        # authoritative. Real strict-schema runs can still carry default EDA subtype
+        # values (e.g. "standard") in nested fields, and those must not route
+        # colonoscopy/CPRE/etc. to the doctor queue.
+        if exam_type != "non_eda":
+            supported_subtype = _extract_supported_eda_subtype_from_llm1(
+                llm1_structured_data=llm1_structured_data,
+            )
+            if supported_subtype is None:
+                supported_subtype, _ = _detect_supported_eda_scope_keyword(
+                    llm1_structured_data=llm1_structured_data,
+                    cleaned_text=cleaned_text,
+                )
+
+            if supported_subtype is not None or explicit_eda_detected:
+                exam_type = "eda"
 
     if exam_type not in {"non_eda", "unknown"}:
         return None
