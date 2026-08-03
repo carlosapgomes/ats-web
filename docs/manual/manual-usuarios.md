@@ -35,18 +35,20 @@ Além do fluxo **Agendamento**, o médico pode aceitar um caso escolhendo um flu
 
 Regra geral:
 
-- quando o médico escolhe **Agendamento**, o caso vai para o **CHD** agendar;
+- quando o médico escolhe **Agendamento** ou **Compartilhar com EM pediátrica — com agendamento**, o caso vai para o **CHD** agendar;
 - quando escolhe qualquer outro fluxo de admissão, o **CHD** apenas toma ciência operacional, e o **NIR** conduz a ação necessária conforme o fluxo indicado.
 
 | Fluxo escolhido pelo médico | Ação do CHD | Ação principal do NIR |
 |---|---|---|
 | **Agendamento** | Agendar o exame | Aguardar resultado do CHD |
+| **Compartilhar com EM pediátrica — com agendamento** | Agendar o exame | Aguardar resultado do CHD e comunicar a EM Pediátrica sobre a chegada da criança |
 | **Vinda imediata** | Confirmar ciência | Comunicar e conduzir vinda imediata conforme rotina institucional |
 | **Admissão prévia em leito de UTI** | Confirmar ciência | Providenciar/reservar leito de UTI |
 | **Admissão em enfermaria para suporte posterior em UTI** | Confirmar ciência | Providenciar enfermaria e retaguarda em UTI |
-| **Compartilhamento com a Pediatria** | Confirmar ciência | Acionar o coordenador da EM Pediátrica |
 
 Nesses fluxos sem agendamento, o caso segue para resultado do **NIR** após a decisão médica. O **CHD** recebe um card apenas para ciência operacional e deve clicar em **Confirmar ciência**.
+
+> **Compatibilidade histórica:** casos antigos registrados como **Compartilhamento com a Pediatria** sem agendamento continuam operando como ciência operacional. Novas decisões usam o item **Compartilhar com EM pediátrica — com agendamento**.
 
 ### 1.3 Fluxo de negativa médica
 
@@ -149,7 +151,7 @@ não é registrada.
 **Modo apenas para ciência (operacional)**:
 
 Quando o caso foi aceito em um fluxo **sem agendamento** (`Vinda imediata`,
-`Pré-UTI`, `Enfermaria + retaguarda UTI` ou `EM pediátrica`), a intercorrência
+`Pré-UTI`, `Enfermaria + retaguarda UTI`), a intercorrência
 serve apenas para o CHD tomar ciência de uma mudança operacional.
 
 Nesse modo:
@@ -410,7 +412,7 @@ Quando o caso já tiver um resultado final, o NIR deve confirmar o recebimento.
 O resultado pode ser, por exemplo:
 
 - regulação aceita com agendamento confirmado;
-- regulação aceita para fluxo sem agendamento, como vinda imediata, admissão prévia em UTI, enfermaria com retaguarda em UTI ou compartilhamento com Pediatria;
+- regulação aceita para fluxo sem agendamento, como vinda imediata, admissão prévia em UTI, enfermaria com retaguarda em UTI;
 - negativa médica;
 - agendamento negado;
 - revisão manual obrigatória;
@@ -479,7 +481,7 @@ O NIR deve abrir o caso, conferir a resposta e clicar em
 ### Modo apenas para ciência (operational_notice)
 
 Use quando o caso foi aceito em fluxo **sem agendamento** (Vinda imediata,
-Pré-UTI, Enfermaria + retaguarda UTI ou EM pediátrica):
+Pré-UTI, Enfermaria + retaguarda UTI):
 
 1. acessar **Casos Encerrados**;
 2. buscar pelo nome do paciente ou número de registro/ocorrência;
@@ -600,7 +602,7 @@ Para aceitar:
    - Vinda imediata;
    - Admissão prévia em leito de UTI;
    - Admissão em enfermaria para suporte posterior em UTI;
-   - Compartilhamento com a Pediatria;
+   - Compartilhar com EM pediátrica — com agendamento;
 4. se necessário, preencher **Orientações para agendamento/execução**;
 5. clicar em **Enviar Decisão**;
 6. conferir o resumo na janela de confirmação;
@@ -610,7 +612,7 @@ O campo **Suporte Necessário** informa ao **CHD** se será preciso reservar ane
 
 Regra geral do **Fluxo de Admissão**:
 
-- escolha **Agendamento** quando o **CHD** precisa marcar data/horário;
+- escolha **Agendamento** ou **Compartilhar com EM pediátrica — com agendamento** quando o **CHD** precisa marcar data/horário;
 - escolha os demais fluxos quando o **CHD** deve apenas tomar ciência e o **NIR** deve executar uma ação operacional antes ou fora do agendamento.
 
 Caso importante: se o paciente já está em UTI próxima ao hospital, por exemplo na Grande Salvador, e virá de UTI móvel apenas para realizar o exame e retornar, selecione **Agendamento**. Nesse caso, use o campo **Orientações para agendamento/execução** para informar que o paciente está em UTI e provavelmente virá de UTI móvel.
@@ -717,7 +719,8 @@ Fluxos em que o CHD apenas confirma ciência:
 - **Vinda imediata**;
 - **Admissão prévia em leito de UTI**;
 - **Admissão em enfermaria para suporte posterior em UTI**;
-- **Compartilhamento com a Pediatria**.
+
+> **Compartilhar com EM pediátrica** é exceção: novas decisões passam pelo agendamento normal (confirmar data/hora ou negar com motivo); apenas casos históricos de **Compartilhamento com a Pediatria** permanecem como ciência operacional.
 
 Na prática, o encaminhamento operacional desses casos é conduzido pelo **NIR** conforme a rotina institucional. O ponto principal para o CHD é: **não abrir agendamento** e registrar ciência no sistema.
 
@@ -791,7 +794,7 @@ Depois da resposta, o resultado volta para o NIR, que deve confirmar o recebimen
 ### Quando o caso é sem agendamento (operational_notice)
 
 Quando o NIR registra uma intercorrência em fluxo **sem agendamento**
-(Vinda imediata, Pré-UTI, Enfermaria + retaguarda UTI ou EM pediátrica),
+(Vinda imediata, Pré-UTI, Enfermaria + retaguarda UTI),
 o card aparece na fila do CHD dentro da seção:
 
 > ⚠️ **Intercorrência pós-aceitação — apenas para ciência**
@@ -906,7 +909,7 @@ Sempre confira:
 | Pedir documento antes da decisão | **Comunicação operacional** |
 | Confirmar ou negar agendamento | **Confirmação de Agendamento** |
 | CHD tomar ciência de fluxo sem agendamento | **Fila do CHD > Confirmar ciência** |
-| NIR executar ação de UTI, enfermaria, vinda imediata ou Pediatria | **Resultado final do caso + rotina operacional NIR** |
+| NIR executar ação de UTI, enfermaria ou vinda imediata | **Resultado final do caso + rotina operacional NIR** |
 | CHD avisar NIR sobre alteração interna em caso histórico | **Buscar histórico > Detalhes > Comunicar NIR** |
 | NIR registrar intercorrência após agendamento | **Casos Encerrados > Detalhes > Intercorrência Pós-Aceitação** |
 | Responder intercorrência | **Fila do CHD/Agendador** |

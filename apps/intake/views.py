@@ -19,6 +19,7 @@ from apps.cases.admission import (
     SUPPORT_FLAG_MAP,
     get_admission_flow_notice_copy,
     is_operational_notice_flow,
+    is_scheduled_admission_flow,
 )
 from apps.cases.models import Case, CaseAttachment, CaseStatus
 from apps.cases.navigation import resolve_safe_next_url
@@ -1353,7 +1354,7 @@ def closed_case_detail(request: HttpRequest, case_id: uuid.UUID) -> HttpResponse
         # Mostra o motivo mais relevante
         ineligibility_reason = get_post_acceptance_issue_ineligibility_reason(
             case,
-            context="scheduled" if case.doctor_admission_flow == "scheduled" else "operational_notice",
+            context=("scheduled" if is_scheduled_admission_flow(case.doctor_admission_flow) else "operational_notice"),
         )
     else:
         ineligibility_reason = ""
