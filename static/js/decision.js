@@ -160,7 +160,8 @@
         confirmModalTitle.textContent = 'Confirmar Decisão';
 
         if (decision === 'accept') {
-            var acceptMessage = flowValue === 'scheduled'
+            var isScheduledFlow = flowValue === 'scheduled' || flowValue === 'pediatric_appt';
+            var acceptMessage = isScheduledFlow
                 ? 'O caso será encaminhado automaticamente para o CHD/agendamento.'
                 : 'O CHD receberá apenas ciência operacional. O NIR dará seguimento ao fluxo escolhido.';
             confirmBody.innerHTML =

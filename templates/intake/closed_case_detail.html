@@ -105,6 +105,18 @@
         <p class="mb-1 text-muted small">Suporte</p>
         <p class="mb-0 fw-medium">{{ result_info.support }}</p>
       </div>
+      {% if case.doctor_admission_flow == "pediatric_appt" %}
+      <div class="col-md-6">
+        <p class="mb-1 text-muted small">Via de entrada</p>
+        <p class="mb-0 fw-medium">Entrada pela Emergência Pediátrica</p>
+      </div>
+      <div class="col-12">
+        <div class="alert alert-info small mb-0">
+          <strong>Comunicação:</strong> o NIR comunicará a Emergência Pediátrica
+          sobre a chegada da criança no horário agendado.
+        </div>
+      </div>
+      {% endif %}
       {% if result_info.instructions %}
       <div class="col-12">
         <p class="mb-1 text-muted small">Instruções</p>

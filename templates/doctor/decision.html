@@ -340,7 +340,7 @@
               <option value="immediate"{% if form.admission_flow.value == "immediate" %} selected{% endif %}>Vinda Imediata</option>
               <option value="pre_icu"{% if form.admission_flow.value == "pre_icu" %} selected{% endif %}>Vinda prévia para UTI</option>
               <option value="ward_icu_backup"{% if form.admission_flow.value == "ward_icu_backup" %} selected{% endif %}>Vinda para enfermaria (para retaguarda em UTI)</option>
-              <option value="pediatric_em"{% if form.admission_flow.value == "pediatric_em" %} selected{% endif %}>Compartilhar com EM pediátrica</option>
+              <option value="pediatric_appt"{% if form.admission_flow.value == "pediatric_appt" %} selected{% endif %}>Compartilhar com EM pediátrica — com agendamento</option>
             </select>
             {% if form.admission_flow.errors %}<div class="invalid-feedback d-block">{{ form.admission_flow.errors.0 }}</div>{% else %}<div class="invalid-feedback">Selecione o fluxo de admissão.</div>{% endif %}
           </div>
