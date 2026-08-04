@@ -47,7 +47,10 @@ from apps.cases.services import (
 
 from .forms import CaseUploadForm
 from .services import (
+    EXAM_TYPE_CORRECTION_REASONS,
+    correct_case_exam_type,
     is_colonoscopy_intake_enabled,
+    is_exam_type_correction_eligible,
     process_uploaded_files,
     validate_attachment_file,
 )
@@ -175,6 +178,9 @@ EVENT_LABELS: dict[str, str] = {
     # ── Reenvio corrigido ─────────────────────────────────────
     "CASE_CORRECTION_CREATED": "Reenvio corrigido criado",
     "CASE_MARKED_SUPERSEDED": "Caso corrigido por novo envio",
+    # ── Correção de tipo e reprocessamento (Slice 006) ────────
+    "EXAM_TYPE_CORRECTED": "Tipo de exame corrigido pelo NIR",
+    "CASE_REPROCESSING_REQUESTED": "Reprocessamento solicitado",
     # ── Comunicação operacional ───────────────────────────────
     "CASE_COMMUNICATION_MESSAGE_POSTED": "Mensagem operacional registrada",
 }
@@ -233,6 +239,9 @@ EVENT_DOT_CSS: dict[str, str] = {
     # ── Reenvio corrigido ─────────────────────────────────────
     "CASE_CORRECTION_CREATED": "nir",
     "CASE_MARKED_SUPERSEDED": "system",
+    # ── Correção de tipo e reprocessamento (Slice 006) ────────
+    "EXAM_TYPE_CORRECTED": "nir",
+    "CASE_REPROCESSING_REQUESTED": "system",
     # ── Comunicação operacional ───────────────────────────────
     "CASE_COMMUNICATION_MESSAGE_POSTED": "system",
 }
@@ -245,6 +254,15 @@ STEPS: list[dict[str, str]] = [
     {"icon": "📅", "label": "Agendamento"},
     {"icon": "✅", "label": "Resultado Final"},
 ]
+
+# Labels legíveis para o tipo detectado no card de correção (Slice 006).
+CORRECTION_DETECTED_TYPE_LABELS: dict[str, str] = {
+    "eda": "EDA",
+    "colonoscopy": "Colonoscopia",
+    "mixed": "Solicitação mista (EDA + Colonoscopia)",
+    "unknown": "Não identificado",
+    "non_eda": "Fora do escopo suportado",
+}
 
 
 @login_required
@@ -593,6 +611,20 @@ def case_detail(request: HttpRequest, case_id: uuid.UUID) -> HttpResponse:
         and case.status in ELIGIBLE_SUPPLEMENTAL_STATUSES
     )
 
+    # ── Correção de tipo (Slice 006): card NIR apenas em manual review elegível ──
+    can_correct_exam_type = False
+    correction_form_context = None
+    if lock_held and is_exam_type_correction_eligible(case):
+        can_correct_exam_type = True
+        suggested = case.suggested_action or {}
+        detected = suggested.get("detected_exam_type") or suggested.get("exam_type") or ""
+        correction_form_context = {
+            "declared_exam_type_label": case.get_exam_type_display(),
+            "detected_exam_type_label": CORRECTION_DETECTED_TYPE_LABELS.get(detected, detected or "—"),
+            "reason_text": suggested.get("reason_text", ""),
+            "correction_reason_choices": list(EXAM_TYPE_CORRECTION_REASONS.items()),
+        }
+
     # ── Correction context (R1: corrects_case card) ──────────────
     correction_context = None
     if case.corrects_case_id:
@@ -668,6 +700,8 @@ def case_detail(request: HttpRequest, case_id: uuid.UUID) -> HttpResponse:
             "attachments": active_attachments,
             "can_add_supplemental": can_add_supplemental,
             "supplemental_lock_blocked_by": supplemental_lock_blocked_by,
+            "can_correct_exam_type": can_correct_exam_type,
+            "correction_form_context": correction_form_context,
             "correction_context": correction_context,
             "corrected_by_cases": corrected_by_cases_list,
             # ── Comunicação operacional ───────────────────────────────
@@ -1084,6 +1118,77 @@ def confirm_receipt(request: HttpRequest, case_id: uuid.UUID) -> HttpResponse:
 
     messages.success(request, "Recebimento confirmado. Caso concluído.")
     return redirect("intake:my_cases")
+
+
+@login_required
+@role_required("nir")
+def exam_type_correction(request: HttpRequest, case_id: uuid.UUID) -> HttpResponse:
+    """POST: corrige o tipo de exame de um caso em revisão manual (Slice 006).
+
+    Requer role NIR ativa, CSRF e reserva (lock) ``nir_receipt`` válida — a
+    mesma reserva usada pela confirmação de recebimento, garantindo exclusão
+    mútua entre as duas ações. Em caso inelegível o controle não existe na
+    UI e o POST retorna 404 seguro, sem qualquer mutação.
+    """
+    if request.method != "POST":
+        raise Http404
+
+    case = get_object_or_404(Case, case_id=case_id)
+
+    if not is_exam_type_correction_eligible(case):
+        raise Http404("Caso não está em revisão manual elegível para correção de tipo.")
+
+    user = request.user
+    assert user.is_authenticated  # garantido por @login_required
+
+    raw_token = request.POST.get("lock_token", "")
+    try:
+        token = uuid.UUID(raw_token) if raw_token else None
+    except (ValueError, AttributeError):
+        token = None
+
+    if token is None:
+        messages.warning(
+            request,
+            "Token de reserva não encontrado. Volte para a lista e tente novamente.",
+        )
+        return redirect("intake:case_detail", case_id=case.case_id)
+
+    try:
+        assert_case_lock(case=case, user=user, token=token, context="nir_receipt")
+    except PermissionError as exc:
+        messages.warning(request, str(exc))
+        return redirect("intake:case_detail", case_id=case.case_id)
+
+    new_exam_type = request.POST.get("exam_type", "")
+    reason_code = request.POST.get("reason_code", "")
+    try:
+        case = correct_case_exam_type(
+            case_id=case.case_id,
+            new_exam_type=new_exam_type,
+            user=user,
+            reason_code=reason_code,
+        )
+    except PermissionError as exc:
+        messages.warning(request, str(exc))
+        return redirect("intake:case_detail", case_id=case.case_id)
+    except ValueError as exc:
+        messages.warning(request, str(exc))
+        return redirect("intake:case_detail", case_id=case.case_id)
+    except Exception:
+        logger.exception("Falha ao reprocessar caso corrigido %s", case_id)
+        messages.error(
+            request,
+            "Tipo de exame corrigido, mas o reprocessamento automático falhou. "
+            "O sistema retomará o processamento automaticamente.",
+        )
+        return redirect("intake:case_detail", case_id=case.case_id)
+
+    messages.success(
+        request,
+        f"Tipo de exame corrigido para {case.get_exam_type_display()}. Caso em reprocessamento.",
+    )
+    return redirect("intake:case_detail", case_id=case.case_id)
 
 
 @login_required

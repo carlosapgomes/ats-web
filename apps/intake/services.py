@@ -9,16 +9,20 @@ from __future__ import annotations
 import hashlib
 import logging
 import os
+import uuid
 from typing import TYPE_CHECKING
 
 from django.conf import settings
 from django.core.files.uploadedfile import UploadedFile
+from django.db import transaction
+from django.utils import timezone
 
 from apps.cases.models import (
     ACCEPTED_ATTACHMENT_CONTENT_TYPES,
     ACCEPTED_ATTACHMENT_EXTENSIONS,
     Case,
     CaseAttachment,
+    CaseStatus,
     ExamType,
 )
 
@@ -64,6 +68,140 @@ def ensure_exam_type_allowed(exam_type: str | None) -> str:
     if value == ExamType.COLONOSCOPY and not is_colonoscopy_intake_enabled():
         raise ValueError("Colonoscopia ainda não está habilitada para novos envios. Envie lotes apenas de EDA.")
     return value
+
+
+# ── Correção de tipo em revisão manual (Slice 006) ────────────────────────
+
+# Reason codes do scope gate elegíveis para correção de tipo: o NIR vê
+# declarado/detectado e corrige o tipo no MESMO caso (spec exam-type-correction).
+# non_eda_request e invalid_regulation_report NÃO são elegíveis: não se
+# resolvem trocando o tipo (fora do escopo EDA/colonoscopia e falha de gate
+# de regulação, respectivamente).
+EXAM_TYPE_CORRECTION_ELIGIBLE_REASON_CODES: frozenset[str] = frozenset(
+    {"exam_type_mismatch", "mixed_exam_request", "unknown_exam_type"}
+)
+
+# Motivos de correção selecionáveis pelo NIR (payload de EXAM_TYPE_CORRECTED).
+EXAM_TYPE_CORRECTION_REASONS: dict[str, str] = {
+    "nir_identified_exam": "Tipo identificado na revisão manual do NIR",
+    "declared_type_incorrect": "Tipo declarado incorreto no envio original",
+    "other": "Outro motivo",
+}
+
+
+# Campos de reserva limpos após a correção (o estado saiu de
+# WAIT_R1_CLEANUP_THUMBS; a reserva nir_receipt perdeu o objeto).
+_LOCK_CLEAR_FIELDS: tuple[str, ...] = (
+    "locked_by",
+    "locked_at",
+    "locked_until",
+    "lock_token",
+    "lock_context",
+    "lock_role",
+)
+
+
+def is_exam_type_correction_eligible(case: Case) -> bool:
+    """Elegibilidade server-side para correção de tipo (R1).
+
+    Estado estável pré-médico explicitamente enumerado: WAIT_R1_CLEANUP_THUMBS
+    com manual review de mismatch/mixed/unknown. Estados transitórios de
+    worker (R1_ACK_PROCESSING/EXTRACTING/LLM_STRUCT/LLM_SUGGEST/R2_POST_WIDGET)
+    e qualquer decisão pós-WAIT_DOCTOR são recusados — nunca comparação
+    textual frouxa de status.
+    """
+    if case.status != CaseStatus.WAIT_R1_CLEANUP_THUMBS:
+        return False
+    if case.doctor_decision:
+        return False
+    suggested = case.suggested_action
+    if not isinstance(suggested, dict):
+        return False
+    if suggested.get("decision") != "manual_review_required":
+        return False
+    return suggested.get("reason_code") in EXAM_TYPE_CORRECTION_ELIGIBLE_REASON_CODES
+
+
+def correct_case_exam_type(
+    *,
+    case_id: uuid.UUID,
+    new_exam_type: str,
+    user: AccountsUser,
+    reason_code: str,
+) -> Case:
+    """Corrige o tipo de exame no mesmo caso e reprocessa (Slice 006).
+
+    Transacional com ``select_for_update`` (R1): nenhuma atualização parcial.
+    Preserva fontes e limpa derivados (R3). Transição FSM nomeada de volta a
+    LLM_STRUCT (R2) com eventos append-only (R5). Após commit, enfileira o
+    pipeline LLM exatamente uma vez — nunca reextrai PDF (R4); em falha de
+    enqueue o estado LLM_STRUCT permite recovery idempotente existente.
+
+    Raises:
+        ValueError: caso inelegível, tipo inválido/igual ou reason_code inválido.
+        PermissionError: caso reservado ativamente por outro usuário.
+    """
+    validated_exam_type = validate_exam_type(new_exam_type)
+    if reason_code not in EXAM_TYPE_CORRECTION_REASONS:
+        raise ValueError("Motivo da correção inválido.")
+
+    with transaction.atomic():
+        case = Case.objects.select_for_update().get(pk=case_id)
+
+        if not is_exam_type_correction_eligible(case):
+            raise ValueError("Caso não está em revisão manual elegível para correção de tipo.")
+        if validated_exam_type == case.exam_type:
+            raise ValueError("O novo tipo de exame deve ser diferente do tipo atual.")
+
+        now = timezone.now()
+        if case.locked_by is not None and case.locked_until is not None and case.locked_until > now:
+            if case.locked_by_id != user.pk:
+                raise PermissionError(f"Caso está reservado por outro usuário: {case.locked_by.display_name}")
+
+        old_exam_type = case.exam_type
+
+        # R3 — invalida artefatos derivados do perfil anterior; fontes ficam.
+        case.structured_data = None
+        case.summary_text = ""
+        case.suggested_action = None
+        case.priority_signals = []
+
+        # R5 — evento de correção com old/new/reason_code (actor = user).
+        case._record_event(
+            "EXAM_TYPE_CORRECTED",
+            user=user,
+            payload={
+                "old_exam_type": old_exam_type,
+                "new_exam_type": validated_exam_type,
+                "reason_code": reason_code,
+            },
+        )
+        case.exam_type = validated_exam_type
+        case.save()
+
+        # R2 — transição FSM nomeada; CASE_REPROCESSING_REQUESTED é persistido
+        # no save() seguinte, após EXAM_TYPE_CORRECTED (ordem append-only,
+        # sem sobrescrever _pending_event).
+        case.reprocess_after_exam_type_correction(
+            user=user,
+            payload={"reason_code": reason_code},
+        )
+        case.save()
+
+        # A reserva nir_receipt perdeu o objeto (estado saiu de
+        # WAIT_R1_CLEANUP_THUMBS): limpa para não vazar lock em LLM_STRUCT.
+        if case.locked_by is not None:
+            for field in _LOCK_CLEAR_FIELDS:
+                setattr(case, field, None if field not in ("lock_context", "lock_role") else "")
+            case.save(update_fields=list(_LOCK_CLEAR_FIELDS))
+
+    # R4 — fora da transação: um único enqueue LLM pós-commit. Se falhar, o
+    # estado LLM_STRUCT persiste e o recovery idempotente existente
+    # (execute_pdf_extraction em LLM_STRUCT) re-enfileira sem reextrair PDF.
+    from apps.pipeline.tasks import enqueue_pipeline
+
+    enqueue_pipeline(case.case_id)
+    return case
 
 
 # ── Validation ──────────────────────────────────────────────────────────

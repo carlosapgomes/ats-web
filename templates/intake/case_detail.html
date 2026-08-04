@@ -308,6 +308,63 @@
 </div>
 {% endif %}
 
+{% if can_correct_exam_type and correction_form_context %}
+<!-- Correção de Tipo de Exame (Slice 006) -->
+<div class="card p-4 mb-4 border-warning">
+  <h5 class="mb-3">↻ Correção de Tipo de Exame</h5>
+  <div class="alert alert-warning small mb-3">
+    <strong>⚠ Revisão Manual:</strong> o tipo declarado no envio difere do
+    detectado. Corrija o tipo no mesmo caso para reprocessar com o perfil
+    correto — PDF, anexos e texto extraído são preservados.
+  </div>
+  <div class="row g-3 mb-3">
+    <div class="col-md-4">
+      <p class="mb-1 text-muted small">Tipo declarado</p>
+      <p class="mb-0 fw-medium">{{ correction_form_context.declared_exam_type_label }}</p>
+    </div>
+    <div class="col-md-4">
+      <p class="mb-1 text-muted small">Tipo detectado</p>
+      <p class="mb-0 fw-medium">{{ correction_form_context.detected_exam_type_label }}</p>
+    </div>
+    <div class="col-md-4">
+      <p class="mb-1 text-muted small">Motivo da revisão</p>
+      <p class="mb-0">{{ correction_form_context.reason_text }}</p>
+    </div>
+  </div>
+  <form method="post" action="{% url 'intake:exam_type_correction' case.case_id %}">
+    {% csrf_token %}
+    <input type="hidden" name="lock_token" value="{{ lock_token }}">
+    <div class="mb-3">
+      <label class="form-label fw-semibold">Novo tipo de exame <span class="text-danger">*</span></label>
+      <div class="form-check">
+        <input class="form-check-input" type="radio" name="exam_type" id="exam-type-eda" value="eda"
+               {% if case.exam_type == "eda" %}disabled{% endif %}>
+        <label class="form-check-label" for="exam-type-eda">EDA {% if case.exam_type == "eda" %}(atual){% endif %}</label>
+      </div>
+      <div class="form-check">
+        <input class="form-check-input" type="radio" name="exam_type" id="exam-type-colonoscopy" value="colonoscopy"
+               {% if case.exam_type == "colonoscopy" %}disabled{% endif %}>
+        <label class="form-check-label" for="exam-type-colonoscopy">
+          Colonoscopia {% if case.exam_type == "colonoscopy" %}(atual){% endif %}
+        </label>
+      </div>
+    </div>
+    <div class="mb-3">
+      <label for="correction-reason-code" class="form-label fw-semibold">
+        Motivo da correção <span class="text-danger">*</span>
+      </label>
+      <select name="reason_code" id="correction-reason-code" class="form-select" required>
+        <option value="">Selecione...</option>
+        {% for code, label in correction_form_context.correction_reason_choices %}
+        <option value="{{ code }}">{{ label }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <button type="submit" class="btn btn-warning">↻ Corrigir tipo e reprocessar</button>
+  </form>
+</div>
+{% endif %}
+
 <!-- Correction: corrects_case card (R1) -->
 {% if correction_context %}
 <div class="card p-4 mb-4 border-warning">

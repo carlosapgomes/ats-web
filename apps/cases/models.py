@@ -366,6 +366,25 @@ class Case(models.Model):
 
     @transition(
         field=status,
+        source=CaseStatus.WAIT_R1_CLEANUP_THUMBS,
+        target=CaseStatus.LLM_STRUCT,
+    )
+    def reprocess_after_exam_type_correction(self, *, user=None, payload=None):
+        """Retorna à análise automática após correção de tipo (Slice 006).
+
+        Transição nomeada WAIT_R1_CLEANUP_THUMBS → LLM_STRUCT usada
+        exclusivamente pelo serviço de correção de tipo do NIR. Preserva a
+        FSM protegida (nenhum status atribuído diretamente) e registra o
+        evento ``CASE_REPROCESSING_REQUESTED`` no save() subsequente.
+        """
+        self._record_event(
+            "CASE_REPROCESSING_REQUESTED",
+            user=user,
+            payload=payload or {},
+        )
+
+    @transition(
+        field=status,
         source=CaseStatus.LLM_STRUCT,
         target=ReturnState(),
     )

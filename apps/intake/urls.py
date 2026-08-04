@@ -34,6 +34,7 @@ urlpatterns = [
     path("<uuid:case_id>/pdf-viewer/", views.pdf_viewer, name="pdf_viewer"),
     path("<uuid:case_id>/corrected-resubmission/", views.corrected_resubmission, name="corrected_resubmission"),
     path("<uuid:case_id>/confirm/", views.confirm_receipt, name="confirm_receipt"),
+    path("<uuid:case_id>/exam-type/correct/", views.exam_type_correction, name="exam_type_correction"),
     path("<uuid:case_id>/lock/renew/", views.nir_lock_renew, name="nir_lock_renew"),
     path("<uuid:case_id>/lock/release/", views.nir_lock_release, name="nir_lock_release"),
     # Post-schedule intercurrence

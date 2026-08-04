@@ -1,0 +1,687 @@
+"""Slice 006 — correção de tipo em revisão manual e reprocessamento auditável.
+
+Cobre R1–R7:
+- R1: elegibilidade server-side (estado estável pré-médico, tipo válido e
+      diferente, lock incompatível recusado, estados transitórios recusados);
+- R2: transição FSM nomeada WAIT_R1_CLEANUP_THUMBS → LLM_STRUCT sem novo estado;
+- R3: fontes preservadas (PDF/anexos/texto/ocorrência/eventos) e derivados
+      limpos (structured_data/summary_text/suggested_action/priority_signals);
+- R4: enqueue_pipeline exatamente uma vez e zero extração de PDF;
+- R5: eventos append-only EXAM_TYPE_CORRECTED (old/new/reason_code) e
+      CASE_REPROCESSING_REQUESTED, em ordem, sem texto clínico no payload;
+- R6: UI NIR — card apenas em caso elegível; POST protegido por role/CSRF/lock;
+- R7: idempotência (segundo POST), rollback transacional e confirm receipt
+      não executado junto com a correção.
+"""
+
+from __future__ import annotations
+
+import pytest
+from django.contrib.auth import get_user_model
+from django.urls import reverse
+
+from apps.cases.models import Case, CaseEvent, CaseStatus, ExamType
+from apps.cases.services import claim_case_lock
+from apps.intake.services import (
+    correct_case_exam_type,
+    is_exam_type_correction_eligible,
+)
+
+User = get_user_model()
+
+
+# ── Helpers ──────────────────────────────────────────────────────────────
+
+
+def _nir_client(client, username: str = "nir-corr@test.com") -> tuple:  # type: ignore[type-arg]
+    """Cria usuário NIR, faz login e retorna (client, user)."""
+    from apps.accounts.models import Role
+
+    user = User.objects.create_user(username=username, password="testpass123")
+    role, _ = Role.objects.get_or_create(name="nir")
+    user.roles.add(role)
+    client.force_login(user)
+    session = client.session
+    session["active_role"] = "nir"
+    session.save()
+    return client, user
+
+
+def _doctor_client(client) -> tuple:  # type: ignore[type-arg]
+    """Cria usuário doctor, faz login e retorna (client, user)."""
+    from apps.accounts.models import Role
+
+    user = User.objects.create_user(username="doc-corr@test.com", password="testpass123")
+    role, _ = Role.objects.get_or_create(name="doctor")
+    user.roles.add(role)
+    client.force_login(user)
+    session = client.session
+    session["active_role"] = "doctor"
+    session.save()
+    return client, user
+
+
+def _eligible_case(
+    *,
+    user,
+    exam_type: str = ExamType.EDA,
+    reason_code: str = "exam_type_mismatch",
+    detected: str = "colonoscopy",
+) -> Case:
+    """Cria um caso em WAIT_R1_CLEANUP_THUMBS com manual review elegível."""
+    return Case.objects.create(
+        created_by=user,
+        exam_type=exam_type,
+        status=CaseStatus.WAIT_R1_CLEANUP_THUMBS,
+        extracted_text=(
+            "RELATÓRIO DE OCORRÊNCIAS\nGoverno do Estado da Bahia\nCódigo: 123\nMotivo da Solicitação: Colonoscopia"
+        ),
+        agency_record_number="REC-CORR-001",
+        regulation_days_on_screen=3,
+        structured_data={"patient": {"name": "Paciente de Teste"}},
+        summary_text="Resumo antigo do perfil anterior.",
+        suggested_action={
+            "decision": "manual_review_required",
+            "suggestion": "manual_review_required",
+            "reason_code": reason_code,
+            "reason_text": "Tipo de exame declarado difere da solicitacao atual.",
+            "exam_type": detected,
+            "declared_exam_type": exam_type,
+            "detected_exam_type": detected,
+        },
+        priority_signals=[{"code": "foreign_body", "label": "Corpo estranho"}],
+    )
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# R1/R2/R3/R4/R5 — serviço transacional
+# ═══════════════════════════════════════════════════════════════════════════
+
+
+@pytest.mark.django_db
+class TestCorrectionService:
+    """R1/R2: mesmo UUID, status LLM_STRUCT e transição FSM nomeada."""
+
+    def test_corrects_same_uuid_and_returns_to_llm_struct(self, user) -> None:
+        """Correção mantém o MESMO caso (uuid) e volta a LLM_STRUCT."""
+        case = _eligible_case(user=user)
+        original_id = case.case_id
+
+        result = correct_case_exam_type(
+            case_id=case.case_id,
+            new_exam_type=ExamType.COLONOSCOPY,
+            user=user,
+            reason_code="nir_identified_exam",
+        )
+
+        assert result.case_id == original_id
+        reloaded = Case.objects.get(pk=result.pk)
+        assert reloaded.status == CaseStatus.LLM_STRUCT
+        assert reloaded.exam_type == ExamType.COLONOSCOPY
+
+    def test_fsm_transition_reprocess_after_exam_type_correction(self, user) -> None:
+        """Transição nomeada existe e registra CASE_REPROCESSING_REQUESTED."""
+        case = _eligible_case(user=user)
+        case.reprocess_after_exam_type_correction(user=user, payload={"reason_code": "other"})
+        case.save()
+        reloaded = Case.objects.get(pk=case.pk)
+        assert reloaded.status == CaseStatus.LLM_STRUCT
+        assert CaseEvent.objects.filter(case=case, event_type="CASE_REPROCESSING_REQUESTED").exists()
+
+    def test_fsm_transition_not_allowed_from_wait_doctor(self, user, advance_to) -> None:
+        """Transição NÃO é permitida a partir de WAIT_DOCTOR (FSM protegida)."""
+        from django_fsm import TransitionNotAllowed
+
+        case = Case.objects.create(created_by=user)
+        case = advance_to(case, CaseStatus.WAIT_DOCTOR)
+        with pytest.raises(TransitionNotAllowed):
+            case.reprocess_after_exam_type_correction(user=user)
+
+    def test_events_recorded_with_old_new_and_ordered(self, user) -> None:
+        """EXAM_TYPE_CORRECTED (old/new/reason_code/actor) antes de reprocessar."""
+        case = _eligible_case(user=user)
+
+        correct_case_exam_type(
+            case_id=case.case_id,
+            new_exam_type=ExamType.COLONOSCOPY,
+            user=user,
+            reason_code="nir_identified_exam",
+        )
+
+        events = list(CaseEvent.objects.filter(case=case).order_by("id"))
+        types = [e.event_type for e in events]
+        assert "EXAM_TYPE_CORRECTED" in types
+        assert "CASE_REPROCESSING_REQUESTED" in types
+        assert types.index("EXAM_TYPE_CORRECTED") < types.index("CASE_REPROCESSING_REQUESTED")
+
+        corrected = next(e for e in events if e.event_type == "EXAM_TYPE_CORRECTED")
+        assert corrected.payload == {
+            "old_exam_type": ExamType.EDA,
+            "new_exam_type": ExamType.COLONOSCOPY,
+            "reason_code": "nir_identified_exam",
+        }
+        assert corrected.actor_id == user.pk
+        # payload não carrega texto clínico integral
+        assert "extracted_text" not in corrected.payload
+
+    def test_derived_cleared_sources_preserved(self, user) -> None:
+        """R3: derivados LLM limpos; PDF/anexos/texto/ocorrência preservados."""
+        case = _eligible_case(user=user)
+        created_at = case.created_at
+        case.pdf_file = "pdfs/2025/01/original.pdf"  # apenas nome — não é tocado
+        case.save()
+
+        correct_case_exam_type(
+            case_id=case.case_id,
+            new_exam_type=ExamType.COLONOSCOPY,
+            user=user,
+            reason_code="nir_identified_exam",
+        )
+
+        reloaded = Case.objects.get(pk=case.pk)
+        # Derivados limpos
+        assert reloaded.structured_data is None
+        assert reloaded.summary_text == ""
+        assert reloaded.suggested_action is None
+        assert reloaded.priority_signals == []
+        # Fontes preservadas
+        assert reloaded.case_id == case.case_id
+        assert reloaded.created_by_id == user.pk
+        assert reloaded.created_at == created_at
+        assert reloaded.pdf_file.name == "pdfs/2025/01/original.pdf"
+        assert reloaded.extracted_text == case.extracted_text
+        assert reloaded.agency_record_number == "REC-CORR-001"
+        assert reloaded.regulation_days_on_screen == 3
+        # Timeline preservada (eventos anteriores continuam)
+        assert CaseEvent.objects.filter(case=case).exists()
+
+    def test_enqueue_pipeline_once_no_pdf_extraction(self, user, monkeypatch) -> None:
+        """R4: enqueue_pipeline 1x, enqueue_pdf_extraction 0x."""
+        pipeline_calls: list[object] = []
+        pdf_calls: list[object] = []
+        monkeypatch.setattr(
+            "apps.pipeline.tasks.enqueue_pipeline",
+            lambda case_id: pipeline_calls.append(case_id),
+        )
+        monkeypatch.setattr(
+            "apps.intake.tasks.enqueue_pdf_extraction",
+            lambda case_id: pdf_calls.append(case_id),
+        )
+        case = _eligible_case(user=user)
+
+        correct_case_exam_type(
+            case_id=case.case_id,
+            new_exam_type=ExamType.COLONOSCOPY,
+            user=user,
+            reason_code="nir_identified_exam",
+        )
+
+        assert len(pipeline_calls) == 1
+        assert pipeline_calls[0] == case.case_id
+        assert pdf_calls == []
+
+    @pytest.mark.parametrize(
+        ("reason_code", "detected"),
+        [
+            ("mixed_exam_request", "mixed"),
+            ("unknown_exam_type", "unknown"),
+        ],
+    )
+    def test_mixed_and_unknown_eligible(self, user, reason_code: str, detected: str) -> None:
+        """R1: mixed e unknown são elegíveis para correção."""
+        case = _eligible_case(user=user, reason_code=reason_code, detected=detected)
+        assert is_exam_type_correction_eligible(case) is True
+
+        correct_case_exam_type(
+            case_id=case.case_id,
+            new_exam_type=ExamType.COLONOSCOPY,
+            user=user,
+            reason_code="other",
+        )
+        assert Case.objects.get(pk=case.pk).status == CaseStatus.LLM_STRUCT
+
+    def test_same_type_rejected_without_mutation(self, user) -> None:
+        """R1: novo tipo igual ao atual é rejeitado sem mutação."""
+        case = _eligible_case(user=user, exam_type=ExamType.EDA)
+
+        with pytest.raises(ValueError):
+            correct_case_exam_type(
+                case_id=case.case_id,
+                new_exam_type=ExamType.EDA,
+                user=user,
+                reason_code="nir_identified_exam",
+            )
+
+        reloaded = Case.objects.get(pk=case.pk)
+        assert reloaded.status == CaseStatus.WAIT_R1_CLEANUP_THUMBS
+        assert reloaded.exam_type == ExamType.EDA
+        assert reloaded.structured_data is not None
+        assert reloaded.suggested_action is not None
+
+    def test_invalid_new_type_rejected(self, user) -> None:
+        """R1: tipo fora do enum é rejeitado."""
+        case = _eligible_case(user=user)
+        with pytest.raises(ValueError):
+            correct_case_exam_type(
+                case_id=case.case_id,
+                new_exam_type="cpre",
+                user=user,
+                reason_code="nir_identified_exam",
+            )
+
+    def test_invalid_reason_code_rejected(self, user) -> None:
+        """R5: reason_code do NIR fora do conjunto é rejeitado."""
+        case = _eligible_case(user=user)
+        with pytest.raises(ValueError):
+            correct_case_exam_type(
+                case_id=case.case_id,
+                new_exam_type=ExamType.COLONOSCOPY,
+                user=user,
+                reason_code="bogus",
+            )
+
+    def test_wait_doctor_and_later_rejected(self, user, advance_to) -> None:
+        """R1: WAIT_DOCTOR e decisões posteriores são rejeitados."""
+        case = Case.objects.create(created_by=user)
+        case = advance_to(case, CaseStatus.WAIT_DOCTOR)
+        case.suggested_action = {
+            "decision": "manual_review_required",
+            "reason_code": "exam_type_mismatch",
+        }
+        case.save()
+
+        with pytest.raises(ValueError):
+            correct_case_exam_type(
+                case_id=case.case_id,
+                new_exam_type=ExamType.COLONOSCOPY,
+                user=user,
+                reason_code="nir_identified_exam",
+            )
+
+        reloaded = Case.objects.get(pk=case.pk)
+        assert reloaded.status == CaseStatus.WAIT_DOCTOR
+        assert reloaded.exam_type == ExamType.EDA
+
+    @pytest.mark.parametrize(
+        "target",
+        [
+            CaseStatus.R1_ACK_PROCESSING,
+            CaseStatus.EXTRACTING,
+            CaseStatus.LLM_STRUCT,
+            CaseStatus.LLM_SUGGEST,
+            CaseStatus.R2_POST_WIDGET,
+        ],
+    )
+    def test_transient_worker_states_rejected_without_mutation(self, user, advance_to, target: CaseStatus) -> None:
+        """R1: estados transitórios de worker não podem ser mutados."""
+        case = Case.objects.create(created_by=user)
+        case = advance_to(case, target)
+        case.suggested_action = {
+            "decision": "manual_review_required",
+            "reason_code": "exam_type_mismatch",
+        }
+        case.save()
+
+        with pytest.raises(ValueError):
+            correct_case_exam_type(
+                case_id=case.case_id,
+                new_exam_type=ExamType.COLONOSCOPY,
+                user=user,
+                reason_code="nir_identified_exam",
+            )
+
+        reloaded = Case.objects.get(pk=case.pk)
+        assert reloaded.status == target
+        assert reloaded.exam_type == ExamType.EDA
+        assert reloaded.suggested_action is not None
+
+    def test_non_eda_and_invalid_regulation_not_eligible(self, user) -> None:
+        """R1: non_eda_request e invalid_regulation_report NÃO são elegíveis."""
+        for reason_code in ("non_eda_request", "invalid_regulation_report"):
+            case = _eligible_case(user=user, reason_code=reason_code, detected="non_eda")
+            assert is_exam_type_correction_eligible(case) is False
+            with pytest.raises(ValueError):
+                correct_case_exam_type(
+                    case_id=case.case_id,
+                    new_exam_type=ExamType.COLONOSCOPY,
+                    user=user,
+                    reason_code="nir_identified_exam",
+                )
+            reloaded = Case.objects.get(pk=case.pk)
+            assert reloaded.status == CaseStatus.WAIT_R1_CLEANUP_THUMBS
+            assert reloaded.structured_data is not None
+
+    def test_incompatible_lock_rejected_without_mutation(self, user) -> None:
+        """R1/R7: reserva de outro usuário rejeita sem limpar dados."""
+        other = User.objects.create_user(username="nir-other@test.com", password="x")
+        case = _eligible_case(user=user)
+        claim_case_lock(
+            case_id=case.case_id,
+            user=other,
+            expected_status=CaseStatus.WAIT_R1_CLEANUP_THUMBS,
+            context="nir_receipt",
+            role="nir",
+        )
+
+        with pytest.raises(PermissionError):
+            correct_case_exam_type(
+                case_id=case.case_id,
+                new_exam_type=ExamType.COLONOSCOPY,
+                user=user,
+                reason_code="nir_identified_exam",
+            )
+
+        reloaded = Case.objects.get(pk=case.pk)
+        assert reloaded.status == CaseStatus.WAIT_R1_CLEANUP_THUMBS
+        assert reloaded.exam_type == ExamType.EDA
+        assert reloaded.structured_data is not None
+        assert reloaded.suggested_action is not None
+
+    def test_same_user_lock_allowed_and_cleared(self, user) -> None:
+        """Lock nir_receipt do próprio NIR é permitido e limpo após correção."""
+        case = _eligible_case(user=user)
+        claim_case_lock(
+            case_id=case.case_id,
+            user=user,
+            expected_status=CaseStatus.WAIT_R1_CLEANUP_THUMBS,
+            context="nir_receipt",
+            role="nir",
+        )
+
+        correct_case_exam_type(
+            case_id=case.case_id,
+            new_exam_type=ExamType.COLONOSCOPY,
+            user=user,
+            reason_code="nir_identified_exam",
+        )
+
+        reloaded = Case.objects.get(pk=case.pk)
+        assert reloaded.status == CaseStatus.LLM_STRUCT
+        assert reloaded.locked_by is None
+        assert reloaded.lock_token is None
+        assert reloaded.lock_context == ""
+
+    def test_enqueue_failure_keeps_llm_struct_committed(self, user, monkeypatch) -> None:
+        """R4: falha de enqueue não desfaz a correção; LLM_STRUCT permite recovery."""
+
+        def _boom(case_id) -> None:  # noqa: ARG001
+            raise RuntimeError("fila indisponível")
+
+        monkeypatch.setattr("apps.pipeline.tasks.enqueue_pipeline", _boom)
+        case = _eligible_case(user=user)
+
+        with pytest.raises(RuntimeError):
+            correct_case_exam_type(
+                case_id=case.case_id,
+                new_exam_type=ExamType.COLONOSCOPY,
+                user=user,
+                reason_code="nir_identified_exam",
+            )
+
+        reloaded = Case.objects.get(pk=case.pk)
+        assert reloaded.status == CaseStatus.LLM_STRUCT
+        assert reloaded.exam_type == ExamType.COLONOSCOPY
+        assert reloaded.structured_data is None
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# R6/R7 — view NIR, idempotência e exclusão mútua com confirm receipt
+# ═══════════════════════════════════════════════════════════════════════════
+
+
+@pytest.mark.django_db
+class TestCorrectionView:
+    """R6/R7: UI NIR, POST protegido, idempotência e exclusão mútua."""
+
+    def _lock_token_for(self, case_id) -> str:
+        return str(Case.objects.get(pk=case_id).lock_token)
+
+    def test_get_detail_shows_correction_card_when_eligible(self, client) -> None:
+        """R6: caso elegível mostra card com declarado/detectado/motivo e form."""
+        client, user = _nir_client(client)
+        case = _eligible_case(user=user)
+
+        response = client.get(reverse("intake:case_detail", args=[case.case_id]))
+        assert response.status_code == 200
+        content = response.content.decode()
+        assert "Correção de Tipo de Exame" in content
+        assert "Tipo declarado" in content
+        assert "Tipo detectado" in content
+        assert "Colonoscopia" in content
+        assert reverse("intake:exam_type_correction", args=[case.case_id]) in content
+
+    def test_get_detail_hides_card_when_not_manual_review(self, client) -> None:
+        """R6: caso sem manual review elegível não mostra o card."""
+        client, user = _nir_client(client)
+        case = Case.objects.create(
+            created_by=user,
+            status=CaseStatus.WAIT_R1_CLEANUP_THUMBS,
+        )
+
+        response = client.get(reverse("intake:case_detail", args=[case.case_id]))
+        assert response.status_code == 200
+        assert "Correção de Tipo de Exame" not in response.content.decode()
+
+    def test_post_success_corrects_and_redirects(self, client, monkeypatch) -> None:
+        """R6: POST NIR válido corrige, redireciona e enfileira 1x."""
+        pipeline_calls: list[object] = []
+        monkeypatch.setattr(
+            "apps.pipeline.tasks.enqueue_pipeline",
+            lambda case_id: pipeline_calls.append(case_id),
+        )
+        client, user = _nir_client(client)
+        case = _eligible_case(user=user)
+
+        # Abrir o detalhe adquire o lock nir_receipt (token no form)
+        client.get(reverse("intake:case_detail", args=[case.case_id]))
+        token = self._lock_token_for(case.case_id)
+
+        response = client.post(
+            reverse("intake:exam_type_correction", args=[case.case_id]),
+            {"exam_type": ExamType.COLONOSCOPY, "reason_code": "nir_identified_exam", "lock_token": token},
+        )
+        assert response.status_code == 302
+
+        reloaded = Case.objects.get(pk=case.pk)
+        assert reloaded.status == CaseStatus.LLM_STRUCT
+        assert reloaded.exam_type == ExamType.COLONOSCOPY
+        assert len(pipeline_calls) == 1
+
+    def test_second_post_idempotent_no_double_enqueue(self, client, monkeypatch) -> None:
+        """R7: segundo POST com estado já movido não enfileira novamente."""
+        pipeline_calls: list[object] = []
+        monkeypatch.setattr(
+            "apps.pipeline.tasks.enqueue_pipeline",
+            lambda case_id: pipeline_calls.append(case_id),
+        )
+        client, user = _nir_client(client)
+        case = _eligible_case(user=user)
+
+        client.get(reverse("intake:case_detail", args=[case.case_id]))
+        token = self._lock_token_for(case.case_id)
+        url = reverse("intake:exam_type_correction", args=[case.case_id])
+
+        first = client.post(
+            url,
+            {"exam_type": ExamType.COLONOSCOPY, "reason_code": "nir_identified_exam", "lock_token": token},
+        )
+        assert first.status_code == 302
+        assert len(pipeline_calls) == 1
+
+        # Estado já LLM_STRUCT → POST inelegível retorna 404 seguro
+        second = client.post(
+            url,
+            {"exam_type": ExamType.EDA, "reason_code": "nir_identified_exam", "lock_token": token},
+        )
+        assert second.status_code == 404
+        assert len(pipeline_calls) == 1
+
+    def test_post_ineligible_returns_404(self, client) -> None:
+        """R6: POST em caso inelegível retorna 404 sem mutação."""
+        client, user = _nir_client(client)
+        case = Case.objects.create(created_by=user, status=CaseStatus.WAIT_R1_CLEANUP_THUMBS)
+
+        response = client.post(
+            reverse("intake:exam_type_correction", args=[case.case_id]),
+            {"exam_type": ExamType.COLONOSCOPY, "reason_code": "nir_identified_exam"},
+        )
+        assert response.status_code == 404
+        reloaded = Case.objects.get(pk=case.pk)
+        assert reloaded.status == CaseStatus.WAIT_R1_CLEANUP_THUMBS
+        assert reloaded.exam_type == ExamType.EDA
+
+    def test_doctor_cannot_post(self, client) -> None:
+        """R6: role doctor é bloqueada no POST de correção."""
+        client, user = _doctor_client(client)
+        case = _eligible_case(user=user)
+
+        response = client.post(
+            reverse("intake:exam_type_correction", args=[case.case_id]),
+            {"exam_type": ExamType.COLONOSCOPY, "reason_code": "nir_identified_exam"},
+        )
+        assert response.status_code == 302
+        reloaded = Case.objects.get(pk=case.pk)
+        assert reloaded.status == CaseStatus.WAIT_R1_CLEANUP_THUMBS
+        assert reloaded.exam_type == ExamType.EDA
+
+    def test_post_without_lock_token_rejected(self, client) -> None:
+        """R6/R7: POST sem token de reserva é rejeitado sem mutação."""
+        client, user = _nir_client(client)
+        case = _eligible_case(user=user)
+
+        response = client.post(
+            reverse("intake:exam_type_correction", args=[case.case_id]),
+            {"exam_type": ExamType.COLONOSCOPY, "reason_code": "nir_identified_exam"},
+        )
+        assert response.status_code == 302
+        reloaded = Case.objects.get(pk=case.pk)
+        assert reloaded.status == CaseStatus.WAIT_R1_CLEANUP_THUMBS
+        assert reloaded.exam_type == ExamType.EDA
+
+    def test_confirm_receipt_not_executed_after_correction(self, client, monkeypatch) -> None:
+        """R7: após correção, confirm receipt não roda (estado saiu da fila)."""
+        monkeypatch.setattr(
+            "apps.pipeline.tasks.enqueue_pipeline",
+            lambda case_id: None,
+        )
+        client, user = _nir_client(client)
+        case = _eligible_case(user=user)
+
+        client.get(reverse("intake:case_detail", args=[case.case_id]))
+        token = self._lock_token_for(case.case_id)
+        client.post(
+            reverse("intake:exam_type_correction", args=[case.case_id]),
+            {"exam_type": ExamType.COLONOSCOPY, "reason_code": "nir_identified_exam", "lock_token": token},
+        )
+        assert Case.objects.get(pk=case.pk).status == CaseStatus.LLM_STRUCT
+
+        # POST confirm com token antigo (lock já limpo) não transiciona
+        response = client.post(
+            reverse("intake:confirm_receipt", args=[case.case_id]),
+            {"lock_token": token},
+        )
+        assert response.status_code == 302
+        reloaded = Case.objects.get(pk=case.pk)
+        assert reloaded.status == CaseStatus.LLM_STRUCT
+        assert not CaseEvent.objects.filter(case=case, event_type="CLEANUP_TRIGGERED").exists()
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# R5 — labels da timeline
+# ═══════════════════════════════════════════════════════════════════════════
+
+
+@pytest.mark.django_db
+class TestTimelineLabels:
+    """R5: labels/dots legíveis para os novos eventos na timeline NIR."""
+
+    def test_event_maps_contain_new_events(self) -> None:
+        from apps.intake import views
+
+        assert "EXAM_TYPE_CORRECTED" in views.EVENT_LABELS
+        assert "CASE_REPROCESSING_REQUESTED" in views.EVENT_LABELS
+        assert views.EVENT_LABELS["EXAM_TYPE_CORRECTED"].strip()
+        assert views.EVENT_LABELS["CASE_REPROCESSING_REQUESTED"].strip()
+        assert "EXAM_TYPE_CORRECTED" in views.EVENT_DOT_CSS
+        assert "CASE_REPROCESSING_REQUESTED" in views.EVENT_DOT_CSS
+
+    def test_detail_renders_new_event_labels(self, client) -> None:
+        """Timeline do detalhe NIR renderiza labels dos eventos de correção."""
+        client, user = _nir_client(client)
+        case = _eligible_case(user=user)
+        # Mesma ordem de eventos do serviço: EXAM_TYPE_CORRECTED antes do
+        # CASE_REPROCESSING_REQUESTED (append-only).
+        case._record_event(
+            "EXAM_TYPE_CORRECTED",
+            user=user,
+            payload={
+                "old_exam_type": ExamType.EDA,
+                "new_exam_type": ExamType.COLONOSCOPY,
+                "reason_code": "other",
+            },
+        )
+        case.save()
+        case.reprocess_after_exam_type_correction(user=user, payload={"reason_code": "other"})
+        case.save()
+
+        response = client.get(reverse("intake:case_detail", args=[case.case_id]))
+        assert response.status_code == 200
+        content = response.content.decode()
+        assert "Tipo de exame corrigido pelo NIR" in content
+        assert "Reprocessamento solicitado" in content
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# R4 — recovery LLM_STRUCT continua (sem reextrair PDF)
+# ═══════════════════════════════════════════════════════════════════════════
+
+
+@pytest.mark.django_db
+class TestRecoveryLlmStruct:
+    """R4: caso corrigido em LLM_STRUCT recupera enfileirando pipeline."""
+
+    def test_recovery_reenqueues_pipeline_without_pdf_extraction(self, user, monkeypatch) -> None:
+        """execute_pdf_extraction em LLM_STRUCT re-enfileira LLM sem extrair PDF."""
+        from apps.intake.tasks import execute_pdf_extraction
+
+        pipeline_calls: list[object] = []
+        monkeypatch.setattr(
+            "apps.pipeline.tasks.enqueue_pipeline",
+            lambda case_id: pipeline_calls.append(case_id),
+        )
+        monkeypatch.setattr(
+            "apps.intake.tasks.enqueue_pdf_extraction",
+            lambda case_id: pytest.fail("PDF não deve ser reenfileirado no recovery"),
+        )
+
+        case = Case.objects.create(
+            created_by=user,
+            exam_type=ExamType.COLONOSCOPY,
+            status=CaseStatus.LLM_STRUCT,
+            extracted_text=(
+                "RELATÓRIO DE OCORRÊNCIAS\n"
+                "Governo do Estado da Bahia\n"
+                "Secretaria da Saúde do Estado\n"
+                "Central Estadual de Regulação\n"
+                "Código: 123456\n"
+                "Abertura: 01/01/2025\n"
+                "Unid. Origem: Hospital Central\n"
+                "Motivo da Solicitação: Colonoscopia para rastreamento oncológico\n"
+                "Complemento da Solicitação: Paciente com histórico familiar.\n"
+                "Resumo Clínico: Paciente de 55 anos, sem comorbidades, encaminhado para colonoscopia.\n"
+                "Dias em tela: 5\n"
+                "Data Adm. Unid.: 15/03/2025\n"
+                + "\n".join(
+                    f"Linha de preenchimento número {i} para atingir o tamanho mínimo exigido pelo detector."
+                    for i in range(6)
+                )
+            ),
+            agency_record_number="REC-RECOVERY-001",
+        )
+
+        execute_pdf_extraction(str(case.case_id))
+
+        assert len(pipeline_calls) == 1
+        assert pipeline_calls[0] == case.case_id
+        reloaded = Case.objects.get(pk=case.pk)
+        assert reloaded.status == CaseStatus.LLM_STRUCT
