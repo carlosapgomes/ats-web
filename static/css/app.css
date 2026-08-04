@@ -1252,3 +1252,23 @@ html {
     flex-wrap: wrap;
   }
 }
+
+/* ---------- Tipo de exame (Slice 002) ---------- */
+/* Badge EDA/Colonoscopia em cards e detalhes. Distinção sutil e acessível
+   (texto é o identificador canônico; cor é reforço visual). */
+.exam-type-badge {
+  font-weight: 600;
+  vertical-align: middle;
+}
+
+.exam-type-eda {
+  background-color: var(--bs-primary-bg-subtle, #cfe2ff);
+  color: var(--bs-primary-text-emphasis, #084298);
+  border: 1px solid var(--bs-primary-border-subtle, #9ec5fe);
+}
+
+.exam-type-colonoscopy {
+  background-color: var(--bs-success-bg-subtle, #d1e7dd);
+  color: var(--bs-success-text-emphasis, #0a3622);
+  border: 1px solid var(--bs-success-border-subtle, #a3cfbb);
+}

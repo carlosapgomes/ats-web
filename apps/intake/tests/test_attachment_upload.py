@@ -98,7 +98,7 @@ class TestAttachmentUpload:
 
         response = client.post(
             reverse("intake:home"),
-            {"pdf_files": [pdf], "attachment_files": [att1, att2, att3]},
+            {"pdf_files": [pdf], "attachment_files": [att1, att2, att3], "exam_type": "eda"},
             follow=True,
         )
         assert response.status_code == 200
@@ -116,7 +116,7 @@ class TestAttachmentUpload:
 
         client.post(
             reverse("intake:home"),
-            {"pdf_files": [pdf], "attachment_files": attachments},
+            {"pdf_files": [pdf], "attachment_files": attachments, "exam_type": "eda"},
             follow=True,
         )
         case = Case.objects.first()
@@ -131,7 +131,7 @@ class TestAttachmentUpload:
 
         client.post(
             reverse("intake:home"),
-            {"pdf_files": [pdf], "attachment_files": [att]},
+            {"pdf_files": [pdf], "attachment_files": [att], "exam_type": "eda"},
             follow=True,
         )
         case = Case.objects.first()
@@ -156,7 +156,7 @@ class TestAttachmentUpload:
 
         response = client.post(
             reverse("intake:home"),
-            {"pdf_files": [pdf1, pdf2], "attachment_files": [att]},
+            {"pdf_files": [pdf1, pdf2], "attachment_files": [att], "exam_type": "eda"},
             follow=True,
         )
         content = response.content.decode()
@@ -177,7 +177,7 @@ class TestAttachmentUpload:
 
         response = client.post(
             reverse("intake:home"),
-            {"pdf_files": [pdf], "attachment_files": [txt]},
+            {"pdf_files": [pdf], "attachment_files": [txt], "exam_type": "eda"},
             follow=True,
         )
         content = response.content.decode()
@@ -194,7 +194,7 @@ class TestAttachmentUpload:
 
         response = client.post(
             reverse("intake:home"),
-            {"pdf_files": [pdf], "attachment_files": many_attachments},
+            {"pdf_files": [pdf], "attachment_files": many_attachments, "exam_type": "eda"},
             follow=True,
         )
         content = response.content.decode()
@@ -216,7 +216,7 @@ class TestAttachmentUpload:
 
         response = client.post(
             reverse("intake:home"),
-            {"pdf_files": [pdf], "attachment_files": [big_att]},
+            {"pdf_files": [pdf], "attachment_files": [big_att], "exam_type": "eda"},
             follow=True,
         )
         content = response.content.decode()
@@ -239,7 +239,7 @@ class TestAttachmentUpload:
 
         response = client.post(
             reverse("intake:home"),
-            {"pdf_files": [pdf], "attachment_files": [att1, att2]},
+            {"pdf_files": [pdf], "attachment_files": [att1, att2], "exam_type": "eda"},
             follow=True,
         )
         content = response.content.decode()
@@ -256,7 +256,7 @@ class TestAttachmentUpload:
 
         response = client.post(
             reverse("intake:home"),
-            {"pdf_files": [pdf1, pdf2], "attachment_files": [att]},
+            {"pdf_files": [pdf1, pdf2], "attachment_files": [att], "exam_type": "eda"},
             follow=True,
         )
         content = response.content.decode()
@@ -282,7 +282,7 @@ class TestAttachmentUpload:
 
         response = client.post(
             reverse("intake:home"),
-            {"pdf_files": [pdf]},
+            {"pdf_files": [pdf], "exam_type": "eda"},
             follow=True,
         )
         assert response.status_code == 200
@@ -299,7 +299,7 @@ class TestAttachmentUpload:
 
         client.post(
             reverse("intake:home"),
-            {"pdf_files": [pdf], "attachment_files": [att]},
+            {"pdf_files": [pdf], "attachment_files": [att], "exam_type": "eda"},
             follow=True,
         )
         attachment = CaseAttachment.objects.first()
@@ -314,7 +314,7 @@ class TestAttachmentUpload:
 
         client.post(
             reverse("intake:home"),
-            {"pdf_files": [pdf], "attachment_files": [att]},
+            {"pdf_files": [pdf], "attachment_files": [att], "exam_type": "eda"},
             follow=True,
         )
         attachment = CaseAttachment.objects.first()
@@ -331,7 +331,7 @@ class TestAttachmentUpload:
 
         response = client.post(
             reverse("intake:home"),
-            {"pdf_files": [pdf], "attachment_files": [att]},
+            {"pdf_files": [pdf], "attachment_files": [att], "exam_type": "eda"},
         )
         assert response.status_code == 302
         assert response.url == reverse("intake:my_cases")

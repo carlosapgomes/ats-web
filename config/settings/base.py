@@ -110,6 +110,16 @@ INTAKE_REGULATION_MIN_OPERATIONAL_SECTIONS = 3
 # Se vazio, papéis nir/scheduler são bloqueados de qualquer IP.
 INTRANET_IP_RANGE = os.environ.get("INTRANET_IP_RANGE", "")
 
+# Exam type intake flag (Slice 002, R3)
+# Bloqueia APENAS novos uploads de colonoscopia no intake. Default false.
+# Casos colonoscopia já criados continuam processáveis: NENHUM worker/
+# pipeline/fila consulta esta flag (inspeção obrigatória do slice).
+COLONOSCOPY_INTAKE_ENABLED = os.environ.get("COLONOSCOPY_INTAKE_ENABLED", "false").lower() in (
+    "true",
+    "1",
+    "yes",
+)
+
 # Header do proxy/tunnel com IP real do cliente
 # Cloudflare Tunnel padrão usa CF-Connecting-IP
 TRUSTED_PROXY_HEADER = os.environ.get("TRUSTED_PROXY_HEADER", "HTTP_CF_CONNECTING_IP")

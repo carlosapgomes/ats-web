@@ -144,7 +144,9 @@ class TestMigrationForwardReal:
         executor = MigrationExecutor(connection)
         self._leaf_nodes = executor.loader.graph.leaf_nodes()
         self._targets_0012 = [
-            ("cases", "0012_post_acceptance_issue_fields") if node == ("cases", _MIGRATION_NAME) else node
+            ("cases", "0012_post_acceptance_issue_fields")
+            if node[0] == "cases" and node[1] > "0012_post_acceptance_issue_fields"
+            else node
             for node in self._leaf_nodes
         ]
         try:

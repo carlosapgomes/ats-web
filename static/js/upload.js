@@ -44,6 +44,31 @@
   var validFiles = [];        // main PDF files
   var validAttachments = [];  // attachment files
 
+  // Exam type radios (Slice 002) — submit só habilita com arquivos + tipo
+  var examTypeRadios = document.querySelectorAll('input[name="exam_type"]');
+  var selectedExamType = '';
+
+  function getSelectedExamType() {
+    for (var i = 0; i < examTypeRadios.length; i++) {
+      if (examTypeRadios[i].checked) {
+        return examTypeRadios[i].value;
+      }
+    }
+    return '';
+  }
+
+  function updateSubmitState() {
+    // Backend é a fonte de verdade; JS apenas melhora a UX.
+    uploadBtn.disabled = !(validFiles.length > 0 && getSelectedExamType());
+  }
+
+  for (var r = 0; r < examTypeRadios.length; r++) {
+    examTypeRadios[r].addEventListener('change', function () {
+      selectedExamType = getSelectedExamType();
+      updateSubmitState();
+    });
+  }
+
   // ── Initial UI setup ─────────────────────────────────────────────
 
   // Hide attachment section initially (no PDF selected yet)
@@ -332,8 +357,8 @@
 
     renderFileList();
 
-    // Enable submit if we have PDFs
-    uploadBtn.disabled = false;
+    // Enable submit only when PDFs AND exam type are present
+    updateSubmitState();
 
     var remainingSlots = MAX_FILES - validFiles.length;
     uploadZone.querySelector('.upload-zone__text').textContent =
@@ -573,6 +598,13 @@
       if (validFiles.length === 0) {
         e.preventDefault();
         showAlert('warning', 'Nenhum arquivo válido selecionado.');
+        return;
+      }
+
+      // Exam type is mandatory — backend is the source of truth (Slice 002)
+      if (!getSelectedExamType()) {
+        e.preventDefault();
+        showAlert('warning', 'Selecione o tipo de exame (EDA ou Colonoscopia) antes de enviar.');
         return;
       }
 

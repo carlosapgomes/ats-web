@@ -190,11 +190,7 @@ class TestMigrationForwardReal:
         # Substitui cases.0012 e a nova leaf 0013 por cases.0011 nos leaf nodes
         self._targets_0011 = [
             ("cases", "0011_dashboard_case_search_indexes")
-            if node
-            in {
-                ("cases", "0012_post_acceptance_issue_fields"),
-                ("cases", "0013_case_priority_signals"),
-            }
+            if node[0] == "cases" and node[1] > "0011_dashboard_case_search_indexes"
             else node
             for node in self._leaf_nodes
         ]

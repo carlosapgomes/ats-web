@@ -46,7 +46,11 @@ from apps.cases.services import (
 )
 
 from .forms import CaseUploadForm
-from .services import process_uploaded_files, validate_attachment_file
+from .services import (
+    is_colonoscopy_intake_enabled,
+    process_uploaded_files,
+    validate_attachment_file,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -254,7 +258,13 @@ def intake_home(request: HttpRequest) -> HttpResponse:
         form = CaseUploadForm(request.POST, request.FILES)
         files = request.FILES.getlist("pdf_files")
         attachments = request.FILES.getlist("attachment_files")
-        cases, errors = process_uploaded_files(files, user, attachments=attachments or None)
+        exam_type = request.POST.get("exam_type", "")
+        cases, errors = process_uploaded_files(
+            files,
+            user,
+            attachments=attachments or None,
+            exam_type=exam_type,
+        )
 
         for error in errors:
             messages.warning(request, error)
@@ -287,6 +297,9 @@ def intake_home(request: HttpRequest) -> HttpResponse:
         {
             "form": form,
             "recent_cases": recent_cases_data,
+            # R3: UI explica indisponibilidade de colonoscopia quando a flag
+            # de intake está desligada (a opção ativa só aparece com flag on).
+            "colonoscopy_intake_enabled": is_colonoscopy_intake_enabled(),
         },
     )
 
@@ -933,6 +946,8 @@ def corrected_resubmission(request: HttpRequest, case_id: uuid.UUID) -> HttpResp
                 user=request.user,
                 correction_reason=correction_reason,
                 attachments=attachment_files or None,
+                # Slice 002: preserva o tipo do original (escolha livre no Slice 007).
+                exam_type=None,
             )
             messages.success(
                 request,

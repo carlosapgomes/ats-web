@@ -186,7 +186,7 @@ class TestUploadPost:
         pdf_file = _simple_pdf()
         response = client.post(
             reverse("intake:home"),
-            {"pdf_files": [pdf_file]},
+            {"pdf_files": [pdf_file], "exam_type": "eda"},
             follow=True,
         )
         assert response.status_code == 200
@@ -198,7 +198,7 @@ class TestUploadPost:
         pdf_file = _simple_pdf()
         client.post(
             reverse("intake:home"),
-            {"pdf_files": [pdf_file]},
+            {"pdf_files": [pdf_file], "exam_type": "eda"},
             follow=True,
         )
         case = Case.objects.first()
@@ -211,7 +211,7 @@ class TestUploadPost:
         pdf_file = _simple_pdf()
         client.post(
             reverse("intake:home"),
-            {"pdf_files": [pdf_file]},
+            {"pdf_files": [pdf_file], "exam_type": "eda"},
             follow=True,
         )
         case = Case.objects.first()
@@ -225,7 +225,7 @@ class TestUploadPost:
         pdf_file = _simple_pdf()
         client.post(
             reverse("intake:home"),
-            {"pdf_files": [pdf_file]},
+            {"pdf_files": [pdf_file], "exam_type": "eda"},
             follow=True,
         )
         case = Case.objects.first()
@@ -238,7 +238,7 @@ class TestUploadPost:
         pdf_file = _simple_pdf()
         client.post(
             reverse("intake:home"),
-            {"pdf_files": [pdf_file]},
+            {"pdf_files": [pdf_file], "exam_type": "eda"},
             follow=True,
         )
         case = Case.objects.first()
@@ -253,7 +253,7 @@ class TestUploadPost:
         txt_file = _simple_txt()
         response = client.post(
             reverse("intake:home"),
-            {"pdf_files": [txt_file]},
+            {"pdf_files": [txt_file], "exam_type": "eda"},
             follow=True,
         )
         assert Case.objects.count() == 0
@@ -266,7 +266,7 @@ class TestUploadPost:
         pdf_file = _simple_pdf()
         response = client.post(
             reverse("intake:home"),
-            {"pdf_files": [pdf_file]},
+            {"pdf_files": [pdf_file], "exam_type": "eda"},
         )
         assert response.status_code == 302
         assert Case.objects.count() == 0
@@ -276,7 +276,7 @@ class TestUploadPost:
         pdf_file = _simple_pdf()
         response = client.post(
             reverse("intake:home"),
-            {"pdf_files": [pdf_file]},
+            {"pdf_files": [pdf_file], "exam_type": "eda"},
         )
         assert response.status_code == 302
         assert "/login/" in response.url.lower()
@@ -293,7 +293,7 @@ class TestUploadAuditEvents:
         pdf_file = _simple_pdf()
         client.post(
             reverse("intake:home"),
-            {"pdf_files": [pdf_file]},
+            {"pdf_files": [pdf_file], "exam_type": "eda"},
             follow=True,
         )
         case = Case.objects.first()
@@ -308,7 +308,7 @@ class TestUploadAuditEvents:
         pdf_file = _simple_pdf()
         client.post(
             reverse("intake:home"),
-            {"pdf_files": [pdf_file]},
+            {"pdf_files": [pdf_file], "exam_type": "eda"},
             follow=True,
         )
         case = Case.objects.first()
@@ -323,7 +323,7 @@ class TestUploadAuditEvents:
         pdf_file = _simple_pdf()
         client.post(
             reverse("intake:home"),
-            {"pdf_files": [pdf_file]},
+            {"pdf_files": [pdf_file], "exam_type": "eda"},
             follow=True,
         )
         case = Case.objects.first()
@@ -347,7 +347,7 @@ class TestMultiUploadPost:
         files = [_simple_pdf() for _ in range(3)]
         response = client.post(
             reverse("intake:home"),
-            {"pdf_files": files},
+            {"pdf_files": files, "exam_type": "eda"},
             follow=True,
         )
         assert response.status_code == 200
@@ -359,7 +359,7 @@ class TestMultiUploadPost:
         files = [_simple_pdf() for _ in range(3)]
         client.post(
             reverse("intake:home"),
-            {"pdf_files": files},
+            {"pdf_files": files, "exam_type": "eda"},
             follow=True,
         )
         for case in Case.objects.all():
@@ -371,7 +371,7 @@ class TestMultiUploadPost:
         files = [_simple_pdf() for _ in range(3)]
         client.post(
             reverse("intake:home"),
-            {"pdf_files": files},
+            {"pdf_files": files, "exam_type": "eda"},
             follow=True,
         )
         for case in Case.objects.all():
@@ -383,7 +383,7 @@ class TestMultiUploadPost:
         files = [_simple_pdf() for _ in range(3)]
         client.post(
             reverse("intake:home"),
-            {"pdf_files": files},
+            {"pdf_files": files, "exam_type": "eda"},
             follow=True,
         )
         for case in Case.objects.all():
@@ -398,7 +398,7 @@ class TestMultiUploadPost:
         valid2 = _simple_pdf()
         response = client.post(
             reverse("intake:home"),
-            {"pdf_files": [valid1, invalid, valid2]},
+            {"pdf_files": [valid1, invalid, valid2], "exam_type": "eda"},
             follow=True,
         )
         # Verificar mensagens
@@ -415,7 +415,7 @@ class TestMultiUploadPost:
         files = [_simple_txt() for _ in range(3)]
         response = client.post(
             reverse("intake:home"),
-            {"pdf_files": files},
+            {"pdf_files": files, "exam_type": "eda"},
             follow=True,
         )
         assert Case.objects.count() == 0
@@ -429,7 +429,7 @@ class TestMultiUploadPost:
         client, _ = _nir_client(client)
         response = client.post(
             reverse("intake:home"),
-            {"pdf_files": []},
+            {"pdf_files": [], "exam_type": "eda"},
             follow=True,
         )
         assert Case.objects.count() == 0
@@ -442,7 +442,7 @@ class TestMultiUploadPost:
         pdf_file = _simple_pdf()
         response = client.post(
             reverse("intake:home"),
-            {"pdf_files": [pdf_file]},
+            {"pdf_files": [pdf_file], "exam_type": "eda"},
         )
         assert response.status_code == 302
         assert response.url == reverse("intake:my_cases")
@@ -462,7 +462,7 @@ class TestMultiUploadPost:
         files = [_simple_pdf() for _ in range(3)]
         client.post(
             reverse("intake:home"),
-            {"pdf_files": files},
+            {"pdf_files": files, "exam_type": "eda"},
             follow=True,
         )
 
@@ -485,7 +485,7 @@ class TestMultiUploadPost:
         client, _ = _nir_client(client)
         client.post(
             reverse("intake:home"),
-            {"pdf_files": [_simple_txt()]},
+            {"pdf_files": [_simple_txt()], "exam_type": "eda"},
             follow=True,
         )
 
@@ -504,7 +504,7 @@ class TestMultiUploadBatchLimits:
         files = [_simple_pdf() for _ in range(max_files + 1)]
         response = client.post(
             reverse("intake:home"),
-            {"pdf_files": files},
+            {"pdf_files": files, "exam_type": "eda"},
             follow=True,
         )
         assert Case.objects.count() == 0
@@ -526,7 +526,7 @@ class TestMultiUploadBatchLimits:
 
         response = client.post(
             reverse("intake:home"),
-            {"pdf_files": [big_file]},
+            {"pdf_files": [big_file], "exam_type": "eda"},
             follow=True,
         )
         assert Case.objects.count() == 0
@@ -544,7 +544,7 @@ class TestMultiUploadEvents:
         files = [_simple_pdf() for _ in range(2)]
         client.post(
             reverse("intake:home"),
-            {"pdf_files": files},
+            {"pdf_files": files, "exam_type": "eda"},
             follow=True,
         )
         for case in Case.objects.all():
@@ -563,7 +563,7 @@ class TestLargeBatchUpload:
         files = [_simple_pdf() for _ in range(20)]
         response = client.post(
             reverse("intake:home"),
-            {"pdf_files": files},
+            {"pdf_files": files, "exam_type": "eda"},
             follow=True,
         )
         assert response.status_code == 200
@@ -579,7 +579,7 @@ class TestLargeBatchUpload:
         files = [_simple_pdf() for _ in range(20)]
         response = client.post(
             reverse("intake:home"),
-            {"pdf_files": files},
+            {"pdf_files": files, "exam_type": "eda"},
         )
         assert response.status_code == 302
         assert response.url == reverse("intake:my_cases")
@@ -592,7 +592,7 @@ class TestLargeBatchUpload:
         files = [_simple_pdf() for _ in range(max_files)]
         response = client.post(
             reverse("intake:home"),
-            {"pdf_files": files},
+            {"pdf_files": files, "exam_type": "eda"},
             follow=True,
         )
         assert response.status_code == 200
@@ -615,7 +615,7 @@ class TestLargeBatchUpload:
         files = [_simple_pdf() for _ in range(20)]
         client.post(
             reverse("intake:home"),
-            {"pdf_files": files},
+            {"pdf_files": files, "exam_type": "eda"},
             follow=True,
         )
 
@@ -631,7 +631,7 @@ class TestLargeBatchUpload:
         valid2 = _simple_pdf()
         response = client.post(
             reverse("intake:home"),
-            {"pdf_files": [valid1, invalid, valid2]},
+            {"pdf_files": [valid1, invalid, valid2], "exam_type": "eda"},
             follow=True,
         )
         content = response.content.decode()
@@ -688,7 +688,7 @@ class TestQClusterConfig:
 
         response = client.post(
             reverse("intake:home"),
-            {"pdf_files": [big_file]},
+            {"pdf_files": [big_file], "exam_type": "eda"},
             follow=True,
         )
         assert Case.objects.count() == 0

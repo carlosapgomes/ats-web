@@ -19,12 +19,52 @@ from apps.cases.models import (
     ACCEPTED_ATTACHMENT_EXTENSIONS,
     Case,
     CaseAttachment,
+    ExamType,
 )
 
 if TYPE_CHECKING:
     from apps.accounts.models import User as AccountsUser
 
 logger = logging.getLogger(__name__)
+
+# ── Exam type validation (centralized — R2/R3) ──────────────────────────
+
+
+def is_colonoscopy_intake_enabled() -> bool:
+    """Flag global de intake: permite novos uploads de colonoscopia.
+
+    Consultada APENAS no intake (novos casos). Nenhum worker/pipeline/fila
+    deve consultar esta flag para interromper casos existentes (R3).
+    """
+    return bool(getattr(settings, "COLONOSCOPY_INTAKE_ENABLED", False))
+
+
+def validate_exam_type(exam_type: str | None) -> str:
+    """Valida e normaliza o tipo de exame declarado.
+
+    Levanta ``ValueError`` se ausente/inválido. Aceita somente valores do
+    enum ``ExamType`` — nunca inferência por texto (R1).
+    """
+    value = (exam_type or "").strip()
+    if value not in ExamType.values:
+        raise ValueError("Selecione o tipo de exame (EDA ou Colonoscopia).")
+    return value
+
+
+def ensure_exam_type_allowed(exam_type: str | None) -> str:
+    """Validação central de choice + flag para criação de novo caso.
+
+    - tipo ausente/inválido → ValueError;
+    - colonoscopia com flag de intake desligada → ValueError;
+    - EDA sempre permitido.
+
+    Backend é a fonte de verdade; templates/JS apenas melhoram a UX.
+    """
+    value = validate_exam_type(exam_type)
+    if value == ExamType.COLONOSCOPY and not is_colonoscopy_intake_enabled():
+        raise ValueError("Colonoscopia ainda não está habilitada para novos envios. Envie lotes apenas de EDA.")
+    return value
+
 
 # ── Validation ──────────────────────────────────────────────────────────
 
@@ -230,19 +270,23 @@ def process_uploaded_files(
     files: list[UploadedFile],
     user: AccountsUser,
     attachments: list[UploadedFile] | None = None,
+    *,
+    exam_type: str | None = None,
 ) -> tuple[list[Case], list[str]]:
     """Validate and process a batch of uploaded PDFs with optional attachments.
 
     For each valid file a new ``Case`` is created, the PDF saved, the
     FSM advanced to ``R1_ACK_PROCESSING``, and PDF extraction enqueued.
 
-    If attachments are provided and valid, they are saved as CaseAttachment
-    records linked to the single case created.
+    ``exam_type`` é obrigatório (R2): um único tipo válido se aplica a TODOS
+    os PDFs do lote. A validação ocorre ANTES de qualquer criação de caso;
+    tipo ausente/inválido/bloqueado pela flag rejeita o request inteiro.
 
     Args:
         files: List of uploaded files from ``request.FILES.getlist(...)``.
         user: The authenticated NIR user creating the cases.
         attachments: Optional list of attachment files.
+        exam_type: Tipo de exame declarado para o lote inteiro.
 
     Returns:
         A tuple ``(cases, errors)`` where ``cases`` is the list of
@@ -251,6 +295,12 @@ def process_uploaded_files(
     """
     cases: list[Case] = []
     errors: list[str] = []
+
+    # Exam type gate FIRST — sem tipo válido, nenhum caso é criado (R2/R3)
+    try:
+        validated_exam_type = ensure_exam_type_allowed(exam_type)
+    except ValueError as exc:
+        return [], [str(exc)]
 
     # Batch-level validation (empty, too many, too large total)
     try:
@@ -280,7 +330,7 @@ def process_uploaded_files(
             errors.append(str(exc))
             continue
 
-        case = _create_case_from_file(file, user)
+        case = _create_case_from_file(file, user, exam_type=validated_exam_type)
         cases.append(case)
 
     # If there was a multi-PDF attachment error, report it after creating cases
@@ -306,11 +356,16 @@ def process_uploaded_files(
     return cases, errors
 
 
-def _create_case_from_file(file: UploadedFile, user: AccountsUser) -> Case:
+def _create_case_from_file(
+    file: UploadedFile,
+    user: AccountsUser,
+    *,
+    exam_type: str,
+) -> Case:
     """Create a single Case from an uploaded PDF file.
 
     Steps:
-    1. Create ``Case(created_by=user)``.
+    1. Create ``Case(created_by=user, exam_type=exam_type)``.
     2. Save ``pdf_file``.
     3. FSM transition ``NEW → R1_ACK_PROCESSING``.
     4. Enqueue async PDF extraction.
@@ -319,7 +374,7 @@ def _create_case_from_file(file: UploadedFile, user: AccountsUser) -> Case:
     transition step.
     """
     # 1. Create case
-    case = Case.objects.create(created_by=user)
+    case = Case.objects.create(created_by=user, exam_type=exam_type)
 
     # 2. Save PDF
     case.pdf_file = file
@@ -347,8 +402,14 @@ def create_corrected_resubmission(
     user: AccountsUser,
     correction_reason: str,
     attachments: list[UploadedFile] | None = None,
+    exam_type: str | None = None,
 ) -> Case:
     """Create a new Case that explicitly corrects a previous Case.
+
+    ``exam_type`` é opcional neste slice: quando ausente, o novo caso
+    preserva o tipo do caso original (herança temporária — a escolha livre
+    será do Slice 007). Quando informado, passa pela mesma validação
+    central (choice + flag de intake).
 
     Steps:
     1. Validate correction_reason (required, not blank).
@@ -367,6 +428,12 @@ def create_corrected_resubmission(
     """
     from django.utils import timezone as tz
 
+    # 0. Exam type — preserve original by default; explicit type validated
+    if exam_type is None:
+        exam_type = original_case.exam_type
+    else:
+        exam_type = ensure_exam_type_allowed(exam_type)
+
     # 1. Validate correction_reason
     reason = (correction_reason or "").strip()
     if not reason:
@@ -383,6 +450,7 @@ def create_corrected_resubmission(
     # 4. Create new Case with correction metadata
     new_case = Case.objects.create(
         created_by=user,
+        exam_type=exam_type,
         corrects_case=original_case,
         correction_reason=reason,
         correction_created_by=user,

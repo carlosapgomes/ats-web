@@ -21,6 +21,10 @@
         <table class="table table-sm mb-0">
           <tr><td class="text-muted" style="width:40%;">Paciente</td><td><strong>{{ patient_name }}</strong></td></tr>
           <tr><td class="text-muted">Registro</td><td>{{ case.agency_record_number|default:case.case_id|truncatechars:20 }}</td></tr>
+          <tr>
+            <td class="text-muted">Tipo de exame</td>
+            <td><span class="badge exam-type-badge exam-type-{{ case.exam_type }}">{{ case.get_exam_type_display }}</span></td>
+          </tr>
           <tr><td class="text-muted">Idade</td><td>{% if patient_age %}{{ patient_age }} anos{% else %}—{% endif %}</td></tr>
           <tr><td class="text-muted">Sexo</td><td>{{ patient_gender|default:"—" }}</td></tr>
           <tr><td class="text-muted">Enviado em</td><td>{{ case.created_at|date:"d/m/Y H:i" }}</td></tr>
