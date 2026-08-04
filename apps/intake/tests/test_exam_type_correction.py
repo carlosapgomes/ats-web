@@ -1195,6 +1195,193 @@ class TestCorrectionConfirmSerialization:
 
 
 # ═══════════════════════════════════════════════════════════════════════════
+# RR1–RR3 — routing do recovery ao cluster pdf (Schedule django-q2)
+# ═══════════════════════════════════════════════════════════════════════════
+
+
+@pytest.mark.django_db
+class TestRecoveryClusterRouting:
+    """RR1/RR2/RR3: Schedule de recovery aponta ao cluster 'pdf' implantado e
+    ONCE é removido após o dispatch (sem nome residual bloqueando o mesmo caso)."""
+
+    @staticmethod
+    def _fail_first_enqueue(monkeypatch, calls: list[object]) -> None:
+        """Faz o primeiro enqueue_pipeline falhar; PDF nunca pode ser enfileirado."""
+
+        def fail_enqueue(case_id) -> None:
+            calls.append(case_id)
+            raise RuntimeError("fila indisponível")
+
+        monkeypatch.setattr("apps.pipeline.tasks.enqueue_pipeline", fail_enqueue)
+        monkeypatch.setattr(
+            "apps.intake.tasks.enqueue_pdf_extraction",
+            lambda case_id: pytest.fail("PDF não deve ser enfileirado"),
+        )
+
+    def test_recovery_schedule_targets_pdf_cluster(self, django_user_model, monkeypatch) -> None:
+        """RR1: Schedule.cluster == 'pdf' (dev/prod rodam apenas llm e pdf)."""
+        from django_q.models import Schedule
+
+        self._fail_first_enqueue(monkeypatch, [])
+        user = _nir_user(django_user_model, "nir-rr1@test.com")
+        case = _eligible_case(user=user, extracted_text=_regulation_pass_text())
+        token = _claim_receipt_lease(case, user)
+
+        with pytest.raises(EnqueueAfterCommitError) as caught:
+            correct_case_exam_type(
+                case_id=case.case_id,
+                new_exam_type=ExamType.COLONOSCOPY,
+                user=user,
+                active_role="nir",
+                lock_token=token,
+                reason_code="nir_identified_exam",
+            )
+        assert caught.value.recovery_scheduled is True
+
+        recovery = Schedule.objects.get(name=f"slice006-recovery:{case.case_id}")
+        assert recovery.cluster == "pdf", (
+            "Schedule.cluster NULL só é consumido pelo cluster default 'ats', "
+            "não implantado; dev/prod rodam apenas Q_CLUSTER_NAME=llm e pdf."
+        )
+        assert recovery.func == "apps.intake.tasks.execute_pdf_extraction"
+        assert str(case.case_id) in (recovery.args or "")
+        assert recovery.repeats < 0  # ONCE default → deletado após o dispatch
+
+    @pytest.mark.django_db(transaction=True)
+    def test_pdf_scheduler_dispatches_recovery(self, django_user_model, monkeypatch) -> None:
+        """RR2: scheduler real do cluster pdf seleciona e despacha o Schedule."""
+        import importlib
+        from datetime import timedelta
+
+        from django.utils import timezone
+        from django_q.conf import Conf
+        from django_q.models import Schedule
+
+        enqueue_calls: list[object] = []
+        self._fail_first_enqueue(monkeypatch, enqueue_calls)
+        dispatched: list[tuple[tuple[object, ...], dict[str, object]]] = []
+        monkeypatch.setattr(Conf, "CLUSTER_NAME", "pdf")
+        monkeypatch.setattr(
+            "django_q.scheduler.async_task",
+            lambda *args, **kwargs: dispatched.append((args, kwargs)),
+        )
+
+        user = _nir_user(django_user_model, "nir-rr2@test.com")
+        case = _eligible_case(user=user, extracted_text=_regulation_pass_text())
+        token = _claim_receipt_lease(case, user)
+
+        with pytest.raises(EnqueueAfterCommitError) as caught:
+            correct_case_exam_type(
+                case_id=case.case_id,
+                new_exam_type=ExamType.COLONOSCOPY,
+                user=user,
+                active_role="nir",
+                lock_token=token,
+                reason_code="nir_identified_exam",
+            )
+        assert caught.value.recovery_scheduled is True
+        # Uma única tentativa imediata de enqueue (falhou); zero enqueue de PDF.
+        assert enqueue_calls == [case.case_id]
+        assert Case.objects.get(pk=case.case_id).status == CaseStatus.LLM_STRUCT
+
+        # Torna o Schedule vencido e roda o scheduler REAL do cluster pdf.
+        Schedule.objects.filter(name=f"slice006-recovery:{case.case_id}").update(
+            next_run=timezone.now() - timedelta(seconds=5)
+        )
+        scheduler_module = importlib.import_module("django_q.scheduler")
+        scheduler_module.scheduler(broker=object())
+
+        assert len(dispatched) == 1, f"scheduler pdf não despachou o recovery: {dispatched}"
+        args, kwargs = dispatched[0]
+        assert args[0] == "apps.intake.tasks.execute_pdf_extraction"
+        assert args[1] == str(case.case_id)
+        q_options = kwargs["q_options"]
+        assert isinstance(q_options, dict)
+        assert q_options.get("cluster") == "pdf"
+
+        # ONCE default foi DELETADO após o dispatch (RR3 — sem nome residual).
+        assert not Schedule.objects.filter(name=f"slice006-recovery:{case.case_id}").exists()
+
+    @pytest.mark.django_db(transaction=True)
+    def test_once_removed_allows_new_recovery_for_same_case(self, django_user_model, monkeypatch) -> None:
+        """RR3: após o dispatch, o mesmo case_id pode ter novo recovery."""
+        import importlib
+        from datetime import timedelta
+
+        from django.utils import timezone
+        from django_q.conf import Conf
+        from django_q.models import Schedule
+
+        from apps.intake.services import _schedule_pipeline_recovery
+
+        enqueue_calls: list[object] = []
+        self._fail_first_enqueue(monkeypatch, enqueue_calls)
+        dispatched: list[tuple[tuple[object, ...], dict[str, object]]] = []
+        monkeypatch.setattr(Conf, "CLUSTER_NAME", "pdf")
+        monkeypatch.setattr(
+            "django_q.scheduler.async_task",
+            lambda *args, **kwargs: dispatched.append((args, kwargs)),
+        )
+
+        user = _nir_user(django_user_model, "nir-rr3@test.com")
+        case = _eligible_case(user=user, extracted_text=_regulation_pass_text())
+        token = _claim_receipt_lease(case, user)
+
+        with pytest.raises(EnqueueAfterCommitError):
+            correct_case_exam_type(
+                case_id=case.case_id,
+                new_exam_type=ExamType.COLONOSCOPY,
+                user=user,
+                active_role="nir",
+                lock_token=token,
+                reason_code="nir_identified_exam",
+            )
+
+        # Despacha o ONCE pelo scheduler do cluster pdf.
+        Schedule.objects.filter(name=f"slice006-recovery:{case.case_id}").update(
+            next_run=timezone.now() - timedelta(seconds=5)
+        )
+        importlib.import_module("django_q.scheduler").scheduler(broker=object())
+        assert len(dispatched) == 1
+        assert not Schedule.objects.filter(name=f"slice006-recovery:{case.case_id}").exists()
+
+        # Novo recovery do MESMO caso: sem IntegrityError e novo Schedule criado.
+        _schedule_pipeline_recovery(case.case_id)
+        assert Schedule.objects.filter(name=f"slice006-recovery:{case.case_id}").exists()
+
+    @pytest.mark.django_db(transaction=True)
+    def test_llm_cluster_does_not_dispatch_pdf_recovery(self, django_user_model, monkeypatch) -> None:
+        """Scheduler do cluster llm NÃO consome Schedule direcionado ao pdf."""
+        import importlib
+        from datetime import timedelta
+
+        from django.utils import timezone
+        from django_q.conf import Conf
+        from django_q.models import Schedule
+
+        from apps.intake.services import _schedule_pipeline_recovery
+
+        dispatched: list[object] = []
+        monkeypatch.setattr(Conf, "CLUSTER_NAME", "llm")
+        monkeypatch.setattr(
+            "django_q.scheduler.async_task",
+            lambda *args, **kwargs: dispatched.append((args, kwargs)),
+        )
+        user = _nir_user(django_user_model, "nir-rr4@test.com")
+        case = _eligible_case(user=user, extracted_text=_regulation_pass_text())
+
+        _schedule_pipeline_recovery(case.case_id)
+        Schedule.objects.filter(name=f"slice006-recovery:{case.case_id}").update(
+            next_run=timezone.now() - timedelta(seconds=5)
+        )
+        importlib.import_module("django_q.scheduler").scheduler(broker=object())
+
+        assert dispatched == []
+        # O Schedule permanece para o cluster pdf consumir.
+        assert Schedule.objects.filter(name=f"slice006-recovery:{case.case_id}").exists()
+
+
+# ═══════════════════════════════════════════════════════════════════════════
 # R6/R7 — view NIR, idempotência e exclusão mútua com confirm receipt
 # ═══════════════════════════════════════════════════════════════════════════
 

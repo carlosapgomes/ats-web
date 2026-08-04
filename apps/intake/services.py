@@ -348,12 +348,18 @@ def _enqueue_pipeline_or_schedule_recovery(case_id: uuid.UUID) -> None:
 
 
 def _schedule_pipeline_recovery(case_id: uuid.UUID) -> None:
-    """Programa retry automático via django-q2 Schedule ONCE (C5).
+    """Programa retry automático via django-q2 Schedule ONCE (C5/RR1/RR3).
 
-    Disparo único em ``RECOVERY_SCHEDULE_DELAY_SECONDS``: o scheduler do
-    qcluster (parte do processo worker em dev/prod) executa
-    ``execute_pdf_extraction``, que em ``LLM_STRUCT`` re-enfileira o pipeline
-    sem reextrair o PDF.
+    Direciona explicitamente ao cluster ``pdf`` — o único cluster implantado
+    que executa ``execute_pdf_extraction`` (dev/prod rodam apenas
+    ``Q_CLUSTER_NAME=llm`` e ``Q_CLUSTER_NAME=pdf``; schedules com cluster
+    NULL só são consumidos pelo cluster default ``ats``, não implantado).
+
+    Em ``LLM_STRUCT``, ``execute_pdf_extraction`` não reextrai PDF: reavalia
+    o regulation gate e chama ``enqueue_pipeline``. ONCE usa o default
+    ``repeats=-1``: o scheduler do django-q2 DELETA o Schedule após o
+    dispatch, sem deixar nome residual determinístico por ``case_id`` que
+    bloquearia um novo recovery do mesmo caso (IntegrityError).
     """
     from datetime import timedelta
 
@@ -364,9 +370,9 @@ def _schedule_pipeline_recovery(case_id: uuid.UUID) -> None:
         "apps.intake.tasks.execute_pdf_extraction",
         str(case_id),
         schedule_type=Schedule.ONCE,
-        repeats=1,
         next_run=timezone.now() + timedelta(seconds=RECOVERY_SCHEDULE_DELAY_SECONDS),
         name=f"slice006-recovery:{case_id}",
+        cluster="pdf",
     )
 
 
