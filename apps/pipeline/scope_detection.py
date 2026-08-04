@@ -259,23 +259,37 @@ _HISTORICAL_AFTER_OCCURRENCE_PATTERN = re.compile(
     r"|^\s*(?:previo|previa|anterior|previamente)\b"
     r"|^\s*no\s+historico\b"
 )
+# Histórico e request percorrem a MESMA cadeia fechada de procedimentos
+# (_REQUEST_LIST_PREFIX_SOURCE), ancorada à ocorrência: 'histórico de
+# solicitação/indicação de' e 'histórico de encaminhamento para' envolvem a
+# cadeia, então um verbo de solicitação interno não vira pedido atual (F2/C22).
 _HISTORICAL_BEFORE_OCCURRENCE_PATTERN = re.compile(
     r"\b(?:realizou)\b\s+$"
     r"|\b(?:previo|previa|anterior|previamente)\b\s*(?:de\s*)?:?\s*$"
     r"|\bhistorico\s+de\b\s*$"
+    r"|\bhistorico\s+de\b\s+(?:solicitacao|indicacao)\s+de\b" + _REQUEST_LIST_PREFIX_SOURCE + r"\s*$"
+    r"|\bhistorico\s+de\b\s+encaminhamento\s+para\b" + _REQUEST_LIST_PREFIX_SOURCE + r"\s*$"
 )
 
+# Negação e request percorrem a MESMA cadeia fechada de procedimentos,
+# ancorada à ocorrência (F3/C21): 'sem/nega/nao ha/ausencia de indicacao de'
+# e 'nao solicito' envolvem a cadeia, então itens negados/ausentes listados
+# antes da ocorrência não ressuscitam um request interno.
 _NEGATION_BEFORE_OCCURRENCE_PATTERN = re.compile(
-    r"\bsem\s+indicacao\s+de\b\s*$"
+    r"\bsem\s+indicacao\s+de\b" + _REQUEST_LIST_PREFIX_SOURCE + r"\s*$"
     r"|\bsem\s+evidencia\s+de\b\s*$"
     r"|\bsem\b\s*$"
-    r"|\bnega\s+(?:a\s+)?indicacao\s+de\b\s*$"
+    r"|\bnega\s+(?:a\s+)?indicacao\s+de\b" + _REQUEST_LIST_PREFIX_SOURCE + r"\s*$"
+    r"|\bnega\s+(?:a\s+)?ingestao\s+de\b\s*$"
     r"|\bnega\b\s*$"
-    r"|\bnao\s+ha\s+indicacao\s+de\b\s*$"
+    r"|\bnao\s+ha\s+indicacao\s+de\b" + _REQUEST_LIST_PREFIX_SOURCE + r"\s*$"
     r"|\bnao\s+ha\s+evidencia\s+de\b\s*$"
-    r"|\bnao\s+solicit\w*\b(?:\s*:?\s*(?:realizacao\s+de|nov[oa]|atual\s+de|de|para)?)?\s*:?\s*$"
+    r"|\bnao\s+solicit\w*\b(?:\s*:?\s*(?:realizacao\s+de|nov[oa]|atual\s+de|de|para)?)"
+    + _REQUEST_LIST_PREFIX_SOURCE
+    + r"\s*:?\s*$"
     r"|\bnao\s+foi\s+identificad[oa]\b\s*$"
     r"|\bnao\s+ha\b\s*$"
+    r"|\bausencia\s+de\s+indicacao\s+de\b" + _REQUEST_LIST_PREFIX_SOURCE + r"\s*$"
     r"|\bausencia\s+de\b\s*$"
 )
 _NEGATION_AFTER_OCCURRENCE_PATTERN = re.compile(
@@ -614,14 +628,15 @@ def _detect_current_request_signals(
     llm1_structured_data: dict[str, object],
     cleaned_text: str,
     llm1_exam_type: str | None,
-) -> tuple[bool, bool]:
-    """Return (has_eda_current, has_colon_current) per design D7.
+) -> tuple[bool, bool, bool]:
+    """Return (has_eda_strong, has_eda_any, has_colon_any) per design D7.
 
-    Strong signals (motivo + structured procedure fields) always count and can
-    rescue an LLM1 ``non_eda`` classification (legacy EDA behaviour). Textual
-    per-occurrence signals count for EDA only when LLM1 did not explicitly
-    classify as non_eda — the legacy authority rule — while colonoscopy is a
-    newly supported type whose textual current request is authoritative.
+    ``has_eda_any``/``has_colon_any`` são evidências de solicitação ATUAL
+    incondicionais (strong OU textual): duas solicitações atuais devem produzir
+    mixed independentemente da classificação LLM1 (F1). ``has_eda_strong`` é o
+    subconjunto com proveniência (motivo/subtipo/nome estruturado) que mantém a
+    regra de autoridade legada do LLM1 ``non_eda`` na resolução de UM ÚNICO
+    tipo detectado, nunca na decisão de mixed.
     """
 
     has_eda_strong = _detect_current_request_eda_signal(
@@ -646,9 +661,7 @@ def _detect_current_request_signals(
         pattern=_COLONOSCOPY_ACRONYM_PATTERN,
     )
 
-    has_eda = has_eda_strong or (has_eda_textual and llm1_exam_type != "non_eda")
-    has_colon = has_colon_strong or has_colon_textual
-    return has_eda, has_colon
+    return has_eda_strong, has_eda_strong or has_eda_textual, has_colon_strong or has_colon_textual
 
 
 # ── Fallback detection (legacy EDA rescue) ──────────────────────────────────
@@ -725,6 +738,35 @@ def _detect_fallback_type(
 # ── Manual review payload ────────────────────────────────────────────────────
 
 
+# ── Manual review payload projection (D7/R8, F4) ─────────────────────────────
+#
+# O payload de scope é dado de auditoria, não armazenamento de texto clínico:
+# os evidence_spans são projetados com limites explícitos de quantidade e
+# comprimento para que um excerpt longo nunca chegue integral a
+# suggested_action ou ao evento EDA_SCOPE_GATED_MANUAL_REVIEW.
+MAX_MANUAL_REVIEW_SPANS = 5
+MAX_MANUAL_REVIEW_FIELD_PATH_LENGTH = 120
+MAX_MANUAL_REVIEW_EXCERPT_LENGTH = 200
+
+
+def _project_manual_review_evidence_spans(evidence_spans: list[dict[str, str]]) -> list[dict[str, str]]:
+    """Projeta spans validados para o payload de manual review (F4).
+
+    Itens inválidos já são descartados a montante; aqui limitamos a quantidade
+    e truncamos field_path/excerpt de forma determinística. Spans curtos
+    passam intactos (contrato legado preservado).
+    """
+    projected: list[dict[str, str]] = []
+    for span in evidence_spans[:MAX_MANUAL_REVIEW_SPANS]:
+        projected.append(
+            {
+                "field_path": span["field_path"][:MAX_MANUAL_REVIEW_FIELD_PATH_LENGTH],
+                "excerpt": span["excerpt"][:MAX_MANUAL_REVIEW_EXCERPT_LENGTH],
+            }
+        )
+    return projected
+
+
 def _build_manual_review_payload(
     *,
     case_id: str,
@@ -748,7 +790,7 @@ def _build_manual_review_payload(
         "exam_type": detected,
         "declared_exam_type": declared,
         "detected_exam_type": detected,
-        "evidence_spans": evidence_spans,
+        "evidence_spans": _project_manual_review_evidence_spans(evidence_spans),
     }
 
 
@@ -786,7 +828,7 @@ def classify_exam_scope(
     expected = _normalize_expected_exam_type(expected_exam_type)
     llm1_exam_type = _extract_preop_exam_type(llm1_structured_data=llm1_structured_data)
 
-    has_eda_current, has_colon_current = _detect_current_request_signals(
+    has_eda_strong, has_eda_any, has_colon_any = _detect_current_request_signals(
         llm1_structured_data=llm1_structured_data,
         cleaned_text=cleaned_text,
         llm1_exam_type=llm1_exam_type,
@@ -794,7 +836,7 @@ def classify_exam_scope(
 
     evidence_spans = _extract_preop_evidence_spans(llm1_structured_data=llm1_structured_data)
 
-    if has_eda_current and has_colon_current:
+    if has_eda_any and has_colon_any:
         return _build_manual_review_payload(
             case_id=case_id,
             agency_record_number=agency_record_number,
@@ -808,10 +850,20 @@ def classify_exam_scope(
             evidence_spans=evidence_spans,
         )
 
-    if has_colon_current:
+    if has_colon_any:
         detected: str | None = "colonoscopy"
-    elif has_eda_current:
-        detected = "eda"
+    elif has_eda_any:
+        # Solicitação única de EDA. O LLM1 non_eda mantém autoridade legada
+        # SOMENTE quando a evidência é textual sem proveniência (motivo/
+        # subtipo/nome estruturado) — nunca na decisão de mixed (F1).
+        if llm1_exam_type == "non_eda" and not has_eda_strong:
+            detected = _detect_fallback_type(
+                llm1_structured_data=llm1_structured_data,
+                cleaned_text=cleaned_text,
+                llm1_exam_type=llm1_exam_type,
+            )
+        else:
+            detected = "eda"
     else:
         detected = _detect_fallback_type(
             llm1_structured_data=llm1_structured_data,

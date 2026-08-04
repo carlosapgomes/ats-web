@@ -228,6 +228,129 @@ class TestScopeColonoscopyHistoryNoMixed:
         assert result is None
 
 
+class TestScopeHistoricalWrapperNoMixed:
+    """F2: wrappers históricos com verbo de solicitação não criam mixed.
+
+    'histórico de solicitação/indicação de' e 'histórico de encaminhamento
+    para' percorrem a MESMA cadeia fechada do request matcher (C22), então um
+    verbo interno não vira pedido atual.
+    """
+
+    @pytest.mark.parametrize(
+        "historical_text",
+        [
+            "Historico de solicitacao de EDA. Solicito colonoscopia.",
+            "Historico de indicacao de EDA. Solicito colonoscopia.",
+            "Historico de encaminhamento para EDA. Solicito colonoscopia.",
+        ],
+    )
+    def test_historical_wrapper_eda_does_not_create_mixed(self, historical_text: str) -> None:
+        llm1: dict[str, object] = {"preop_screening": {"exam_type": "unknown"}}
+        result = _classify(
+            llm1_structured_data=llm1,
+            cleaned_text=historical_text,
+            expected_exam_type="colonoscopy",
+        )
+        assert result is None, f"wrapper histórico não pode virar mixed: {historical_text!r}"
+
+    @pytest.mark.parametrize(
+        "historical_text",
+        [
+            "Historico de solicitacao de colonoscopia. Solicito EDA.",
+            "Historico de indicacao de colonoscopia. Solicito EDA.",
+            "Historico de encaminhamento para colonoscopia. Solicito EDA.",
+        ],
+    )
+    def test_historical_wrapper_colon_does_not_create_mixed(self, historical_text: str) -> None:
+        llm1: dict[str, object] = {"preop_screening": {"exam_type": "unknown"}}
+        result = _classify(
+            llm1_structured_data=llm1,
+            cleaned_text=historical_text,
+            expected_exam_type="eda",
+        )
+        assert result is None, f"wrapper histórico não pode virar mixed: {historical_text!r}"
+
+
+class TestScopeNegatedListNoMixed:
+    """F3: negação/ausência em lista fechada não cria mixed.
+
+    Os matchers de negação percorrem a MESMA cadeia fechada do request (C21),
+    ancorados à ocorrência, nas duas direções EDA ↔ colonoscopia.
+    """
+
+    @pytest.mark.parametrize(
+        "negated_text,expected",
+        [
+            ("Nega indicacao de ecoendoscopia e colonoscopia. Solicito EDA.", "eda"),
+            ("Sem indicacao de gastrostomia e colonoscopia. Solicito EDA.", "eda"),
+            ("Ausencia de indicacao de EDA e gastrostomia. Solicito colonoscopia.", "colonoscopy"),
+            ("Nega indicacao de EDA e ecoendoscopia. Solicito colonoscopia.", "colonoscopy"),
+            ("Sem indicacao de EDA e gastrostomia. Solicito colonoscopia.", "colonoscopy"),
+            ("Ausencia de indicacao de colonoscopia. Solicito EDA.", "eda"),
+        ],
+    )
+    def test_negated_list_does_not_create_mixed(self, negated_text: str, expected: str) -> None:
+        """Lista negada/ausente do outro exame não cria mixed, nas duas direções."""
+        llm1: dict[str, object] = {"preop_screening": {"exam_type": "unknown"}}
+        result = _classify(
+            llm1_structured_data=llm1,
+            cleaned_text=negated_text,
+            expected_exam_type=expected,
+        )
+        assert result is None, f"lista negada não pode virar mixed: {negated_text!r}"
+
+
+class TestScopeManualReviewPayloadBounds:
+    """F4: payload de manual review projeta spans com limites explícitos."""
+
+    def test_bounded_scope_payload_truncates_long_excerpt_and_caps_count(self) -> None:
+        from apps.pipeline.scope_detection import (
+            MAX_MANUAL_REVIEW_EXCERPT_LENGTH,
+            MAX_MANUAL_REVIEW_FIELD_PATH_LENGTH,
+            MAX_MANUAL_REVIEW_SPANS,
+        )
+
+        long_excerpt = "DADO_CLINICO_" * 1000
+        spans = [{"field_path": f"campo.longo.{i}", "excerpt": long_excerpt} for i in range(10)]
+        llm1: dict[str, object] = {"preop_screening": {"exam_type": "unknown", "evidence_spans": spans}}
+        result = _classify(
+            llm1_structured_data=llm1,
+            cleaned_text="Relatorio generico sem exame especifico.",
+            expected_exam_type="colonoscopy",
+        )
+        assert result is not None
+        projected = result["evidence_spans"]
+        assert isinstance(projected, list)
+        assert len(projected) <= MAX_MANUAL_REVIEW_SPANS
+        for span in projected:
+            assert len(span["excerpt"]) <= MAX_MANUAL_REVIEW_EXCERPT_LENGTH
+            assert len(span["field_path"]) <= MAX_MANUAL_REVIEW_FIELD_PATH_LENGTH
+        assert long_excerpt not in str(result)
+
+    def test_bounded_scope_payload_keeps_short_spans_identical(self) -> None:
+        spans = [{"field_path": "preop_screening.exam_type", "excerpt": "colonoscopia solicitada"}]
+        llm1: dict[str, object] = {"preop_screening": {"exam_type": "unknown", "evidence_spans": spans}}
+        result = _classify(
+            llm1_structured_data=llm1,
+            cleaned_text="Relatorio generico sem exame especifico.",
+            expected_exam_type="colonoscopy",
+        )
+        assert result is not None
+        assert result["evidence_spans"] == spans
+
+    def test_bounded_scope_payload_preserves_types_and_reason(self) -> None:
+        llm1: dict[str, object] = {"preop_screening": {"exam_type": "unknown"}}
+        result = _classify(
+            llm1_structured_data=llm1,
+            cleaned_text="Relatorio generico sem exame especifico.",
+            expected_exam_type="colonoscopy",
+        )
+        assert result is not None
+        assert result["reason_code"] == "unknown_exam_type"
+        assert result["declared_exam_type"] == "colonoscopy"
+        assert result["detected_exam_type"] == "unknown"
+
+
 class TestScopeColonoscopyMixed:
     @pytest.mark.parametrize("expected", ["eda", "colonoscopy"])
     def test_current_eda_and_colonoscopy_blocks_with_mixed(self, expected: str) -> None:
@@ -241,6 +364,24 @@ class TestScopeColonoscopyMixed:
         assert result["decision"] == "manual_review_required"
         assert result["reason_code"] == "mixed_exam_request"
         assert result["declared_exam_type"] == expected
+        assert result["detected_exam_type"] == "mixed"
+
+    def test_mixed_non_eda_llm1_still_blocks(self) -> None:
+        """F1: duas solicitações atuais são mixed mesmo com LLM1 non_eda.
+
+        A autoridade/fallback do LLM1 não pode apagar uma solicitação textual
+        atual ao decidir mixed (D7).
+        """
+        llm1: dict[str, object] = {"preop_screening": {"exam_type": "non_eda"}}
+        result = _classify(
+            llm1_structured_data=llm1,
+            cleaned_text="Solicito EDA e colonoscopia.",
+            expected_exam_type="colonoscopy",
+        )
+        assert result is not None
+        assert result["decision"] == "manual_review_required"
+        assert result["reason_code"] == "mixed_exam_request"
+        assert result["declared_exam_type"] == "colonoscopy"
         assert result["detected_exam_type"] == "mixed"
 
     def test_mixed_in_motivo_blocks(self) -> None:
@@ -725,3 +866,60 @@ class TestColonoscopyPipeline:
         serialized = json.dumps(payload)
         assert "extracted_text" not in serialized
         assert "Solicito" not in serialized  # sem texto clínico longo
+
+    def test_pipeline_mixed_non_eda_llm1_blocks_without_llm2(self, django_user_model) -> None:
+        """F1 integrado: LLM1 non_eda + duas solicitações atuais → gate sem LLM2."""
+        llm1_data = json.loads(_colonoscopy_llm1_response())
+        llm1_data["preop_screening"]["exam_type"] = "non_eda"
+
+        user = django_user_model.objects.create_user(username="nir_colon5", password="pw")
+        case = _make_case(user, extracted_text="Solicito EDA e colonoscopia.", exam_type="colonoscopy")
+
+        client = RecordingLlmClient(responses=[json.dumps(llm1_data)])
+        run_pipeline(
+            case.case_id,
+            llm_client=client,
+            llm1_system_prompt="sp1",
+            llm1_user_template="{case_id}|{agency_record_number}|{extracted_text}",
+        )
+
+        case = _reload(case)
+        assert case.status == CaseStatus.WAIT_R1_CLEANUP_THUMBS
+        assert len(client.calls) == 1
+        assert case.suggested_action is not None
+        assert case.suggested_action.get("reason_code") == "mixed_exam_request"
+
+    def test_scope_event_bounded_scope_payload_without_long_excerpt(self, django_user_model) -> None:
+        """F4 integrado: evento não copia excerpt clínico longo integral."""
+        from apps.cases.models import CaseEvent
+        from apps.pipeline.scope_detection import MAX_MANUAL_REVIEW_EXCERPT_LENGTH
+
+        long_excerpt = "DADO_CLINICO_" * 1000
+        llm1_data = json.loads(_colonoscopy_llm1_response())
+        llm1_data["preop_screening"]["exam_type"] = "non_eda"
+        llm1_data["preop_screening"]["evidence_spans"] = [
+            {"field_path": "preop_screening.exam_type", "excerpt": long_excerpt}
+        ]
+
+        user = django_user_model.objects.create_user(username="nir_colon6", password="pw")
+        case = _make_case(user, extracted_text="Solicito EDA e colonoscopia.", exam_type="colonoscopy")
+
+        client = RecordingLlmClient(responses=[json.dumps(llm1_data)])
+        run_pipeline(
+            case.case_id,
+            llm_client=client,
+            llm1_system_prompt="sp1",
+            llm1_user_template="{case_id}|{agency_record_number}|{extracted_text}",
+        )
+
+        event = CaseEvent.objects.filter(case=case, event_type="EDA_SCOPE_GATED_MANUAL_REVIEW").latest("timestamp")
+        payload: dict[str, Any] = event.payload or {}
+        assert payload.get("reason_code") == "mixed_exam_request"
+        assert payload.get("declared_exam_type") == "colonoscopy"
+        assert payload.get("detected_exam_type") == "mixed"
+        serialized = json.dumps(payload)
+        assert long_excerpt not in serialized
+        assert len(serialized) < len(long_excerpt)
+        spans = payload.get("evidence_spans")
+        assert isinstance(spans, list) and len(spans) == 1
+        assert len(spans[0]["excerpt"]) <= MAX_MANUAL_REVIEW_EXCERPT_LENGTH
