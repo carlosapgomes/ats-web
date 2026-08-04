@@ -408,8 +408,10 @@ def create_corrected_resubmission(
 
     ``exam_type`` é opcional neste slice: quando ausente, o novo caso
     preserva o tipo do caso original (herança temporária — a escolha livre
-    será do Slice 007). Quando informado, passa pela mesma validação
-    central (choice + flag de intake).
+    será do Slice 007). O tipo EFETIVO (herdado OU explícito) passa sempre
+    pela validação central (choice + flag de intake), pois o reenvio cria
+    um NOVO Case — é novo intake (R3/F1): flag desligada impede novo
+    colonoscopia mesmo quando o original é colonoscopia.
 
     Steps:
     1. Validate correction_reason (required, not blank).
@@ -428,11 +430,12 @@ def create_corrected_resubmission(
     """
     from django.utils import timezone as tz
 
-    # 0. Exam type — preserve original by default; explicit type validated
-    if exam_type is None:
-        exam_type = original_case.exam_type
-    else:
-        exam_type = ensure_exam_type_allowed(exam_type)
+    # 0. Exam type — resolve o tipo efetivo (herdado do original ou
+    #    explicitamente informado) e valida SEMPRE via função central:
+    #    choice válido + flag de intake. A validação ocorre ANTES de
+    #    qualquer criação/evento/save/enqueue (R3/F1).
+    requested_exam_type = original_case.exam_type if exam_type is None else exam_type
+    validated_exam_type = ensure_exam_type_allowed(requested_exam_type)
 
     # 1. Validate correction_reason
     reason = (correction_reason or "").strip()
@@ -450,7 +453,7 @@ def create_corrected_resubmission(
     # 4. Create new Case with correction metadata
     new_case = Case.objects.create(
         created_by=user,
-        exam_type=exam_type,
+        exam_type=validated_exam_type,
         corrects_case=original_case,
         correction_reason=reason,
         correction_created_by=user,

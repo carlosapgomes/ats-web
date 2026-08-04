@@ -13,10 +13,12 @@ import fitz  # type: ignore[import-untyped]
 import pytest
 from django.contrib.auth import get_user_model
 from django.core.files.uploadedfile import SimpleUploadedFile
+from django.test import override_settings
 from django.urls import reverse
 from django.utils import timezone
 
-from apps.cases.models import Case, CaseAttachment, CaseEvent, CaseStatus
+from apps.cases.models import Case, CaseAttachment, CaseEvent, CaseStatus, ExamType
+from apps.intake.services import create_corrected_resubmission
 
 User = get_user_model()
 
@@ -521,3 +523,146 @@ class TestClosedCasesSearchCorrectionVisibility:
         assert response.status_code == 200
         content = response.content.decode()
         assert "corrigido" in content.lower() or "Corrigido" in content
+
+
+# ── Correção pós-verificação (F1): flag de intake também vale no reenvio ──
+
+
+@pytest.mark.django_db
+class TestCorrectedResubmissionExamTypeFlag:
+    """F1 — o tipo efetivo (herdado do original OU explícito) passa pela
+    validação central de choice + flag antes de qualquer efeito colateral.
+
+    Reenvio corrigido cria um NOVO Case (novo intake): flag false impede
+    novo colonoscopia mesmo quando o original é colonoscopia. Casos
+    existentes continuam legíveis/processáveis (não é isto que é bloqueado).
+    """
+
+    # ── RED: cenário bloqueante via service ──────────────────────────
+
+    def test_service_rejects_inherited_colonoscopy_when_flag_off(self) -> None:
+        """Flag false + original colonoscopia + tipo omitido → ValueError,
+        sem criar caso, sem enfileirar extração e sem eventos novos."""
+        with override_settings(COLONOSCOPY_INTAKE_ENABLED=False):
+            nir_user = _nir_user()
+            original = Case.objects.create(
+                created_by=nir_user,
+                exam_type=ExamType.COLONOSCOPY,
+            )
+            with patch("apps.intake.tasks.enqueue_pdf_extraction") as mock_enqueue:
+                with pytest.raises(ValueError):
+                    create_corrected_resubmission(
+                        original_case=original,
+                        pdf_file=_simple_pdf(),
+                        user=nir_user,
+                        correction_reason="Laudo corrigido",
+                    )
+
+        # Nenhum novo caso; original inalterado; nada enfileirado
+        assert Case.objects.count() == 1
+        mock_enqueue.assert_not_called()
+        original = Case.objects.get(pk=original.pk)
+        assert original.exam_type == ExamType.COLONOSCOPY
+        assert original.status == CaseStatus.NEW
+        assert set(original.events.values_list("event_type", flat=True)) == {"CASE_CREATED"}
+
+    def test_service_rejects_explicit_colonoscopy_when_flag_off(self) -> None:
+        """Tipo explicitamente informado continua na mesma validação central."""
+        with override_settings(COLONOSCOPY_INTAKE_ENABLED=False):
+            nir_user = _nir_user()
+            original = Case.objects.create(created_by=nir_user, exam_type=ExamType.EDA)
+            with pytest.raises(ValueError):
+                create_corrected_resubmission(
+                    original_case=original,
+                    pdf_file=_simple_pdf(),
+                    user=nir_user,
+                    correction_reason="Laudo corrigido",
+                    exam_type=ExamType.COLONOSCOPY,
+                )
+        assert Case.objects.count() == 1
+
+    # ── RED: cenário bloqueante via view/POST ────────────────────────
+
+    def test_post_with_inherited_colonoscopy_flag_off_creates_no_case(self, client) -> None:
+        """View: flag false + original colonoscopia → tela com indisponibilidade,
+        sem redirect de sucesso, sem caso/evento/enqueue e original intacto."""
+        with override_settings(COLONOSCOPY_INTAKE_ENABLED=False):
+            nir_client, nir_user = _nir_client(client)
+            original = Case.objects.create(
+                created_by=nir_user,
+                exam_type=ExamType.COLONOSCOPY,
+                agency_record_number="2026-C1",
+            )
+            url = reverse("intake:corrected_resubmission", args=[original.case_id])
+            with patch("apps.intake.tasks.enqueue_pdf_extraction") as mock_enqueue:
+                response = nir_client.post(
+                    url,
+                    {
+                        "correction_reason": "Laudo corrigido",
+                        "pdf_file": _simple_pdf(),
+                        "confirmation": "on",
+                    },
+                )
+
+        # Re-renderiza com warning (não redireciona para sucesso)
+        assert response.status_code == 200
+        content = response.content.decode()
+        assert "colonoscopia" in content.lower()
+        assert "indispon" in content.lower() or "habilitad" in content.lower()
+
+        # Nenhum novo caso; nada enfileirado; original inalterado
+        assert Case.objects.count() == 1
+        mock_enqueue.assert_not_called()
+        original = Case.objects.get(pk=original.pk)
+        assert original.exam_type == ExamType.COLONOSCOPY
+        assert original.status == CaseStatus.NEW
+        assert original.agency_record_number == "2026-C1"
+        event_types = set(original.events.values_list("event_type", flat=True))
+        assert "CASE_MARKED_SUPERSEDED" not in event_types
+        assert event_types == {"CASE_CREATED"}
+
+    # ── Caracterização positiva ───────────────────────────────────────
+
+    def test_post_with_inherited_colonoscopy_flag_on_preserves_type(self, client) -> None:
+        """Flag true + original colonoscopia → novo caso preserva colonoscopia."""
+        with override_settings(COLONOSCOPY_INTAKE_ENABLED=True):
+            nir_client, nir_user = _nir_client(client)
+            original = Case.objects.create(created_by=nir_user, exam_type=ExamType.COLONOSCOPY)
+            url = reverse("intake:corrected_resubmission", args=[original.case_id])
+            with patch("apps.intake.tasks.enqueue_pdf_extraction") as mock_enqueue:
+                response = nir_client.post(
+                    url,
+                    {
+                        "correction_reason": "Laudo corrigido",
+                        "pdf_file": _simple_pdf(),
+                        "confirmation": "on",
+                    },
+                )
+
+        assert response.status_code == 302
+        new_case = Case.objects.exclude(case_id=original.case_id).first()
+        assert new_case is not None
+        assert new_case.exam_type == ExamType.COLONOSCOPY
+        mock_enqueue.assert_called_once_with(new_case.case_id)
+
+    def test_post_with_inherited_eda_flag_off_preserves_type(self, client) -> None:
+        """Flag false + original EDA → novo caso preserva EDA (EDA segue ok)."""
+        with override_settings(COLONOSCOPY_INTAKE_ENABLED=False):
+            nir_client, nir_user = _nir_client(client)
+            original = Case.objects.create(created_by=nir_user, exam_type=ExamType.EDA)
+            url = reverse("intake:corrected_resubmission", args=[original.case_id])
+            with patch("apps.intake.tasks.enqueue_pdf_extraction") as mock_enqueue:
+                response = nir_client.post(
+                    url,
+                    {
+                        "correction_reason": "Laudo corrigido",
+                        "pdf_file": _simple_pdf(),
+                        "confirmation": "on",
+                    },
+                )
+
+        assert response.status_code == 302
+        new_case = Case.objects.exclude(case_id=original.case_id).first()
+        assert new_case is not None
+        assert new_case.exam_type == ExamType.EDA
+        mock_enqueue.assert_called_once_with(new_case.case_id)
