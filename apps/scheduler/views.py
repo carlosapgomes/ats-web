@@ -21,6 +21,7 @@ from apps.cases.admission import (
     OPERATIONAL_NOTICE_ACK_EVENT_TYPES,
     OPERATIONAL_NOTICE_EVENT_TYPES,
     OPERATIONAL_NOTICE_FLOWS,
+    SCHEDULED_ADMISSION_FLOWS,
     SUPPORT_FLAG_MAP,
     get_admission_flow_notice_copy,
 )
@@ -426,14 +427,14 @@ def _is_scheduler_historical_case(case: Case) -> bool:
 
     Critério:
     - doctor_decision == 'accept'
-    - doctor_admission_flow == 'scheduled'
+    - doctor_admission_flow in SCHEDULED_ADMISSION_FLOWS ('scheduled', 'pediatric_appt')
     - appointment_status in ('confirmed', 'denied', 'cancelled')
 
     Inclui CLEANED e casos finais pós-agendamento.
     """
     if case.doctor_decision != "accept":
         return False
-    if case.doctor_admission_flow != "scheduled":
+    if case.doctor_admission_flow not in SCHEDULED_ADMISSION_FLOWS:
         return False
     if case.appointment_status not in ("confirmed", "denied", "cancelled"):
         return False
@@ -447,7 +448,7 @@ def _scheduler_historical_queryset() -> QuerySet[Case]:
     """
     return Case.objects.filter(
         doctor_decision="accept",
-        doctor_admission_flow="scheduled",
+        doctor_admission_flow__in=SCHEDULED_ADMISSION_FLOWS,
         appointment_status__in=["confirmed", "denied", "cancelled"],
     )
 

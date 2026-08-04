@@ -18,6 +18,7 @@ from apps.cases.admission import (
     SUPPORT_FLAG_MAP,
     get_admission_flow_notice_copy,
     is_operational_notice_flow,
+    is_scheduled_admission_flow,
 )
 from apps.cases.models import Case, CaseAttachment, CaseStatus
 from apps.cases.navigation import resolve_safe_next_url
@@ -504,8 +505,9 @@ def doctor_submit(request: HttpRequest, case_id: uuid.UUID) -> HttpResponse:
         case.save()
         case.final_reply_posted(user=request.user)
         case.save()
-    # If accepted for scheduled admission, advance to WAIT_APPT
-    elif decision == "accept":
+    # If accepted for a scheduled admission flow (incl. pediatric_appt), advance
+    # to WAIT_APPT for the CHD to confirm/deny before any final reply to NIR.
+    elif decision == "accept" and is_scheduled_admission_flow(case.doctor_admission_flow):
         case.ready_for_scheduler(user=request.user)
         case.save()
         case.scheduler_request_posted(user=request.user)

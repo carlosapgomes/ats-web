@@ -2,8 +2,17 @@
 
 from __future__ import annotations
 
-SCHEDULED_ADMISSION_FLOW = "scheduled"
+# Fluxos que abrem a fila de agendamento do CHD (WAIT_APPT).
+# `pediatric_appt` é a variante interna agendada das novas decisões
+# de compartilhamento/entrada pela EM Pediátrica (Slice 001).
+SCHEDULED_ADMISSION_FLOWS: tuple[str, ...] = (
+    "scheduled",
+    "pediatric_appt",
+)
 
+# Fluxos sem agendamento: CHD recebe apenas ciência operacional.
+# `pediatric_em` permanece aqui como compatibilidade histórica; novas
+# decisões pediátricas usam `pediatric_appt` (agendado) e NÃO entram aqui.
 OPERATIONAL_NOTICE_FLOWS: tuple[str, ...] = (
     "immediate",
     "pre_icu",
@@ -17,10 +26,17 @@ ADMISSION_FLOW_CHOICES: tuple[tuple[str, str], ...] = (
     ("immediate", "Vinda Imediata"),
     ("pre_icu", "Vinda prévia para UTI"),
     ("ward_icu_backup", "Vinda para enfermaria (para retaguarda em UTI)"),
-    ("pediatric_em", "Compartilhar com EM pediátrica"),
+    ("pediatric_appt", "Compartilhar com EM pediátrica — com agendamento"),
 )
 
-ADMISSION_FLOW_MAP: dict[str, str] = dict(ADMISSION_FLOW_CHOICES[1:])
+# Mapa de exibição: deriva das choices e adiciona compatibilidade histórica.
+# `pediatric_em` deixa de ser choice nova (legível apenas em telas históricas);
+# `pediatric_appt` exibe label inequívoco de entrada pela EM Pediátrica.
+ADMISSION_FLOW_MAP: dict[str, str] = {
+    **dict(ADMISSION_FLOW_CHOICES[1:]),
+    "pediatric_appt": "Entrada pela Emergência Pediátrica",
+    "pediatric_em": "Compartilhar com EM pediátrica",
+}
 
 # Labels compactos para badges de apresentação (dashboard + detalhe)
 # Preserva ADMISSION_FLOW_CHOICES completos para formulários médicos.
@@ -91,6 +107,11 @@ ADMISSION_FLOW_NOTICE_COPY: dict[str, dict[str, str]] = {
 def is_operational_notice_flow(flow: str | None) -> bool:
     """Return True when an accepted case does not open CHD scheduling."""
     return bool(flow) and flow in OPERATIONAL_NOTICE_FLOWS
+
+
+def is_scheduled_admission_flow(flow: str | None) -> bool:
+    """Return True when an accepted case opens the CHD scheduling gate."""
+    return bool(flow) and flow in SCHEDULED_ADMISSION_FLOWS
 
 
 def get_admission_flow_display(flow: str | None) -> str:

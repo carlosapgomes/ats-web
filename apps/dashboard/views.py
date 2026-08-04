@@ -24,6 +24,7 @@ from apps.cases.admission import (
     SUPPORT_FLAG_MAP,
     get_admission_flow_notice_copy,
     is_operational_notice_flow,
+    is_scheduled_admission_flow,
 )
 from apps.cases.models import Case, CaseAttachment, CaseEvent, CaseStatus, SupervisorSummary
 from apps.cases.navigation import resolve_safe_next_url
@@ -217,7 +218,7 @@ def _compute_admission_flow(day: date | None = None, period: str | None = None) 
         "immediate": base.filter(doctor_admission_flow="immediate").count(),
         "pre_icu": base.filter(doctor_admission_flow="pre_icu").count(),
         "ward_icu_backup": base.filter(doctor_admission_flow="ward_icu_backup").count(),
-        "pediatric_em": base.filter(doctor_admission_flow="pediatric_em").count(),
+        "pediatric_em": base.filter(doctor_admission_flow__in=("pediatric_em", "pediatric_appt")).count(),
     }
 
 
@@ -524,7 +525,7 @@ def _compute_next_step(case: Case) -> tuple[str, str] | None:
 
     # WAIT_APPT — se fluxo agendado, Pendente: agendador
     if case.status == CaseStatus.WAIT_APPT:
-        if case.doctor_admission_flow == "scheduled":
+        if is_scheduled_admission_flow(case.doctor_admission_flow):
             return ("Pendente: agendador", "bg-info text-dark")
         # Fluxo operacional sem agendamento → NIR
         return ("Pendente: NIR", "bg-info text-dark")

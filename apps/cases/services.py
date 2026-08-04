@@ -22,6 +22,7 @@ from apps.cases.admission import (
     OPERATIONAL_NOTICE_ACK_EVENT_TYPES,
     OPERATIONAL_NOTICE_EVENT_TYPES,
     OPERATIONAL_NOTICE_FLOWS,
+    is_scheduled_admission_flow,
 )
 from apps.cases.models import Case, CaseAttachment, CaseCommunicationMessage, CaseEvent, CaseStatus
 from apps.intake.services import create_case_attachment
@@ -578,7 +579,7 @@ def is_post_acceptance_issue_eligible(case: Case, *, context: str = "") -> bool:
 
     # Context-specific checks
     if context == POST_ACCEPTANCE_ISSUE_CONTEXT_SCHEDULED or not context:
-        return case.doctor_admission_flow == "scheduled" and case.appointment_status == "confirmed"
+        return is_scheduled_admission_flow(case.doctor_admission_flow) and case.appointment_status == "confirmed"
 
     if context == POST_ACCEPTANCE_ISSUE_CONTEXT_OPERATIONAL:
         return case.doctor_admission_flow in OPERATIONAL_NOTICE_FLOWS
@@ -597,7 +598,7 @@ def get_post_acceptance_issue_ineligibility_reason(case: Case, *, context: str =
 
     effective_context = context or POST_ACCEPTANCE_ISSUE_CONTEXT_SCHEDULED
     if effective_context == POST_ACCEPTANCE_ISSUE_CONTEXT_SCHEDULED:
-        if case.doctor_admission_flow != "scheduled":
+        if not is_scheduled_admission_flow(case.doctor_admission_flow):
             return "Fluxo de admissão não é agendado."
         if case.appointment_status != "confirmed":
             return "Agendamento não está confirmado."
