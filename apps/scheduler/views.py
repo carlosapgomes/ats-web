@@ -427,7 +427,7 @@ def _is_scheduler_historical_case(case: Case) -> bool:
 
     Critério:
     - doctor_decision == 'accept'
-    - doctor_admission_flow == 'scheduled'
+    - doctor_admission_flow in SCHEDULED_ADMISSION_FLOWS ('scheduled', 'pediatric_appt')
     - appointment_status in ('confirmed', 'denied', 'cancelled')
 
     Inclui CLEANED e casos finais pós-agendamento.
