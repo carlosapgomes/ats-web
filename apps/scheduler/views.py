@@ -25,7 +25,7 @@ from apps.cases.admission import (
     SUPPORT_FLAG_MAP,
     get_admission_flow_notice_copy,
 )
-from apps.cases.models import Case, CaseEvent, CaseStatus
+from apps.cases.models import Case, CaseEvent, CaseStatus, ExamType
 from apps.cases.navigation import resolve_safe_next_url
 from apps.cases.priority_signals import build_priority_signal_badges
 from apps.cases.services import (
@@ -142,6 +142,10 @@ def _build_case_card(case: Case, wait_minutes: int, user: Any = None) -> dict[st
         "has_doctor_observation": case.has_doctor_observation,
         "doctor_observation": case.doctor_observation,
         "wait_minutes": wait_minutes,
+        # Tipo de exame declarado no intake (Slice 005) — cards/badges usam
+        # exclusivamente o valor persistido, nunca inferido de texto/JSON.
+        "exam_type": case.exam_type,
+        "exam_type_label": case.get_exam_type_display(),
         # Badges projetados exclusivamente do valor persistido (Slice 004) —
         # a view nunca redetecta sinais a partir de texto bruto.
         "priority_signal_badges": build_priority_signal_badges(case.priority_signals),
@@ -264,6 +268,14 @@ def _scheduler_queue_context(user: Any = None, tab: str = "pending") -> dict[str
 
     processed_today_count = len(processed_today)
 
+    # ── Contagens por tipo (Slice 005) ────────────────────────────────
+    # Pendentes soma os MESMOS três grupos do badge primário
+    # (WAIT_APPT + notices iniciais + issues operacionais); Processados Hoje
+    # soma apenas os cards processados do dia. Nenhum contador inclui
+    # Histórico/ciências reconhecidas.
+    pending_exam_type_counts = _sum_exam_type_counts([pending_cards, immediate_notice_cards, operational_issue_cards])
+    processed_exam_type_counts = _sum_exam_type_counts([processed_today])
+
     context: dict[str, Any] = {
         "active_tab": tab,
         "pending_cases": pending_cards,
@@ -277,9 +289,29 @@ def _scheduler_queue_context(user: Any = None, tab: str = "pending") -> dict[str
         "processed_today_count": processed_today_count,
         "acknowledged_notice_count": len(acknowledged_notice_cards),
         "total_notice_count": pending_count + immediate_notice_count + operational_issue_count,
+        "exam_type_counts": {
+            "all": pending_count + immediate_notice_count + operational_issue_count,
+            **pending_exam_type_counts,
+        },
+        "processed_exam_type_counts": {"all": processed_today_count, **processed_exam_type_counts},
     }
 
     return context
+
+
+def _sum_exam_type_counts(card_groups: list[list[dict[str, Any]]]) -> dict[str, int]:
+    """Soma contagens EDA/colonoscopia sobre grupos de cards já construídos.
+
+    Conta exclusivamente o valor persistido ``exam_type`` presente em cada
+    card; tipos desconhecidos são ignorados (nunca inventados).
+    """
+    counts: dict[str, int] = {"eda": 0, "colonoscopy": 0}
+    for cards in card_groups:
+        for card in cards:
+            exam_type = card.get("exam_type")
+            if exam_type in counts:
+                counts[exam_type] += 1
+    return counts
 
 
 def _build_processed_card(case: Case) -> dict[str, Any]:
@@ -300,6 +332,9 @@ def _build_processed_card(case: Case) -> dict[str, Any]:
         "appointment_decided_at": case.appointment_decided_at,
         "appointment_at": case.appointment_at,
         "appointment_reason": case.appointment_reason or "",
+        # Tipo de exame declarado no intake (Slice 005).
+        "exam_type": case.exam_type,
+        "exam_type_label": case.get_exam_type_display(),
         # Badges projetados exclusivamente do valor persistido (Slice 004).
         "priority_signal_badges": build_priority_signal_badges(case.priority_signals),
     }
@@ -1024,23 +1059,26 @@ def scheduler_lock_release(request: HttpRequest, case_id: uuid.UUID) -> HttpResp
 def scheduler_historical_search(request: HttpRequest) -> HttpResponse:
     """Busca histórica Scheduler: casos aceitos/agendados/processados.
 
-    Pesquisa por agency_record_number ou nome do paciente.
-    Não limitada a processados hoje ou ao scheduler logado.
+    Combina termo (ocorrência ou nome do paciente) com tipo de exame
+    (exam_type=all|eda|colonoscopy). Tipo inválido cai para all. Tipo
+    específico sem termo lista os últimos 50 casos daquele tipo; com termo,
+    ambos são compostos com AND. Sem critério nenhum, mantém o estado vazio.
     """
     query = request.GET.get("q", "").strip()
-    results: list[dict[str, Any]] = []
+    raw_exam_type = request.GET.get("exam_type", "all")
+    exam_type = raw_exam_type if raw_exam_type in ExamType.values else "all"
 
+    qs = _scheduler_historical_queryset()
+    if exam_type != "all":
+        qs = qs.filter(exam_type=exam_type)
     if query:
-        qs = (
-            _scheduler_historical_queryset()
-            .filter(
-                models.Q(agency_record_number__icontains=query)
-                | models.Q(structured_data__patient__name__icontains=query)
-            )
-            .order_by("-created_at")[:50]
+        qs = qs.filter(
+            models.Q(agency_record_number__icontains=query) | models.Q(structured_data__patient__name__icontains=query)
         )
 
-        for case in qs:
+    results: list[dict[str, Any]] = []
+    if query or exam_type != "all":
+        for case in qs.order_by("-created_at")[:50]:
             results.append(
                 {
                     "case": case,
@@ -1056,6 +1094,9 @@ def scheduler_historical_search(request: HttpRequest) -> HttpResponse:
                     else ("Negado" if case.appointment_status == "denied" else "Cancelado"),
                     "appointment_at": case.appointment_at,
                     "doctor_display": case.doctor_display,
+                    # Tipo de exame declarado no intake (Slice 005).
+                    "exam_type": case.exam_type,
+                    "exam_type_label": case.get_exam_type_display(),
                 }
             )
 
@@ -1064,6 +1105,7 @@ def scheduler_historical_search(request: HttpRequest) -> HttpResponse:
         "scheduler/historical_search.html",
         {
             "query": query,
+            "exam_type": exam_type,
             "results": results,
             "active_tab": "historical",
         },
