@@ -1,6 +1,14 @@
-/* doctor_queue_filter.js — Client-side filter for doctor pending queue cards.
- * Filters pending case cards by patient name or agency record number.
- * Survives HTMX auto-refresh by re-applying filter on htmx:afterSwap.
+/* doctor_queue_filter.js — Client-side filters for doctor queue cards.
+ *
+ * Pendentes tab: composed filter over exam type (Todos|EDA|Colonoscopia)
+ * AND patient name / agency record number search.
+ * Decididos Hoje tab: simple exam type filter without search.
+ *
+ * The type selection lives in radio buttons ([data-doctor-exam-filter]) and
+ * the term in the search input; switching type never clears the term and
+ * clearing the term never resets the type. HTMX polling re-applies both on
+ * htmx:afterSwap because the controls live outside #doctor-queue-content.
+ *
  * No dependencies, no persistence (no URL, storage, cookie or session).
  */
 (function () {
@@ -11,12 +19,16 @@
   var clearButton = null;
   var statusEl = null;
   var noResultsEl = null;
+  var typeButtons = [];
 
   function resolveElements() {
     searchInput = document.querySelector("[data-doctor-queue-search]");
     clearButton = document.querySelector("[data-doctor-queue-clear]");
     statusEl = document.querySelector("[data-doctor-queue-filter-status]");
     noResultsEl = document.querySelector("[data-doctor-queue-no-results]");
+    typeButtons = Array.prototype.slice.call(
+      document.querySelectorAll("[data-doctor-exam-filter]")
+    );
   }
 
   // ── Helpers ───────────────────────────────────────────────────────
@@ -35,76 +47,114 @@
     return /[a-z\u00e0-\u024f]/i.test(term);
   }
 
-  /** Return all pending cards currently in the DOM. */
+  /** Return all queue cards currently in the DOM. */
   function getCards() {
     return document.querySelectorAll("[data-doctor-queue-card]");
   }
 
-  // ── Filter logic ──────────────────────────────────────────────────
+  /** Return the selected exam type: "all" | "eda" | "colonoscopy". */
+  function getSelectedType() {
+    for (var i = 0; i < typeButtons.length; i++) {
+      if (typeButtons[i].checked) {
+        return typeButtons[i].value;
+      }
+    }
+    return "all";
+  }
+
+  /** Human label for the active scope. */
+  function scopeLabel(type) {
+    if (type === "eda") return "EDA";
+    if (type === "colonoscopy") return "Colonoscopia";
+    return "Todos";
+  }
+
+  /** Pluralize "caso"/"casos". */
+  function pluralCasos(n) {
+    return n !== 1 ? "casos" : "caso";
+  }
+
+  // ── Counters ──────────────────────────────────────────────────────
+
+  /** Recompute per-type counters from the persisted card attribute. */
+  function updateCounts() {
+    var cards = getCards();
+    var counts = { all: cards.length, eda: 0, colonoscopy: 0 };
+    Array.prototype.forEach.call(cards, function (card) {
+      var type = card.getAttribute("data-exam-type") || "";
+      if (counts[type] !== undefined) counts[type]++;
+    });
+    Array.prototype.forEach.call(
+      document.querySelectorAll("[data-exam-type-count]"),
+      function (el) {
+        var type = el.getAttribute("data-exam-type-count") || "all";
+        el.textContent = String(counts[type] !== undefined ? counts[type] : 0);
+      }
+    );
+  }
+
+  // ── Filter logic (type + term composed) ───────────────────────────
 
   function applyFilter() {
-    if (!searchInput || !statusEl || !noResultsEl) return;
+    if (!statusEl || !noResultsEl) return;
 
-    var term = searchInput.value;
+    var term = searchInput ? searchInput.value : "";
     var trimmed = term.trim();
+    var type = getSelectedType();
 
-    // Update clear button visibility
+    // Clear button visibility follows the term only.
     if (clearButton) {
       clearButton.style.display = trimmed.length > 0 ? "" : "none";
     }
 
+    updateCounts();
+
     var cards = getCards();
     var total = cards.length;
 
-    // If empty term, show all
-    if (trimmed.length === 0) {
-      cards.forEach(function (card) {
-        card.hidden = false;
-      });
-      noResultsEl.style.display = "none";
-      statusEl.textContent =
-        total > 0
-          ? "Mostrando todos os " + total + " paciente" + (total !== 1 ? "s" : "") + " pendentes."
-          : "";
-      return;
-    }
-
     var normTerm = normalize(trimmed);
     var hasLettersInTerm = hasLetters(trimmed);
+    // Limiar: termo com letras e menos de 3 chars normalizados não filtra o nome.
+    var thresholdHint = trimmed.length > 0 && hasLettersInTerm && normTerm.length < 3;
 
-    // Limiar: if term has letters and fewer than 3 normalized chars, show all with hint
-    if (hasLettersInTerm && normTerm.length < 3) {
-      cards.forEach(function (card) {
-        card.hidden = false;
-      });
-      noResultsEl.style.display = "none";
+    var visibleCount = 0;
+    Array.prototype.forEach.call(cards, function (card) {
+      var matchesType =
+        type === "all" || (card.getAttribute("data-exam-type") || "") === type;
+      var matchesTerm = true;
+      if (trimmed.length > 0 && !thresholdHint) {
+        var name = card.getAttribute("data-patient-name") || "";
+        var record = card.getAttribute("data-agency-record-number") || "";
+        matchesTerm =
+          normalize(name).indexOf(normTerm) !== -1 ||
+          normalize(record).indexOf(normTerm) !== -1;
+      }
+      var visible = matchesType && matchesTerm;
+      card.hidden = !visible;
+      if (visible) visibleCount++;
+    });
+
+    noResultsEl.style.display = "none";
+    if (thresholdHint) {
       statusEl.textContent = "Digite pelo menos 3 letras para filtrar por nome.";
       return;
     }
-
-    // Filter
-    var visibleCount = 0;
-    cards.forEach(function (card) {
-      var name = card.getAttribute("data-patient-name") || "";
-      var record = card.getAttribute("data-agency-record-number") || "";
-      var normName = normalize(name);
-      var normRecord = normalize(record);
-      var matches = normName.indexOf(normTerm) !== -1 || normRecord.indexOf(normTerm) !== -1;
-      card.hidden = !matches;
-      if (matches) visibleCount++;
-    });
-
-    // Status
     if (visibleCount === 0) {
       noResultsEl.style.display = "";
       statusEl.textContent = "";
-    } else {
-      noResultsEl.style.display = "none";
+      return;
+    }
+    var scope = type !== "all" ? " de " + scopeLabel(type) + "." : ".";
+    if (visibleCount === total) {
       statusEl.textContent =
-        "Mostrando " + visibleCount + " de " + total + " paciente" + (total !== 1 ? "s" : "") + ".";
+        "Mostrando todos os " + total + " " + pluralCasos(total) + scope;
+    } else {
+      statusEl.textContent =
+        "Mostrando " + visibleCount + " de " + total + " " + pluralCasos(total) + scope;
     }
   }
 
+  /** Clear only the term; the selected type (radio state) is preserved. */
   function clearFilter() {
     if (!searchInput) return;
     searchInput.value = "";
@@ -129,12 +179,14 @@
     clearFilter();
   }
 
-  /** Re-apply filter after HTMX swaps in new content. */
+  function onTypeChange() {
+    // Termo permanece no campo; apenas o escopo de tipo muda.
+    applyFilter();
+  }
+
+  /** Re-apply composed filter after HTMX swaps in new cards. */
   function onHtmxAfterSwap(e) {
     if (e && e.detail && e.detail.target && e.detail.target.id === "doctor-queue-content") {
-      // Re-resolve elements inside the swapped content could have changed,
-      // but search bar lives outside #doctor-queue-content so references are stable.
-      // Cards inside #doctor-queue-content are fresh — re-run filter.
       applyFilter();
     }
   }
@@ -143,14 +195,18 @@
 
   function init() {
     resolveElements();
-    if (!searchInput) return; // silently return if not on a page with search
+    if (!statusEl || !noResultsEl) return; // not on a queue page
 
-    searchInput.addEventListener("input", onInput);
-    searchInput.addEventListener("keydown", onKeydown);
-
+    if (searchInput) {
+      searchInput.addEventListener("input", onInput);
+      searchInput.addEventListener("keydown", onKeydown);
+    }
     if (clearButton) {
       clearButton.addEventListener("click", onClearClick);
     }
+    typeButtons.forEach(function (btn) {
+      btn.addEventListener("change", onTypeChange);
+    });
 
     document.addEventListener("htmx:afterSwap", onHtmxAfterSwap);
 
