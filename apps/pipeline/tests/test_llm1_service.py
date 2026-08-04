@@ -20,6 +20,7 @@ from apps.pipeline.llm1_service import (
     Llm1ValidationError,
     _render_user_prompt,
 )
+from apps.pipeline.policy.eda_preop_policy import evaluate_eda_preop_policy
 
 # ── Test helpers ────────────────────────────────────────────────────────────
 
@@ -677,6 +678,331 @@ class TestLlm1ComorbiditiesDescribed:
     def test_default_user_prompt_mentions_comorbidities(self) -> None:
         up = LLM1_DEFAULT_USER_PROMPT
         assert "comorbidities_described" in up or "comorbidades" in up.lower()
+
+
+# ── Medications described (Slice 001) ────────────────────────────────────
+
+
+def _medication_payload_item(
+    *,
+    name: str = "Rivaroxabana",
+    medication_class: str = "anticoagulant",
+    use_status: str = "current",
+    source_text_hint: str = "Em uso de rivaroxabana 20 mg/dia",
+    last_dose_or_schedule: str | None = None,
+) -> dict[str, Any]:
+    """Build a medication item for the medications_described collection."""
+    return {
+        "name": name,
+        "normalized_name": None,
+        "medication_class": medication_class,
+        "use_status": use_status,
+        "last_dose_or_schedule": last_dose_or_schedule,
+        "source_text_hint": source_text_hint,
+    }
+
+
+class TestLlm1MedicationsDescribed:
+    """R1: contrato estruturado de medicamentos com evidência obrigatória."""
+
+    def test_schema_accepts_anticoagulant_with_evidence(self) -> None:
+        payload = _valid_llm1_payload()
+        payload["preop_screening"]["medications_described"] = [
+            _medication_payload_item(
+                name="Rivaroxabana",
+                medication_class="anticoagulant",
+                use_status="current",
+                source_text_hint="Em uso de rivaroxabana 20 mg/dia",
+                last_dose_or_schedule="20 mg/dia",
+            )
+        ]
+        service = _make_service(json.dumps(payload))
+
+        result = service.run(
+            case_id="case-med-001",
+            agency_record_number="12345",
+            extracted_text="Em uso de rivaroxabana 20 mg/dia.",
+            system_prompt="SP",
+            user_prompt_template="UT",
+        )
+
+        preop = result.structured_data["preop_screening"]
+        assert isinstance(preop, dict)
+        meds = preop["medications_described"]
+        assert isinstance(meds, list)
+        assert meds[0]["name"] == "Rivaroxabana"
+        assert meds[0]["medication_class"] == "anticoagulant"
+        assert meds[0]["use_status"] == "current"
+        assert meds[0]["last_dose_or_schedule"] == "20 mg/dia"
+        assert meds[0]["source_text_hint"] == "Em uso de rivaroxabana 20 mg/dia"
+
+    def test_schema_rejects_item_without_evidence(self) -> None:
+        payload = _valid_llm1_payload()
+        payload["preop_screening"]["medications_described"] = [_medication_payload_item(source_text_hint="")]
+        service = _make_service(json.dumps(payload))
+
+        with pytest.raises(Llm1ValidationError, match="source_text_hint"):
+            service.run(
+                case_id="case-med-002",
+                agency_record_number="12345",
+                extracted_text="...",
+                system_prompt="SP",
+                user_prompt_template="UT",
+            )
+
+    def test_schema_rejects_item_with_missing_evidence_key(self) -> None:
+        payload = _valid_llm1_payload()
+        item = _medication_payload_item(
+            name="Clopidogrel",
+            medication_class="antiplatelet",
+            use_status="suspended",
+        )
+        del item["source_text_hint"]
+        payload["preop_screening"]["medications_described"] = [item]
+        service = _make_service(json.dumps(payload))
+
+        with pytest.raises(Llm1ValidationError, match="source_text_hint"):
+            service.run(
+                case_id="case-med-003",
+                agency_record_number="12345",
+                extracted_text="...",
+                system_prompt="SP",
+                user_prompt_template="UT",
+            )
+
+    def test_schema_rejects_empty_name(self) -> None:
+        payload = _valid_llm1_payload()
+        payload["preop_screening"]["medications_described"] = [
+            _medication_payload_item(name="", source_text_hint="evidência")
+        ]
+        service = _make_service(json.dumps(payload))
+
+        with pytest.raises(Llm1ValidationError, match="name"):
+            service.run(
+                case_id="case-med-004",
+                agency_record_number="12345",
+                extracted_text="...",
+                system_prompt="SP",
+                user_prompt_template="UT",
+            )
+
+    def test_schema_rejects_unknown_medication_field(self) -> None:
+        payload = _valid_llm1_payload()
+        item = _medication_payload_item()
+        item["dosage"] = "20 mg"
+        payload["preop_screening"]["medications_described"] = [item]
+        service = _make_service(json.dumps(payload))
+
+        with pytest.raises(Llm1ValidationError, match="Extra inputs are not permitted"):
+            service.run(
+                case_id="case-med-005",
+                agency_record_number="12345",
+                extracted_text="...",
+                system_prompt="SP",
+                user_prompt_template="UT",
+            )
+
+    def test_schema_rejects_invalid_medication_class(self) -> None:
+        payload = _valid_llm1_payload()
+        payload["preop_screening"]["medications_described"] = [_medication_payload_item(medication_class="sedative")]
+        service = _make_service(json.dumps(payload))
+
+        with pytest.raises(Llm1ValidationError, match="medication_class"):
+            service.run(
+                case_id="case-med-006",
+                agency_record_number="12345",
+                extracted_text="...",
+                system_prompt="SP",
+                user_prompt_template="UT",
+            )
+
+    def test_schema_rejects_invalid_use_status(self) -> None:
+        payload = _valid_llm1_payload()
+        payload["preop_screening"]["medications_described"] = [_medication_payload_item(use_status="taking")]
+        service = _make_service(json.dumps(payload))
+
+        with pytest.raises(Llm1ValidationError, match="use_status"):
+            service.run(
+                case_id="case-med-007",
+                agency_record_number="12345",
+                extracted_text="...",
+                system_prompt="SP",
+                user_prompt_template="UT",
+            )
+
+    def test_suspended_antiplatelet_roundtrips(self) -> None:
+        payload = _valid_llm1_payload()
+        payload["preop_screening"]["medications_described"] = [
+            _medication_payload_item(
+                name="Clopidogrel",
+                medication_class="antiplatelet",
+                use_status="suspended",
+                source_text_hint="Clopidogrel suspenso há 5 dias",
+            )
+        ]
+        service = _make_service(json.dumps(payload))
+
+        result = service.run(
+            case_id="case-med-008",
+            agency_record_number="12345",
+            extracted_text="Clopidogrel suspenso.",
+            system_prompt="SP",
+            user_prompt_template="UT",
+        )
+
+        preop = result.structured_data["preop_screening"]
+        assert isinstance(preop, dict)
+        meds = preop["medications_described"]
+        assert isinstance(meds, list)
+        assert meds[0]["name"] == "Clopidogrel"
+        assert meds[0]["medication_class"] == "antiplatelet"
+        assert meds[0]["use_status"] == "suspended"
+
+    def test_old_payload_without_key_validates_as_empty_list(self) -> None:
+        payload = _valid_llm1_payload()
+        assert "medications_described" not in payload["preop_screening"]
+        service = _make_service(json.dumps(payload))
+
+        result = service.run(
+            case_id="case-med-009",
+            agency_record_number="12345",
+            extracted_text="...",
+            system_prompt="SP",
+            user_prompt_template="UT",
+        )
+
+        preop = result.structured_data["preop_screening"]
+        assert isinstance(preop, dict)
+        assert preop["medications_described"] == []
+
+    def test_schema_rejects_excessive_medication_list(self) -> None:
+        payload = _valid_llm1_payload()
+        payload["preop_screening"]["medications_described"] = [
+            _medication_payload_item(
+                name=f"medicamento {i}",
+                medication_class="other",
+                use_status="unknown",
+                source_text_hint="evidência",
+            )
+            for i in range(21)
+        ]
+        service = _make_service(json.dumps(payload))
+
+        with pytest.raises(Llm1ValidationError):
+            service.run(
+                case_id="case-med-010",
+                agency_record_number="12345",
+                extracted_text="...",
+                system_prompt="SP",
+                user_prompt_template="UT",
+            )
+
+
+class TestLlm1MedicationPromptRules:
+    """R2: prompts exigem evidência, sem inferência e sem inventar dose."""
+
+    def test_render_user_prompt_requires_explicit_description_and_evidence(self) -> None:
+        prompt = _render_user_prompt(
+            template="Template base",
+            case_id="case-med-p-001",
+            agency_record_number="12345",
+            clean_text="Texto clinico.",
+        )
+        lower = prompt.lower()
+        assert "medications_described" in prompt
+        assert "explicitamente descritos" in lower or "explicitamente descrito" in lower
+        assert "source_text_hint" in prompt
+        assert "evidencia" in lower or "evidência" in lower
+
+    def test_render_user_prompt_forbids_inference(self) -> None:
+        prompt = _render_user_prompt(
+            template="Template base",
+            case_id="case-med-p-002",
+            agency_record_number="12345",
+            clean_text="Texto clinico.",
+        )
+        lower = prompt.lower()
+        assert "nao infer" in lower or "não infer" in lower
+        assert "comorbidade" in lower
+
+    def test_render_user_prompt_forbids_inventing_last_dose(self) -> None:
+        prompt = _render_user_prompt(
+            template="Template base",
+            case_id="case-med-p-003",
+            agency_record_number="12345",
+            clean_text="Texto clinico.",
+        )
+        lower = prompt.lower()
+        assert "invent" in lower
+        assert "ultima dose" in lower or "última dose" in lower
+
+    def test_render_user_prompt_highlights_anticoagulants_and_antiplatelets(self) -> None:
+        prompt = _render_user_prompt(
+            template="Template base",
+            case_id="case-med-p-004",
+            agency_record_number="12345",
+            clean_text="Texto clinico.",
+        )
+        lower = prompt.lower()
+        assert "anticoagulante" in lower or "anticoagul" in lower
+        assert "antiagregante" in lower or "antiagreg" in lower
+
+    def test_render_user_prompt_empty_list_on_absence(self) -> None:
+        prompt = _render_user_prompt(
+            template="Template base",
+            case_id="case-med-p-005",
+            agency_record_number="12345",
+            clean_text="Texto clinico.",
+        )
+        lower = prompt.lower()
+        assert "lista vazia" in lower
+
+    def test_default_user_prompt_mentions_medication_rules(self) -> None:
+        up = LLM1_DEFAULT_USER_PROMPT
+        lower = up.lower()
+        assert "medications_described" in up
+        assert "anticoagul" in lower
+        assert "source_text_hint" in up
+
+    def test_default_system_prompt_mentions_medications(self) -> None:
+        sp = LLM1_DEFAULT_SYSTEM_PROMPT
+        assert "medications_described" in sp
+
+    def test_required_schema_instructions_include_medications_contract(self) -> None:
+        instructions = LLM1_REQUIRED_SCHEMA_INSTRUCTIONS
+        assert "medications_described[]" in instructions
+        assert "medication_class" in instructions
+        assert "anticoagulant" in instructions
+        assert "antiplatelet" in instructions
+        assert "use_status" in instructions
+        assert "suspended" in instructions
+
+
+class TestMedicationsDoNotAffectPolicy:
+    """R4: adicionar medicamentos ao mesmo payload não altera a policy."""
+
+    def test_policy_output_identical_with_and_without_medications(self) -> None:
+        base_payload = _valid_llm1_payload()
+        base_result = evaluate_eda_preop_policy(structured_data=base_payload)
+
+        med_payload = _valid_llm1_payload()
+        med_payload["preop_screening"]["medications_described"] = [
+            _medication_payload_item(
+                name="Rivaroxabana",
+                medication_class="anticoagulant",
+                use_status="current",
+                source_text_hint="Em uso de rivaroxabana",
+            ),
+            _medication_payload_item(
+                name="Clopidogrel",
+                medication_class="antiplatelet",
+                use_status="suspended",
+                source_text_hint="Clopidogrel suspenso",
+            ),
+        ]
+        med_result = evaluate_eda_preop_policy(structured_data=med_payload)
+
+        assert base_result == med_result
 
 
 # ── Fallback / default LLM1 prompts ─────────────────────────────────────────

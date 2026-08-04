@@ -19,7 +19,7 @@ Se o branch atual for outro, o implementador deve parar e reportar `INCOMPLETE/B
 
 ## Slices verticais
 
-- [ ] Slice 001 — Medicamentos relevantes no relatório médico (`slices/slice-001-medication-safety-alert.md`)
+- [x] Slice 001 — Medicamentos relevantes no relatório médico (`slices/slice-001-medication-safety-alert.md`)
 - [ ] Slice 002 — Tipo explícito no intake e rastreabilidade inicial (`slices/slice-002-explicit-exam-type-intake.md`)
 - [ ] Slice 003 — Colonoscopia percorre pipeline e decisão médica (`slices/slice-003-colonoscopy-to-doctor.md`)
 - [ ] Slice 004 — Filtros médicos por tipo com busca preservada (`slices/slice-004-doctor-exam-type-filters.md`)

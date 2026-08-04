@@ -45,7 +45,11 @@ LLM1_DEFAULT_SYSTEM_PROMPT = (
     "Extraia origin_context (cidade/hospital/unidade/UF) quando disponivel. "
     "Identifique tracked_exams com recencia por data/hora ou posicao textual. "
     "Registre had_transfusion como binario (yes/no); ausencia de evidencia "
-    "de transfusao deve ser tratada como 'no'."
+    "de transfusao deve ser tratada como 'no'. "
+    "Extraia medicamentos explicitamente descritos (medications_described) com "
+    "evidencia por item, classificando anticoagulantes/antiagregantes para alerta "
+    "informativo. Nao inferir medicamento por comorbidade, idade, exame ou "
+    "diagnostico; nao inventar ultima dose; lista vazia na ausencia."
 )
 
 LLM1_REQUIRED_SCHEMA_INSTRUCTIONS = """
@@ -69,13 +73,21 @@ eda = {"indication_category", "exclusion_type", "is_pediatric", "foreign_body_su
 eda.requested_procedure = {"name", "urgency", "subtype"}.
 eda.labs = {"hb_g_dl", "hct_percent", "platelets_per_mm3", "tp_seconds", "inr", "rni", "ttpa_seconds", "urea_mg_dl", "creatinine_mg_dl", "source_text_hint"}.
 eda.ecg = {"report_present", "abnormal_flag", "source_text_hint"}.
-preop_screening = {"exam_type", "has_cardiovascular_disease", "has_active_respiratory_symptoms", "has_prior_respiratory_disease", "has_ecg_report", "has_chest_xray_report", "has_echocardiogram_report", "hb_g_dl", "platelets_per_mm3", "inr", "evidence_spans", "rulebook_signals", "comorbidities_described"}.
+preop_screening = {"exam_type", "has_cardiovascular_disease", "has_active_respiratory_symptoms", "has_prior_respiratory_disease", "has_ecg_report", "has_chest_xray_report", "has_echocardiogram_report", "hb_g_dl", "platelets_per_mm3", "inr", "evidence_spans", "rulebook_signals", "comorbidities_described", "medications_described"}.
 policy_precheck = {"excluded_from_eda_flow", "exclusion_reason", "labs_required", "labs_pass", "labs_failed_items", "ecg_required", "ecg_present", "pediatric_flag", "notes"}.
 summary = {"one_liner", "bullet_points"}; bullet_points deve ter 3 a 8 itens.
 extraction_quality = {"confidence", "missing_fields", "notes"}; confidence: alta, media ou baixa.
 origin_context = {"city", "hospital", "unit", "state_uf", "source_text_hint"}.
 transfusion = {"had_transfusion", "total_units", "hemocomponent", "source_text_hint"}.
 tracked_exams[] = {"exam_type", "exam_label", "result_value", "exam_datetime_iso", "is_most_recent", "source_text_hint"}.
+medications_described[] = {"name", "normalized_name", "medication_class", "use_status", "last_dose_or_schedule", "source_text_hint"}.
+
+medications_described e lista de medicamentos EXPLICITAMENTE descritos no relatorio; ausencia de medicamento descrito exige lista vazia [].
+- medications_described[].name: obrigatorio e nao vazio.
+- medications_described[].source_text_hint: obrigatorio e nao vazio (evidencia textual).
+- medications_described[].medication_class: anticoagulant, antiplatelet, other ou unknown. Anticoagulantes/antiagregantes devem ser destacados.
+- medications_described[].use_status: current, recent, historical, suspended ou unknown; suspenso deve permanecer suspenso, nunca como uso atual confirmado.
+- medications_described[].last_dose_or_schedule: opcional; nunca inventar dose/posologia ausente.
 
 NUNCA use estes nomes/aliases: case_id no JSON de resposta, full_name, age_years,
 race_color, weight_kg, gender, request_indication, clinical_question,
@@ -120,7 +132,19 @@ LLM1_DEFAULT_USER_PROMPT = (
     "Para todo exame em tracked_exams, preencha exam_datetime_iso quando "
     "houver data/hora associada. Ao mencionar exames no resumo "
     "(summary.one_liner ou summary.bullet_points), inclua a data do exame "
-    "quando disponivel.\n\n"
+    "quando disponivel. "
+    "Extrair medicamentos explicitamente descritos (medications_described) "
+    "como lista de objetos {name, normalized_name, medication_class, "
+    "use_status, last_dose_or_schedule, source_text_hint}. Somente medicamentos "
+    "descritos explicitamente no relatorio; cada item exige source_text_hint "
+    "nao vazio. Destacar anticoagulantes (anticoagulant) e antiagregantes "
+    "(antiplatelet) para alerta informativo. Nao inferir medicamento por "
+    "comorbidade, idade, exame ou diagnostico; nao inventar ultima dose ou "
+    "posologia; classificar uso como current, recent, historical, suspended ou "
+    "unknown, preservando mencao de suspensao. Retornar lista vazia se o "
+    "relatorio nao descrever medicamentos. Medicamentos nunca alteram "
+    "sugestao/decisao e nunca geram orientacao de suspensao ou janela "
+    "farmacologica.\n\n"
     f"{LLM1_REQUIRED_SCHEMA_INSTRUCTIONS}"
 )
 
@@ -332,6 +356,19 @@ def _render_user_prompt(
         "ausencia de evidencia de transfusao deve ser tratada como 'no'. "
         "Se had_transfusion=yes, informar total_units (inteiro) "
         "e hemocomponent quando disponivel.\n"
+        "Para medications_described: extrair somente medicamentos explicitamente "
+        "descritos no relatorio, com {name, normalized_name, medication_class, "
+        "use_status, last_dose_or_schedule, source_text_hint}. Cada item exige "
+        "name e source_text_hint nao vazios. Classificar medication_class como "
+        "anticoagulant, antiplatelet, other ou unknown, destacando "
+        "anticoagulantes/antiagregantes para alerta informativo. Classificar "
+        "use_status como current, recent, historical, suspended ou unknown, "
+        "preservando mencao de suspensao (nunca como uso atual confirmado). "
+        "Nao inferir medicamento por comorbidade, idade, exame ou diagnostico; "
+        "nao inventar ultima dose/posologia quando nao descrita (usar null). "
+        "Retornar lista vazia se o relatorio nao descrever medicamentos. "
+        "Medicamentos sao apenas informativos: nunca alteram sugestao/decisao "
+        "e nunca geram orientacao de suspensao, dose ou janela farmacologica.\n"
         "Se o relatorio mencionar ingestao de substancia caustica/corrosiva, "
         "soda caustica, produto corrosivo ou acido em contexto de ingestao, "
         "mencione esse evento no summary.one_liner ou summary.bullet_points e "

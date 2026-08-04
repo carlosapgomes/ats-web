@@ -107,6 +107,42 @@ def _format_value_or_fallback(value: Any) -> str:
     return str(value)
 
 
+# ── Medication labels (Slice 001) ────────────────────────────────────────
+
+_MEDICATION_CLASS_LABELS: dict[str, str] = {
+    "anticoagulant": "anticoagulante",
+    "antiplatelet": "antiagregante",
+    "other": "outro",
+    "unknown": "classe a confirmar",
+}
+
+_MEDICATION_USE_STATUS_LABELS: dict[str, str] = {
+    "current": "uso atual",
+    "recent": "uso recente",
+    "historical": "uso prévio",
+    "suspended": "suspenso",
+    "unknown": "não informado",
+}
+
+
+def _format_medication_class(value: Any) -> str:
+    """Map a medication_class enum value to its Portuguese label."""
+    if isinstance(value, str):
+        label = _MEDICATION_CLASS_LABELS.get(value)
+        if label is not None:
+            return label
+    return "classe a confirmar"
+
+
+def _format_medication_use_status(value: Any) -> str:
+    """Map a use_status enum value to its Portuguese label."""
+    if isinstance(value, str):
+        label = _MEDICATION_USE_STATUS_LABELS.get(value)
+        if label is not None:
+            return label
+    return "não informado"
+
+
 def _format_unknown_with_evidence(value: Any) -> str:
     """Return clearer wording when scalar value is unknown in source evidence."""
     formatted = _format_value_or_fallback(value)
@@ -307,6 +343,13 @@ class DoctorReportPresenter:
             lines.append(context["comorbidities_line"])
         lines.append("")
 
+        # Medications (informational; alert lives in Achados críticos)
+        medication_lines = context.get("medication_lines")
+        if medication_lines:
+            lines.append("Medicamentos descritos:")
+            lines.extend(medication_lines)
+            lines.append("")
+
         # Blocks
         block_labels = [
             ("resumo_clinico", "Resumo clínico"),
@@ -386,7 +429,11 @@ class DoctorReportPresenter:
             f"- ECG presente: {_format_value_or_fallback(ecg_present)}",
             f"- ECG sinal de alerta: {_format_unknown_with_evidence(ecg_alert)}",
         ]
-        return [*self._build_clinical_alert_lines_from_signals(), *lab_lines]
+        return [
+            *self._build_clinical_alert_lines_from_signals(),
+            *self._build_medication_alert_lines(),
+            *lab_lines,
+        ]
 
     def _build_critical_pending(self) -> list[str]:
         labs_pass = _extract_nested(self.structured_data, "policy_precheck", "labs_pass")
@@ -561,6 +608,70 @@ class DoctorReportPresenter:
 
     # ── Context builders ─────────────────────────────────────────────────
 
+    def _iter_medications(self) -> list[dict[str, Any]]:
+        """Return the structured medications_described items, ignoring malformed input."""
+        preop = _extract_nested(self.structured_data, "preop_screening")
+        if not isinstance(preop, dict):
+            return []
+        items = preop.get("medications_described")
+        if not isinstance(items, list):
+            return []
+        return [item for item in items if isinstance(item, dict)]
+
+    def _build_medication_alert_lines(self) -> list[str]:
+        """Informative alert lines for anticoagulants/antiplatelets.
+
+        Prominent at the start of Achados críticos. Never recommends
+        suspension, dose or pharmacological window — the doctor confirms
+        peri-procedural management.
+        """
+        lines: list[str] = []
+        for med in self._iter_medications():
+            med_class = med.get("medication_class")
+            if med_class not in {"anticoagulant", "antiplatelet"}:
+                continue
+            name = med.get("name")
+            if not isinstance(name, str) or not name.strip():
+                continue
+            lines.append(f"Medicamento relevante: {name.strip()} — {_format_medication_class(med_class)}")
+            lines.append(f"Uso descrito: {_format_medication_use_status(med.get('use_status'))}")
+            lines.append("Conduta: confirmar manejo peri-procedimento.")
+        return lines
+
+    def _build_medication_lines(self) -> list[str]:
+        """Build informational medication lines from structured_data.
+
+        Lists every explicitly described medication with class, use status
+        and, when available, last dose/schedule and textual evidence.
+        """
+        meds = self._iter_medications()
+        if not meds:
+            return []
+
+        lines: list[str] = []
+        seen: set[str] = set()
+        for med in meds:
+            name = med.get("name")
+            if not isinstance(name, str) or not name.strip():
+                continue
+            normalized = name.strip()
+            if normalized in seen:
+                continue
+            seen.add(normalized)
+
+            line = (
+                f"{normalized}: {_format_medication_class(med.get('medication_class'))}; "
+                f"{_format_medication_use_status(med.get('use_status'))}"
+            )
+            last_dose = med.get("last_dose_or_schedule")
+            if isinstance(last_dose, str) and last_dose.strip():
+                line += f"; última dose/posologia: {last_dose.strip()}"
+            evidence = med.get("source_text_hint")
+            if isinstance(evidence, str) and evidence.strip():
+                line += f" (evidência: {evidence.strip()})"
+            lines.append(line)
+        return lines
+
     def _build_context(self) -> dict[str, Any]:
         return {
             "procedure": f"procedimento solicitado: {self._resolve_canonical_procedure_name()}",
@@ -569,6 +680,7 @@ class DoctorReportPresenter:
             "tracked_exam_lines": self._build_tracked_exam_lines(),
             "pediatric": "paciente pediátrico: sim" if self._is_pediatric() else "",
             "comorbidities_line": self._build_comorbidities_line(),
+            "medication_lines": self._build_medication_lines(),
         }
 
     def _resolve_canonical_procedure_name(self) -> str:

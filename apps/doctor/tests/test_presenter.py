@@ -1305,3 +1305,245 @@ class TestCausticIngestionAlertInReport:
         text = presenter.build_text_report()
         assert "ingestão cáustica/corrosiva" in text.lower()
         assert "há 3 semanas" in text
+
+
+# ── Medication safety alert (Slice 001) ────────────────────────────────────
+
+
+def _medication(
+    *,
+    name: str = "Rivaroxabana",
+    medication_class: str = "anticoagulant",
+    use_status: str = "current",
+    source_text_hint: str = "Em uso de rivaroxabana 20 mg/dia",
+    last_dose_or_schedule: str | None = None,
+) -> dict[str, Any]:
+    """Build a structured medication item as produced by LLM1."""
+    return {
+        "name": name,
+        "normalized_name": None,
+        "medication_class": medication_class,
+        "use_status": use_status,
+        "last_dose_or_schedule": last_dose_or_schedule,
+        "source_text_hint": source_text_hint,
+    }
+
+
+class TestMedicationSafetyAlert:
+    """R3: alerta informativo de anticoagulantes/antiagregantes no relatório."""
+
+    def test_anticoagulant_generates_prominent_alert(self) -> None:
+        presenter = DoctorReportPresenter(
+            structured_data={
+                "preop_screening": {
+                    "medications_described": [
+                        _medication(
+                            name="Rivaroxabana",
+                            medication_class="anticoagulant",
+                            use_status="current",
+                            last_dose_or_schedule="20 mg/dia",
+                            source_text_hint="Em uso de rivaroxabana",
+                        ),
+                    ]
+                }
+            },
+            summary_text="",
+            suggested_action={},
+        )
+        report = presenter.build_report()
+        findings = report["blocks"]["achados_criticos"]
+
+        assert any("Medicamento relevante: Rivaroxabana" in line for line in findings)
+        assert any("anticoagulante" in line for line in findings)
+        assert any("Uso descrito: uso atual" in line for line in findings)
+        assert any("Conduta: confirmar manejo peri-procedimento." in line for line in findings)
+
+        # Posição proeminente: alerta antes das linhas de laboratório
+        med_idx = next(i for i, line in enumerate(findings) if "Medicamento relevante" in line)
+        hb_idx = next(i for i, line in enumerate(findings) if line.startswith("- Hb:"))
+        assert med_idx < hb_idx
+
+    def test_antiplatelet_generates_alert(self) -> None:
+        presenter = DoctorReportPresenter(
+            structured_data={
+                "preop_screening": {
+                    "medications_described": [
+                        _medication(name="Clopidogrel", medication_class="antiplatelet", use_status="current"),
+                    ]
+                }
+            },
+            summary_text="",
+            suggested_action={},
+        )
+        report = presenter.build_report()
+        findings = "\n".join(report["blocks"]["achados_criticos"])
+        assert "Medicamento relevante: Clopidogrel" in findings
+        assert "antiagregante" in findings
+
+    def test_suspended_antiplatelet_is_not_described_as_current(self) -> None:
+        presenter = DoctorReportPresenter(
+            structured_data={
+                "preop_screening": {
+                    "medications_described": [
+                        _medication(
+                            name="Clopidogrel",
+                            medication_class="antiplatelet",
+                            use_status="suspended",
+                            source_text_hint="Clopidogrel suspenso há 5 dias",
+                        ),
+                    ]
+                }
+            },
+            summary_text="",
+            suggested_action={},
+        )
+        report = presenter.build_report()
+        findings = "\n".join(report["blocks"]["achados_criticos"])
+        assert "suspenso" in findings
+        assert "uso atual" not in findings
+        assert "Medicamento relevante: Clopidogrel" in findings
+
+    def test_other_class_medication_has_no_alert_but_is_listed(self) -> None:
+        presenter = DoctorReportPresenter(
+            structured_data={
+                "preop_screening": {
+                    "medications_described": [
+                        _medication(
+                            name="Omeprazol",
+                            medication_class="other",
+                            use_status="current",
+                            source_text_hint="Uso contínuo de omeprazol",
+                        ),
+                    ]
+                }
+            },
+            summary_text="",
+            suggested_action={},
+        )
+        report = presenter.build_report()
+        findings = report["blocks"]["achados_criticos"]
+        assert not any("Medicamento relevante" in line for line in findings)
+        medication_lines = report["context"]["medication_lines"]
+        assert any("Omeprazol" in line for line in medication_lines)
+
+    def test_medication_informational_lines_in_context(self) -> None:
+        presenter = DoctorReportPresenter(
+            structured_data={
+                "preop_screening": {
+                    "medications_described": [
+                        _medication(
+                            name="Rivaroxabana",
+                            medication_class="anticoagulant",
+                            use_status="current",
+                            last_dose_or_schedule="20 mg/dia",
+                            source_text_hint="Em uso de rivaroxabana",
+                        ),
+                    ]
+                }
+            },
+            summary_text="",
+            suggested_action={},
+        )
+        report = presenter.build_report()
+        medication_lines = report["context"]["medication_lines"]
+        assert len(medication_lines) == 1
+        line = medication_lines[0]
+        assert "Rivaroxabana" in line
+        assert "anticoagulante" in line
+        assert "uso atual" in line
+        assert "20 mg/dia" in line
+        assert "Em uso de rivaroxabana" in line
+
+    def test_no_medications_preserves_existing_report(self) -> None:
+        base_payload = _make_complete_payload()
+        presenter_base = DoctorReportPresenter(
+            structured_data=base_payload,
+            summary_text="",
+            suggested_action={},
+        )
+        report_base = presenter_base.build_report()
+
+        payload_with_key = dict(base_payload)
+        payload_with_key["preop_screening"] = {"medications_described": []}
+        presenter_with_key = DoctorReportPresenter(
+            structured_data=payload_with_key,
+            summary_text="",
+            suggested_action={},
+        )
+        report_with_key = presenter_with_key.build_report()
+
+        assert report_with_key["blocks"] == report_base["blocks"]
+        assert report_with_key["context"]["medication_lines"] == []
+        assert report_base["context"]["medication_lines"] == []
+
+    def test_malformed_medications_payload_does_not_crash(self) -> None:
+        malformed_payloads: list[dict[str, Any]] = [
+            {},
+            {"preop_screening": {}},
+            {"preop_screening": {"medications_described": "not-a-list"}},
+            {"preop_screening": {"medications_described": ["not-a-dict"]}},
+        ]
+        for structured_data in malformed_payloads:
+            presenter = DoctorReportPresenter(
+                structured_data=structured_data,
+                summary_text="",
+                suggested_action={},
+            )
+            report = presenter.build_report()  # não deve levantar
+            assert report["context"]["medication_lines"] == []
+
+    def test_html_like_content_stays_plain_escapable_text(self) -> None:
+        """Nome/evidência HTML-like permanece texto normal — presenter não gera markup seguro."""
+        presenter = DoctorReportPresenter(
+            structured_data={
+                "preop_screening": {
+                    "medications_described": [
+                        _medication(
+                            name="<b>Rivaroxabana</b>",
+                            medication_class="anticoagulant",
+                            use_status="current",
+                            source_text_hint="<script>alert(1)</script>",
+                        ),
+                    ]
+                }
+            },
+            summary_text="",
+            suggested_action={},
+        )
+        text = presenter.build_text_report()
+        findings = "\n".join(presenter.build_report()["blocks"]["achados_criticos"])
+        assert "<b>Rivaroxabana</b>" in findings
+        assert "<script>alert(1)</script>" in text
+
+    def test_text_report_includes_medication_alert_and_lines(self) -> None:
+        presenter = DoctorReportPresenter(
+            structured_data={
+                "preop_screening": {
+                    "medications_described": [
+                        _medication(
+                            name="Rivaroxabana",
+                            medication_class="anticoagulant",
+                            use_status="current",
+                            source_text_hint="Em uso de rivaroxabana",
+                        ),
+                    ]
+                }
+            },
+            summary_text="",
+            suggested_action={},
+        )
+        text = presenter.build_text_report()
+        assert "Medicamento relevante: Rivaroxabana" in text
+        assert "Conduta: confirmar manejo peri-procedimento." in text
+        assert "Rivaroxabana: anticoagulante; uso atual" in text
+        assert "Medicamentos descritos:" in text
+
+    def test_text_report_without_medications_has_no_section(self) -> None:
+        presenter = DoctorReportPresenter(
+            structured_data={},
+            summary_text="",
+            suggested_action={},
+        )
+        text = presenter.build_text_report()
+        assert "Medicamentos descritos:" not in text
+        assert "Medicamento relevante" not in text
