@@ -70,7 +70,7 @@ def ensure_exam_type_allowed(exam_type: str | None) -> str:
     return value
 
 
-# ── Correção de tipo em revisão manual (Slice 006) ────────────────────────
+# ── Correção de tipo e confirmação NIR serializadas (Slice 006) ───────────
 
 # Reason codes do scope gate elegíveis para correção de tipo: o NIR vê
 # declarado/detectado e corrige o tipo no MESMO caso (spec exam-type-correction).
@@ -88,8 +88,28 @@ EXAM_TYPE_CORRECTION_REASONS: dict[str, str] = {
     "other": "Outro motivo",
 }
 
+# Reserva NIR exigida por correção e confirmação (mesmo protocolo, C1/C3).
+NIR_RECEIPT_CONTEXT: str = "nir_receipt"
+NIR_RECEIPT_ROLE: str = "nir"
 
-# Campos de reserva limpos após a correção (o estado saiu de
+# Atraso do retry automático (Schedule ONCE) quando o enqueue pós-commit falha.
+RECOVERY_SCHEDULE_DELAY_SECONDS: int = 60
+
+
+class EnqueueAfterCommitError(RuntimeError):
+    """Falha pós-commit ao enfileirar o reprocessamento LLM.
+
+    A correção já foi commitada (caso em ``LLM_STRUCT``). ``recovery_scheduled``
+    indica se um retry automático foi programado via ``Schedule`` ONCE.
+    """
+
+    def __init__(self, *, recovery_scheduled: bool, original: Exception) -> None:
+        super().__init__("Falha pós-commit ao enfileirar o reprocessamento LLM.")
+        self.recovery_scheduled = recovery_scheduled
+        self.original = original
+
+
+# Campos de reserva limpos após conclusão (o estado saiu de
 # WAIT_R1_CLEANUP_THUMBS; a reserva nir_receipt perdeu o objeto).
 _LOCK_CLEAR_FIELDS: tuple[str, ...] = (
     "locked_by",
@@ -99,6 +119,59 @@ _LOCK_CLEAR_FIELDS: tuple[str, ...] = (
     "lock_context",
     "lock_role",
 )
+
+
+def _validate_nir_actor(*, user: AccountsUser, active_role: str) -> None:
+    """Valida o ator NIR explicitamente (C2).
+
+    Exige ator autenticado, papel ativo NIR passado pela sessão e papel NIR
+    atribuído ao usuário. Nunca deriva o papel ativo de papéis existentes de
+    um usuário multi-role.
+    """
+    if user is None or not user.is_authenticated:
+        raise PermissionError("Ator não autenticado.")
+    if active_role != NIR_RECEIPT_ROLE:
+        raise PermissionError("Papel ativo não é NIR; operação recusada.")
+    if not user.roles.filter(name=NIR_RECEIPT_ROLE).exists():
+        raise PermissionError("Usuário não possui o papel NIR atribuído.")
+
+
+def _assert_receipt_lease(*, case: Case, user: AccountsUser, token: uuid.UUID) -> None:
+    """Valida a reserva nir_receipt completa na instância bloqueada (C3).
+
+    Owner correto, token exato, contexto ``nir_receipt``, papel ``nir`` e
+    lease não expirada. Rejeita também lock do mesmo usuário quando token,
+    contexto ou papel forem incompatíveis.
+    """
+    from apps.cases.services import assert_case_lock
+
+    assert_case_lock(case=case, user=user, token=token, context=NIR_RECEIPT_CONTEXT)
+    if case.lock_role != NIR_RECEIPT_ROLE:
+        raise PermissionError(f"Papel da reserva inválido: esperado '{NIR_RECEIPT_ROLE}', obtido '{case.lock_role}'.")
+
+
+def _clear_receipt_lease(case: Case) -> None:
+    """Limpa os campos de reserva nir_receipt após conclusão."""
+    for field in _LOCK_CLEAR_FIELDS:
+        setattr(case, field, None if field not in ("lock_context", "lock_role") else "")
+    case.save(update_fields=list(_LOCK_CLEAR_FIELDS))
+
+
+def _acquire_locked_case(
+    *,
+    case_id: uuid.UUID,
+    user: AccountsUser,
+    active_role: str,
+) -> Case:
+    """Valida o ator NIR (C2) e retorna a instância bloqueada e atualizada.
+
+    A linha é travada com ``select_for_update`` DENTRO da transação aberta
+    pelo serviço; a instância retornada é a fonte de verdade para validação
+    e mutação — nenhuma instância lida fora do lock é usada para salvar
+    (C1/C4).
+    """
+    _validate_nir_actor(user=user, active_role=active_role)
+    return Case.objects.select_for_update().get(pk=case_id)
 
 
 def is_exam_type_correction_eligible(case: Case) -> bool:
@@ -127,36 +200,38 @@ def correct_case_exam_type(
     case_id: uuid.UUID,
     new_exam_type: str,
     user: AccountsUser,
+    active_role: str,
+    lock_token: uuid.UUID,
     reason_code: str,
 ) -> Case:
     """Corrige o tipo de exame no mesmo caso e reprocessa (Slice 006).
 
     Transacional com ``select_for_update`` (R1): nenhuma atualização parcial.
-    Preserva fontes e limpa derivados (R3). Transição FSM nomeada de volta a
+    Ator NIR e reserva completa validados sob o row lock (C2/C3). Preserva
+    fontes e limpa derivados (R3). Transição FSM nomeada de volta a
     LLM_STRUCT (R2) com eventos append-only (R5). Após commit, enfileira o
     pipeline LLM exatamente uma vez — nunca reextrai PDF (R4); em falha de
-    enqueue o estado LLM_STRUCT permite recovery idempotente existente.
+    enqueue, agenda retry automático e levanta ``EnqueueAfterCommitError`` (C5).
 
     Raises:
         ValueError: caso inelegível, tipo inválido/igual ou reason_code inválido.
-        PermissionError: caso reservado ativamente por outro usuário.
+        PermissionError: ator sem papel NIR, papel ativo incorreto ou reserva
+            incompatível/ausente/expirada.
+        EnqueueAfterCommitError: enqueue pós-commit falhou (correção commitada).
     """
     validated_exam_type = validate_exam_type(new_exam_type)
     if reason_code not in EXAM_TYPE_CORRECTION_REASONS:
         raise ValueError("Motivo da correção inválido.")
+    if lock_token is None:
+        raise PermissionError("Token de reserva não fornecido.")
 
     with transaction.atomic():
-        case = Case.objects.select_for_update().get(pk=case_id)
-
+        case = _acquire_locked_case(case_id=case_id, user=user, active_role=active_role)
         if not is_exam_type_correction_eligible(case):
             raise ValueError("Caso não está em revisão manual elegível para correção de tipo.")
         if validated_exam_type == case.exam_type:
             raise ValueError("O novo tipo de exame deve ser diferente do tipo atual.")
-
-        now = timezone.now()
-        if case.locked_by is not None and case.locked_until is not None and case.locked_until > now:
-            if case.locked_by_id != user.pk:
-                raise PermissionError(f"Caso está reservado por outro usuário: {case.locked_by.display_name}")
+        _assert_receipt_lease(case=case, user=user, token=lock_token)
 
         old_exam_type = case.exam_type
 
@@ -190,18 +265,109 @@ def correct_case_exam_type(
 
         # A reserva nir_receipt perdeu o objeto (estado saiu de
         # WAIT_R1_CLEANUP_THUMBS): limpa para não vazar lock em LLM_STRUCT.
-        if case.locked_by is not None:
-            for field in _LOCK_CLEAR_FIELDS:
-                setattr(case, field, None if field not in ("lock_context", "lock_role") else "")
-            case.save(update_fields=list(_LOCK_CLEAR_FIELDS))
+        _clear_receipt_lease(case)
 
-    # R4 — fora da transação: um único enqueue LLM pós-commit. Se falhar, o
-    # estado LLM_STRUCT persiste e o recovery idempotente existente
-    # (execute_pdf_extraction em LLM_STRUCT) re-enfileira sem reextrair PDF.
+    # R4/C5 — fora da transação: um único enqueue LLM pós-commit. Em falha,
+    # agenda retry automático (Schedule ONCE) e levanta erro explícito.
+    _enqueue_pipeline_or_schedule_recovery(case.case_id)
+    return case
+
+
+def confirm_case_receipt(
+    *,
+    case_id: uuid.UUID,
+    user: AccountsUser,
+    active_role: str,
+    lock_token: uuid.UUID,
+) -> Case:
+    """Confirma recebimento do resultado final e conclui o caso (NIR).
+
+    Mesmo protocolo de row lock da correção (C1): ``transaction.atomic`` +
+    ``select_for_update`` no mesmo ``case_id``, ator NIR e reserva completa
+    validados na instância bloqueada e atualizada, e somente então as
+    transições FSM. Confirmação e correção nunca podem vencer juntas e
+    nenhuma usa instância obsoleta para salvar.
+
+    Preserva o fluxo legado: ciência de intercorrência pós-agendamento
+    respondida (``acknowledge_scheduled_post_acceptance_issue``) ou limpeza
+    comum (``cleanup_triggered`` → ``cleanup_completed``).
+
+    Raises:
+        ValueError: caso não está aguardando confirmação.
+        PermissionError: ator ou reserva incompatíveis.
+    """
+    from apps.cases.services import (
+        POST_SCHEDULE_ISSUE_STATUS_RESPONDED,
+        acknowledge_scheduled_post_acceptance_issue,
+    )
+
+    if lock_token is None:
+        raise PermissionError("Token de reserva não fornecido.")
+
+    with transaction.atomic():
+        case = _acquire_locked_case(case_id=case_id, user=user, active_role=active_role)
+        if case.status != CaseStatus.WAIT_R1_CLEANUP_THUMBS:
+            raise ValueError("Este caso não está aguardando confirmação de recebimento.")
+        _assert_receipt_lease(case=case, user=user, token=lock_token)
+
+        if case.post_schedule_issue_status == POST_SCHEDULE_ISSUE_STATUS_RESPONDED:
+            case = acknowledge_scheduled_post_acceptance_issue(case=case, user=user)
+        else:
+            case.cleanup_triggered(user=user)
+            case.save()
+            case.cleanup_completed(user=user)
+            case.save()
+
+        _clear_receipt_lease(case)
+
+    return Case.objects.get(pk=case.case_id)
+
+
+def _enqueue_pipeline_or_schedule_recovery(case_id: uuid.UUID) -> None:
+    """R4/C5: um único enqueue LLM pós-commit; em falha agenda retry automático.
+
+    O retry usa ``Schedule`` ONCE apontando para ``execute_pdf_extraction``:
+    em ``LLM_STRUCT`` ela re-enfileira o pipeline sem reextrair o PDF
+    (recovery idempotente existente). Nenhum enqueue de extração de PDF é
+    feito aqui. Se a programação do retry também falhar, o caso permanece em
+    ``LLM_STRUCT`` para recovery manual/documentado.
+    """
     from apps.pipeline.tasks import enqueue_pipeline
 
-    enqueue_pipeline(case.case_id)
-    return case
+    try:
+        enqueue_pipeline(case_id)
+    except Exception as exc:
+        logger.exception("enqueue_pipeline falhou para %s — agendando retry", case_id)
+        recovery_scheduled = False
+        try:
+            _schedule_pipeline_recovery(case_id)
+            recovery_scheduled = True
+        except Exception:
+            logger.exception("Falha ao agendar retry automático para %s", case_id)
+        raise EnqueueAfterCommitError(recovery_scheduled=recovery_scheduled, original=exc) from exc
+
+
+def _schedule_pipeline_recovery(case_id: uuid.UUID) -> None:
+    """Programa retry automático via django-q2 Schedule ONCE (C5).
+
+    Disparo único em ``RECOVERY_SCHEDULE_DELAY_SECONDS``: o scheduler do
+    qcluster (parte do processo worker em dev/prod) executa
+    ``execute_pdf_extraction``, que em ``LLM_STRUCT`` re-enfileira o pipeline
+    sem reextrair o PDF.
+    """
+    from datetime import timedelta
+
+    from django_q.models import Schedule
+    from django_q.tasks import schedule as q_schedule
+
+    q_schedule(
+        "apps.intake.tasks.execute_pdf_extraction",
+        str(case_id),
+        schedule_type=Schedule.ONCE,
+        repeats=1,
+        next_run=timezone.now() + timedelta(seconds=RECOVERY_SCHEDULE_DELAY_SECONDS),
+        name=f"slice006-recovery:{case_id}",
+    )
 
 
 # ── Validation ──────────────────────────────────────────────────────────

@@ -28,9 +28,7 @@ from apps.cases.services import (
     CASE_COMMUNICATION_MAX_LENGTH,
     ELIGIBLE_SUPPLEMENTAL_STATUSES,
     CaseCommunicationError,
-    acknowledge_scheduled_post_acceptance_issue,
     add_supplemental_case_attachment,
-    assert_case_lock,
     claim_case_lock,
     compute_lock_display,
     expire_stale_locks_for_statuses,
@@ -48,6 +46,8 @@ from apps.cases.services import (
 from .forms import CaseUploadForm
 from .services import (
     EXAM_TYPE_CORRECTION_REASONS,
+    EnqueueAfterCommitError,
+    confirm_case_receipt,
     correct_case_exam_type,
     is_colonoscopy_intake_enabled,
     is_exam_type_correction_eligible,
@@ -1047,23 +1047,24 @@ def serve_pdf(request: HttpRequest, case_id: uuid.UUID) -> HttpResponseBase:
 def confirm_receipt(request: HttpRequest, case_id: uuid.UUID) -> HttpResponse:
     """Confirma recebimento do resultado final e conclui o caso.
 
-    Qualquer NIR autorizado pode confirmar recebimento de um resultado
-    pendente (WAIT_R1_CLEANUP_THUMBS), desde que possua a reserva (lock)
-    válida com token e contexto 'nir_receipt'.
-
-    Após confirmação, o caso vai para CLEANED e não fica mais acessível
-    pela rota operacional NIR — redireciona para a lista.
+    View fina: parseia o token, delega ao serviço transacional
+    ``confirm_case_receipt`` — que serializa com a correção de tipo pelo
+    MESMO row lock (``select_for_update``) e revalida estado + reserva na
+    instância bloqueada e atualizada — traduz erros esperados e redireciona.
+    Nenhuma regra de negócio duplicada na view e nenhum save sobre instância
+    obsoleta.
     """
     if request.method != "POST":
         return redirect("intake:case_detail", case_id=case_id)
 
     case = get_object_or_404(Case, case_id=case_id)
 
+    # Pré-checagem apenas para mensagem amigável; a validação autoritativa
+    # ocorre no serviço, sob o row lock.
     if case.status != CaseStatus.WAIT_R1_CLEANUP_THUMBS:
         messages.warning(request, "Este caso não está aguardando confirmação de recebimento.")
         return redirect("intake:case_detail", case_id=case.case_id)
 
-    # Validate lock token
     raw_token = request.POST.get("lock_token", "")
     try:
         token = uuid.UUID(raw_token) if raw_token else None
@@ -1077,44 +1078,22 @@ def confirm_receipt(request: HttpRequest, case_id: uuid.UUID) -> HttpResponse:
         )
         return redirect("intake:case_detail", case_id=case.case_id)
 
-    # Check lock validity before proceeding
+    user = request.user
+    assert user.is_authenticated  # garantido por @login_required
+
     try:
-        assert_case_lock(
-            case=case,
-            user=request.user,
-            token=token,
-            context="nir_receipt",
+        confirm_case_receipt(
+            case_id=case.case_id,
+            user=user,
+            active_role=request.session.get("active_role", ""),
+            lock_token=token,
         )
     except PermissionError as exc:
         messages.warning(request, str(exc))
         return redirect("intake:case_detail", case_id=case.case_id)
-
-    # Execute FSM transitions
-    if case.post_schedule_issue_status == "responded":
-        acknowledge_scheduled_post_acceptance_issue(case=case, user=request.user)
-    else:
-        case.cleanup_triggered(user=request.user)
-        case.save()
-        case.cleanup_completed(user=request.user)
-        case.save()
-
-    # Clear lock after completion
-    case.locked_by = None
-    case.locked_at = None
-    case.locked_until = None
-    case.lock_token = None
-    case.lock_context = ""
-    case.lock_role = ""
-    case.save(
-        update_fields=[
-            "locked_by",
-            "locked_at",
-            "locked_until",
-            "lock_token",
-            "lock_context",
-            "lock_role",
-        ]
-    )
+    except ValueError as exc:
+        messages.warning(request, str(exc))
+        return redirect("intake:case_detail", case_id=case.case_id)
 
     messages.success(request, "Recebimento confirmado. Caso concluído.")
     return redirect("intake:my_cases")
@@ -1125,10 +1104,11 @@ def confirm_receipt(request: HttpRequest, case_id: uuid.UUID) -> HttpResponse:
 def exam_type_correction(request: HttpRequest, case_id: uuid.UUID) -> HttpResponse:
     """POST: corrige o tipo de exame de um caso em revisão manual (Slice 006).
 
-    Requer role NIR ativa, CSRF e reserva (lock) ``nir_receipt`` válida — a
-    mesma reserva usada pela confirmação de recebimento, garantindo exclusão
-    mútua entre as duas ações. Em caso inelegível o controle não existe na
-    UI e o POST retorna 404 seguro, sem qualquer mutação.
+    View fina: parseia token e papel ativo da sessão, delega ao serviço
+    transacional ``correct_case_exam_type`` (que serializa com a confirmação
+    pelo MESMO row lock e valida ator + reserva sob o lock) e traduz erros.
+    Em caso inelegível o controle não existe na UI e o POST retorna 404
+    seguro, sem qualquer mutação.
     """
     if request.method != "POST":
         raise Http404
@@ -1154,12 +1134,6 @@ def exam_type_correction(request: HttpRequest, case_id: uuid.UUID) -> HttpRespon
         )
         return redirect("intake:case_detail", case_id=case.case_id)
 
-    try:
-        assert_case_lock(case=case, user=user, token=token, context="nir_receipt")
-    except PermissionError as exc:
-        messages.warning(request, str(exc))
-        return redirect("intake:case_detail", case_id=case.case_id)
-
     new_exam_type = request.POST.get("exam_type", "")
     reason_code = request.POST.get("reason_code", "")
     try:
@@ -1167,6 +1141,8 @@ def exam_type_correction(request: HttpRequest, case_id: uuid.UUID) -> HttpRespon
             case_id=case.case_id,
             new_exam_type=new_exam_type,
             user=user,
+            active_role=request.session.get("active_role", ""),
+            lock_token=token,
             reason_code=reason_code,
         )
     except PermissionError as exc:
@@ -1175,13 +1151,24 @@ def exam_type_correction(request: HttpRequest, case_id: uuid.UUID) -> HttpRespon
     except ValueError as exc:
         messages.warning(request, str(exc))
         return redirect("intake:case_detail", case_id=case.case_id)
-    except Exception:
-        logger.exception("Falha ao reprocessar caso corrigido %s", case_id)
-        messages.error(
-            request,
-            "Tipo de exame corrigido, mas o reprocessamento automático falhou. "
-            "O sistema retomará o processamento automaticamente.",
-        )
+    except EnqueueAfterCommitError as exc:
+        # Falha PÓS-commit: a correção foi aplicada (LLM_STRUCT). Mensagem
+        # verdadeira: retry automático programado ou erro operacional explícito
+        # — sem prometer retomada automática inexistente.
+        if exc.recovery_scheduled:
+            messages.error(
+                request,
+                "Tipo de exame corrigido, mas o reprocessamento automático não pôde ser "
+                "agendado imediatamente. Uma nova tentativa automática foi programada; "
+                "o caso permanece em análise automática (LLM_STRUCT).",
+            )
+        else:
+            messages.error(
+                request,
+                "Tipo de exame corrigido, mas o reprocessamento automático não pôde ser "
+                "agendado. O caso permanece em análise automática (LLM_STRUCT); acione o "
+                "suporte para reenfileirar o pipeline manualmente.",
+            )
         return redirect("intake:case_detail", case_id=case.case_id)
 
     messages.success(
