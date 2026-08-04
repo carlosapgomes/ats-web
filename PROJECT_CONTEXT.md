@@ -178,6 +178,7 @@ static/          # css/app.css (paleta hospitalar), js/upload.js, js/password-to
   - `openspec/archive/align-llm-contract-and-doctor-routing/` (7 slices)
   - `openspec/archive/post-schedule-intercurrence/` (5 slices + follow-ups)
   - `openspec/archive/post-acceptance-intercurrence/` (3 slices + hardenings — notices operacionais iniciais duráveis até ACK; intercorrência pós-aceitação nos modos `scheduled` e `operational_notice`; ciclos UUID auditáveis; fila/badge CHD deduplicados; ACK operacional sem alterar FSM ou campos `appointment_*`; compatibilidade com eventos e storage legados preservada).
+  - `openspec/archive/schedule-pediatric-em-before-nir-handoff/` (2 slices — novas decisões de compartilhamento/entrada pela EM Pediátrica persistem `pediatric_appt` e percorrem o agendamento CHD (confirmar data/hora ou negar com motivo) antes do retorno ao NIR com via de entrada + data/hora; `pediatric_em` histórico permanece ciência operacional sem backfill; intercorrência pós-aceitação do novo código usa contexto `scheduled` (`CLEANED → WAIT_APPT`); histórico CHD inclui `scheduled` + `pediatric_appt` sem promover `pediatric_em`; dashboard atribui `WAIT_APPT` pediátrico ao agendador e consolida EM Pediátrica (`pediatric_em` + `pediatric_appt`) sem dupla contagem; nenhum model/migration/FSM/rota/permissão alterado).
   - `openspec/archive/consolidate-duplicated-test-fixtures/` (1 slice)
   - `openspec/archive/align-uuid-route-parameter-annotations/` (1 slice)
   - `openspec/archive/release-lock-on-successful-handoff/` (1 slice)
