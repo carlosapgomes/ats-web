@@ -211,6 +211,9 @@ class DoctorReportPresenter:
     recent_denial_context: dict[str, Any] | None = None
     source_text: str = ""
     priority_signals: list[dict[str, Any]] = field(default_factory=list)
+    # Slice 003 (R6): declared exam type drives the canonical procedure name.
+    # Never infer the type from the legacy ``eda`` envelope block.
+    exam_type: str = "eda"
 
     # ── Public API ───────────────────────────────────────────────────────
 
@@ -684,15 +687,14 @@ class DoctorReportPresenter:
         }
 
     def _resolve_canonical_procedure_name(self) -> str:
-        """Resolve the canonical procedure name.
+        """Resolve the canonical procedure name from the declared exam type.
 
-        Corpo estranho as the primary subtype (requested procedure or rulebook)
-        always keeps its procedural name, even when ecoendoscopia/dilatação/
-        gastrostomia signals coexist; the coexisting signals remain visible in
-        badges, alerts and context line. Otherwise procedural signals coexist
-        without a combined enum (ecoendoscopia → dilatação esofágica →
-        gastrostomia), and single signals/structured subtypes keep existing names.
+        Colonoscopy is identified by ``Case.exam_type`` (R6): the canonical
+        procedure never says EDA and the legacy subtype envelope is not used
+        as the type source. EDA keeps the existing subtype-aware names.
         """
+        if self.exam_type == "colonoscopy":
+            return "Colonoscopia"
         subtype = self._extract_eda_subtype()
         if subtype == "foreign_body":
             return "EDA para retirada de corpo estranho"

@@ -9,11 +9,14 @@ from __future__ import annotations
 import logging
 import uuid
 
+from apps.cases.exam_profiles import get_exam_profile
 from apps.cases.models import Case
 from apps.cases.priority_signals import resolve_priority_signals
 from apps.llm.models import PromptTemplate
 from apps.pipeline.llm import LlmClient
 from apps.pipeline.llm1_service import (
+    COLONOSCOPY_LLM1_DEFAULT_SYSTEM_PROMPT,
+    COLONOSCOPY_LLM1_DEFAULT_USER_PROMPT,
     LLM1_DEFAULT_SYSTEM_PROMPT,
     LLM1_DEFAULT_USER_PROMPT,
     Llm1Service,
@@ -23,7 +26,7 @@ from apps.pipeline.policy import (
     EdaPolicyPrecheckInput,
     Llm2PolicyAlignmentInput,
     Llm2SuggestionInput,
-    evaluate_eda_preop_policy,
+    evaluate_preop_policy,
     reconcile_eda_policy,
     synthesize_eda_support_context,
 )
@@ -101,8 +104,9 @@ def _run_llm1_step(
 ) -> None:
     """Run LLM1: structured data extraction + persist artifacts + audit events."""
 
-    sp = system_prompt or _get_prompt_content("llm1_system")
-    ut = user_template or _get_prompt_content("llm1_user")
+    profile = get_exam_profile(case.exam_type)
+    sp = system_prompt or _get_prompt_content(profile.llm1_system_prompt_name)
+    ut = user_template or _get_prompt_content(profile.llm1_user_prompt_name)
 
     service = Llm1Service(client)
     result = service.run(
@@ -111,23 +115,27 @@ def _run_llm1_step(
         extracted_text=case.extracted_text,
         system_prompt=sp,
         user_prompt_template=ut,
+        exam_type=case.exam_type,
     )
 
     case.structured_data = result.structured_data
     case.summary_text = result.summary_text
     # Persist derived canonical signals together with the validated LLM1
     # artifacts, BEFORE the scope gate/LLM2. Views never redetect signals
-    # from raw text; they consume this persisted projection.
+    # from raw text; they consume this persisted projection. The declared
+    # exam profile restricts which signals are persisted (R7).
     case.priority_signals = resolve_priority_signals(
         structured_data=result.structured_data,
         source_text=case.extracted_text,
+        exam_type=case.exam_type,
     )
     case.save()
 
 
 def _build_llm1_ok_payload(case: Case) -> dict[str, object]:
-    """Code-only audit payload for LLM1_OK: summary + signal codes, no raw text."""
+    """Code-only audit payload for LLM1_OK: type + summary + signal codes, no raw text."""
     return {
+        "exam_type": case.exam_type,
         "summary_text": case.summary_text,
         "priority_signal_codes": [signal["code"] for signal in case.priority_signals],
     }
@@ -146,16 +154,19 @@ def _run_scope_and_llm2(
 
     structured_data: dict[str, object] = case.structured_data
 
+    profile = get_exam_profile(case.exam_type)
+
     # ── 1. Scope detection ───────────────────────────────────────
     scope_result = classify_exam_scope(
         llm1_structured_data=structured_data,
         cleaned_text=case.extracted_text,
         case_id=str(case.case_id),
         agency_record_number=case.agency_record_number,
+        expected_exam_type=case.exam_type,
     )
 
     if scope_result is not None:
-        # Non-EDA or unknown — manual review, skip LLM2
+        # Mixed / mismatch / non-EDA / unknown — manual review, skip LLM2
         case.suggested_action = scope_result
         case._record_event("LLM1_OK", payload=_build_llm1_ok_payload(case))
         case.save()  # persists suggested_action + LLM1_OK before scope events
@@ -176,19 +187,23 @@ def _run_scope_and_llm2(
     case.llm1_complete(success=True, user=None, payload=_build_llm1_ok_payload(case))
     case.save()
 
-    # ── 3. Preop policy (deterministic) ─────────────────────────
-    preop_decision = evaluate_eda_preop_policy(structured_data=structured_data)
+    # ── 3. Preop policy (deterministic, profile-dispatched) ─────
+    preop_decision = evaluate_preop_policy(
+        structured_data=structured_data,
+        exam_type=case.exam_type,
+    )
     case._record_event(
         "EDA_PREOP_POLICY_DECISION",
-        payload=preop_decision,
+        payload={**preop_decision, "exam_type": case.exam_type},
     )
 
-    # ── 4. Prior case lookup ────────────────────────────────────
+    # ── 4. Prior case lookup (same exam type — R7) ──────────────
     from apps.pipeline.prior_case import lookup_prior_case_context
 
     prior_context = lookup_prior_case_context(
         case_id=case.case_id,
         agency_record_number=case.agency_record_number,
+        exam_type=case.exam_type,
     )
 
     # Serializa prior_case para dict (ou None) para passar ao LLM2
@@ -215,8 +230,8 @@ def _run_scope_and_llm2(
         )
 
     # ── 5. LLM2 suggestion ──────────────────────────────────────
-    sp2 = llm2_system_prompt or _get_prompt_content("llm2_system")
-    ut2 = llm2_user_template or _get_prompt_content("llm2_user")
+    sp2 = llm2_system_prompt or _get_prompt_content(profile.llm2_system_prompt_name)
+    ut2 = llm2_user_template or _get_prompt_content(profile.llm2_user_prompt_name)
 
     service2 = Llm2Service(client)
     result2 = service2.run(
@@ -233,6 +248,7 @@ def _run_scope_and_llm2(
         structured_data=structured_data,
         llm2_suggested_action=result2.suggested_action,
         preop_decision=preop_decision,
+        allow_foreign_body_exception=profile.allows_foreign_body_exception,
     )
 
     # ── 7. Support synthesis ────────────────────────────────────
@@ -264,14 +280,21 @@ def _apply_reconciliation(
     structured_data: dict[str, object],
     llm2_suggested_action: dict[str, object],
     preop_decision: dict[str, object],
+    allow_foreign_body_exception: bool = True,
 ) -> dict[str, object]:
     """Reconcile LLM2 output with deterministic preop policy rules.
 
     Returns a merged suggested_action dict with reconciliation applied
     and contradictions recorded.
+
+    ``allow_foreign_body_exception`` gates EDA's foreign-body alignment
+    overrides; colonoscopy never applies them (R4).
     """
     # Extract precheck inputs from LLM1 structured_data
-    precheck = _build_policy_precheck(structured_data)
+    precheck = _build_policy_precheck(
+        structured_data,
+        allow_foreign_body_exception=allow_foreign_body_exception,
+    )
 
     # Extract LLM2 alignment from its output
     llm2_input = _build_llm2_suggestion_input(llm2_suggested_action)
@@ -309,14 +332,24 @@ def _apply_reconciliation(
     return reconciled
 
 
-def _build_policy_precheck(structured_data: dict[str, object]) -> EdaPolicyPrecheckInput:
-    """Build EdaPolicyPrecheckInput from LLM1 structured_data."""
+def _build_policy_precheck(
+    structured_data: dict[str, object],
+    *,
+    allow_foreign_body_exception: bool = True,
+) -> EdaPolicyPrecheckInput:
+    """Build EdaPolicyPrecheckInput from LLM1 structured_data.
+
+    When the profile does not allow the foreign-body exception (colonoscopy),
+    the foreign-body indication does not unlock EDA's alignment overrides (R4).
+    """
     eda = _get_dict(structured_data, "eda")
     preop = _get_dict(structured_data, "preop_screening")
     rulebook = _get_dict(preop, "rulebook_signals")
 
     excluded = _get_bool(rulebook, "excluded_from_eda_flow")
     indication = str(eda.get("indication_category", "") or "")
+    if not allow_foreign_body_exception and indication == "foreign_body":
+        indication = ""
 
     return EdaPolicyPrecheckInput(
         excluded_from_eda_flow=excluded,
@@ -362,6 +395,8 @@ def _get_prompt_content(name: str) -> str:
     fallbacks = {
         "llm1_system": LLM1_DEFAULT_SYSTEM_PROMPT,
         "llm1_user": LLM1_DEFAULT_USER_PROMPT,
+        "colonoscopy_llm1_system": COLONOSCOPY_LLM1_DEFAULT_SYSTEM_PROMPT,
+        "colonoscopy_llm1_user": COLONOSCOPY_LLM1_DEFAULT_USER_PROMPT,
         "llm2_system": (
             "Voce e um assistente de apoio a decisao clinica para triagem de "
             "Endoscopia Digestiva Alta (EDA). Retorne APENAS JSON valido que siga estritamente "
@@ -373,6 +408,18 @@ def _get_prompt_content(name: str) -> str:
         "llm2_user": (
             "Tarefa: sugerir accept/deny e recomendacao de suporte para triagem EDA "
             "usando dados estruturados do LLM1 e contexto de caso anterior."
+        ),
+        "colonoscopy_llm2_system": (
+            "Voce e um assistente de apoio a decisao clinica para triagem de "
+            "Colonoscopia (endoscopia digestiva baixa). Retorne APENAS JSON valido que siga "
+            "estritamente o schema_version 1.1. Escreva todos os campos narrativos em "
+            "portugues brasileiro (pt-BR). Nao use palavras em ingles nos campos narrativos. "
+            "Use apenas valores de enum permitidos para suggestion e support_recommendation. "
+            "Nao inclua markdown, blocos de codigo ou chaves extras."
+        ),
+        "colonoscopy_llm2_user": (
+            "Tarefa: sugerir accept/deny e recomendacao de suporte para triagem de "
+            "Colonoscopia usando dados estruturados do LLM1 e contexto de caso anterior."
         ),
     }
     return fallbacks.get(name, "{case_id}")

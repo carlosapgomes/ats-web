@@ -11,6 +11,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Literal, cast
 
+from apps.cases.exam_profiles import get_exam_profile
+
 DecisionValue = Literal["accept", "deny", "excluded", "manual_review_required"]
 SupportedEdaSubtype = Literal[
     "standard",
@@ -62,14 +64,43 @@ class ContraindicationThresholds:
     profile_name: str
 
 
+def evaluate_preop_policy(*, structured_data: dict[str, object], exam_type: str) -> dict[str, object]:
+    """Evaluate deterministic pre-procedure criteria for a declared exam type.
+
+    Profile-dispatched (design D3 / ADR-0003): EDA and colonoscopy share the
+    same minimum exams, thresholds and conditional gates. The foreign-body
+    exception is exclusive to EDA (R4).
+    """
+    profile = get_exam_profile(exam_type)
+    return _evaluate_common_preop_policy(
+        structured_data=structured_data,
+        allow_foreign_body_exception=profile.allows_foreign_body_exception,
+        procedure_label=profile.label,
+    )
+
+
 def evaluate_eda_preop_policy(*, structured_data: dict[str, object]) -> dict[str, object]:
-    """Evaluate deterministic EDA pre-procedure criteria from structured extraction."""
+    """Legacy entry point: EDA profile."""
+    return evaluate_preop_policy(structured_data=structured_data, exam_type="eda")
+
+
+def _evaluate_common_preop_policy(
+    *,
+    structured_data: dict[str, object],
+    allow_foreign_body_exception: bool,
+    procedure_label: str,
+) -> dict[str, object]:
+    """Shared deterministic pre-procedure evaluation across profiles (R4).
+
+    ``procedure_label`` is used only in persisted reason texts so a
+    colonoscopy case never asserts the EDA rulebook (R4).
+    """
 
     preop_payload = _extract_dict(structured_data, "preop_screening")
     pediatric_flag = _is_pediatric(structured_data)
     subtype = _extract_supported_eda_subtype(structured_data=structured_data)
 
-    if subtype == "foreign_body":
+    if subtype == "foreign_body" and allow_foreign_body_exception:
         return EdaPreopDecision(
             decision="accept",
             reason_code="foreign_body_exception",
@@ -86,7 +117,7 @@ def evaluate_eda_preop_policy(*, structured_data: dict[str, object]) -> dict[str
         reason_code, exam_label = minimum_exam_failure
         return _deny(
             reason_code=reason_code,
-            reason_text=(f"Exame mínimo obrigatório ausente ou insuficiente para EDA: {exam_label}."),
+            reason_text=(f"Exame mínimo obrigatório ausente ou insuficiente para {procedure_label}: {exam_label}."),
             structured_data=structured_data,
         )
 
@@ -95,7 +126,9 @@ def evaluate_eda_preop_policy(*, structured_data: dict[str, object]) -> dict[str
     if hb is not None and hb < thresholds.hb_min:
         return _deny(
             reason_code="hb_below_threshold",
-            reason_text=(f"HB < {thresholds.hb_min:g} para perfil {thresholds.profile_name} do rulebook EDA."),
+            reason_text=(
+                f"HB < {thresholds.hb_min:g} para perfil {thresholds.profile_name} dos critérios de {procedure_label}."
+            ),
             structured_data=structured_data,
         )
 
@@ -104,7 +137,8 @@ def evaluate_eda_preop_policy(*, structured_data: dict[str, object]) -> dict[str
         return _deny(
             reason_code="platelets_below_threshold",
             reason_text=(
-                f"Plaquetas < {thresholds.platelets_min} para perfil {thresholds.profile_name} do rulebook EDA."
+                f"Plaquetas < {thresholds.platelets_min} para perfil {thresholds.profile_name} "
+                f"dos critérios de {procedure_label}."
             ),
             structured_data=structured_data,
         )
@@ -113,7 +147,10 @@ def evaluate_eda_preop_policy(*, structured_data: dict[str, object]) -> dict[str
     if rni is not None and rni > thresholds.rni_max:
         return _deny(
             reason_code="inr_above_threshold",
-            reason_text=(f"RNI/INR > {thresholds.rni_max:g} para perfil {thresholds.profile_name} do rulebook EDA."),
+            reason_text=(
+                f"RNI/INR > {thresholds.rni_max:g} para perfil {thresholds.profile_name} "
+                f"dos critérios de {procedure_label}."
+            ),
             structured_data=structured_data,
         )
 
@@ -132,7 +169,7 @@ def evaluate_eda_preop_policy(*, structured_data: dict[str, object]) -> dict[str
         decision="accept",
         reason_code="criteria_met",
         reason_text=_with_pediatric_signal(
-            "Critérios determinísticos do rulebook EDA atendidos nesta etapa.",
+            f"Critérios determinísticos pré-operatórios de {procedure_label} atendidos nesta etapa.",
             pediatric_flag,
         ),
         evidence_spans=_extract_evidence_spans(preop_payload),

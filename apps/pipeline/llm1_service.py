@@ -64,7 +64,8 @@ Valores fixos e enums obrigatorios:
 - patient.sex: apenas "M", "F" ou "Outro"; nunca "masculino"/"feminino".
 - Todos os EvidenceFlag devem ser strings "yes", "no" ou "unknown"; nunca true/false.
 - transfusion.had_transfusion: apenas "yes" ou "no".
-- eda.requested_procedure.subtype e preop_screening.rulebook_signals.eda_subtype: standard, gastrostomy, esophageal_dilation, foreign_body, echoendoscopy ou unknown.
+- eda.requested_procedure.subtype e preop_screening.rulebook_signals.eda_subtype: standard, gastrostomy, esophageal_dilation, foreign_body, echoendoscopy ou unknown. Para colonoscopia, manter standard ou unknown.
+- preop_screening.exam_type: "eda", "colonoscopy" (colonoscopia), "non_eda" ou "unknown".
 - eda.asa.bucket: I-II, III ou mais ou insufficient_data.
 
 Campos obrigatorios por bloco:
@@ -97,7 +98,7 @@ triage_summary, result_excerpt, exam_name, key_findings, labs no topo.
 
 LLM1_DEFAULT_USER_PROMPT = (
     "Tarefa: extrair dados estruturados e gerar resumo conciso de triagem "
-    "a partir de um relatorio clinico para triagem EDA. Exigir evidencia "
+    "a partir de um relatorio clinico para triagem EDA.Exigir evidencia "
     "textual explicita para cada campo objetivo. Quando nao houver evidencia "
     "textual, retornar unknown (ou null para numericos). Preencher "
     "preop_screening.rulebook_signals para o novo rulebook, incluindo exames "
@@ -149,6 +150,74 @@ LLM1_DEFAULT_USER_PROMPT = (
 )
 
 
+# ── Colonoscopy defaults (Slice 003) ────────────────────────────────────────
+# Separate administrable prompts (design D5 / ADR-0003). Same strict schema
+# contract, same exams and medications as EDA, pt-BR, but colonoscopy framing:
+# exam_type=colonoscopy, subtype standard/unknown, no foreign-body exception,
+# no prep/biopsy/diagnostic-therapeutic gate.
+
+COLONOSCOPY_LLM1_DEFAULT_SYSTEM_PROMPT = (
+    "Voce e um assistente clinico para triagem de Colonoscopia "
+    "(endoscopia digestiva baixa). Retorne APENAS JSON valido que siga "
+    "estritamente o schema_version 1.1. Escreva todos os campos narrativos em "
+    "portugues brasileiro (pt-BR). Nao use palavras em ingles nos campos "
+    "narrativos. Nao inclua markdown, blocos de codigo ou chaves extras. Nao "
+    "invente fatos; use null/unknown quando faltar informacao. "
+    "Classifique preop_screening.exam_type=colonoscopy quando a solicitacao atual "
+    "for colonoscopia; requested_procedure.subtype e rulebook_signals.eda_subtype "
+    "permanecem standard ou unknown (sem subtipo especial de colonoscopia). "
+    "Nao avalie preparo intestinal, biopsia ou carater diagnostico/terapeutico "
+    "como gate de triagem. Nao aplique excecao de corpo estranho. "
+    "Estime ASA pratico apenas nos buckets I-II, III ou mais, ou "
+    "insufficient_data, sempre de forma conservadora e baseada no texto. "
+    "Nao inferir Mallampati ou risco OSA. "
+    "Extraia origin_context (cidade/hospital/unidade/UF) quando disponivel. "
+    "Identifique tracked_exams com recencia por data/hora ou posicao textual. "
+    "Registre had_transfusion como binario (yes/no); ausencia de evidencia "
+    "de transfusao deve ser tratada como 'no'. "
+    "Extraia medicamentos explicitamente descritos (medications_described) com "
+    "evidencia por item, classificando anticoagulantes/antiagregantes para alerta "
+    "informativo. Nao inferir medicamento por comorbidade, idade, exame ou "
+    "diagnostico; nao inventar ultima dose; lista vazia na ausencia."
+)
+
+COLONOSCOPY_LLM1_DEFAULT_USER_PROMPT = (
+    "Tarefa: extrair dados estruturados e gerar resumo conciso de triagem "
+    "a partir de um relatorio clinico para triagem de Colonoscopia "
+    "(endoscopia digestiva baixa). Exigir evidencia textual explicita para cada "
+    "campo objetivo. Quando nao houver evidencia textual, retornar unknown (ou "
+    "null para numericos). Preencher preop_screening.exam_type=colonoscopy quando "
+    "a solicitacao atual for colonoscopia; requested_procedure.subtype e "
+    "rulebook_signals.eda_subtype permanecem standard ou unknown. Nao avaliar "
+    "preparo intestinal, biopsia ou carater diagnostico/terapeutico como gate de "
+    "triagem; nao aplicar excecao de corpo estranho. Preencher "
+    "preop_screening.rulebook_signals para o rulebook compartilhado, incluindo "
+    "exames minimos, exames condicionais e contexto de paciente pediatrico. "
+    "Incluir preop_screening.evidence_spans com field_path e excerpt sempre que "
+    "houver evidencia. "
+    "Extrair comorbidades descritas (comorbidities_described) como lista de "
+    "objetos {name, source_text_hint}, apenas condicoes cronicas descritas "
+    "explicitamente; retornar lista vazia quando negadas/ausentes. "
+    "Extrair origin_context (cidade/hospital/unidade/UF) quando disponivel. "
+    "Identificar exames rastreados (tracked_exams) com recencia por data/hora ou "
+    "posicao textual; incluir apenas exames efetivamente realizados; preencher "
+    "exam_datetime_iso quando houver data. Registrar had_transfusion como "
+    "binario (yes/no); ausencia de evidencia de transfusao deve ser tratada "
+    "como 'no'. "
+    "Extrair medicamentos explicitamente descritos (medications_described) como "
+    "lista de objetos {name, normalized_name, medication_class, use_status, "
+    "last_dose_or_schedule, source_text_hint}. Somente medicamentos descritos "
+    "explicitamente; cada item exige source_text_hint nao vazio. Destacar "
+    "anticoagulantes (anticoagulant) e antiagregantes (antiplatelet) para alerta "
+    "informativo. Nao inferir medicamento por comorbidade, idade, exame ou "
+    "diagnostico; nao inventar ultima dose; classificar uso como current, "
+    "recent, historical, suspended ou unknown; retornar lista vazia na ausencia. "
+    "Medicamentos nunca alteram sugestao/decisao e nunca geram orientacao de "
+    "suspensao ou janela farmacologica.\n\n"
+    f"{LLM1_REQUIRED_SCHEMA_INSTRUCTIONS}"
+)
+
+
 # ── Exceptions ──────────────────────────────────────────────────────────────
 
 
@@ -193,6 +262,7 @@ class Llm1Service:
         extracted_text: str,
         system_prompt: str,
         user_prompt_template: str,
+        exam_type: str = "eda",
     ) -> Llm1Result:
         """Execute LLM1 extraction with full Pydantic v2 validation.
 
@@ -202,6 +272,8 @@ class Llm1Service:
             extracted_text: Raw text extracted from the medical report.
             system_prompt: System prompt for the LLM.
             user_prompt_template: Base user prompt template (before rendering).
+            exam_type: Declared exam type used to select the scope instructions
+                and prompt audit names (Slice 003). Defaults to EDA.
 
         Returns:
             Llm1Result with structured_data (model_dump mode="json"),
@@ -217,6 +289,7 @@ class Llm1Service:
             case_id=case_id,
             agency_record_number=agency_record_number,
             clean_text=extracted_text,
+            exam_type=exam_type,
         )
 
         # Call the LLM
@@ -254,14 +327,43 @@ class Llm1Service:
         return Llm1Result(
             structured_data=structured,
             summary_text=validated.summary.one_liner,
-            prompt_system_name="llm1_system",
+            prompt_system_name=("colonoscopy_llm1_system" if exam_type == "colonoscopy" else "llm1_system"),
             prompt_system_version=0,
-            prompt_user_name="llm1_user",
+            prompt_user_name=("colonoscopy_llm1_user" if exam_type == "colonoscopy" else "llm1_user"),
             prompt_user_version=0,
         )
 
 
 # ── Helpers ─────────────────────────────────────────────────────────────────
+
+
+def _render_exam_scope_instructions(*, exam_type: str) -> str:
+    """Escopo do exame conforme perfil de procedimento (Slice 003).
+
+    EDA preserva as instruções canônicas legadas. Colonoscopia declara o novo
+    tipo suportado, subtipo standard/unknown, sem preparo/biópsia/caráter
+    diagnóstico-terapêutico como gate e sem exceção de corpo estranho (R2/R4).
+    """
+    if exam_type == "colonoscopy":
+        return (
+            "Para escopo do exame: classificar preop_screening.exam_type=colonoscopy quando a "
+            "solicitacao atual for colonoscopia (colonoscopia, endoscopia digestiva baixa, "
+            "videocolonoendoscopia, colonoscopia diagnostica ou terapeutica); usar eda apenas "
+            "para endoscopia digestiva alta e subtipos suportados; usar non_eda para "
+            "solicitacoes fora de escopo (ex.: CPRE); usar unknown quando o tipo permanecer "
+            "indefinido. Para colonoscopia, requested_procedure.subtype e "
+            "rulebook_signals.eda_subtype devem permanecer standard ou unknown; nao avaliar "
+            "preparo intestinal, biopsia ou carater diagnostico/terapeutico como gate de "
+            "triagem. Nao aplicar excecao de corpo estranho para colonoscopia.\n"
+        )
+    return (
+        "Para escopo do exame: classificar preop_screening.exam_type=eda para EDA padrao, "
+        "gastrostomia/GTT/PEG, dilatacao esofagica, retirada de corpo estranho e ecoendoscopia "
+        "(ecoendoscopia, eco-endoscopia, ultrassonografia endoscopica, ultrassom endoscopico ou "
+        "EUS em contexto procedimental); usar non_eda "
+        "apenas para solicitacoes claramente fora de escopo EDA, incluindo CPRE; usar unknown "
+        "somente quando o tipo de exame permanecer indefinido.\n"
+    )
 
 
 def _render_user_prompt(
@@ -270,11 +372,12 @@ def _render_user_prompt(
     case_id: str,
     agency_record_number: str,
     clean_text: str,
+    exam_type: str = "eda",
 ) -> str:
-    """Render the full user prompt with legacy EDA scope instructions.
+    """Render the full user prompt with profile-aware scope instructions.
 
     Ported from the legacy _render_user_prompt() in llm1_service.py.
-    Appends case metadata, schema instructions, EDA scope rules,
+    Appends case metadata, schema instructions, scope rules,
     tracked exams rules, origin_context rules, and the clinical text.
     """
     return (
@@ -292,13 +395,8 @@ def _render_user_prompt(
         "Incluir preop_screening.evidence_spans com itens {field_path, excerpt}.\n"
         "Preencher eda.requested_procedure.subtype e preop_screening.rulebook_signals.eda_subtype "
         "com standard, gastrostomy, esophageal_dilation, foreign_body, echoendoscopy ou unknown.\n"
-        "Para escopo do exame: classificar preop_screening.exam_type=eda para EDA padrao, "
-        "gastrostomia/GTT/PEG, dilatacao esofagica, retirada de corpo estranho e ecoendoscopia "
-        "(ecoendoscopia, eco-endoscopia, ultrassonografia endoscopica, ultrassom endoscopico ou "
-        "EUS em contexto procedimental); usar non_eda "
-        "apenas para solicitacoes claramente fora de escopo EDA, incluindo CPRE; usar unknown "
-        "somente quando o tipo de exame permanecer indefinido.\n"
-        "Quando houver ecoendoscopia, eco-endoscopia, ultrassonografia endoscopica, ultrassom "
+        + _render_exam_scope_instructions(exam_type=exam_type)
+        + "Quando houver ecoendoscopia, eco-endoscopia, ultrassonografia endoscopica, ultrassom "
         "endoscopico ou EUS em contexto procedimental, usar subtype echoendoscopy; quando houver "
         "gastrostomia/GTT/PEG, usar subtype gastrostomy; quando houver "
         "dilatacao esofagica, usar subtype esophageal_dilation; quando houver retirada de "

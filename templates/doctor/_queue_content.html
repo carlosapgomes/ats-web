@@ -22,7 +22,9 @@
         <div class="col-lg-8">
           <div class="d-flex align-items-start gap-3">
             <div class="flex-grow-1">
-              <div class="patient-name">{{ c.patient_name }}</div>
+              <div class="patient-name">{{ c.patient_name }}
+                {% if c.exam_type_label %}<span class="badge exam-type-badge bg-secondary ms-1">{{ c.exam_type_label }}</span>{% endif %}
+              </div>
               <div class="case-meta mb-2">
                 {% if c.agency_record_number %}Reg. {{ c.agency_record_number }} · {% endif %}
                 {% if c.patient_age %}{{ c.patient_age }} anos · {% endif %}
@@ -89,7 +91,9 @@
         <div class="col-lg-8">
           <div class="d-flex align-items-start gap-3">
             <div class="flex-grow-1">
-              <div class="patient-name">{{ c.patient_name }}</div>
+              <div class="patient-name">{{ c.patient_name }}
+                {% if c.exam_type_label %}<span class="badge exam-type-badge bg-secondary ms-1">{{ c.exam_type_label }}</span>{% endif %}
+              </div>
               <div class="case-meta mb-2">
                 {% if c.agency_record_number %}Reg. {{ c.agency_record_number }} · {% endif %}
                 {% if c.patient_age %}{{ c.patient_age }} anos · {% endif %}

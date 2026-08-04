@@ -662,13 +662,19 @@ class TestPipelineScopeGated:
         """unknown exam_type → WAIT_R1_CLEANUP_THUMBS sem LLM2."""
         user = django_user_model.objects.create_user(username="nir_unk", password="pw")
 
-        # Use NON-EDA response but modify exam_type to 'unknown'
+        # LLM1 genuinely unknown: no colonoscopy signals in name/summary so the
+        # detector stays unknown (Slice 003: procedure name with colonoscopy
+        # aliases would now be detected as colonoscopy → mismatch).
         import json
 
         unknown_data = json.loads(_non_eda_llm1_response())
         unknown_data["preop_screening"]["exam_type"] = "unknown"
+        unknown_data["summary"]["one_liner"] = "Exame nao identificado."
+        unknown_data["eda"]["requested_procedure"]["name"] = "Exame indefinido"
+        unknown_data["eda"]["requested_procedure"]["subtype"] = "unknown"
+        unknown_data["preop_screening"]["evidence_spans"] = []
 
-        case = _make_case(user)
+        case = _make_case(user, extracted_text="Relatorio generico sem exame especifico.")
         client = RecordingLlmClient(responses=[json.dumps(unknown_data)])
 
         run_pipeline(

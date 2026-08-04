@@ -12,6 +12,7 @@ from apps.pipeline.policy.eda_preop_policy import (
     ContraindicationThresholds,
     EdaPreopDecision,
     evaluate_eda_preop_policy,
+    evaluate_preop_policy,
 )
 from apps.pipeline.policy.eda_recommendation_synthesis import (
     EdaSupportContext,
@@ -28,6 +29,7 @@ __all__ = [
     "Llm2PolicyAlignmentInput",
     "Llm2SuggestionInput",
     "evaluate_eda_preop_policy",
+    "evaluate_preop_policy",
     "reconcile_eda_policy",
     "synthesize_eda_support_context",
 ]

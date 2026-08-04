@@ -1,15 +1,23 @@
-"""Deterministic scope detection: classify exam as EDA vs non-EDA/unknown.
+"""Deterministic scope detection: classify exam as EDA vs colonoscopy vs mixed/unknown.
 
 Ported faithfully from the legacy augmented-triage-system:
   triage_automation/application/services/process_pdf_case_service.py
 
-Every keyword list, normalisation helper, and detection heuristic preserved exactly.
+Slice 003 rework (R3): colonoscopy is a supported type when declared and
+confirmed. Approved aliases are recognized; EDB only with boundary and local
+request/exam/procedure context; history/negation of the other exam never
+creates mixed; two CURRENT requests EDA+colonoscopy → manual review with
+``mixed_exam_request``; declared/detected mismatch and unknown also return to
+NIR with a generic payload carrying ``declared_exam_type``,
+``detected_exam_type`` and ``reason_code``.
 """
 
 from __future__ import annotations
 
 import re
 import unicodedata
+
+from apps.cases.exam_profiles import COLONOSCOPY_PROFILE
 
 _SUPPORTED_EDA_SUBTYPES: frozenset[str] = frozenset(
     {"standard", "gastrostomy", "esophageal_dilation", "foreign_body", "echoendoscopy"}
@@ -50,13 +58,9 @@ _SCOPE_EXPLICIT_EDA_TERMS: tuple[str, ...] = (
     "endoscopia digestiva superior",
 )
 
-_SCOPE_EXPLICIT_NON_EDA_TERMS: tuple[str, ...] = (
-    "endoscopia digestiva baixa",
-    "endoscopia digestiva baixa - colonoscopia",
-    "colonoscopia",
-    "colonoscopia diagnostica",
-    "colonoscopia terapeutica",
-)
+# Approved colonoscopy aliases come from the exam profile (R1/R3). EDB is
+# handled separately with boundary + local request/exam/procedure context.
+_SCOPE_EXPLICIT_COLONOSCOPY_TERMS: tuple[str, ...] = tuple(COLONOSCOPY_PROFILE.scope_aliases)
 
 
 def _normalize_scope_keyword_text(*, value: str) -> str:
@@ -110,7 +114,10 @@ def _extract_preop_exam_type(
     *,
     llm1_structured_data: dict[str, object],
 ) -> str | None:
-    """Extract exam_type from LLM1 preop_screening if valid."""
+    """Extract exam_type from LLM1 preop_screening if valid.
+
+    Slice 003: ``colonoscopy`` is now a valid LLM1 classification.
+    """
 
     preop_screening = llm1_structured_data.get("preop_screening")
     if not isinstance(preop_screening, dict):
@@ -118,7 +125,7 @@ def _extract_preop_exam_type(
     exam_type = preop_screening.get("exam_type")
     if isinstance(exam_type, str):
         normalized = exam_type.strip().lower()
-        if normalized in {"eda", "non_eda", "unknown"}:
+        if normalized in {"eda", "colonoscopy", "non_eda", "unknown"}:
             return normalized
     return None
 
@@ -194,28 +201,133 @@ def _contains_boundary_safe_eus(*, normalized_text: str) -> bool:
     return re.search(r"\beus\b", normalized_text) is not None
 
 
-# Sentence/clause boundaries that bound the local context of an EUS mention.
+# Sentence/clause boundaries that bound the local context of an occurrence.
 # ':' is intentionally NOT a boundary so an immediate label such as
-# 'Procedimento: EUS' stays in the local context of the occurrence.
-_EUS_CLAUSE_BOUNDARY_PATTERN = re.compile(r"[.;!?]|\n")
+# 'Procedimento: EDB' stays in the local context of the occurrence.
+_CLAUSE_BOUNDARY_PATTERN = re.compile(r"[.;!?]|\n")
 
-# Request-oriented stems before EUS with natural connectors or a colon
-# label: 'solicito EUS', 'solicitacao de EUS', 'solicito realizacao de EUS',
-# 'encaminhamento/encaminhado para EUS', 'indicado para EUS', 'Solicitacao: EUS'.
-# Anchored at the end of the occurrence prefix so a distant occurrence does
-# not qualify this one.
+
+def _clause_context(normalized_text: str, start: int, end: int) -> tuple[str, str]:
+    """Return (prefix, suffix) local clause context for an occurrence span."""
+    left_boundaries = list(_CLAUSE_BOUNDARY_PATTERN.finditer(normalized_text, 0, start))
+    clause_start = left_boundaries[-1].end() if left_boundaries else 0
+    right_boundary = _CLAUSE_BOUNDARY_PATTERN.search(normalized_text, end)
+    clause_end = right_boundary.start() if right_boundary else len(normalized_text)
+    return normalized_text[clause_start:start], normalized_text[end:clause_end]
+
+
+# ── Shared per-occurrence machinery (current-request detection) ─────────────
+#
+# Every qualifier below is ANCHORED to the occurrence: before-patterns end at
+# the end of the prefix ('$'), after-patterns start at the beginning of the
+# suffix ('^'). Context is never borrowed from another procedure in the same
+# clause, and word boundaries protect against partial matches.
+#
+# The request-before pattern accepts a closed list chain of exam terms so that
+# 'Solicito EDA e colonoscopia' marks both occurrences as current while
+# 'Solicitacao previa de EUS foi cancelada' stays historical.
+
+_REQUEST_LIST_TERM_SOURCE = (
+    r"colonoscopia\s+diagnostica|colonoscopia\s+terapeutica|colonoscopia"
+    r"|endoscopia\s+digestiva\s+baixa|videocolonoendoscopia"
+    r"|endoscopia\s+digestiva\s+alta|videoendoscopia\s+digestiva\s+alta|endoscopia\s+digestiva\s+superior"
+    r"|ecoendoscopia|eco\s+endoscopia|eco-endoscopia|ultrassonografia\s+endoscopica|ultrassom\s+endoscopico"
+    r"|gastrostomia|gastrostomy|gtt|peg"
+    r"|dilatacao\s+esofagica|dilatacao\s+do\s+esofago|dilatacao\s+de\s+esofago|dilatacao\s+endoscopica\s+esofagica"
+    r"|corpo\s+estranho|eda"
+)
+
+_REQUEST_LIST_PREFIX_SOURCE = r"(?:\s+(?:" + _REQUEST_LIST_TERM_SOURCE + r")\b(?:\s+(?:e\b|,))?)*"
+
+_REQUEST_BEFORE_OCCURRENCE_PATTERN = re.compile(
+    r"\b(?:solicit|encaminh|indic|programar|confeccao|regulac)\w*\b"
+    r"(?:\s*:?\s*(?:realizacao\s+de|regulacao\s+para|regulacao\s+de|nov[oa]|atual\s+de|de|para)?)"
+    + _REQUEST_LIST_PREFIX_SOURCE
+    + r"\s*$"
+)
+
+_LABEL_BEFORE_OCCURRENCE_PATTERN = re.compile(
+    r"\b(?:exame|procedimento)\b\s*(?:de|para|:)?\s*$"
+    r"|\bmotivo\s+da\s+solicitacao\b\s*:?\s*$"
+    r"|\bmotivo\b\s*:?\s*$"
+)
+
+_REQUEST_AFTER_OCCURRENCE_PATTERN = re.compile(r"^\s*(?:solicit|indic|encaminh|regulac)\w*\b")
+
+_HISTORICAL_AFTER_OCCURRENCE_PATTERN = re.compile(
+    r"^\s*(?:ja\s+)?(?:foi\s+)?realizad[oa]\b"
+    r"|^\s*(?:previo|previa|anterior|previamente)\b"
+    r"|^\s*no\s+historico\b"
+)
+_HISTORICAL_BEFORE_OCCURRENCE_PATTERN = re.compile(
+    r"\b(?:realizou)\b\s+$"
+    r"|\b(?:previo|previa|anterior|previamente)\b\s*(?:de\s*)?:?\s*$"
+    r"|\bhistorico\s+de\b\s*$"
+)
+
+_NEGATION_BEFORE_OCCURRENCE_PATTERN = re.compile(
+    r"\bsem\s+indicacao\s+de\b\s*$"
+    r"|\bsem\s+evidencia\s+de\b\s*$"
+    r"|\bsem\b\s*$"
+    r"|\bnega\s+(?:a\s+)?indicacao\s+de\b\s*$"
+    r"|\bnega\b\s*$"
+    r"|\bnao\s+ha\s+indicacao\s+de\b\s*$"
+    r"|\bnao\s+ha\s+evidencia\s+de\b\s*$"
+    r"|\bnao\s+solicit\w*\b(?:\s*:?\s*(?:realizacao\s+de|nov[oa]|atual\s+de|de|para)?)?\s*:?\s*$"
+    r"|\bnao\s+foi\s+identificad[oa]\b\s*$"
+    r"|\bnao\s+ha\b\s*$"
+    r"|\bausencia\s+de\b\s*$"
+)
+_NEGATION_AFTER_OCCURRENCE_PATTERN = re.compile(
+    r"^\s*(?:descartad[oa]|negad[oa]|ausente|contraindicad[oa])\b"
+    r"|^\s*nao\s+(?:foi\s+)?(?:indicad[oa]|recomendad[oa]|solicitad[oa]|identificad[oa])\b"
+    r"|^\s*sem\s+indicac\w*\b"
+)
+
+
+def _occurrence_is_current_request(*, normalized_text: str, pattern: re.Pattern[str]) -> bool:
+    """True when at least one term occurrence is a current positive request.
+
+    A historical/negated qualifier cancels only its own occurrence; a distinct
+    current occurrence in the same or another clause survives (R3).
+    """
+    for match in pattern.finditer(normalized_text):
+        prefix, suffix = _clause_context(normalized_text, match.start(), match.end())
+        if _HISTORICAL_BEFORE_OCCURRENCE_PATTERN.search(prefix) or _HISTORICAL_AFTER_OCCURRENCE_PATTERN.match(suffix):
+            continue
+        if _NEGATION_BEFORE_OCCURRENCE_PATTERN.search(prefix) or _NEGATION_AFTER_OCCURRENCE_PATTERN.match(suffix):
+            continue
+        if (
+            _REQUEST_BEFORE_OCCURRENCE_PATTERN.search(prefix) is not None
+            or _LABEL_BEFORE_OCCURRENCE_PATTERN.search(prefix) is not None
+            or _REQUEST_AFTER_OCCURRENCE_PATTERN.match(suffix) is not None
+        ):
+            return True
+    return False
+
+
+def _occurrence_has_unqualified_match(*, normalized_text: str, pattern: re.Pattern[str]) -> bool:
+    """True when at least one occurrence is NOT historically/negatively qualified.
+
+    Used for EDA full names in the fallback path: a plain mention is EDA
+    evidence unless explicitly historical or negated (legacy behaviour).
+    """
+    for match in pattern.finditer(normalized_text):
+        prefix, suffix = _clause_context(normalized_text, match.start(), match.end())
+        if _HISTORICAL_BEFORE_OCCURRENCE_PATTERN.search(prefix) or _HISTORICAL_AFTER_OCCURRENCE_PATTERN.match(suffix):
+            continue
+        if _NEGATION_BEFORE_OCCURRENCE_PATTERN.search(prefix) or _NEGATION_AFTER_OCCURRENCE_PATTERN.match(suffix):
+            continue
+        return True
+    return False
+
+
+# ── EUS (Slice 001) — preserved exactly ──────────────────────────────────────
+
+
 _EUS_REQUEST_BEFORE_PATTERN = re.compile(r"\b(solicit|encaminh|indic)\w*\b\s*(?:realizacao\s+de|de|para|:)?\s*$")
-
-# Exam/procedure context directly qualifying EUS: 'exame de EUS',
-# 'procedimento de EUS', 'Exame: EUS', 'Procedimento: EUS'.
 _EUS_EXAM_BEFORE_PATTERN = re.compile(r"\b(exame|procedimento)\b\s*(?:de|para|:)?\s*$")
-
-# Request stems immediately after EUS: 'EUS solicitado', 'EUS indicado'.
 _EUS_REQUEST_AFTER_PATTERN = re.compile(r"^\s*(?:solicit|indic|encaminh)\w*\b")
-
-# Historical constructions that qualify a specific EUS occurrence:
-# marker after EUS ('EUS realizado/realizada', 'EUS previo/previa') or
-# marker before EUS ('realizou EUS', 'X previa de EUS').
 _EUS_HISTORICAL_AFTER_PATTERN = re.compile(r"^\s*(realizad[oa]|previo|previa|anterior)\b")
 _EUS_HISTORICAL_BEFORE_PATTERN = re.compile(r"\b(?:realizou)\b\s+$|\b(?:previo|previa|anterior)\b\s+(?:de\s+)?$")
 
@@ -226,22 +338,16 @@ def _extract_eus_local_clause_bounds(
     eus_start: int,
     eus_end: int,
 ) -> tuple[int, int]:
-    """Return (clause_start, clause_end) bounding the EUS occurrence.
+    """Return (clause_start, clause_end) bounding the EUS occurrence."""
 
-    Clauses end at '.', ';', '!', '?' or newline. ':' is not a boundary so
-    that immediate labels ('Procedimento: EUS') stay in the local context.
-    """
-
-    left_boundaries = list(_EUS_CLAUSE_BOUNDARY_PATTERN.finditer(normalized_text, 0, eus_start))
+    left_boundaries = list(_CLAUSE_BOUNDARY_PATTERN.finditer(normalized_text, 0, eus_start))
     clause_start = left_boundaries[-1].end() if left_boundaries else 0
-    right_boundary = _EUS_CLAUSE_BOUNDARY_PATTERN.search(normalized_text, eus_end)
+    right_boundary = _CLAUSE_BOUNDARY_PATTERN.search(normalized_text, eus_end)
     clause_end = right_boundary.start() if right_boundary else len(normalized_text)
     return clause_start, clause_end
 
 
 def _is_historical_eus_occurrence(*, prefix: str, suffix: str) -> bool:
-    """Return True when historical syntax qualifies this specific EUS occurrence."""
-
     return (
         _EUS_HISTORICAL_AFTER_PATTERN.match(suffix) is not None
         or _EUS_HISTORICAL_BEFORE_PATTERN.search(prefix) is not None
@@ -249,8 +355,6 @@ def _is_historical_eus_occurrence(*, prefix: str, suffix: str) -> bool:
 
 
 def _is_explicit_eus_request_occurrence(*, prefix: str, suffix: str) -> bool:
-    """Return True when request/exam/procedure syntax qualifies this occurrence."""
-
     return (
         _EUS_REQUEST_BEFORE_PATTERN.search(prefix) is not None
         or _EUS_EXAM_BEFORE_PATTERN.search(prefix) is not None
@@ -259,13 +363,7 @@ def _is_explicit_eus_request_occurrence(*, prefix: str, suffix: str) -> bool:
 
 
 def _contains_eus_with_local_request_context(*, normalized_text: str) -> bool:
-    """Return True when at least one EUS occurrence is an explicit request.
-
-    Each boundary-safe EUS occurrence is classified independently against its
-    own bounded prefix/suffix. A historical occurrence cancels only itself;
-    a distinct requested occurrence in the same clause still yields EDA. A
-    distant 'Motivo'/'exame'/'procedimento' anywhere else is not sufficient.
-    """
+    """Return True when at least one EUS occurrence is an explicit request."""
 
     if not _contains_boundary_safe_eus(normalized_text=normalized_text):
         return False
@@ -370,6 +468,66 @@ def _motive_mentions_supported_eda(*, normalized_motive: str) -> bool:
     return subtype is not None
 
 
+def _motive_mentions_colonoscopy(*, normalized_motive: str) -> bool:
+    """Return True when the motive text asks for colonoscopy (approved aliases)."""
+
+    for term in _SCOPE_EXPLICIT_COLONOSCOPY_TERMS:
+        if _contains_scope_term(normalized_text=normalized_motive, term=term):
+            return True
+    if _occurrence_is_current_request(
+        normalized_text=normalized_motive,
+        pattern=_COLONOSCOPY_ACRONYM_PATTERN,
+    ):
+        return True
+    return False
+
+
+# ── Term patterns ────────────────────────────────────────────────────────────
+
+
+_EDA_FULL_NAME_PATTERN = re.compile(
+    r"\bendoscopia\s+digestiva\s+alta\b"
+    r"|\bvideoendoscopia\s+digestiva\s+alta\b"
+    r"|\bendoscopia\s+digestiva\s+superior\b"
+)
+
+_EDA_ACRONYM_PATTERN = re.compile(r"\beda\b|\be\s*[.\-]?\s*d\s*[.\-]?\s*a\b")
+
+_EDA_TERM_PATTERN = re.compile(
+    r"\bendoscopia\s+digestiva\s+alta\b"
+    r"|\bvideoendoscopia\s+digestiva\s+alta\b"
+    r"|\bendoscopia\s+digestiva\s+superior\b"
+    r"|\beda\b|\be\s*[.\-]?\s*d\s*[.\-]?\s*a\b"
+    r"|\becoendoscopia\b|\beco\s+endoscopia\b|\beco-endoscopia\b"
+    r"|\bultrassonografia\s+endoscopica\b|\bultrassom\s+endoscopico\b"
+    r"|\b(?:gtt|gastrostomia|gastrostomy|peg)\b"
+    r"|\bdilatacao\s+esofagica\b|\bdilatacao\s+do\s+esofago\b|\bdilatacao\s+de\s+esofago\b"
+    r"|\bdilatacao\s+endoscopica\s+esofagica\b"
+    r"|\bcorpo\s+estranho\b"
+)
+
+_COLONOSCOPY_TERM_PATTERN = re.compile(
+    r"\bcolonoscopia\s+diagnostica\b|\bcolonoscopia\s+terapeutica\b|\bcolonoscopia\b"
+    r"|\bendoscopia\s+digestiva\s+baixa\b|\bvideocolonoendoscopia\b"
+)
+
+# EDB is only accepted with boundary + local request/exam/procedure context
+# (R3). The shared per-occurrence machinery enforces exactly that.
+_COLONOSCOPY_ACRONYM_PATTERN = re.compile(r"\bedb\b")
+
+
+def _contains_eda_acronym(*, normalized_text: str) -> bool:
+    """Return True when the EDA acronym (plain, dotted or hyphenated) is present."""
+
+    return (
+        re.search(r"\beda\b", normalized_text) is not None
+        or re.search(r"\be\s*[.\-]?\s*d\s*[.\-]?\s*a\b", normalized_text) is not None
+    )
+
+
+# ── Current-request signals (R3) ─────────────────────────────────────────────
+
+
 def _detect_current_request_eda_signal(
     *,
     llm1_structured_data: dict[str, object],
@@ -378,8 +536,9 @@ def _detect_current_request_eda_signal(
     """Return True when the current request explicitly asks for EDA/echoendoscopy.
 
     Only the 'Motivo da Solicitação' field and structured procedure fields
-    count as current-request evidence. Mentions elsewhere in the clinical
-    body (e.g. historical EDA) must not override a non-EDA classification.
+    count as current-request evidence for EDA (legacy behaviour preserved).
+    Mentions elsewhere in the clinical body (e.g. historical EDA) must not
+    override a non-EDA classification.
     """
 
     motive_text = _extract_motivo_solicitacao_text(cleaned_text=cleaned_text)
@@ -404,8 +563,6 @@ def _detect_current_request_eda_signal(
     if not isinstance(requested_name, str) or not requested_name.strip():
         return False
     normalized_name = _normalize_scope_keyword_text(value=requested_name)
-    # The structured procedure name supplies procedural context by provenance,
-    # so a bare boundary-safe EUS counts as echoendoscopy.
     if _contains_boundary_safe_eus(normalized_text=normalized_name):
         return True
     subtype_from_name, _ = _detect_supported_eda_scope_keyword_in_text(
@@ -414,149 +571,171 @@ def _detect_current_request_eda_signal(
     return subtype_from_name is not None
 
 
-def _detect_explicit_non_eda_scope_keyword(
+def _detect_current_request_colonoscopy_signal(
     *,
     llm1_structured_data: dict[str, object],
     cleaned_text: str,
-) -> tuple[bool, str | None, str | None]:
-    """Check if the request explicitly names a non-EDA exam.
+) -> bool:
+    """Return True when the current request explicitly asks for colonoscopy.
 
-    The top-level 'Motivo da Solicitação' field is authoritative because the
-    clinical body may mention prior EDA reports or mixed historical context.
-
-    Returns (is_non_eda, matched_term, source) or (False, None, None).
+    Mirrors the EDA strong-signal provenance: 'Motivo da Solicitação' field
+    and the structured procedure name carry current-request evidence.
     """
 
     motive_text = _extract_motivo_solicitacao_text(cleaned_text=cleaned_text)
     if motive_text is not None:
-        for term in _SCOPE_EXPLICIT_NON_EDA_TERMS:
-            if _contains_scope_term(normalized_text=motive_text, term=term):
-                return True, term, "motivo_da_solicitacao"
+        normalized_motive = _normalize_scope_keyword_text(value=motive_text)
+        if _motive_mentions_colonoscopy(normalized_motive=normalized_motive):
+            return True
 
-    candidate_texts = _extract_scope_keyword_candidate_texts(
-        llm1_structured_data=llm1_structured_data,
-        cleaned_text=cleaned_text,
+    eda_payload = llm1_structured_data.get("eda")
+    if not isinstance(eda_payload, dict):
+        return False
+    requested_procedure = eda_payload.get("requested_procedure")
+    if not isinstance(requested_procedure, dict):
+        return False
+    requested_name = requested_procedure.get("name")
+    if not isinstance(requested_name, str) or not requested_name.strip():
+        return False
+    normalized_name = _normalize_scope_keyword_text(value=requested_name)
+    # O campo estruturado de procedimento tem prioridade por proveniência (D7):
+    # um alias aprovado no nome basta, sem exigir verbo de solicitação.
+    for term in _SCOPE_EXPLICIT_COLONOSCOPY_TERMS:
+        if _contains_scope_term(normalized_text=normalized_name, term=term):
+            return True
+    return _occurrence_is_current_request(
+        normalized_text=normalized_name,
+        pattern=_COLONOSCOPY_ACRONYM_PATTERN,
     )
-    for candidate in candidate_texts:
-        normalized_candidate = _normalize_scope_keyword_text(value=candidate)
-        for term in _SCOPE_EXPLICIT_NON_EDA_TERMS:
-            if _contains_scope_term(normalized_text=normalized_candidate, term=term):
-                return True, term, "candidate_text"
-
-    return False, None, None
 
 
-def _contains_eda_acronym(*, normalized_text: str) -> bool:
-    """Return True when the EDA acronym (plain, dotted or hyphenated) is present."""
-
-    return (
-        re.search(r"\beda\b", normalized_text) is not None
-        or re.search(r"\be\s*[.\-]?\s*d\s*[.\-]?\s*a\b", normalized_text) is not None
-    )
-
-
-def _detect_explicit_eda_scope_keyword(
+def _detect_current_request_signals(
     *,
     llm1_structured_data: dict[str, object],
     cleaned_text: str,
-) -> tuple[bool, str | None]:
-    """Check if the report explicitly mentions EDA.
+    llm1_exam_type: str | None,
+) -> tuple[bool, bool]:
+    """Return (has_eda_current, has_colon_current) per design D7.
 
-    Returns (is_eda, matched_term) or (False, None).
+    Strong signals (motivo + structured procedure fields) always count and can
+    rescue an LLM1 ``non_eda`` classification (legacy EDA behaviour). Textual
+    per-occurrence signals count for EDA only when LLM1 did not explicitly
+    classify as non_eda — the legacy authority rule — while colonoscopy is a
+    newly supported type whose textual current request is authoritative.
     """
 
-    candidate_texts = _extract_scope_keyword_candidate_texts(
+    has_eda_strong = _detect_current_request_eda_signal(
+        llm1_structured_data=llm1_structured_data,
+        cleaned_text=cleaned_text,
+    )
+    has_colon_strong = _detect_current_request_colonoscopy_signal(
         llm1_structured_data=llm1_structured_data,
         cleaned_text=cleaned_text,
     )
 
-    for candidate in candidate_texts:
-        normalized_candidate = _normalize_scope_keyword_text(value=candidate)
+    normalized_text = _normalize_scope_keyword_text(value=cleaned_text)
+    has_eda_textual = _occurrence_is_current_request(
+        normalized_text=normalized_text,
+        pattern=_EDA_TERM_PATTERN,
+    ) or _contains_eus_with_local_request_context(normalized_text=normalized_text)
+    has_colon_textual = _occurrence_is_current_request(
+        normalized_text=normalized_text,
+        pattern=_COLONOSCOPY_TERM_PATTERN,
+    ) or _occurrence_is_current_request(
+        normalized_text=normalized_text,
+        pattern=_COLONOSCOPY_ACRONYM_PATTERN,
+    )
 
-        for term in _SCOPE_EXPLICIT_EDA_TERMS:
-            if _contains_scope_term(normalized_text=normalized_candidate, term=term):
-                return True, term
-
-        has_eda_acronym = _contains_eda_acronym(normalized_text=normalized_candidate)
-        has_request_context = (
-            re.search(
-                r"\b(motivo|solicit|exame|encaminhamento|procedimento)\b",
-                normalized_candidate,
-            )
-            is not None
-        )
-        if has_eda_acronym and has_request_context:
-            return True, "eda"
-
-    return False, None
+    has_eda = has_eda_strong or (has_eda_textual and llm1_exam_type != "non_eda")
+    has_colon = has_colon_strong or has_colon_textual
+    return has_eda, has_colon
 
 
-def classify_exam_scope(
+# ── Fallback detection (legacy EDA rescue) ──────────────────────────────────
+
+
+def _has_eda_anywhere_evidence(
     *,
     llm1_structured_data: dict[str, object],
     cleaned_text: str,
-    case_id: str,
-    agency_record_number: str,
-) -> dict[str, object] | None:
-    """Classify exam scope and gate automatic recommendation.
+) -> bool:
+    """Return True when EDA evidence exists anywhere in candidate texts.
 
-    Returns:
-        None → EDA confirmed; proceed with LLM2.
-        dict → non_eda or unknown → manual_review_required payload.
+    Full names count anywhere unless historically/negatively qualified; the
+    acronym requires per-occurrence request/label context (like EUS).
     """
-
-    exam_type = _extract_preop_exam_type(llm1_structured_data=llm1_structured_data)
-
-    explicit_non_eda_detected, _, explicit_non_eda_source = _detect_explicit_non_eda_scope_keyword(
-        llm1_structured_data=llm1_structured_data,
-        cleaned_text=cleaned_text,
-    )
-    if explicit_non_eda_detected and explicit_non_eda_source == "motivo_da_solicitacao":
-        exam_type = "non_eda"
-
-    # A current-request EDA/echoendoscopy signal wins over a simultaneous
-    # out-of-scope mention (e.g. CPRE/colonoscopia) and over LLM1's non_eda
-    # classification. 'standard' is default schema noise and does not count.
-    if _detect_current_request_eda_signal(
+    for candidate in _extract_scope_keyword_candidate_texts(
         llm1_structured_data=llm1_structured_data,
         cleaned_text=cleaned_text,
     ):
-        exam_type = "eda"
-    else:
-        explicit_eda_detected, _ = _detect_explicit_eda_scope_keyword(
-            llm1_structured_data=llm1_structured_data,
-            cleaned_text=cleaned_text,
-        )
+        normalized_candidate = _normalize_scope_keyword_text(value=candidate)
+        if _occurrence_has_unqualified_match(
+            normalized_text=normalized_candidate,
+            pattern=_EDA_FULL_NAME_PATTERN,
+        ):
+            return True
+        if _occurrence_is_current_request(
+            normalized_text=normalized_candidate,
+            pattern=_EDA_ACRONYM_PATTERN,
+        ):
+            return True
+    return False
 
-        # If LLM1 explicitly classified the request as non-EDA, keep that result
-        # authoritative. Real strict-schema runs can still carry default EDA subtype
-        # values (e.g. "standard") in nested fields, and those must not route
-        # colonoscopy/CPRE/etc. to the doctor queue.
-        if exam_type != "non_eda":
-            supported_subtype = _extract_supported_eda_subtype_from_llm1(
-                llm1_structured_data=llm1_structured_data,
-            )
-            if supported_subtype is None:
-                supported_subtype, _ = _detect_supported_eda_scope_keyword(
-                    llm1_structured_data=llm1_structured_data,
-                    cleaned_text=cleaned_text,
-                )
 
-            if supported_subtype is not None or explicit_eda_detected:
-                exam_type = "eda"
+def _detect_fallback_type(
+    *,
+    llm1_structured_data: dict[str, object],
+    cleaned_text: str,
+    llm1_exam_type: str | None,
+) -> str | None:
+    """Determine the detected type when no current-request signal fired.
 
-    if exam_type not in {"non_eda", "unknown"}:
-        return None
+    Returns one of "eda", "colonoscopy", "non_eda", "unknown" or None
+    (None = pass-through when preop_screening is entirely absent, legacy).
+    """
+    if llm1_exam_type in {"eda", "colonoscopy"}:
+        return llm1_exam_type
 
-    reason_code = "non_eda_request" if exam_type == "non_eda" else "unknown_exam_type"
-    reason_text = (
-        "Relatorio fora de escopo EDA; revisao manual obrigatoria."
-        if exam_type == "non_eda"
-        else "Tipo de exame nao identificado; revisao manual obrigatoria."
+    supported_subtype = _extract_supported_eda_subtype_from_llm1(
+        llm1_structured_data=llm1_structured_data,
     )
+    if supported_subtype is not None:
+        return "eda"
 
-    evidence_spans = _extract_preop_evidence_spans(llm1_structured_data=llm1_structured_data)
+    subtype, _ = _detect_supported_eda_scope_keyword(
+        llm1_structured_data=llm1_structured_data,
+        cleaned_text=cleaned_text,
+    )
+    if subtype is not None:
+        return "eda"
 
+    if _has_eda_anywhere_evidence(
+        llm1_structured_data=llm1_structured_data,
+        cleaned_text=cleaned_text,
+    ):
+        return "eda"
+
+    if llm1_exam_type == "non_eda":
+        return "non_eda"
+    if llm1_exam_type == "unknown":
+        return "unknown"
+    return None
+
+
+# ── Manual review payload ────────────────────────────────────────────────────
+
+
+def _build_manual_review_payload(
+    *,
+    case_id: str,
+    agency_record_number: str,
+    reason_code: str,
+    reason_text: str,
+    detected: str,
+    declared: str,
+    evidence_spans: list[dict[str, str]],
+) -> dict[str, object]:
+    """Generic manual-review payload with declared/detected types (R3/R8)."""
     return {
         "schema_version": "1.1",
         "language": "pt-BR",
@@ -566,6 +745,117 @@ def classify_exam_scope(
         "suggestion": "manual_review_required",
         "reason_code": reason_code,
         "reason_text": reason_text,
-        "exam_type": exam_type,
+        "exam_type": detected,
+        "declared_exam_type": declared,
+        "detected_exam_type": detected,
         "evidence_spans": evidence_spans,
     }
+
+
+def _normalize_expected_exam_type(expected_exam_type: str | None) -> str:
+    """Normalize the declared exam type; unknown/absent defaults to EDA."""
+    normalized = (expected_exam_type or "").strip().lower()
+    if normalized in {"eda", "colonoscopy"}:
+        return normalized
+    return "eda"
+
+
+# ── Public API ───────────────────────────────────────────────────────────────
+
+
+def classify_exam_scope(
+    *,
+    llm1_structured_data: dict[str, object],
+    cleaned_text: str,
+    case_id: str,
+    agency_record_number: str,
+    expected_exam_type: str | None = None,
+) -> dict[str, object] | None:
+    """Classify exam scope and gate automatic recommendation.
+
+    Args:
+        expected_exam_type: Exam type declared at intake (``Case.exam_type``).
+            Defaults to EDA for backward compatibility.
+
+    Returns:
+        None → the detected exam type matches the declared type; proceed.
+        dict → manual_review_required payload with ``reason_code`` and
+            declared/detected types (mixed, mismatch, non_eda or unknown).
+    """
+
+    expected = _normalize_expected_exam_type(expected_exam_type)
+    llm1_exam_type = _extract_preop_exam_type(llm1_structured_data=llm1_structured_data)
+
+    has_eda_current, has_colon_current = _detect_current_request_signals(
+        llm1_structured_data=llm1_structured_data,
+        cleaned_text=cleaned_text,
+        llm1_exam_type=llm1_exam_type,
+    )
+
+    evidence_spans = _extract_preop_evidence_spans(llm1_structured_data=llm1_structured_data)
+
+    if has_eda_current and has_colon_current:
+        return _build_manual_review_payload(
+            case_id=case_id,
+            agency_record_number=agency_record_number,
+            reason_code="mixed_exam_request",
+            reason_text=(
+                "Documento solicita EDA e Colonoscopia como pedidos atuais no mesmo PDF; "
+                "envie PDFs/casos separados por tipo de exame."
+            ),
+            detected="mixed",
+            declared=expected,
+            evidence_spans=evidence_spans,
+        )
+
+    if has_colon_current:
+        detected: str | None = "colonoscopy"
+    elif has_eda_current:
+        detected = "eda"
+    else:
+        detected = _detect_fallback_type(
+            llm1_structured_data=llm1_structured_data,
+            cleaned_text=cleaned_text,
+            llm1_exam_type=llm1_exam_type,
+        )
+
+    if detected is None:
+        # No preop_screening at all — legacy pass-through.
+        return None
+
+    if detected == expected:
+        return None
+
+    if detected in {"eda", "colonoscopy"}:
+        return _build_manual_review_payload(
+            case_id=case_id,
+            agency_record_number=agency_record_number,
+            reason_code="exam_type_mismatch",
+            reason_text=(
+                "Tipo de exame declarado difere da solicitacao atual do documento; revisao manual obrigatoria."
+            ),
+            detected=detected,
+            declared=expected,
+            evidence_spans=evidence_spans,
+        )
+
+    if detected == "non_eda":
+        return _build_manual_review_payload(
+            case_id=case_id,
+            agency_record_number=agency_record_number,
+            reason_code="non_eda_request",
+            reason_text="Solicitacao fora do escopo dos tipos suportados; revisao manual obrigatoria.",
+            detected="non_eda",
+            declared=expected,
+            evidence_spans=evidence_spans,
+        )
+
+    return _build_manual_review_payload(
+        case_id=case_id,
+        agency_record_number=agency_record_number,
+        reason_code="unknown_exam_type",
+        reason_text="Tipo de exame nao identificado; revisao manual obrigatoria.",
+        detected="unknown",
+        declared=expected,
+        evidence_spans=evidence_spans,
+    )

@@ -243,7 +243,9 @@ class Llm1RulebookSignals(StrictModel):
 class Llm1PreopScreening(StrictModel):
     """Objective pre-procedure screening signals extracted from textual evidence."""
 
-    exam_type: Literal["eda", "non_eda", "unknown"]
+    # Slice 003: colonoscopy is now a supported exam type; non_eda remains for
+    # genuinely out-of-scope requests (e.g. CPRE).
+    exam_type: Literal["eda", "colonoscopy", "non_eda", "unknown"]
     has_cardiovascular_disease: EvidenceFlag
     has_active_respiratory_symptoms: EvidenceFlag
     has_prior_respiratory_disease: EvidenceFlag

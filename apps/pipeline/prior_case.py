@@ -41,6 +41,7 @@ def lookup_prior_case_context(
     case_id: uuid.UUID | str,
     agency_record_number: str,
     now: datetime | None = None,
+    exam_type: str | None = None,
 ) -> PriorCaseContext:
     """Busca casos anteriores do mesmo paciente (mesmo ``agency_record_number``).
 
@@ -57,6 +58,9 @@ def lookup_prior_case_context(
         agency_record_number: Número de protocolo da agência (chave de
             agrupamento do paciente).
         now: Referência temporal (útil em testes). Default: UTC now.
+        exam_type: Slice 003 (R7) — filtra candidatos pelo mesmo tipo de
+            exame. Quando ``None``, preserva o comportamento legado sem
+            filtro de tipo.
 
     Returns:
         PriorCaseContext com o caso anterior mais relevante (ou None) e
@@ -71,16 +75,19 @@ def lookup_prior_case_context(
     # Normaliza case_id para string UUID para comparação
     current_case_id = str(case_id)
 
-    # Busca candidatos com mesmo agency_record_number, excluindo o atual.
+    # Busca candidatos com mesmo agency_record_number e mesmo tipo de exame
+    # (R7), excluindo o atual.
     # Usa campos semânticos de decisão (não Case.status) e janela por
     # decided_at (não created_at). A sobreposição das Q é intencional:
     # o banco pode incluir candidatos com decided_at no passado, e o
     # filtro determinístico em Python resolve ambiguidades.
+    candidates_qs = Case.objects.filter(
+        agency_record_number=agency_record_number,
+    )
+    if exam_type is not None:
+        candidates_qs = candidates_qs.filter(exam_type=exam_type)
     prior_case_qs: list[Case] = list(
-        Case.objects.filter(
-            agency_record_number=agency_record_number,
-        )
-        .exclude(case_id=current_case_id)
+        candidates_qs.exclude(case_id=current_case_id)
         .filter(
             Q(doctor_decision="deny", doctor_decided_at__gte=window_start)
             | Q(appointment_status="denied", appointment_decided_at__gte=window_start),

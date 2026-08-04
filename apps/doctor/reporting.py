@@ -56,6 +56,7 @@ def prepare_doctor_case_report(case: Case) -> PreparedDoctorReport:
         pc = lookup_prior_case_context(
             case_id=case.case_id,
             agency_record_number=case.agency_record_number,
+            exam_type=case.exam_type,
         )
         if pc.prior_case is not None:
             prior_context = pc
@@ -74,6 +75,7 @@ def prepare_doctor_case_report(case: Case) -> PreparedDoctorReport:
         recent_denial_context=recent_denial_ctx,
         source_text=case.extracted_text or "",
         priority_signals=case.priority_signals or [],
+        exam_type=case.exam_type,
     )
 
     return PreparedDoctorReport(
