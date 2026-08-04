@@ -3188,3 +3188,133 @@ class TestDoctorDecisionPrioritySignals:
         assert "&lt;script&gt;" in content
         assert "<script>alert" not in content
         assert 'data-priority-signal-code="caustic_ingestion"' in content
+
+
+@pytest.mark.django_db
+class TestDoctorDecisionMedicationEvidence:
+    """Correção F1: o médico vê evidência e última dose dos medicamentos na tela de decisão.
+
+    O alerta em Achados críticos já cobre nome/status/conduta; a correção prova
+    que a evidência textual e a última dose/posologia também chegam ao HTML
+    entregue pela view, projetando as linhas canônicas do presenter
+    (report.context.medication_lines) com autoescape padrão do Django.
+    """
+
+    def _create_role(self, name: str):
+        from apps.accounts.models import Role
+
+        role, _ = Role.objects.get_or_create(name=name)
+        return role
+
+    def _login_as(self, client, role_name: str) -> None:
+        user = User.objects.create_user(username=f"{role_name}@medev.test", password="testpass123")
+        user.roles.add(self._create_role(role_name))
+        client.force_login(user)
+        session = client.session
+        session["active_role"] = role_name
+        session.save()
+
+    def _make_wait_doctor_case(self, *, medications: list[dict[str, object]]) -> Case:
+        from apps.accounts.models import Role
+
+        nir_user = User.objects.create_user(
+            username=f"nir_medev_{uuid.uuid4().hex[:8]}@test.com", password="testpass123"
+        )
+        role, _ = Role.objects.get_or_create(name="nir")
+        nir_user.roles.add(role)
+        case = Case.objects.create(
+            created_by=nir_user,
+            status=CaseStatus.WAIT_DOCTOR,
+            extracted_text="",
+            structured_data={
+                "patient": {"name": "Med Ev", "age": 60, "sex": "F"},
+                "preop_screening": {"medications_described": medications},
+            },
+        )
+        case.agency_record_number = "2026-0901-099"
+        case.save()
+        return case
+
+    @staticmethod
+    def _medication(
+        *,
+        name: str,
+        medication_class: str,
+        use_status: str,
+        source_text_hint: str,
+        last_dose_or_schedule: str | None = None,
+    ) -> dict[str, object]:
+        return {
+            "name": name,
+            "normalized_name": None,
+            "medication_class": medication_class,
+            "use_status": use_status,
+            "last_dose_or_schedule": last_dose_or_schedule,
+            "source_text_hint": source_text_hint,
+        }
+
+    def test_decision_shows_medication_evidence_and_dose(self, client) -> None:
+        """F1: tela médica mostra nome, status, evidência, dose e conduta neutra."""
+        case = self._make_wait_doctor_case(
+            medications=[
+                self._medication(
+                    name="Rivaroxabana",
+                    medication_class="anticoagulant",
+                    use_status="current",
+                    source_text_hint="Em uso contínuo de rivaroxabana",
+                    last_dose_or_schedule="20 mg/dia",
+                ),
+            ]
+        )
+        self._login_as(client, "doctor")
+        content = client.get(f"/doctor/{case.case_id}/").content.decode()
+
+        # Alerta proeminente em Achados críticos (já existente)
+        assert "Medicamento relevante: Rivaroxabana" in content
+        assert "uso atual" in content
+        assert "Conduta: confirmar manejo peri-procedimento." in content
+
+        # Evidência e última dose/posologia (correção F1 — ausentes no estado atual)
+        assert "Em uso contínuo de rivaroxabana" in content
+        assert "20 mg/dia" in content
+
+    def test_decision_medication_without_dose_shows_no_none(self, client) -> None:
+        """F1: medicamento sem dose não exibe 'None' nem label vazio; evidência aparece."""
+        case = self._make_wait_doctor_case(
+            medications=[
+                self._medication(
+                    name="Clopidogrel",
+                    medication_class="antiplatelet",
+                    use_status="suspended",
+                    source_text_hint="Clopidogrel suspenso há 5 dias",
+                    last_dose_or_schedule=None,
+                ),
+            ]
+        )
+        self._login_as(client, "doctor")
+        content = client.get(f"/doctor/{case.case_id}/").content.decode()
+
+        assert "Clopidogrel suspenso há 5 dias" in content
+        assert "suspenso" in content
+        assert "None" not in content
+        assert "última dose/posologia: None" not in content
+
+    def test_decision_escapes_html_like_medication_content(self, client) -> None:
+        """F1: conteúdo HTML-like em nome/evidência permanece escapado no HTML final."""
+        case = self._make_wait_doctor_case(
+            medications=[
+                self._medication(
+                    name="<b>Rivaroxabana</b>",
+                    medication_class="anticoagulant",
+                    use_status="current",
+                    source_text_hint="<script>alert(1)</script>",
+                    last_dose_or_schedule=None,
+                ),
+            ]
+        )
+        self._login_as(client, "doctor")
+        content = client.get(f"/doctor/{case.case_id}/").content.decode()
+
+        assert "&lt;b&gt;Rivaroxabana&lt;/b&gt;" in content
+        assert "&lt;script&gt;alert(1)&lt;/script&gt;" in content
+        assert "<script>alert(1)</script>" not in content

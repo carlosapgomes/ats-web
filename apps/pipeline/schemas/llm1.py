@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 EvidenceFlag = Literal["yes", "no", "unknown"]
 
@@ -215,6 +215,18 @@ class Llm1Medication(StrictModel):
     use_status: MedicationUseStatus
     last_dose_or_schedule: str | None = Field(default=None, max_length=200)
     source_text_hint: str = Field(min_length=1, max_length=300)
+
+    @field_validator("name", "source_text_hint")
+    @classmethod
+    def _reject_whitespace_only(cls, value: str) -> str:
+        """Reject semantically empty whitespace-only values (local to medications).
+
+        Kept local to Llm1Medication on purpose: widening StrictModel would
+        change validation behaviour for every other schema field.
+        """
+        if not value.strip():
+            raise ValueError("campo não pode conter apenas espaços")
+        return value
 
 
 class Llm1RulebookSignals(StrictModel):

@@ -786,6 +786,40 @@ class TestLlm1MedicationsDescribed:
                 user_prompt_template="UT",
             )
 
+    def test_schema_rejects_whitespace_only_name(self) -> None:
+        """F2: name com apenas espaços é semanticamente vazio e deve ser rejeitado."""
+        payload = _valid_llm1_payload()
+        payload["preop_screening"]["medications_described"] = [
+            _medication_payload_item(name="   ", source_text_hint="evidência")
+        ]
+        service = _make_service(json.dumps(payload))
+
+        with pytest.raises(Llm1ValidationError, match="name"):
+            service.run(
+                case_id="case-med-004b",
+                agency_record_number="12345",
+                extracted_text="...",
+                system_prompt="SP",
+                user_prompt_template="UT",
+            )
+
+    def test_schema_rejects_whitespace_only_source_text_hint(self) -> None:
+        """F2: source_text_hint com apenas espaços é semanticamente vazio e deve ser rejeitado."""
+        payload = _valid_llm1_payload()
+        payload["preop_screening"]["medications_described"] = [
+            _medication_payload_item(name="Rivaroxabana", source_text_hint="   ")
+        ]
+        service = _make_service(json.dumps(payload))
+
+        with pytest.raises(Llm1ValidationError, match="source_text_hint"):
+            service.run(
+                case_id="case-med-004c",
+                agency_record_number="12345",
+                extracted_text="...",
+                system_prompt="SP",
+                user_prompt_template="UT",
+            )
+
     def test_schema_rejects_unknown_medication_field(self) -> None:
         payload = _valid_llm1_payload()
         item = _medication_payload_item()
