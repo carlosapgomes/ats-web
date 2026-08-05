@@ -2,50 +2,50 @@
 
 **Change:** `introduce-colonoscopy-exam-workflow` (8 slices, do Slice 001 ao Slice 008)
 **Branch:** `feature/colonoscopy-exam-workflow` → `main`
-**Classificação de risco:** 🟡 Médio (ativação de novo tipo de exame em produção)
+**Classificação de risco:** 🔴 CRÍTICO / HIGH-ARCH (ativação de novo tipo de exame em produção, migration com UPDATE full-row e AddIndex não-concorrente)
 
 ---
 
 ## Quick reference
 
 Cópia de mão — para uso **após** leitura completa do runbook e após o
-Passo 1 (backup) já estar em `/archive/backups/`. Executar como `apps`,
-no diretório de instalação.
+Passo 1 (backup) já estar em `/archive/backups/`. Executar como `apps`.
+**Todos os comandos usam caminhos absolutos e `--project-directory` — não
+dependem do diretório corrente.**
 
 ```bash
-DPROD="docker compose -f docker-compose.yml -f docker-compose.prod.yml"
+# Diretório real de instalação (ajustar para o ambiente)
+PROJECT_DIR=/opt/ats-web/app
+BACKUP_DIR=/archive/backups/2026-XXX-colonoscopy
+DPROD="docker compose --project-directory ${PROJECT_DIR} \
+  -f ${PROJECT_DIR}/docker-compose.yml -f ${PROJECT_DIR}/docker-compose.prod.yml"
 
-# 1. (pré) Backup já feito e movido para /archive/backups/ pelo admin.
+# 1. (pré) Backup já feito, validado por conteúdo e movido para /archive/backups/ (Passo 1).
 
 # 2. Atualizar código
-git fetch origin && git checkout main && git pull origin main
+git -C "$PROJECT_DIR" fetch origin && git -C "$PROJECT_DIR" checkout main && git -C "$PROJECT_DIR" pull origin main
 
 # 3. Build das novas imagens
 $DPROD build --pull web worker pdf_worker
 
-# 4. Aplicar migrations (app no ar, zero downtime)
-#    Saída esperada: Applying cases.0014_case_exam_type... OK
-#    A migration faz AddField + backfill EDA idempotente (sem reprocessar).
+# 4. Migration em janela controlada de baixa atividade (ver Passo 4 — NÃO é zero downtime)
 $DPROD run --rm web uv run python manage.py migrate --settings=config.settings.prod
 
-# 5. Seed dos prompts (idempotente) — cria/ativa os 8 nomes canônicos,
-#    incluindo os 4 prompts de colonoscopia
+# 5. Seed dos prompts (idempotente) — cria os 8 nomes canônicos, incluindo os 4 de colonoscopia
 $DPROD run --rm web uv run python manage.py seed_prompts --settings=config.settings.prod
 
-# 6. Subir containers com a imagem nova
+# 6. PRECHECK BINÁRIO de prompts antes de ativar a flag (ver Passo 7) — STOP se falhar
+
+# 7. Subir containers com a imagem nova
 $DPROD up -d
 
-# 7. Verificação imediata
-$DPROD ps                                                   # todos "running"
-$DPROD logs --tail=30 web worker pdf_worker                 # sem traceback
-curl -sS -o /dev/null -w "%{http_code}\n" https://app.example.com/   # 200 ou 302
-
-# 8. Flag de intake permanece DESLIGADA por padrão (ver Seção 3.4 para ativar)
+# 8. Flag de intake permanece DESLIGADA por padrão (ver Passo 8 para ativar — apenas web)
 ```
 
 > Passos 9 (validação funcional) e 10 (monitoramento 24h) seguem abaixo em
 > formato completo. A ativação da flag é um passo **explícito e separado**
-> (Seção 3.4) — o deploy do código não ativa colonoscopia sozinho.
+> (Passo 8) — o deploy do código não ativa colonoscopia sozinho, e a flag é
+> lida **somente pelo serviço `web`**.
 
 ---
 
@@ -53,12 +53,13 @@ curl -sS -o /dev/null -w "%{http_code}\n" https://app.example.com/   # 200 ou 30
 
 | Aspecto | Avaliação |
 |---|---|
-| **Migration** | `apps/cases/migrations/0014_case_exam_type.py` — **aditiva, não-bloqueante**. `AddField` com default histórico + `RunPython` (elidable) que força `exam_type='eda'` em todas as linhas existentes, **sem ler PDF/JSON/texto** e **sem reprocessar/alterar FSM, decisão, agenda ou eventos**. Índice composto `(status, exam_type)` adicionado. |
-| **Compatibilidade** | Código velho ignora o novo campo → **zero downtime possível**. A migration pode rodar antes do restart. |
+| **Risco global** | 🔴 **CRÍTICO / HIGH-ARCH** — conforme `proposal.md`. Ativação de novo tipo de exame com mudança de schema e contratos LLM em produção. |
+| **Migration** | `apps/cases/migrations/0014_case_exam_type.py` — **aditiva, mas NÃO é zero downtime**. Executa `AddField` (default histórico `eda`) + **`UPDATE` de todas as linhas existentes** (backfill `RunPython` elidable, sem ler PDF/JSON/texto, sem reprocessar) + **`AddIndex` normal (não `CONCURRENTLY`)** em `(status, exam_type)`. O `UPDATE` full-row e o `AddIndex` podem adquirir locks e contender com escrita. **Exige janela controlada de baixa atividade** (Passo 4). |
+| **Compatibilidade** | Código velho ignora o novo campo após a migration; a app pode continuar atendendo leituras, mas os writers devem ser reduzidos durante a janela (Passo 4). |
 | **Mudanças de FSM / pipeline / schema existente** | Nenhum estado novo; 17 estados FSM preservados. Contrato LLM1 evolui de forma aditiva (`medications_described[]` e `exam_type=colonoscopy` aceito). |
-| **Dados sensíveis** | Backfill não lê conteúdo clínico. Nenhum PDF/JSON/texto é migrado. Volume de mídia não é afetado. |
-| **Variáveis de ambiente novas** | `COLONOSCOPY_INTAKE_ENABLED` (default `false`) — já documentada em `.env.example` e propagada para web/worker em `docker-compose.dev.yml`/`docker-compose.prod.yml`. |
-| **Prompts** | `seed_prompts` cria os 8 nomes canônicos (4 EDA + 4 colonoscopia). Nomes EDA não são substituídos. |
+| **Dados sensíveis** | Backfill não lê conteúdo clínico. Nenhum PDF/JSON/texto é migrado. |
+| **Variáveis de ambiente novas** | `COLONOSCOPY_INTAKE_ENABLED` (default `false`). No Compose de produção **somente o serviço `web` recebe a variável** (`docker-compose.prod.yml`); `worker`/`pdf_worker` **não** recebem nem consultam a flag. |
+| **Prompts** | `seed_prompts` cria os 8 nomes canônicos (4 EDA + 4 colonoscopia) quando ausentes; **não** reativa versões inativas. Precheck binário exige os 4 nomes colonoscopia **ativos** antes de ligar a flag (Passo 7). |
 | **Rollback** | Não destrutivo: desligar flag, drenar/encerrar casos em voo, reverter imagem, manter coluna/índice/prompts. Detalhes na Seção 5. |
 
 ### O que o change entrega
@@ -68,36 +69,63 @@ curl -sS -o /dev/null -w "%{http_code}\n" https://app.example.com/   # 200 ou 30
 - Filtros por tipo em médico (Pendentes/Decididos Hoje), CHD (Pendentes/Processados/Histórico), NIR (operacionais/encerrados) e dashboard (tabela gerencial).
 - Dashboard: métricas consolidadas preservadas + **breakdown EDA/Colonoscopia** por período.
 - Alertas medicamentosos informativos (anticoagulante/antiagregante) no relatório médico — **sem** alterar decisão/sugestão e **sem** orientação de suspensão.
-- Correção de tipo pelo NIR antes da fila médica / em revisão manual, com reprocessamento auditável do mesmo caso.
+- Correção de tipo pelo NIR em revisão manual (`WAIT_R1_CLEANUP_THUMBS` + `manual_review_required` com mismatch/mixed/unknown), com reprocessamento auditável do mesmo caso.
 
 ---
 
 ## 2. Pré-requisitos (no servidor de produção)
 
 - Acesso de shell ao servidor de produção como `apps` (conforme operação atual).
-- `docker compose -f docker-compose.yml -f docker-compose.prod.yml` funcional.
+- `docker compose` funcional com acesso ao projeto (`--project-directory`).
 - Acesso ao registry da imagem de release (GHCR) com a tag nova.
-- Backup do Postgres e do volume de mídia **obrigatório** antes de qualquer passo (Seção 3, Passo 1).
-- Comunicar aos times NIR/médico/CHD que o novo tipo de exame será ativado (a flag é ligada em momento explícito, ver Seção 3.4).
+- **Backup do Postgres e do volume de mídia `media_prod` obrigatório** antes de qualquer passo (Passo 1) — validado por conteúdo, não apenas tamanho.
+- **Janela de baixa atividade acordada com a operação** para a migration (Passo 4).
+- Comunicar aos times NIR/médico/CHD que o novo tipo de exame será ativado (a flag é ligada em momento explícito, ver Passo 8).
 
 ---
 
 ## 3. Passos de deploy
 
-### Passo 1 — Backup (obrigatório)
+### Passo 1 — Backup (obrigatório, validado por conteúdo)
 
 ```bash
-mkdir -p /archive/backups/2026-XXX-colonoscopy && cd /archive/backups/2026-XXX-colonoscopy
+# Caminhos absolutos — nada depende do diretório corrente.
+PROJECT_DIR=/opt/ats-web/app
+BACKUP_DIR=/archive/backups/2026-XXX-colonoscopy
+mkdir -p "$BACKUP_DIR"
+DPROD="docker compose --project-directory ${PROJECT_DIR} \
+  -f ${PROJECT_DIR}/docker-compose.yml -f ${PROJECT_DIR}/docker-compose.prod.yml"
 
-# Dump do Postgres (produção)
-$DPROD exec -T db pg_dump -U ats_web ats_web | gzip > ats_web_pre_colonoscopy_$(date +%Y%m%d_%H%M).sql.gz
+# 1a. Dump do Postgres (produção)
+STAMP=$(date +%Y%m%d_%H%M)
+$DPROD exec -T db pg_dump -U ats_web ats_web | gzip > "${BACKUP_DIR}/ats_web_pre_colonoscopy_${STAMP}.sql.gz"
 
-# Snapshot do volume de mídia (PDFs/anexos)
-$DPROD run --rm -v ats_web_media:/media:ro -v $(pwd):/backup alpine \
-  tar czf /backup/media_pre_colonoscopy_$(date +%Y%m%d_%H%M).tar.gz -C /media .
+# 1b. VALIDAÇÃO do dump por conteúdo (gzip -t descompacta e verifica CRC/EOF)
+gzip -t "${BACKUP_DIR}/ats_web_pre_colonoscopy_${STAMP}.sql.gz" \
+  && echo "Dump gzip OK: $(zcat "${BACKUP_DIR}/ats_web_pre_colonoscopy_${STAMP}.sql.gz" | wc -l) linhas SQL"
 
-# Confirmar que os arquivos não estão vazios
-ls -lh ats_web_pre_colonoscopy_*.sql.gz media_pre_colonoscopy_*.tar.gz
+# 1c. Snapshot do volume de mídia REAL herdado pelo serviço web (media_prod).
+#     NUNCA inventar nome de volume: resolve-se o volume montado em /app/media
+#     no container atual do serviço web (nome real: <projeto>_media_prod, ex.
+#     ats-web-prod_media_prod). Se a resolução falhar, PARAR — não prosseguir.
+WEB_CID="$($DPROD ps -q web)"
+test -n "$WEB_CID" || { echo "ERRO: serviço web não encontrado"; exit 1; }
+MEDIA_VOLUME="$(docker inspect "$WEB_CID" --format \
+  '{{range .Mounts}}{{if eq .Destination "/app/media"}}{{.Name}}{{end}}{{end}}')"
+test -n "$MEDIA_VOLUME" || { echo "ERRO: não foi possível resolver o volume media_prod de web"; exit 1; }
+echo "Volume de mídia resolvido: $MEDIA_VOLUME"
+
+docker run --rm \
+  -v "${MEDIA_VOLUME}":/media:ro \
+  -v "${BACKUP_DIR}":/backup \
+  alpine tar czf "/backup/media_pre_colonoscopy_${STAMP}.tar.gz" -C /media .
+
+# 1d. VALIDAÇÃO do tar por conteúdo (listagem completa, não apenas tamanho)
+tar -tzf "${BACKUP_DIR}/media_pre_colonoscopy_${STAMP}.tar.gz" > /dev/null \
+  && echo "Tar de mídia OK: $(tar -tzf "${BACKUP_DIR}/media_pre_colonoscopy_${STAMP}.tar.gz" | wc -l) entradas"
+
+# Confirmar presença/ausência esperada de arquivos
+ls -lh "${BACKUP_DIR}"/ats_web_pre_colonoscopy_*.sql.gz "${BACKUP_DIR}"/media_pre_colonoscopy_*.tar.gz
 ```
 
 > **Precheck:** antes do deploy, registrar o baseline de casos em voo
@@ -106,9 +134,9 @@ ls -lh ats_web_pre_colonoscopy_*.sql.gz media_pre_colonoscopy_*.tar.gz
 ### Passo 2 — Atualizar código
 
 ```bash
-cd <diretório de instalação>
-git fetch origin && git checkout main && git pull origin main
-git log --oneline -5        # confirmar os commits do change no topo
+PROJECT_DIR=/opt/ats-web/app
+git -C "$PROJECT_DIR" fetch origin && git -C "$PROJECT_DIR" checkout main && git -C "$PROJECT_DIR" pull origin main
+git -C "$PROJECT_DIR" log --oneline -5        # confirmar os commits do change no topo
 ```
 
 ### Passo 3 — Build das novas imagens
@@ -117,19 +145,36 @@ git log --oneline -5        # confirmar os commits do change no topo
 $DPROD build --pull web worker pdf_worker
 ```
 
-### Passo 4 — Aplicar a migration (app ainda no ar)
+### Passo 4 — Aplicar a migration em janela controlada (NÃO é zero downtime)
+
+A migration `cases.0014_case_exam_type` executa:
+
+1. `AddField` `Case.exam_type` com default histórico `eda`;
+2. **`UPDATE` full-row** (`RunPython` elidable) forçando `exam_type='eda'` em
+   todas as linhas existentes — sem ler PDF/JSON/texto, sem reprocessar, sem
+   criar eventos;
+3. **`AddIndex` não-concorrente** em `(status, exam_type)` — pode bloquear
+   escritas concorrentes no PostgreSQL.
+
+Procedimento de janela controlada/baixa atividade:
 
 ```bash
-# Saída esperada: Applying cases.0014_case_exam_type... OK
+# a) Acordar janela de baixa atividade com NIR/operação (idealmente fora do horário de pico).
+# b) Reduzir writers: pausar filas dos workers (ou escalar para zero réplicas de worker)
+#    para minimizar contenção de escrita durante o UPDATE/AddIndex.
+$DPROD stop worker pdf_worker        # retomar logo após a migration
+
+# c) Aplicar a migration monitorando locks
+#    Saída esperada: Applying cases.0014_case_exam_type... OK
 $DPROD run --rm web uv run python manage.py migrate --settings=config.settings.prod
+
+# d) Verificar locks/atividade durante a janela (em outro shell, se necessário):
+$DPROD exec -T db psql -U ats_web -d ats_web -c \
+  "SELECT pid, state, wait_event_type, query FROM pg_stat_activity WHERE state <> 'idle';"
+
+# e) Retomar os workers
+$DPROD start worker pdf_worker
 ```
-
-A migration `cases.0014_case_exam_type`:
-
-1. adiciona `Case.exam_type` com default histórico `eda`;
-2. **backfill idempotente** de todas as linhas existentes para `eda` (sem ler
-   PDF/JSON/texto, sem reprocessar, sem criar eventos);
-3. cria o índice composto `(status, exam_type)`.
 
 Se erro: **NÃO continuar** — ir para a Seção 5 (Rollback).
 
@@ -149,8 +194,9 @@ colonoscopy_llm2_system / colonoscopy_llm2_user              (Colonoscopia)
 
 - Idempotente: não sobrescreve versões já ativas.
 - Nomes EDA **não são substituídos** pelos de colonoscopia.
-- Depois do seed, os prompts de colonoscopia são administráveis na UI de
-  admin (Gestão de Prompts), com versionamento (1 ativo por nome).
+- **Limitação:** `seed_prompts` não reativa versões inativas. Se um nome
+  colonoscopia já existir como versão **inativa**, o seed o ignora — a
+  ativação deve ser feita na UI (Passo 7).
 
 ### Passo 6 — Subir os containers com a imagem nova
 
@@ -158,45 +204,56 @@ colonoscopy_llm2_system / colonoscopy_llm2_user              (Colonoscopia)
 $DPROD up -d
 ```
 
-### Passo 7 — Verificação imediata
+### Passo 7 — PRECHECK binário de prompts (obrigatório antes de ativar a flag)
+
+Antes de ligar `COLONOSCOPY_INTAKE_ENABLED`, os **quatro** nomes de prompt de
+colonoscopia devem ter uma **versão ativa**. O comando abaixo falha (exit 1)
+se qualquer nome não estiver ativo — **em caso de falha, PARAR e não ativar a
+flag**:
 
 ```bash
-$DPROD ps                                                   # todos "running"
-$DPROD logs --tail=30 web worker pdf_worker                 # sem traceback
-curl -sS -o /dev/null -w "%{http_code}\n" https://app.example.com/   # 200 ou 302
-
-# Migration aplicada?
-$DPROD exec -T web uv run python manage.py showmigrations cases \
-  --settings=config.settings.prod | tail -8                 # [X] 0014_case_exam_type
-
-# Prompts colonoscopia presentes?
-$DPROD exec -T web uv run python manage.py shell \
-  --settings=config.settings.prod -c \
-  "from apps.llm.models import PromptTemplate; \
-print(list(PromptTemplate.objects.filter(name__startswith='colonoscopy_').values_list('name','is_active')))"
+$DPROD exec -T web uv run python manage.py shell --settings=config.settings.prod -c "
+from apps.llm.models import PromptTemplate
+names = ['colonoscopy_llm1_system', 'colonoscopy_llm1_user',
+         'colonoscopy_llm2_system', 'colonoscopy_llm2_user']
+missing = [n for n in names
+           if not PromptTemplate.objects.filter(name=n, is_active=True).exists()]
+if missing:
+    print('PRECHECK FALHOU — prompts colonoscopia sem versão ativa:', missing)
+    raise SystemExit(1)
+print('PRECHECK OK — 4 prompts colonoscopia ativos')
+"
 ```
 
-### Passo 8 — Flag de intake (default desligada)
+**Se falhar (versões inativas):** ativar na UI de admin — **Gestão de Prompts** —
+localizar cada nome, **desativar** a versão ativa (se houver outra) e
+**ativar** a versão de colonoscopia desejada (1 ativo por nome). Repetir o
+precheck até passar. **Não ativar a flag com precheck vermelho.**
+
+### Passo 8 — Flag de intake (default desligada; leitura apenas em `web`)
 
 O código já funciona com a flag **desligada** (`false`): o sistema roda
 normalmente para EDA e casos colonoscopia **já existentes** continuam
 processáveis. **Novos uploads** de colonoscopia são bloqueados até a flag ser
 ligada.
 
+**Semântica da flag:** `COLONOSCOPY_INTAKE_ENABLED` existe **somente no
+serviço `web`** (`docker-compose.prod.yml`). `worker` e `pdf_worker` **não
+recebem a variável** e **nenhum worker/pipeline a consulta** — a flag nunca
+bloqueia processamento de casos existentes.
+
 **Como ativar globalmente (rollout):**
 
 1. Definir `COLONOSCOPY_INTAKE_ENABLED=true` no ambiente de produção
    (`.env` privado ou orquestrador);
-2. recriar os serviços que leem a variável:
+2. recriar **apenas** o serviço que lê a variável:
 
 ```bash
-$DPROD up -d --force-recreate web worker
+$DPROD up -d --force-recreate web
 ```
 
-> A flag é consultada **apenas no intake** (validação de novos uploads).
-> Workers/pipeline **não** consultam a flag para bloquear casos existentes
-> (Seção 4.3). Portanto, recriar o worker é uma boa prática de propagação,
-> mas não é o mecanismo que bloqueia/libera casos em voo.
+> Não é necessário recriar `worker`/`pdf_worker`: eles não recebem nem
+> consultam a variável. Recriá-los por esse motivo seria uma operação inútil.
 
 ### Passo 9 — Smoke tests (após ativação da flag)
 
@@ -223,8 +280,8 @@ $DPROD exec -T web uv run python manage.py shell --settings=config.settings.prod
 from apps.cases.models import Case, CaseStatus
 
 print('— Casos por tipo (total) —')
-for t, label in Case.objects.order_by().values_list('exam_type', 'exam_type').distinct():
-    print(label, Case.objects.filter(exam_type=t).count())
+for t in ('eda', 'colonoscopy'):
+    print(t, Case.objects.filter(exam_type=t).count())
 
 print('— Em voo (não CLEANED) por tipo —')
 for t in ('eda', 'colonoscopy'):
@@ -243,7 +300,9 @@ print('FAILED', Case.objects.filter(status=CaseStatus.FAILED).count())
 
 - **Falhas:** `Case.status = FAILED` (query acima) — revisar daily; casos
   colonoscopia com falha são elegíveis a correção/reprocessamento pelo NIR
-  apenas nos estados permitidos (antes de `WAIT_DOCTOR` ou revisão manual).
+  apenas em revisão manual (`WAIT_R1_CLEANUP_THUMBS` + `manual_review_required`
+  com motivo mismatch/mixed/unknown) — nunca em estados de worker ou após
+  decisão médica.
 - **Mismatch/mixed:** eventos `EXAM_TYPE_MISMATCH_DETECTED` e correções
   `EXAM_TYPE_CORRECTED` na auditoria:
 
@@ -271,8 +330,9 @@ rg -n "COLONOSCOPY_INTAKE_ENABLED" apps/ | grep -v tests
 ```
 
 > A flag é consultada **somente no intake** (validação de novos uploads e
-> reenvios corrigidos). Casos colonoscopia já criados continuam no pipeline,
-> nas filas e na decisão mesmo com a flag desligada — por design (D2/D16).
+> reenvios corrigidos), que roda no serviço `web`. Casos colonoscopia já
+> criados continuam no pipeline, nas filas e na decisão mesmo com a flag
+> desligada — por design (D2/D16).
 
 ---
 
@@ -282,11 +342,11 @@ rg -n "COLONOSCOPY_INTAKE_ENABLED" apps/ | grep -v tests
 
 Usar quando a ativação causar problema operacional, mas sem corrupção de dados:
 
-1. **Desligar o intake de colonoscopia:**
+1. **Desligar o intake de colonoscopia** (apenas `web` lê a flag):
 
 ```bash
 # .env de produção: COLONOSCOPY_INTAKE_ENABLED=false
-$DPROD up -d --force-recreate web worker
+$DPROD up -d --force-recreate web
 ```
 
 2. **Drenar/encerrar casos colonoscopia em voo** (não `CLEANED`):
@@ -319,9 +379,11 @@ canônicos (`llm1_system`/`llm1_user`/`llm2_system`/`llm2_user`):
 ### 5.3 Rollback completo (última instância — restaurar backup)
 
 Só se a migration tiver causado problema real de dados (não esperado: a
-migration é aditiva e o backfill não lê artefatos):
+migration é aditiva e o backfill não lê artefatos, mas o UPDATE/AddIndex
+exigem janela controlada):
 
-1. restaurar o dump do Postgres (Passo 1) e a mídia (se necessário);
+1. restaurar o dump do Postgres (Passo 1, validado por `gzip -t`) e a mídia
+   (Passo 1, validada por `tar -tzf`), se necessário;
 2. voltar o código para o commit anterior e rebuild;
 3. `$DPROD up -d` e validar.
 
@@ -330,11 +392,12 @@ migration é aditiva e o backfill não lê artefatos):
 ## 6. Pós-deploy (fechamento do change)
 
 - Manter a flag documentada no `.env` privado de produção; `.env.example` já
-  contém `COLONOSCOPY_INTAKE_ENABLED=false` como default seguro.
+  contém `COLONOSCOPY_INTAKE_ENABLED=false` como default seguro; a variável é
+  propagada apenas para `web` (nenhum worker a recebe).
 - Manter `PROJECT_CONTEXT.md` e o manual de usuário alinhados ao
   comportamento real (seleção homogênea, mixed PDFs separados, alerta
-  medicamentoso informativo, correção antes da fila médica, flag não é
-  assunto de usuário comum).
+  medicamentoso informativo, correção em revisão manual com
+  mismatch/mixed/unknown, flag não é assunto de usuário comum).
 - O change **não** arquiva como concluído enquanto houver item do DoD global
   não comprovado em `openspec/changes/introduce-colonoscopy-exam-workflow/tasks.md`.
 
@@ -346,6 +409,9 @@ migration é aditiva e o backfill não lê artefatos):
   política de colonoscopia.
 - Medicamentos: apenas alerta informativo; **nunca** orientação de suspensão,
   janela farmacológica ou dose.
+- Correção de tipo: apenas em `WAIT_R1_CLEANUP_THUMBS` com
+  `manual_review_required` e motivo `exam_type_mismatch`/`mixed_exam_request`/
+  `unknown_exam_type`; nunca em estados de worker ou após decisão médica.
 - Regra de ouro do rollback: **flag desligada bloqueia novos uploads, nunca
   processamento de casos existentes**; nenhuma migration destrutiva é
   necessária para reverter.

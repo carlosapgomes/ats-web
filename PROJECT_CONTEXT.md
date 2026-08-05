@@ -14,10 +14,11 @@ Resumo executivo para retomada rapida apos pausas e para onboarding de novos con
 
 ## Objetivo do Sistema
 
-Sistema de **triagem automatizada para EDA** (Endoscopia Digestiva Alta).
-Operadores NIR enviam PDFs de relatorios medicos, o sistema processa via pipeline
-LLM, apresenta ao medico para decisao, encaminha ao agendador, e retorna o
-resultado ao NIR. Monolito Django SSR, sem API REST e sem SPA.
+Sistema de **triagem automatizada para EDA e Colonoscopia** (Endoscopia
+Digestiva Alta e Baixa). Operadores NIR enviam PDFs de relatorios medicos, o
+sistema processa via pipeline LLM, apresenta ao medico para decisao, encaminha
+ao agendador, e retorna o resultado ao NIR. Monolito Django SSR, sem API REST
+e sem SPA.
 
 Projeto **greenfield** — reimplantacao de sistema legado (`augmented-triage-system`)
 que operava via salas Matrix. A interface Matrix desaparece completamente;
@@ -125,7 +126,7 @@ static/          # css/app.css (paleta hospitalar), js/upload.js, js/password-to
 
 ## Contratos e Validações
 
-- **Tipo de exame explícito (colonoscopia)**: `Case.exam_type` (`eda` | `colonoscopy`) é declarado obrigatoriamente no upload (lote homogêneo) e no reenvio corrigido; casos históricos foram backfillados como `eda` sem reprocessamento (migration `0014`). Flag `COLONOSCOPY_INTAKE_ENABLED` (default `false`) bloqueia apenas **novos uploads** de colonoscopia — nenhum worker/pipeline consulta a flag para interromper casos existentes. PDF com solicitações atuais EDA+colonoscopia juntas é bloqueado (mixed) e exige PDFs separados. Correção de tipo pelo NIR só antes de `WAIT_DOCTOR`/em revisão manual, com reprocessamento auditável do mesmo caso (`EXAM_TYPE_MISMATCH_DETECTED`/`EXAM_TYPE_CORRECTED`/`CASE_REPROCESSING_REQUESTED`). Filtros por tipo em médico (Pendentes/Decididos Hoje), CHD (Pendentes/Processados/Histórico), NIR (operacionais/encerrados) e dashboard (tabela gerencial, compõe com busca/status/datas/atenção/paginação). Dashboard mantém métricas consolidadas e adiciona breakdown EDA/Colonoscopia no período ativo (desfechos = período; esperas por etapa = snapshot atual, rotulado). Prompts de colonoscopia (`colonoscopy_llm1_*`/`colonoscopy_llm2_*`) são administráveis e não substituem os canônicos EDA. Sem CPRE funcional; sem hard rule medicamentosa (alerta é informativo).
+- **Tipo de exame explícito (colonoscopia)**: `Case.exam_type` (`eda` | `colonoscopy`) é declarado obrigatoriamente no upload (lote homogêneo) e no reenvio corrigido (escolha explícita, não herdada do original, pode divergir e respeita a flag de intake); casos históricos foram backfillados como `eda` sem reprocessamento (migration `0014`). Flag `COLONOSCOPY_INTAKE_ENABLED` (default `false`) é lida **somente no serviço `web`/intake** e bloqueia apenas **novos uploads** de colonoscopia — nenhum worker/pipeline consulta a flag para interromper casos existentes. PDF com solicitações atuais EDA+colonoscopia juntas é bloqueado (mixed) e exige PDFs separados. Correção de tipo pelo NIR **somente** em `WAIT_R1_CLEANUP_THUMBS` com `manual_review_required` e motivo `exam_type_mismatch`/`mixed_exam_request`/`unknown_exam_type`, sem decisão médica — reprocessamento auditável do mesmo caso (`EXAM_TYPE_MISMATCH_DETECTED`/`EXAM_TYPE_CORRECTED`/`CASE_REPROCESSING_REQUESTED`). Filtros por tipo em médico (Pendentes/Decididos Hoje), CHD (Pendentes/Processados/Histórico), NIR (operacionais/encerrados) e dashboard (tabela gerencial, compõe com busca/status/datas/atenção/paginação). Dashboard mantém métricas consolidadas e adiciona breakdown EDA/Colonoscopia no período ativo (desfechos = período; esperas por etapa = snapshot atual, rotulado). Prompts de colonoscopia (`colonoscopy_llm1_*`/`colonoscopy_llm2_*`) são administráveis e não substituem os canônicos EDA. Sem CPRE funcional; sem hard rule medicamentosa (alerta é informativo).
 - **Prompts canônicos**: nomes legados `llm1_system`, `llm1_user`, `llm2_system`, `llm2_user` são definitivos.
   `seed_prompts` cria versões ativas com defaults portados do legado. Fallback de código usa os mesmos defaults.
 - **Validação Pydantic v2**: schemas `apps/pipeline/schemas/llm1.py` (StructuredData) e `llm2.py` (Suggestion)
@@ -219,12 +220,12 @@ static/          # css/app.css (paleta hospitalar), js/upload.js, js/password-to
   - `openspec/archive/restore-isolated-deterministic-test-baseline/` (1 slice — baseline de testes isolado e determinístico restaurado e endurecido (gates baseline-vs-final)).
 - **Apps criados**: `apps/accounts/`, `apps/cases/`, `apps/llm/`, `apps/intake/`, `apps/pipeline/`,
   `apps/doctor/`, `apps/scheduler/`, `apps/dashboard/`, `apps/admin_ui/`
-- **Testes**: 2187 passando, quality gate verde (ruff + mypy + pytest)
+- **Testes**: 2798 passando (baseline verificado no gate do commit de correção do Slice 008; inclui 19 testes de contrato de documentação do rollout), quality gate verde (ruff + mypy + pytest)
 - **Templates**: base.html com tema hospitalar, login, switch-role, perfil, password reset/change,
   intake (home, my_cases, case_detail), doctor (queue, decision)
 - **Documentacao de dominio**: `docs/DOMAIN_ANALYSIS.md`
 - **Investigações**: `docs/investigations/2026-05-18-nir-to-doctor-flow-review.md`
-- **ADR ativas**: ADR-0001 (arquitetura Django SSR), ADR-0002 (emails transacionais de conta/autenticação)
+- **ADR ativas**: ADR-0001 (arquitetura Django SSR), ADR-0002 (emails transacionais de conta/autenticação), ADR-0003 (perfis de procedimento e tipo de exame explícito — **Accepted**)
 - **Dívida técnica**: `django-fsm` deprecated → `viewflow.fsm` (não urgente); observabilidade de logs do gunicorn / falha SMTP (candidato a change de hardening)
 
 ## Quality Bar

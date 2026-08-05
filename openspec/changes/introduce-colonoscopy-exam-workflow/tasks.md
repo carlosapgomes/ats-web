@@ -27,6 +27,13 @@ Se o branch atual for outro, o implementador deve parar e reportar `INCOMPLETE/B
 - [x] Slice 006 — Correção de tipo e reprocessamento auditável (`slices/slice-006-exam-type-correction-reprocess.md`)
 - [x] Slice 007 — Filtros NIR e tipo no reenvio corrigido (`slices/slice-007-nir-type-filters-resubmission.md`)
 - [x] Slice 008 — Breakdown gerencial, documentação e rollout (`slices/slice-008-dashboard-breakdown-rollout.md`)
+  - Correção pós-revisão (commit `prompt-correct-slice-008-rollout-documentation.md`): runbook corrigido
+    (risco CRÍTICO/HIGH-ARCH, `--project-directory` absoluto, volume real `media_prod`, validação de
+    conteúdo gzip/tar, janela controlada para migration 0014, flag web-only, precheck binário de prompts,
+    ativação UI de prompts inativos), manual (elegibilidade exata `WAIT_R1_CLEANUP_THUMBS` +
+    `manual_review_required` mismatch/mixed/unknown; tipo explícito no reenvio corrigido não herdado),
+    PROJECT_CONTEXT (objetivo EDA+Colonoscopia, baseline 2798, ADR-0003 Accepted), relatórios /tmp
+    slice-002/003/004 regularizados, +19 testes de contrato de documentação em `tests/test_colonoscopy_rollout_docs.py`.
 
 ## Definition of Done do change
 

@@ -97,12 +97,18 @@ Nesse caso:
 2.  **NIR** abrir os **Detalhes** do caso.
 3.  **NIR** clicar em **Reenviar caso corrigido**.
 4.  **NIR** informar o motivo do reenvio.
-5.  **NIR** selecionar o novo PDF principal correto.
-6. Se houver anexos necessários, o **NIR** envia novamente os anexos corretos.
-7.  **NIR** confirmar que está criando um novo envio corrigido.
-8. O sistema cria um **novo caso vinculado ao caso anterior**.
-9. O novo caso segue o fluxo normal de processamento e avaliação médica.
-10. O médico vê que aquele caso é um **reenvio corrigido**.
+5.  **NIR** selecionar o **tipo de exame do novo envio** (**EDA** ou
+    **Colonoscopia** — escolha obrigatória). O tipo do caso anterior **não é
+    herdado automaticamente**: pode ser igual ou **diferente** do original,
+    caso o relatório anterior estivesse classificado incorretamente. A opção
+    **Colonoscopia** fica indisponível quando a operação ainda não ativou a
+    colonoscopia (mesma regra do upload novo).
+6.  **NIR** selecionar o novo PDF principal correto.
+7. Se houver anexos necessários, o **NIR** envia novamente os anexos corretos.
+8.  **NIR** confirmar que está criando um novo envio corrigido.
+9. O sistema cria um **novo caso vinculado ao caso anterior**.
+10. O novo caso segue o fluxo normal de processamento e avaliação médica.
+11. O médico vê que aquele caso é um **reenvio corrigido**.
 
 O caso anterior **não é reaberto nem alterado**. Ele permanece registrado para auditoria.
 
@@ -450,9 +456,13 @@ Passo a passo:
 1. abrir o caso anterior;
 2. clicar em **Reenviar caso corrigido**;
 3. informar o motivo do reenvio;
-4. selecionar o novo PDF correto;
-5. marcar a confirmação;
-6. clicar em **Enviar caso corrigido**.
+4. selecionar o **tipo de exame do novo envio** (**EDA** ou **Colonoscopia**
+   — escolha obrigatória; o tipo anterior **não é herdado** e pode ser
+   **diferente** do original; **Colonoscopia** só está disponível quando a
+   operação a liberou para novos envios);
+5. selecionar o novo PDF correto;
+6. marcar a confirmação;
+7. clicar em **Enviar caso corrigido**.
 
 O caso anterior não é reaberto. O sistema cria um novo caso vinculado ao anterior.
 
@@ -561,15 +571,24 @@ Quando o sistema identifica divergência entre o tipo declarado no upload e o
 conteúdo do relatório, o caso vai para **Revisão Manual** e o NIR pode
 corrigir o tipo de exame.
 
-A correção também está disponível **antes de o caso entrar na fila médica**
-(estados estáveis anteriores a `WAIT_DOCTOR`). Depois que o caso está na
-fila médica ou já foi decidido, o tipo **não** pode mais ser corrigido.
+A correção está disponível **somente** quando o caso está exatamente nesta
+situação:
+
+- status `WAIT_R1_CLEANUP_THUMBS` (revisão manual do NIR);
+- resultado `manual_review_required` com motivo `exam_type_mismatch`
+  (divergência de tipo), `mixed_exam_request` (solicitação mista) ou
+  `unknown_exam_type` (tipo não identificado);
+- **sem** decisão médica registrada.
+
+A correção **não** está disponível durante o processamento do worker, nem
+quando o caso já está na fila médica ou já foi decidido. Fora das condições
+acima, o formulário de correção não aparece.
 
 Passo a passo:
 
 1. abrir o caso em **Meus Casos**;
 2. localizar a seção de **correção do tipo de exame** (visível apenas quando
-   permitido, conforme o estado do caso);
+   o caso está em revisão manual, conforme as condições acima);
 3. selecionar o tipo correto (**EDA** ou **Colonoscopia**);
 4. confirmar a correção.
 

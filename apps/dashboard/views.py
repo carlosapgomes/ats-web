@@ -234,12 +234,6 @@ def _compute_exam_type_breakdown(
     return breakdown
 
 
-EXAM_TYPE_BREAKDOWN_LABELS: dict[str, str] = {
-    ExamType.EDA: "EDA",
-    ExamType.COLONOSCOPY: "Colonoscopia",
-}
-
-
 def _exam_type_breakdown_rows(
     period: str | None = None,
     day: date | None = None,
