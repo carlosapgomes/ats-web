@@ -25,7 +25,7 @@ Se o branch atual for outro, o implementador deve parar e reportar `INCOMPLETE/B
 - [x] Slice 004 — Filtros médicos por tipo com busca preservada (`slices/slice-004-doctor-exam-type-filters.md`)
 - [x] Slice 005 — Filtros CHD em pendentes, processados e histórico (`slices/slice-005-scheduler-exam-type-filters.md`)
 - [x] Slice 006 — Correção de tipo e reprocessamento auditável (`slices/slice-006-exam-type-correction-reprocess.md`)
-- [ ] Slice 007 — Filtros NIR e tipo no reenvio corrigido (`slices/slice-007-nir-type-filters-resubmission.md`)
+- [x] Slice 007 — Filtros NIR e tipo no reenvio corrigido (`slices/slice-007-nir-type-filters-resubmission.md`)
 - [ ] Slice 008 — Breakdown gerencial, documentação e rollout (`slices/slice-008-dashboard-breakdown-rollout.md`)
 
 ## Definition of Done do change

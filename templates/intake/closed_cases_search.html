@@ -20,7 +20,7 @@
   </p>
 
   <form method="get" class="row g-3 align-items-end">
-    <div class="col-md-8">
+    <div class="col-md-4">
       <label for="search-input" class="form-label">Buscar</label>
       <input
         type="text"
@@ -31,6 +31,14 @@
         value="{{ query }}"
       >
     </div>
+    <div class="col-md-4">
+      <label for="exam-type-select" class="form-label">Filtrar por tipo de exame</label>
+      <select name="exam_type" id="exam-type-select" class="form-select" aria-label="Filtrar por tipo de exame">
+        <option value="all" {% if exam_type == 'all' %}selected{% endif %}>Todos os tipos</option>
+        <option value="eda" {% if exam_type == 'eda' %}selected{% endif %}>EDA</option>
+        <option value="colonoscopy" {% if exam_type == 'colonoscopy' %}selected{% endif %}>Colonoscopia</option>
+      </select>
+    </div>
     <div class="col-md-4 d-flex gap-2">
       <button type="submit" class="btn btn-hospital">Buscar</button>
       <a href="{% url 'intake:closed_cases_search' %}" class="btn btn-hospital-outline">Limpar</a>
@@ -40,7 +48,7 @@
 
 <!-- Resultados -->
 <div class="card p-4">
-  {% if query %}
+  {% if query or exam_type != 'all' %}
     <div class="d-flex justify-content-between align-items-center mb-3">
       <h3 class="mb-0">Resultados</h3>
       <span class="badge-hospital-primary status-badge">{{ results|length }} caso{{ results|length|pluralize:"s" }}</span>
@@ -53,7 +61,10 @@
           <div class="case-card card p-3">
             <div class="row align-items-center">
               <div class="col-md-5">
-                <div class="patient-name">{{ item.patient_name }}</div>
+                <div class="patient-name">
+                  {{ item.patient_name }}
+                  <span class="badge exam-type-badge exam-type-{{ item.case.exam_type }}">{{ item.case.get_exam_type_display }}</span>
+                </div>
                 <div class="case-meta">
                   {% if item.case.agency_record_number %}Reg. {{ item.case.agency_record_number }}{% endif %}
                   {% with origin=item.case.get_origin_unit_display %}{% if origin %} · 🏥 {{ origin }}{% endif %}{% endwith %}
@@ -96,8 +107,8 @@
       <div class="text-center py-5">
         <p class="text-muted mb-3 fs-5">Nenhum caso encontrado</p>
         <p class="text-muted small">
-          Nenhum caso encerrado corresponde à busca "{{ query }}".
-          Tente um número de registro ou nome de paciente diferente.
+          Nenhum caso encerrado corresponde aos filtros aplicados.
+          Ajuste o termo ou o tipo de exame e tente novamente.
         </p>
         <a href="{% url 'intake:closed_cases_search' %}" class="btn btn-hospital-outline">Nova busca</a>
       </div>

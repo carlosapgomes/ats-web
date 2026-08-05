@@ -21,7 +21,7 @@ from apps.cases.admission import (
     is_operational_notice_flow,
     is_scheduled_admission_flow,
 )
-from apps.cases.models import Case, CaseAttachment, CaseStatus
+from apps.cases.models import Case, CaseAttachment, CaseStatus, ExamType
 from apps.cases.navigation import resolve_safe_next_url
 from apps.cases.priority_signals import build_priority_signal_badges
 from apps.cases.services import (
@@ -49,6 +49,7 @@ from .services import (
     EnqueueAfterCommitError,
     confirm_case_receipt,
     correct_case_exam_type,
+    ensure_exam_type_allowed,
     is_colonoscopy_intake_enabled,
     is_exam_type_correction_eligible,
     process_uploaded_files,
@@ -360,6 +361,13 @@ def _my_cases_context(request: HttpRequest) -> dict[str, object]:
     if search:
         qs = qs.filter(agency_record_number__icontains=search)
 
+    # R1 (Slice 007): filtro server-side por tipo de exame — default Todos;
+    # compõe com status e busca; tipo inválido cai para all.
+    raw_exam_type = request.GET.get("exam_type", "all")
+    exam_type = raw_exam_type if raw_exam_type in ExamType.values else "all"
+    if exam_type != "all":
+        qs = qs.filter(exam_type=exam_type)
+
     case_data = [
         {
             "case": c,
@@ -403,6 +411,7 @@ def _my_cases_context(request: HttpRequest) -> dict[str, object]:
         "case_data": case_data,
         "status_filter": status_filter,
         "search": search,
+        "exam_type": exam_type,
         "status_labels": STATUS_LABELS,
         "status_css": STATUS_CSS_CLASS,
         "my_cases_partial_url": partial_url,
@@ -942,6 +951,7 @@ def corrected_resubmission(request: HttpRequest, case_id: uuid.UUID) -> HttpResp
         correction_reason = request.POST.get("correction_reason", "")
         pdf_file = request.FILES.get("pdf_file")
         attachment_files = request.FILES.getlist("attachment_files")
+        exam_type = request.POST.get("exam_type", "")
 
         errors: list[str] = []
 
@@ -957,6 +967,13 @@ def corrected_resubmission(request: HttpRequest, case_id: uuid.UUID) -> HttpResp
         if not request.POST.get("confirmation"):
             errors.append("Confirme que os documentos do caso anterior não serão herdados.")
 
+        # R3 (Slice 007): tipo explícito obrigatório — backend é a fonte de
+        # verdade (choice + flag de intake); o tipo do original não é herdado.
+        try:
+            ensure_exam_type_allowed(exam_type)
+        except ValueError as exc:
+            errors.append(str(exc))
+
         if errors:
             for err in errors:
                 messages.warning(request, err)
@@ -966,6 +983,7 @@ def corrected_resubmission(request: HttpRequest, case_id: uuid.UUID) -> HttpResp
                 {
                     "original_case": original_case,
                     "patient_name": original_case.patient_name,
+                    "colonoscopy_intake_enabled": is_colonoscopy_intake_enabled(),
                 },
             )
 
@@ -980,8 +998,9 @@ def corrected_resubmission(request: HttpRequest, case_id: uuid.UUID) -> HttpResp
                 user=request.user,
                 correction_reason=correction_reason,
                 attachments=attachment_files or None,
-                # Slice 002: preserva o tipo do original (escolha livre no Slice 007).
-                exam_type=None,
+                # Slice 007 (R3/R4): escolha explícita do NIR; pode divergir
+                # do original; nunca herda silenciosamente.
+                exam_type=exam_type,
             )
             messages.success(
                 request,
@@ -1000,6 +1019,7 @@ def corrected_resubmission(request: HttpRequest, case_id: uuid.UUID) -> HttpResp
             {
                 "original_case": original_case,
                 "patient_name": original_case.patient_name,
+                "colonoscopy_intake_enabled": is_colonoscopy_intake_enabled(),
             },
         )
 
@@ -1012,6 +1032,7 @@ def corrected_resubmission(request: HttpRequest, case_id: uuid.UUID) -> HttpResp
             "patient_name": original_case.patient_name,
             "status_label": STATUS_LABELS.get(original_case.status, original_case.get_status_display()),
             "status_css": STATUS_CSS_CLASS.get(original_case.status, "status-pending"),
+            "colonoscopy_intake_enabled": is_colonoscopy_intake_enabled(),
         },
     )
 
@@ -1262,20 +1283,24 @@ def closed_cases_search(request: HttpRequest) -> HttpResponse:
     )
 
     query = request.GET.get("q", "").strip()
+    # R2 (Slice 007): filtro server-side por tipo — default Todos; tipo
+    # inválido cai para all. Tipo específico sem termo lista os últimos 50
+    # do tipo (comportamento definido no design D13, consistente com o
+    # histórico CHD do Slice 005).
+    raw_exam_type = request.GET.get("exam_type", "all")
+    exam_type = raw_exam_type if raw_exam_type in ExamType.values else "all"
     results: list[dict[str, object]] = []
 
-    if query:
+    if query or exam_type != "all":
         # Busca: casos CLEANED + casos com intercorrência ativa (qualquer status)
-        qs = (
-            Case.objects.filter(
-                models.Q(status=CaseStatus.CLEANED) | models.Q(post_schedule_issue_status__in=["opened", "responded"])
-            )
-            .filter(
-                models.Q(agency_record_number__icontains=query)
-                | models.Q(structured_data__patient__name__icontains=query)
-            )
-            .order_by("-created_at")[:50]
+        qs = Case.objects.filter(
+            models.Q(status=CaseStatus.CLEANED) | models.Q(post_schedule_issue_status__in=["opened", "responded"])
         )
+        if exam_type != "all":
+            qs = qs.filter(exam_type=exam_type)
+        qs = qs.filter(
+            models.Q(agency_record_number__icontains=query) | models.Q(structured_data__patient__name__icontains=query)
+        ).order_by("-created_at")[:50]
 
         for c in qs:
             eligible_scheduled = is_post_acceptance_issue_eligible(c, context="scheduled")
@@ -1311,6 +1336,7 @@ def closed_cases_search(request: HttpRequest) -> HttpResponse:
         "intake/closed_cases_search.html",
         {
             "query": query,
+            "exam_type": exam_type,
             "results": results,
         },
     )

@@ -14,12 +14,12 @@
 <!-- Filtros -->
 <div class="card p-4 mb-4">
   <form method="get" class="row g-3 align-items-end">
-    <div class="col-md-5">
+    <div class="col-md-4">
       <label for="search-input" class="form-label">Buscar por número de registro</label>
       <input type="text" name="q" id="search-input" class="form-control" placeholder="Ex: 2026-0428" value="{{ search }}">
     </div>
 
-    <div class="col-md-4">
+    <div class="col-md-3">
       <label for="status-select" class="form-label">Filtrar por status</label>
       <select name="status" id="status-select" class="form-select">
         <option value="">Todos os status</option>
@@ -29,7 +29,16 @@
       </select>
     </div>
 
-    <div class="col-md-3 d-flex gap-2">
+    <div class="col-md-3">
+      <label for="exam-type-select" class="form-label">Filtrar por tipo de exame</label>
+      <select name="exam_type" id="exam-type-select" class="form-select" aria-label="Filtrar por tipo de exame">
+        <option value="all" {% if exam_type == 'all' %}selected{% endif %}>Todos os tipos</option>
+        <option value="eda" {% if exam_type == 'eda' %}selected{% endif %}>EDA</option>
+        <option value="colonoscopy" {% if exam_type == 'colonoscopy' %}selected{% endif %}>Colonoscopia</option>
+      </select>
+    </div>
+
+    <div class="col-md-2 d-flex gap-2">
       <button type="submit" class="btn btn-hospital">Filtrar</button>
       <a href="{% url 'intake:my_cases' %}" class="btn btn-hospital-outline">Limpar</a>
     </div>

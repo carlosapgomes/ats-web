@@ -716,12 +716,11 @@ def create_corrected_resubmission(
 ) -> Case:
     """Create a new Case that explicitly corrects a previous Case.
 
-    ``exam_type`` é opcional neste slice: quando ausente, o novo caso
-    preserva o tipo do caso original (herança temporária — a escolha livre
-    será do Slice 007). O tipo EFETIVO (herdado OU explícito) passa sempre
-    pela validação central (choice + flag de intake), pois o reenvio cria
-    um NOVO Case — é novo intake (R3/F1): flag desligada impede novo
-    colonoscopia mesmo quando o original é colonoscopia.
+    ``exam_type`` é OBRIGATÓRIO (Slice 007): o novo caso exige escolha
+    explícita do NIR — o tipo do original NÃO é herdado. O tipo informado
+    passa sempre pela validação central (choice + flag de intake), pois o
+    reenvio cria um NOVO Case — é novo intake (R3/F1): flag desligada
+    impede novo colonoscopia mesmo quando o original é colonoscopia.
 
     Steps:
     1. Validate correction_reason (required, not blank).
@@ -740,12 +739,10 @@ def create_corrected_resubmission(
     """
     from django.utils import timezone as tz
 
-    # 0. Exam type — resolve o tipo efetivo (herdado do original ou
-    #    explicitamente informado) e valida SEMPRE via função central:
-    #    choice válido + flag de intake. A validação ocorre ANTES de
-    #    qualquer criação/evento/save/enqueue (R3/F1).
-    requested_exam_type = original_case.exam_type if exam_type is None else exam_type
-    validated_exam_type = ensure_exam_type_allowed(requested_exam_type)
+    # 0. Exam type OBRIGATÓRIO — validação central (choice + flag) ANTES
+    #    de qualquer criação/evento/save/enqueue. Ausente/inválido levanta
+    #    ValueError e nada é criado (R3).
+    validated_exam_type = ensure_exam_type_allowed(exam_type)
 
     # 1. Validate correction_reason
     reason = (correction_reason or "").strip()
@@ -802,6 +799,9 @@ def create_corrected_resubmission(
             "original_agency_record_number": original_case.agency_record_number or "",
             "correction_reason": reason,
             "created_by_id": str(user.pk),
+            # R4: tipo do novo caso — divergência fica auditável sem mudar
+            # semântica dos eventos existentes (sem PDF/texto clínico).
+            "exam_type": validated_exam_type,
         },
     )
     new_case.save()
