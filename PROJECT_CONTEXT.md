@@ -105,7 +105,7 @@ static/          # css/app.css (paleta hospitalar), js/upload.js, js/password-to
 
 - **User** (AbstractUser): multi-role via M2M(Role), `account_status`, papel ativo na sessao
 - **Role**: nir, doctor, scheduler, manager, admin
-- **Case**: FSM 17 estados, 30+ campos (PDF, LLM artifacts, decisao medica, agendamento). Vínculo opcional de reenvio corrigido: `corrects_case` (self-FK) + `correction_reason`/`correction_created_by`/`correction_created_at`.
+- **Case**: FSM 17 estados, 30+ campos (PDF, LLM artifacts, decisao medica, agendamento). `exam_type` (`eda`/`colonoscopy`, default histórico `eda`) distingue o tipo de exame declarado no intake. Vínculo opcional de reenvio corrigido: `corrects_case` (self-FK) + `correction_reason`/`correction_created_by`/`correction_created_at`.
 - **CaseEvent**: auditoria append-only (~40 tipos de evento)
 - **CaseCommunicationMessage**: thread operacional append-only vinculada a um `Case` (comunicação entre NIR/médico/scheduler para esclarecimentos; NÃO substitui decisão/agendamento/eventos estruturados). Suporta `message_type="user"` (manual, com autor) e `message_type="system"` (projeção automática de `CaseEvent`, sem autor) via `source_event` OneToOne idempotente + `system_event_type`.
 - **UserNotification**: notificação in-app user-scoped criada por menções explícitas (`@role`/`@username`) em `CaseCommunicationMessage`; badge SSR + inbox “Minhas notificações” + polling Vanilla JS do badge
@@ -125,6 +125,7 @@ static/          # css/app.css (paleta hospitalar), js/upload.js, js/password-to
 
 ## Contratos e Validações
 
+- **Tipo de exame explícito (colonoscopia)**: `Case.exam_type` (`eda` | `colonoscopy`) é declarado obrigatoriamente no upload (lote homogêneo) e no reenvio corrigido; casos históricos foram backfillados como `eda` sem reprocessamento (migration `0014`). Flag `COLONOSCOPY_INTAKE_ENABLED` (default `false`) bloqueia apenas **novos uploads** de colonoscopia — nenhum worker/pipeline consulta a flag para interromper casos existentes. PDF com solicitações atuais EDA+colonoscopia juntas é bloqueado (mixed) e exige PDFs separados. Correção de tipo pelo NIR só antes de `WAIT_DOCTOR`/em revisão manual, com reprocessamento auditável do mesmo caso (`EXAM_TYPE_MISMATCH_DETECTED`/`EXAM_TYPE_CORRECTED`/`CASE_REPROCESSING_REQUESTED`). Filtros por tipo em médico (Pendentes/Decididos Hoje), CHD (Pendentes/Processados/Histórico), NIR (operacionais/encerrados) e dashboard (tabela gerencial, compõe com busca/status/datas/atenção/paginação). Dashboard mantém métricas consolidadas e adiciona breakdown EDA/Colonoscopia no período ativo (desfechos = período; esperas por etapa = snapshot atual, rotulado). Prompts de colonoscopia (`colonoscopy_llm1_*`/`colonoscopy_llm2_*`) são administráveis e não substituem os canônicos EDA. Sem CPRE funcional; sem hard rule medicamentosa (alerta é informativo).
 - **Prompts canônicos**: nomes legados `llm1_system`, `llm1_user`, `llm2_system`, `llm2_user` são definitivos.
   `seed_prompts` cria versões ativas com defaults portados do legado. Fallback de código usa os mesmos defaults.
 - **Validação Pydantic v2**: schemas `apps/pipeline/schemas/llm1.py` (StructuredData) e `llm2.py` (Suggestion)
@@ -170,6 +171,11 @@ static/          # css/app.css (paleta hospitalar), js/upload.js, js/password-to
 ## State do Sistema
 
 - **Fase atual**: Fase 3 (débitos técnicos) — capacity de anexos clínicos entregue
+- **Change ativo**: `openspec/changes/introduce-colonoscopy-exam-workflow/` — 8 slices implementados
+  (Slice 008 concluído: breakdown gerencial EDA/Colonoscopia no dashboard, filtro de tipo na tabela
+  gerencial, manual do usuário e runbook `docs/deploy/introduce-colonoscopy-exam-workflow.md`).
+  Change **não arquivado**: DoD global do change depende de revisão dos relatórios dos 8 slices;
+  flag de produção ainda desligada por padrão até ativação explícita pela operação.
 - **Changes concluídos**:
   - `openspec/archive/bootstrap-django-ats-core/` (7 slices, Fase 0)
   - `openspec/archive/intake-nir/` (6 slices, Fase 1)

@@ -274,11 +274,18 @@ Acesse a aba **Novo Encaminhamento**.
 
 Na área de upload:
 
-1. clicar para selecionar os PDFs ou arraste os arquivos para a área indicada;
-2. conferir a lista de arquivos selecionados;
-3. clicar em **Enviar para Regulação**.
+1. selecionar o **tipo de exame** do lote: **EDA** ou **Colonoscopia** (seleção obrigatória — o envio é bloqueado sem escolha);
+2. clicar para selecionar os PDFs ou arraste os arquivos para a área indicada;
+3. conferir a lista de arquivos selecionados;
+4. clicar em **Enviar para Regulação**.
 
 O sistema aceita arquivos PDF de encaminhamento, com até **20 MB por arquivo**. O processamento ocorre em segundo plano. Você pode sair da tela; o sistema continuará processando o caso.
+
+**Lote homogêneo:** o tipo selecionado vale para **todos os PDFs enviados naquele lote**. Não é possível misturar EDA e Colonoscopia no mesmo envio.
+
+**Solicitações mistas no mesmo PDF:** se um mesmo PDF contiver solicitações atuais de **EDA e Colonoscopia juntas**, o sistema bloqueia o caso e encaminha para revisão manual — o NIR deve **separar os PDFs** e reenviar um pedido por tipo.
+
+**Colonoscopia indisponível:** quando a operação ainda não ativou a colonoscopia, a opção **Colonoscopia** fica desabilitada com uma explicação. Casos de colonoscopia já existentes continuam sendo processados normalmente — apenas novos uploads ficam bloqueados nessa situação.
 
 ### Envio de um único relatório com anexos
 
@@ -328,10 +335,12 @@ Na aba **Meus Casos**, é possível:
 
 1. buscar por número de registro;
 2. filtrar por status;
-3. abrir os detalhes do caso em **Ver detalhes**.
+3. filtrar por **tipo de exame** (Todos os tipos, EDA ou Colonoscopia) — compõe com os demais filtros;
+4. abrir os detalhes do caso em **Ver detalhes**.
 
 Na tela de detalhes, o NIR pode ver:
 
+- tipo de exame do caso (badge **EDA** ou **Colonoscopia**);
 - status atual;
 - progresso do caso;
 - resultado final, quando disponível;
@@ -546,6 +555,30 @@ Se a mensagem do CHD for apenas informativa e não exigir mudança no agendament
 
 ---
 
+## 3.10 Corrigir o tipo de exame de um caso
+
+Quando o sistema identifica divergência entre o tipo declarado no upload e o
+conteúdo do relatório, o caso vai para **Revisão Manual** e o NIR pode
+corrigir o tipo de exame.
+
+A correção também está disponível **antes de o caso entrar na fila médica**
+(estados estáveis anteriores a `WAIT_DOCTOR`). Depois que o caso está na
+fila médica ou já foi decidido, o tipo **não** pode mais ser corrigido.
+
+Passo a passo:
+
+1. abrir o caso em **Meus Casos**;
+2. localizar a seção de **correção do tipo de exame** (visível apenas quando
+   permitido, conforme o estado do caso);
+3. selecionar o tipo correto (**EDA** ou **Colonoscopia**);
+4. confirmar a correção.
+
+O sistema reprocessa o caso com o tipo corrigido, sem novo upload e sem
+perder o PDF, os anexos, o texto extraído ou o histórico de eventos. A
+correção fica registrada na linha do tempo do caso para auditoria.
+
+---
+
 # 4. Ações do usuário Médico
 
 ## 4.1 Abrir a fila médica
@@ -556,6 +589,7 @@ A fila mostra os casos aguardando decisão médica.
 
 Em cada card, o médico pode ver informações como:
 
+- tipo de exame (badge **EDA** ou **Colonoscopia**);
 - nome do paciente;
 - registro;
 - idade e sexo;
@@ -565,6 +599,8 @@ Em cada card, o médico pode ver informações como:
 - fluxo sugerido pelo sistema;
 - tempo de espera;
 - dias em tela, quando essa informação estiver disponível.
+
+Nas abas **Pendentes** e **Decididos Hoje**, o médico pode filtrar por **tipo de exame** (Todos, EDA ou Colonoscopia). O filtro compõe com a busca por nome/ocorrência, e o termo digitado é preservado ao trocar o tipo.
 
 Para iniciar a avaliação, clique em **Avaliar**.
 
@@ -577,7 +613,9 @@ Se outro médico já estiver avaliando o caso, ele pode aparecer como **Reservad
 Na tela de decisão médica, o médico deve revisar:
 
 - dados do paciente;
+- tipo de exame (badge **EDA** ou **Colonoscopia**);
 - relatório automático da regulação;
+- **alerta medicamentoso informativo** (quando o relatório descreve anticoagulante ou antiagregante, o sistema exibe um aviso apenas informativo — ele **não** altera a sugestão nem a decisão e **não** gera orientação de suspensão de medicamento);
 - texto extraído do PDF;
 - PDF original;
 - anexos clínicos, se houver;
@@ -690,6 +728,8 @@ A fila pode mostrar três tipos principais de item:
 1. **Ciência operacional — fluxos sem agendamento** — não devem ser agendados pelo CHD.
 2. **Casos aguardando agendamento** — precisam ser confirmados ou negados.
 3. **Intercorrências pós-aceitação (modo agendado)** — precisam de resposta do CHD.
+
+Em **Pendentes**, **Processados Hoje** e no **histórico**, o CHD pode filtrar por **tipo de exame** (Todos, EDA ou Colonoscopia). No histórico, o tipo compõe com a busca por nome/ocorrência — selecionar um tipo sem termo lista os casos recentes daquele tipo.
 
 A fila é atualizada automaticamente.
 
@@ -948,3 +988,11 @@ Neste manual:
 - usamos **CHD** como termo principal para o usuário de agendamento;
 - usamos `@medico` e `@chd` como menções preferenciais;
 - as menções devem ser digitadas sem acento.
+
+## 7.2 Ativação da colonoscopia é assunto da operação
+
+A disponibilidade da **Colonoscopia** no upload é controlada pela operação
+(flag de configuração). Esse controle não é assunto de usuário comum: o
+usuário apenas vê a opção habilitada quando o sistema a liberar, ou
+desabilitada com explicação quando não. Nenhuma ação individual ativa ou
+desativa o tipo de exame.

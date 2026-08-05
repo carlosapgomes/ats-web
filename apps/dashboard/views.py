@@ -26,7 +26,7 @@ from apps.cases.admission import (
     is_operational_notice_flow,
     is_scheduled_admission_flow,
 )
-from apps.cases.models import Case, CaseAttachment, CaseEvent, CaseStatus, SupervisorSummary
+from apps.cases.models import Case, CaseAttachment, CaseEvent, CaseStatus, ExamType, SupervisorSummary
 from apps.cases.navigation import resolve_safe_next_url
 from apps.cases.services import (
     ADMINISTRATIVE_CLOSURE_REASON_CHOICES,
@@ -115,7 +115,11 @@ def _period_bounds(period: str) -> tuple[datetime | None, datetime | None]:
         return today_start, tomorrow_start
 
 
-def _compute_summary(day: date | None = None, period: str | None = None) -> dict[str, int]:
+def _compute_summary(
+    day: date | None = None,
+    period: str | None = None,
+    exam_type: str | None = None,
+) -> dict[str, int]:
     """Computa métricas resumidas do dashboard.
 
     Usa campos de decisão imutáveis (doctor_decision, appointment_status)
@@ -130,17 +134,22 @@ def _compute_summary(day: date | None = None, period: str | None = None) -> dict
     Se period for fornecido ("today", "7d", "30d", "all"), as métricas
     refletem o período correspondente. day é mantido para compatibilidade
     reversa com testes existentes.
+
+    exam_type (opcional, Slice 008) restringe o QuerySet a um tipo de exame
+    ("eda" | "colonoscopy") sem alterar a semântica de desfechos.
     """
     if period is not None:
         start, end = _period_bounds(period)
         if start is None:
-            # all: sem filtro temporal
             period_cases = Case.objects.all()
         else:
             period_cases = Case.objects.filter(created_at__gte=start, created_at__lt=end)
     else:
         start, end = local_day_bounds(day)
         period_cases = Case.objects.filter(created_at__gte=start, created_at__lt=end)
+
+    if exam_type is not None:
+        period_cases = period_cases.filter(exam_type=exam_type)
 
     total_today = period_cases.count()
 
@@ -179,13 +188,73 @@ def _compute_summary(day: date | None = None, period: str | None = None) -> dict
     }
 
 
-def _compute_stage_waiting() -> dict[str, int]:
-    """Contagem de casos aguardando por etapa."""
+def _compute_stage_waiting(exam_type: str | None = None) -> dict[str, int]:
+    """Contagem de casos aguardando por etapa (snapshot do estado atual).
+
+    exam_type (opcional, Slice 008) restringe a contagem a um tipo de exame.
+    """
+    waiting_qs = Case.objects.all()
+    if exam_type is not None:
+        waiting_qs = waiting_qs.filter(exam_type=exam_type)
     return {
-        "waiting_doctor": Case.objects.filter(status=CaseStatus.WAIT_DOCTOR).count(),
-        "waiting_appt": Case.objects.filter(status=CaseStatus.WAIT_APPT).count(),
-        "waiting_confirm": Case.objects.filter(status=CaseStatus.WAIT_R1_CLEANUP_THUMBS).count(),
+        "waiting_doctor": waiting_qs.filter(status=CaseStatus.WAIT_DOCTOR).count(),
+        "waiting_appt": waiting_qs.filter(status=CaseStatus.WAIT_APPT).count(),
+        "waiting_confirm": waiting_qs.filter(status=CaseStatus.WAIT_R1_CLEANUP_THUMBS).count(),
     }
+
+
+def _compute_exam_type_breakdown(
+    period: str | None = None,
+    day: date | None = None,
+) -> dict[str, dict[str, int]]:
+    """Decomposição das métricas por tipo de exame (Slice 008).
+
+    Reutiliza as fórmulas existentes (``_compute_summary`` para desfechos e
+    ``_compute_stage_waiting`` para esperas) parametrizando o QuerySet por
+    ``exam_type`` — sem copiar a semântica de accepted/denied/admin-closed.
+
+    Semânticas distintas (rotuladas no template):
+    - desfechos (total/aceitos/negados/admin-closed/em andamento) → período;
+    - esperas por etapa (waiting_*) → snapshot do estado atual.
+    """
+    breakdown: dict[str, dict[str, int]] = {}
+    for exam_type in ExamType.values:
+        summary = _compute_summary(period=period, day=day, exam_type=exam_type)
+        waiting = _compute_stage_waiting(exam_type=exam_type)
+        breakdown[exam_type] = {
+            "total": summary["total_today"],
+            "accepted": summary["accepted"],
+            "denied": summary["denied"],
+            "administratively_closed": summary["administratively_closed"],
+            "in_progress": summary["in_progress"],
+            "waiting_doctor": waiting["waiting_doctor"],
+            "waiting_appt": waiting["waiting_appt"],
+            "waiting_confirm": waiting["waiting_confirm"],
+        }
+    return breakdown
+
+
+EXAM_TYPE_BREAKDOWN_LABELS: dict[str, str] = {
+    ExamType.EDA: "EDA",
+    ExamType.COLONOSCOPY: "Colonoscopia",
+}
+
+
+def _exam_type_breakdown_rows(
+    period: str | None = None,
+    day: date | None = None,
+) -> list[dict[str, Any]]:
+    """Linhas de apresentação do breakdown por tipo, com label pt-BR."""
+    rows: list[dict[str, Any]] = []
+    for code, values in _compute_exam_type_breakdown(period=period, day=day).items():
+        rows.append(
+            {
+                "code": code,
+                "label": ExamType(code).label,
+                **values,
+            }
+        )
+    return rows
 
 
 def _compute_admission_flow(day: date | None = None, period: str | None = None) -> dict[str, int]:
@@ -640,6 +709,13 @@ def _dashboard_case_list_context(request: HttpRequest) -> dict[str, Any]:
     elif len(search_term) in (1, 2):
         search_min_chars_help = True
 
+    # Filtro de tipo de exame (Slice 008): default Todos; compõe por AND
+    # com busca/status/datas/atenção; valor inválido cai para all.
+    raw_exam_type = request.GET.get("exam_type", "all")
+    exam_type = raw_exam_type if raw_exam_type in ExamType.values else "all"
+    if exam_type != "all":
+        cases_qs = cases_qs.filter(exam_type=exam_type)
+
     # Filtros
     status_filter = request.GET.get("status", "")
     if status_filter:
@@ -691,6 +767,7 @@ def _dashboard_case_list_context(request: HttpRequest) -> dict[str, Any]:
         "search_min_chars_help": search_min_chars_help,
         "attention_filter": attention_filter,
         "attention_count": attention_count,
+        "exam_type": exam_type,
         "metrics_period": metrics_period,
         "metrics_date": metrics_date,
         "metrics_start": metrics_start,
@@ -753,6 +830,8 @@ def dashboard_index(request: HttpRequest) -> HttpResponse:
     stage_waiting = _compute_stage_waiting()
     admission_flow = _compute_admission_flow(period=metrics_period)
     avg_times = _compute_average_times(period=metrics_period)
+    # Slice 008: breakdown EDA/Colonoscopia reutiliza as fórmulas por tipo
+    exam_type_breakdown_rows = _exam_type_breakdown_rows(period=metrics_period)
 
     # Labels
     period_labels = {
@@ -820,6 +899,7 @@ def dashboard_index(request: HttpRequest) -> HttpResponse:
             "metrics_period_error": metrics_period_error,
             "status_choices": CaseStatus.choices,
             "STATUS_LABELS": STATUS_LABELS,
+            "exam_type_breakdown_rows": exam_type_breakdown_rows,
             **case_list_context,
         },
     )

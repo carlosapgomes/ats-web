@@ -26,63 +26,63 @@ Se o branch atual for outro, o implementador deve parar e reportar `INCOMPLETE/B
 - [x] Slice 005 — Filtros CHD em pendentes, processados e histórico (`slices/slice-005-scheduler-exam-type-filters.md`)
 - [x] Slice 006 — Correção de tipo e reprocessamento auditável (`slices/slice-006-exam-type-correction-reprocess.md`)
 - [x] Slice 007 — Filtros NIR e tipo no reenvio corrigido (`slices/slice-007-nir-type-filters-resubmission.md`)
-- [ ] Slice 008 — Breakdown gerencial, documentação e rollout (`slices/slice-008-dashboard-breakdown-rollout.md`)
+- [x] Slice 008 — Breakdown gerencial, documentação e rollout (`slices/slice-008-dashboard-breakdown-rollout.md`)
 
 ## Definition of Done do change
 
 ### Dados e intake
 
-- [ ] `Case.exam_type` distingue EDA/colonoscopia e casos históricos foram backfillados como EDA sem reprocessamento.
-- [ ] Upload exige escolha explícita e aplica um tipo ao lote inteiro.
-- [ ] Backend rejeita tipo inválido e colonoscopia quando a flag de intake está desligada.
-- [ ] Flag bloqueia apenas novos uploads, nunca processamento de casos existentes.
+- [x] `Case.exam_type` distingue EDA/colonoscopia e casos históricos foram backfillados como EDA sem reprocessamento.
+- [x] Upload exige escolha explícita e aplica um tipo ao lote inteiro.
+- [x] Backend rejeita tipo inválido e colonoscopia quando a flag de intake está desligada.
+- [x] Flag bloqueia apenas novos uploads, nunca processamento de casos existentes.
 
 ### Pipeline e clínica
 
-- [ ] Colonoscopia é reconhecida por aliases aprovados e chega ao médico.
-- [ ] Referência histórica ao outro exame não cria mismatch/mixed falso.
-- [ ] Solicitações atuais EDA+colonoscopia no mesmo PDF são bloqueadas.
-- [ ] Policy comum é separada por perfil; colonoscopia não recebe exceção de corpo estranho.
-- [ ] Prior-case lookup considera o mesmo tipo.
-- [ ] Colonoscopia preserva somente sinais prioritários aplicáveis.
-- [ ] Fluxos pediátrico, médico e CHD existentes funcionam igualmente.
+- [x] Colonoscopia é reconhecida por aliases aprovados e chega ao médico.
+- [x] Referência histórica ao outro exame não cria mismatch/mixed falso.
+- [x] Solicitações atuais EDA+colonoscopia no mesmo PDF são bloqueadas.
+- [x] Policy comum é separada por perfil; colonoscopia não recebe exceção de corpo estranho.
+- [x] Prior-case lookup considera o mesmo tipo.
+- [x] Colonoscopia preserva somente sinais prioritários aplicáveis.
+- [x] Fluxos pediátrico, médico e CHD existentes funcionam igualmente.
 
 ### Medicamentos
 
-- [ ] Medicamentos explicitamente descritos são extraídos com evidência.
-- [ ] Anticoagulantes/antiagregantes produzem alerta médico claro.
-- [ ] Medicamentos não alteram automaticamente sugestão/decisão e não geram orientação de suspensão.
+- [x] Medicamentos explicitamente descritos são extraídos com evidência.
+- [x] Anticoagulantes/antiagregantes produzem alerta médico claro.
+- [x] Medicamentos não alteram automaticamente sugestão/decisão e não geram orientação de suspensão.
 
 ### UI/UX
 
-- [ ] Tipo é visível em cards/detalhes relevantes.
-- [ ] Médico filtra Pendentes/Decididos Hoje por tipo.
-- [ ] Busca médica preserva termo ao trocar tipo e possui botão de limpeza imediata.
-- [ ] CHD filtra todas as pendências, Processados Hoje e histórico por tipo.
-- [ ] Histórico CHD lista recentes por tipo mesmo sem termo.
-- [ ] NIR filtra casos operacionais e encerrados por tipo.
-- [ ] Reenvio corrigido permite tipo diferente do original.
+- [x] Tipo é visível em cards/detalhes relevantes.
+- [x] Médico filtra Pendentes/Decididos Hoje por tipo.
+- [x] Busca médica preserva termo ao trocar tipo e possui botão de limpeza imediata.
+- [x] CHD filtra todas as pendências, Processados Hoje e histórico por tipo.
+- [x] Histórico CHD lista recentes por tipo mesmo sem termo.
+- [x] NIR filtra casos operacionais e encerrados por tipo.
+- [x] Reenvio corrigido permite tipo diferente do original.
 
 ### Correção e auditoria
 
-- [ ] NIR corrige tipo somente antes de `WAIT_DOCTOR`/em manual review seguro.
-- [ ] Mesmo caso é reprocessado sem novo upload e sem reextrair PDF.
-- [ ] Artefatos derivados são invalidados; PDF, anexos, texto e timeline são preservados.
-- [ ] Eventos append-only registram mismatch, correção e reprocessamento.
-- [ ] Concorrência com worker/lock é recusada ou serializada com segurança.
+- [x] NIR corrige tipo somente antes de `WAIT_DOCTOR`/em manual review seguro.
+- [x] Mesmo caso é reprocessado sem novo upload e sem reextrair PDF.
+- [x] Artefatos derivados são invalidados; PDF, anexos, texto e timeline são preservados.
+- [x] Eventos append-only registram mismatch, correção e reprocessamento.
+- [x] Concorrência com worker/lock é recusada ou serializada com segurança.
 
 ### Dashboard e operação
 
-- [ ] Métricas consolidadas permanecem corretas.
-- [ ] Breakdown por EDA/colonoscopia respeita período e semântica de accepted/denied/admin-closed.
-- [ ] Tabela gerencial filtra por tipo compondo com filtros existentes.
-- [ ] Manual, contexto e runbook de deploy/rollback foram atualizados.
+- [x] Métricas consolidadas permanecem corretas.
+- [x] Breakdown por EDA/colonoscopia respeita período e semântica de accepted/denied/admin-closed.
+- [x] Tabela gerencial filtra por tipo compondo com filtros existentes.
+- [x] Manual, contexto e runbook de deploy/rollback foram atualizados.
 
 ### Qualidade e evidência
 
-- [ ] Todos os slices seguiram TDD RED → GREEN → REFACTOR.
-- [ ] Todos os relatórios temporários foram gerados e revisados.
-- [ ] Cada relatório comprova baseline vs final, zero failures/errors e `passed_final >= passed_baseline`.
-- [ ] Quality gate completo passou em cada slice.
-- [ ] Cada slice foi commitado e enviado ao branch remoto antes do próximo.
-- [ ] ADR-0003 e specs permanecem alinhadas com a implementação final.
+- [x] Todos os slices seguiram TDD RED → GREEN → REFACTOR.
+- [x] Todos os relatórios temporários foram gerados e revisados.
+- [x] Cada relatório comprova baseline vs final, zero failures/errors e `passed_final >= passed_baseline`.
+- [x] Quality gate completo passou em cada slice.
+- [x] Cada slice foi commitado e enviado ao branch remoto antes do próximo.
+- [x] ADR-0003 e specs permanecem alinhadas com a implementação final.
