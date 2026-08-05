@@ -25,6 +25,7 @@ RUNBOOK_PATH = PROJECT_ROOT / "docs" / "deploy" / "introduce-colonoscopy-exam-wo
 MANUAL_PATH = PROJECT_ROOT / "docs" / "manual" / "manual-usuarios.md"
 CONTEXT_PATH = PROJECT_ROOT / "PROJECT_CONTEXT.md"
 PROD_COMPOSE_PATH = PROJECT_ROOT / "docker-compose.prod.yml"
+TASKS_PATH = PROJECT_ROOT / "openspec" / "changes" / "introduce-colonoscopy-exam-workflow" / "tasks.md"
 
 COLONOSCOPY_PROMPT_NAMES = (
     "colonoscopy_llm1_system",
@@ -106,15 +107,25 @@ class TestRunbookRiskAndMigration:
 
 class TestRunbookFlagAndPrompts:
     def test_flag_is_web_only_in_runbook(self) -> None:
-        """Runbook afirma que apenas web recebe/lê a flag; worker não recriado como leitor."""
+        """Runbook afirma que apenas web recebe/lê a flag; ativação recria apenas web."""
         runbook = _read(RUNBOOK_PATH)
         lower = runbook.lower()
         assert "apenas o serviço web" in lower or "somente o serviço web" in lower or "apenas web" in lower, (
             "Runbook deve afirmar que somente web recebe a flag"
         )
         assert "worker" in lower, "Runbook deve explicar por que worker não recebe a flag"
-        assert "--force-recreate web worker" not in runbook, "Ativação não deve recriar worker como leitor da flag"
-        assert "force-recreate web" in runbook, "Ativação deve recriar apenas web"
+        # A ATIVAÇÃO da flag (Passo 8) recria apenas web — nunca worker como leitor.
+        passo8 = runbook.split("### Passo 8", 1)[1]
+        assert "--force-recreate web worker" not in passo8, (
+            "Ativação da flag não deve recriar worker como leitor da flag"
+        )
+        assert "force-recreate web" in passo8, "Ativação da flag deve recriar apenas web"
+        # A subida pós-migration (Passo 6) recria os três serviços — isso é a janela
+        # de manutenção, não a ativação da flag, e é legítimo.
+        passo6 = runbook.split("### Passo 6", 1)[1].split("### Passo 7", 1)[0]
+        assert "--force-recreate web worker pdf_worker" in passo6, (
+            "Subida pós-migration deve recriar os três serviços com as imagens novas"
+        )
 
     def test_flag_web_only_matches_prod_compose(self) -> None:
         """docker-compose.prod.yml: flag existe apenas no serviço web."""
@@ -223,3 +234,149 @@ class TestProjectContextTruthfulness:
         """ADR-0003 listada como ativa/aceita."""
         context = _read(CONTEXT_PATH)
         assert "ADR-0003" in context
+
+
+# ── C1: Backup — pipeline fail-fast e assert de conteúdo ──────────────────
+
+
+class TestRunbookBackupPipelineSafety:
+    def test_backup_pipeline_is_fail_fast_on_pg_dump_failure(self) -> None:
+        """pg_dump | gzip não pode mascarar falha do dump como gzip válido."""
+        runbook = _read(RUNBOOK_PATH)
+        lower = runbook.lower()
+        has_pipefail = "set -euo pipefail" in lower or "set -o pipefail" in lower
+        has_pipeline_status = "pipestatus" in lower
+        assert has_pipefail or has_pipeline_status, (
+            "pg_dump | gzip deve ser fail-fast (pipefail/PIPESTATUS) para que falha do "
+            "pg_dump não vire gzip vazio aceito por gzip -t"
+        )
+
+    def test_backup_asserts_dump_content_marker_and_min_lines(self) -> None:
+        """Dump validado por conteúdo: marker de PostgreSQL + volume mínimo, com exit 1."""
+        runbook = _read(RUNBOOK_PATH)
+        assert "PostgreSQL database dump" in runbook, "Runbook deve verificar o marker esperado de dump PostgreSQL"
+        assert re.search(r"-ge\s+\d+", runbook), "Runbook deve comparar a contagem de linhas do dump contra um mínimo"
+        assert "exit 1" in runbook, "Falha de validação do dump deve encerrar a execução (exit 1), não apenas imprimir"
+
+    def test_backup_keeps_gzip_integrity_and_media_tar_checks(self) -> None:
+        """Checks de integridade do gzip e do tar de mídia permanecem."""
+        runbook = _read(RUNBOOK_PATH)
+        assert "gzip -t" in runbook, "Integridade do gzip (CRC/EOF) deve ser checada"
+        assert "tar -tzf" in runbook, "Conteúdo do tar de mídia deve ser checado"
+        assert "exit 1" in runbook
+
+
+# ── C2: Migration — schema-compatible, serviços parados, downtime honesto ──
+
+
+class TestRunbookMigrationWindowSafety:
+    def test_migration_stops_or_blocks_old_web_writes(self) -> None:
+        """Passo 4 para o web ANTIGO (ou bloqueia ingress) antes da migration 0014.
+
+        0014 remove o default de banco (DROP DEFAULT); o código antigo insere
+        Case sem exam_type e falharia NOT NULL — o web antigo não pode aceitar
+        escritas durante/já após a migration.
+        """
+        runbook = _read(RUNBOOK_PATH)
+        step4 = runbook.split("### Passo 4", 1)[1].split("### Passo 5", 1)[0].lower()
+        safe_web_writer_control = bool(
+            re.search(r"\bstop\s+(?:[^\n#]*\s)?web\b", step4)
+            or "bloquear novos uploads" in step4
+            or "modo de manutenção" in step4
+            or "modo de manutencao" in step4
+        )
+        assert safe_web_writer_control, "Migration 0014 exige parar web (ou bloquear ingress) antes do DDL"
+        assert "worker" in step4 and "pdf_worker" in step4, (
+            "Workers também devem ser parados durante a janela de manutenção"
+        )
+
+    def test_migration_runs_through_new_image_while_services_stopped(self) -> None:
+        """Migration roda com a imagem nova (run --rm web) com serviços parados."""
+        runbook = _read(RUNBOOK_PATH)
+        assert "run --rm web" in runbook and "manage.py migrate" in runbook
+        # O stop do web precisa aparecer ANTES do comando migrate real no Passo 4
+        step4 = runbook.split("### Passo 4", 1)[1].split("### Passo 5", 1)[0]
+        stop_pos = step4.find("stop web")
+        migrate_pos = step4.find("manage.py migrate")
+        assert stop_pos != -1 and migrate_pos != -1 and stop_pos < migrate_pos, (
+            "O stop dos serviços deve preceder o migrate no Passo 4"
+        )
+
+    def test_migration_never_restarts_old_workers_before_new_image_up(self) -> None:
+        """Nunca 'start' de containers antigos após a migration; subir só imagens novas."""
+        runbook = _read(RUNBOOK_PATH)
+        assert "start worker" not in runbook, (
+            "Não pode reativar os containers antigos de worker com docker compose start"
+        )
+        assert "up -d" in runbook, "Containers novos devem ser subidos via up -d"
+        assert "--force-recreate" in runbook, "Subida após migration deve forçar recriação com a imagem nova"
+        # A subida (up) precisa vir depois da migration/seed no fluxo principal
+        up_pos = runbook.lower().find("up -d")
+        migrate_pos = runbook.lower().find("migrate")
+        assert migrate_pos != -1 and up_pos > migrate_pos
+
+    def test_runbook_documents_expected_downtime_honestly(self) -> None:
+        """Janela de manutenção documenta downtime esperado de forma honesta."""
+        runbook = _read(RUNBOOK_PATH)
+        lower = runbook.lower()
+        assert "downtime" in lower or "indisponível" in lower or "indisponivel" in lower, (
+            "Runbook deve declarar o downtime esperado da janela de manutenção"
+        )
+
+
+# ── C3: Prompts colonoscopia — ativos enquanto houver casos em voo ─────────
+
+
+class TestRunbookPromptDeactivationSafety:
+    def test_inactive_prompts_not_declared_impact_free(self) -> None:
+        """Prompts inativos não podem ser declarados sem impacto com flag desligada."""
+        runbook = _read(RUNBOOK_PATH)
+        assert "podem permanecer inativos sem impacto enquanto" not in runbook.lower(), (
+            "Flag desligada bloqueia novos uploads, mas casos em voo seguem precisando dos prompts colonoscopia ativos"
+        )
+
+    def test_prompts_must_remain_active_while_cases_in_flight(self) -> None:
+        """Runbook exige prompts ativos enquanto houver casos colonoscopia em voo."""
+        runbook = _read(RUNBOOK_PATH)
+        lower = runbook.lower()
+        assert "devem permanecer ativos" in lower, (
+            "Runbook deve afirmar que prompts colonoscopia permanecem ativos enquanto houver casos"
+        )
+        assert "em voo" in lower, "Critério de drenagem é casos em voo (não CLEANED)"
+        assert "drenagem" in lower or "drenar" in lower, (
+            "Desativação de prompts deve ser condicionada à drenagem/encerramento comprovado"
+        )
+
+    def test_eda_prompt_rollback_procedure_retained(self) -> None:
+        """Procedimento de rollback de prompts EDA é preservado."""
+        runbook = _read(RUNBOOK_PATH)
+        assert "llm1_system" in runbook or "prompts EDA" in runbook, (
+            "Rollback do contrato LLM1 (prompts EDA canônicos) deve permanecer documentado"
+        )
+
+
+# ── C4: Rastreabilidade — hash real, prompt não é commit ───────────────────
+
+
+class TestTasksTraceability:
+    def test_tasks_references_actual_correction_commit(self) -> None:
+        """tasks.md referencia o commit real da correção 1 (503019e)."""
+        tasks = _read(TASKS_PATH)
+        assert "503019e" in tasks, "tasks.md deve registrar o hash real do commit de correção"
+        assert "commit `prompt-correct-slice-008-rollout-documentation.md`" not in tasks, (
+            "Arquivo de prompt não pode ser rotulado como commit"
+        )
+
+    def test_tasks_labels_prompt_files_as_prompts_not_commits(self) -> None:
+        """Arquivos de prompt são rotulados como handoff/prompt, nunca como commit."""
+        tasks = _read(TASKS_PATH)
+        # Nenhum arquivo de prompt pode ser objeto direto de um rótulo "commit"
+        assert not re.search(r"commit\s+`prompt-correct-slice-008", tasks), (
+            "Arquivo de prompt não pode ser rotulado como commit"
+        )
+        # Cada menção a prompt-correct-slice-008* carrega rótulo handoff/prompt
+        for mention in re.finditer(r"prompt-correct-slice-008\S*", tasks):
+            snippet = tasks[max(0, mention.start() - 80) : mention.end()]
+            assert "handoff" in snippet.lower() or "prompt" in snippet.lower(), (
+                f"Menção a prompt sem rótulo handoff/prompt: {snippet}"
+            )

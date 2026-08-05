@@ -28,18 +28,22 @@ git -C "$PROJECT_DIR" fetch origin && git -C "$PROJECT_DIR" checkout main && git
 # 3. Build das novas imagens
 $DPROD build --pull web worker pdf_worker
 
-# 4. Migration em janela controlada de baixa atividade (ver Passo 4 — NÃO é zero downtime)
-$DPROD run --rm web uv run python manage.py migrate --settings=config.settings.prod
+# 4. JANELA DE MANUTENÇÃO (Passo 4) — parar TODOS os serviços. O web ANTIGO
+#    não pode aceitar escritas durante a migration 0014 (o default de banco é
+#    removido e o código antigo insere Case sem exam_type -> NOT NULL).
+#    NUNCA "start" dos containers antigos depois: subir apenas as imagens novas.
+$DPROD stop web worker pdf_worker
 
-# 5. Seed dos prompts (idempotente) — cria os 8 nomes canônicos, incluindo os 4 de colonoscopia
+# 5. Migration + seed com a imagem NOVA (serviços parados; db permanece no ar)
+$DPROD run --rm web uv run python manage.py migrate --settings=config.settings.prod
 $DPROD run --rm web uv run python manage.py seed_prompts --settings=config.settings.prod
 
-# 6. PRECHECK BINÁRIO de prompts antes de ativar a flag (ver Passo 7) — STOP se falhar
+# 6. Subir apenas as imagens novas (recriação forçada garante a imagem do Passo 3)
+$DPROD up -d --force-recreate web worker pdf_worker
 
-# 7. Subir containers com a imagem nova
-$DPROD up -d
+# 7. PRECHECK BINÁRIO de prompts antes de ativar a flag (ver Passo 7) — STOP se falhar
 
-# 8. Flag de intake permanece DESLIGADA por padrão (ver Passo 8 para ativar — apenas web)
+# 8. Flag de intake permanece DESLIGADA por padrão (Passo 8 ativa apenas web)
 ```
 
 > Passos 9 (validação funcional) e 10 (monitoramento 24h) seguem abaixo em
@@ -55,7 +59,7 @@ $DPROD up -d
 |---|---|
 | **Risco global** | 🔴 **CRÍTICO / HIGH-ARCH** — conforme `proposal.md`. Ativação de novo tipo de exame com mudança de schema e contratos LLM em produção. |
 | **Migration** | `apps/cases/migrations/0014_case_exam_type.py` — **aditiva, mas NÃO é zero downtime**. Executa `AddField` (default histórico `eda`) + **`UPDATE` de todas as linhas existentes** (backfill `RunPython` elidable, sem ler PDF/JSON/texto, sem reprocessar) + **`AddIndex` normal (não `CONCURRENTLY`)** em `(status, exam_type)`. O `UPDATE` full-row e o `AddIndex` podem adquirir locks e contender com escrita. **Exige janela controlada de baixa atividade** (Passo 4). |
-| **Compatibilidade** | Código velho ignora o novo campo após a migration; a app pode continuar atendendo leituras, mas os writers devem ser reduzidos durante a janela (Passo 4). |
+| **Compatibilidade** | Código velho ignora o novo campo após a migration, mas **não conhece `exam_type` NOT NULL (sem default)** — por isso `web`, `worker` e `pdf_worker` são **parados** durante a janela (Passo 4) e só as imagens novas voltam ao ar (Passo 6). |
 | **Mudanças de FSM / pipeline / schema existente** | Nenhum estado novo; 17 estados FSM preservados. Contrato LLM1 evolui de forma aditiva (`medications_described[]` e `exam_type=colonoscopy` aceito). |
 | **Dados sensíveis** | Backfill não lê conteúdo clínico. Nenhum PDF/JSON/texto é migrado. |
 | **Variáveis de ambiente novas** | `COLONOSCOPY_INTAKE_ENABLED` (default `false`). No Compose de produção **somente o serviço `web` recebe a variável** (`docker-compose.prod.yml`); `worker`/`pdf_worker` **não** recebem nem consultam a flag. |
@@ -96,13 +100,24 @@ mkdir -p "$BACKUP_DIR"
 DPROD="docker compose --project-directory ${PROJECT_DIR} \
   -f ${PROJECT_DIR}/docker-compose.yml -f ${PROJECT_DIR}/docker-compose.prod.yml"
 
-# 1a. Dump do Postgres (produção)
+# 1a. Dump do Postgres (produção) — pipeline FAIL-FAST. set -euo pipefail faz o
+#     shell abortar se QUALQUER comando da pipeline falhar, incluindo o pg_dump à
+#     esquerda do pipe: um dump falho nunca vira "gzip válido" aceito adiante.
+set -euo pipefail
 STAMP=$(date +%Y%m%d_%H%M)
-$DPROD exec -T db pg_dump -U ats_web ats_web | gzip > "${BACKUP_DIR}/ats_web_pre_colonoscopy_${STAMP}.sql.gz"
+DUMP="${BACKUP_DIR}/ats_web_pre_colonoscopy_${STAMP}.sql.gz"
+$DPROD exec -T db pg_dump -U ats_web ats_web | gzip > "$DUMP"
 
-# 1b. VALIDAÇÃO do dump por conteúdo (gzip -t descompacta e verifica CRC/EOF)
-gzip -t "${BACKUP_DIR}/ats_web_pre_colonoscopy_${STAMP}.sql.gz" \
-  && echo "Dump gzip OK: $(zcat "${BACKUP_DIR}/ats_web_pre_colonoscopy_${STAMP}.sql.gz" | wc -l) linhas SQL"
+# 1b. VALIDAÇÃO do dump por CONTEÚDO (não apenas tamanho) — cada check falho
+#     encerra a execução (exit 1); nunca seguir com backup vazio/truncado.
+#     zgrep lê o gzip diretamente (sem pipeline zcat|grep, evitando SIGPIPE com pipefail).
+gzip -t "$DUMP" || { echo "ERRO: gzip inválido/truncado: $DUMP"; exit 1; }
+zgrep -q -- "PostgreSQL database dump" "$DUMP" \
+  || { echo "ERRO: dump sem marker de PostgreSQL: $DUMP"; exit 1; }
+DUMP_LINES=$(zgrep -c "" "$DUMP")
+[ "${DUMP_LINES}" -ge 100 ] \
+  || { echo "ERRO: dump com conteúdo suspeito (${DUMP_LINES} linhas): $DUMP"; exit 1; }
+echo "Dump gzip OK: ${DUMP_LINES} linhas SQL, marker PostgreSQL presente"
 
 # 1c. Snapshot do volume de mídia REAL herdado pelo serviço web (media_prod).
 #     NUNCA inventar nome de volume: resolve-se o volume montado em /app/media
@@ -145,26 +160,43 @@ git -C "$PROJECT_DIR" log --oneline -5        # confirmar os commits do change n
 $DPROD build --pull web worker pdf_worker
 ```
 
-### Passo 4 — Aplicar a migration em janela controlada (NÃO é zero downtime)
+### Passo 4 — JANELA DE MANUTENÇÃO: migration 0014 com serviços parados (NÃO é zero downtime)
 
-A migration `cases.0014_case_exam_type` executa:
+A migration `cases.0014_case_exam_type` executa o seguinte DDL (SQL gerado por
+`uv run python manage.py sqlmigrate cases 0014`, reproduzido para raciocínio de
+ordenação):
 
-1. `AddField` `Case.exam_type` com default histórico `eda`;
-2. **`UPDATE` full-row** (`RunPython` elidable) forçando `exam_type='eda'` em
-   todas as linhas existentes — sem ler PDF/JSON/texto, sem reprocessar, sem
-   criar eventos;
-3. **`AddIndex` não-concorrente** em `(status, exam_type)` — pode bloquear
-   escritas concorrentes no PostgreSQL.
+```sql
+ALTER TABLE "cases_case" ADD COLUMN "exam_type" varchar(20) DEFAULT 'eda' NOT NULL;
+ALTER TABLE "cases_case" ALTER COLUMN "exam_type" DROP DEFAULT;  -- default de banco REMOVIDO
+-- RunPython (elidable): UPDATE full-row forçando exam_type='eda' em todas as linhas
+CREATE INDEX "cases_status_exam_type_idx" ON "cases_case" ("status", "exam_type");  -- não-concorrente
+```
 
-Procedimento de janela controlada/baixa atividade:
+**Por que parar TAMBÉM o `web` (e não só os workers):** após o `DROP DEFAULT`, o
+banco exige `exam_type` NOT NULL em qualquer INSERT. O código da imagem ANTIGA
+insere `Case` sem `exam_type` — qualquer escrita do `web` antigo durante ou
+depois da migration falharia. O `web` antigo precisa estar **parado** até a
+imagem nova estar no ar; `worker`/`pdf_worker` também não podem continuar
+escrevendo durante o `UPDATE` full-row e o `AddIndex` não-concorrente (locks).
+
+**Downtime esperado (honesto):** a janela de manutenção deixa o sistema
+indisponível (web fora do ar, workers e filas pausados, uploads bloqueados)
+durante parada → migration → seed → subida. Estimativa realista: **minutos**
+(dominado pelo `UPDATE` full-row + `AddIndex`), podendo ser maior em tabelas
+muito grandes. Acordar e comunicar esse downtime à operação antes de abrir a
+janela.
+
+Procedimento (executar como script; `set -euo pipefail` aborta em qualquer falha):
 
 ```bash
-# a) Acordar janela de baixa atividade com NIR/operação (idealmente fora do horário de pico).
-# b) Reduzir writers: pausar filas dos workers (ou escalar para zero réplicas de worker)
-#    para minimizar contenção de escrita durante o UPDATE/AddIndex.
-$DPROD stop worker pdf_worker        # retomar logo após a migration
+set -euo pipefail
+# a) Janela de manutenção acordada com a operação (fora do horário de pico).
+# b) PARAR todos os serviços que escrevem no banco: web (uploads/reenvios/escritas
+#    HTTP), worker e pdf_worker (pipeline/extração). O db permanece no ar.
+$DPROD stop web worker pdf_worker
 
-# c) Aplicar a migration monitorando locks
+# c) Aplicar a migration COM A IMAGEM NOVA (serviços parados; db no ar).
 #    Saída esperada: Applying cases.0014_case_exam_type... OK
 $DPROD run --rm web uv run python manage.py migrate --settings=config.settings.prod
 
@@ -172,19 +204,22 @@ $DPROD run --rm web uv run python manage.py migrate --settings=config.settings.p
 $DPROD exec -T db psql -U ats_web -d ats_web -c \
   "SELECT pid, state, wait_event_type, query FROM pg_stat_activity WHERE state <> 'idle';"
 
-# e) Retomar os workers
-$DPROD start worker pdf_worker
+# e) NÃO "start" os containers antigos depois da migration: o código antigo não
+#    conhece exam_type NOT NULL (sem default). Subir somente as imagens novas no
+#    Passo 6 ($DPROD up -d --force-recreate web worker pdf_worker).
 ```
 
-Se erro: **NÃO continuar** — ir para a Seção 5 (Rollback).
+Se erro na migration: **NÃO continuar** — ir para a Seção 5 (Rollback).
 
-### Passo 5 — Seed dos prompts (idempotente)
+### Passo 5 — Seed dos prompts (idempotente; imagem nova, serviços ainda parados)
 
 ```bash
 $DPROD run --rm web uv run python manage.py seed_prompts --settings=config.settings.prod
 ```
 
-Cria (se ainda não existirem) versões ativas dos 8 nomes canônicos:
+Roda com a imagem nova (mesma do Passo 4c), com `web`/`worker`/`pdf_worker`
+ainda parados; o db permanece no ar. Cria (se ainda não existirem) versões
+ativas dos 8 nomes canônicos:
 
 ```text
 llm1_system / llm1_user / llm2_system / llm2_user            (EDA — legados)
@@ -201,15 +236,20 @@ colonoscopy_llm2_system / colonoscopy_llm2_user              (Colonoscopia)
 ### Passo 6 — Subir os containers com a imagem nova
 
 ```bash
-$DPROD up -d
+$DPROD up -d --force-recreate web worker pdf_worker
 ```
 
-### Passo 7 — PRECHECK binário de prompts (obrigatório antes de ativar a flag)
+Força a recriação para garantir que os containers parados sejam substituídos
+pelas imagens novas (Passo 3) — **nunca** `docker compose start` dos containers
+antigos após a migration. Depois da subida, confirmar os três serviços de pé:
+`$DPROD ps`. Só então seguir para o precheck binário de prompts (Passo 7).
 
-Antes de ligar `COLONOSCOPY_INTAKE_ENABLED`, os **quatro** nomes de prompt de
-colonoscopia devem ter uma **versão ativa**. O comando abaixo falha (exit 1)
-se qualquer nome não estiver ativo — **em caso de falha, PARAR e não ativar a
-flag**:
+### Passo 7 — PRECHECK binário de prompts (obrigatório, após a subida da imagem nova)
+
+Depois do `up -d` do Passo 6 (web novo no ar), antes de ligar
+`COLONOSCOPY_INTAKE_ENABLED`, os **quatro** nomes de prompt de colonoscopia
+devem ter uma **versão ativa**. O comando abaixo falha (exit 1) se qualquer nome
+não estiver ativo — **em caso de falha, PARAR e não ativar a flag**:
 
 ```bash
 $DPROD exec -T web uv run python manage.py shell --settings=config.settings.prod -c "
@@ -373,8 +413,13 @@ canônicos (`llm1_system`/`llm1_user`/`llm2_system`/`llm2_user`):
 - só então reverter o código para a imagem antiga;
 - validar um upload EDA em homologação antes de liberar.
 
-> Os prompts de colonoscopia podem permanecer inativos sem impacto enquanto
-> a flag estiver desligada.
+> **Os prompts de colonoscopia NÃO podem ser desativados enquanto houver casos em voo —
+> devem permanecer ativos.** Desligar a flag bloqueia apenas novos uploads; casos
+> colonoscopia existentes continuam processando e **precisam** dos prompts ativos (o
+> precheck exige 1 versão ativa por nome; produção MUST seed templates ativos). A
+> desativação de prompts colonoscopia só é permitida **após** drenagem/encerramento
+> administrativo comprovado: rodar a consulta da Seção 4.1 e confirmar **zero**
+> casos colonoscopia em voo (não `CLEANED`) antes de desativar qualquer nome.
 
 ### 5.3 Rollback completo (última instância — restaurar backup)
 
@@ -415,3 +460,7 @@ exigem janela controlada):
 - Regra de ouro do rollback: **flag desligada bloqueia novos uploads, nunca
   processamento de casos existentes**; nenhuma migration destrutiva é
   necessária para reverter.
+- **Prompts de colonoscopia permanecem ativos enquanto houver casos em voo**
+  (não `CLEANED`); desativação só após drenagem/encerramento comprovado
+  (Seção 5.2). Eles são necessários para o processamento contínuo de casos
+  existentes mesmo com a flag de intake desligada.
