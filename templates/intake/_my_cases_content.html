@@ -19,7 +19,7 @@
           <div class="col-md-4">
             <div class="patient-name">
               {{ item.patient_name }}
-              <span class="badge exam-type-badge exam-type-{{ item.case.exam_type }}">{{ item.case.get_exam_type_display }}</span>
+              <span class="badge exam-type-badge exam-type-{{ item.declared_type_key }}">{{ item.declared_label }}</span>
             </div>
             <div class="case-meta">
               {% if item.case.agency_record_number %}Reg. {{ item.case.agency_record_number }}{% endif %}

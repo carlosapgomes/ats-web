@@ -26,7 +26,7 @@ A ADR-0004 deve ser commitada, enviada e aprovada explicitamente antes de entreg
 
 ## Slices verticais
 
-- [ ] Slice 001 — NIR cria e acompanha um único caso combinado (`slices/slice-001-combined-intake-procedure-projection.md`)
+- [x] Slice 001 — NIR cria e acompanha um único caso combinado (`slices/slice-001-combined-intake-procedure-projection.md`)
 - [ ] Slice 002 — Pipeline neutro analisa um ou dois procedimentos e entrega ao médico (`slices/slice-002-procedure-neutral-pipeline.md`)
 - [ ] Slice 003 — Médico decide cada procedimento com justificativa e histórico próprio (`slices/slice-003-per-procedure-doctor-decision.md`)
 - [ ] Slice 004 — CHD recebe conjunto autorizado e faz um agendamento casado (`slices/slice-004-paired-scheduler-appointment.md`)
@@ -39,11 +39,11 @@ A ADR-0004 deve ser commitada, enviada e aprovada explicitamente antes de entreg
 
 ### Modelo e intake
 
-- [ ] Um `Case` possui 1–2 procedimentos únicos, sem criar segundo caso para combinado.
-- [ ] Declaração, detecção e decisão médica são distinguíveis e auditáveis.
-- [ ] Upload e reenvio corrigido aceitam EDA, Colonoscopia e EDA + Colonoscopia.
-- [ ] Flag falsa bloqueia Colonoscopia e combinado, mas não EDA nem casos existentes.
-- [ ] Dados anteriores são preservados por migration conservadora.
+- [x] Um `Case` possui 1–2 procedimentos únicos, sem criar segundo caso para combinado.
+- [x] Declaração, detecção e decisão médica são distinguíveis e auditáveis.
+- [x] Upload e reenvio corrigido aceitam EDA, Colonoscopia e EDA + Colonoscopia.
+- [x] Flag falsa bloqueia Colonoscopia e combinado, mas não EDA nem casos existentes.
+- [x] Dados anteriores são preservados por migration conservadora.
 
 ### Pipeline e prompts
 

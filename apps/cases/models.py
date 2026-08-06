@@ -27,6 +27,15 @@ class ExamType(models.TextChoices):
     COLONOSCOPY = "colonoscopy", "Colonoscopia"
 
 
+# Ponte transitória (Slice 001→007): valor persistido em ``Case.exam_type`` para
+# a combinação declarada EDA + Colonoscopia. NÃO é membro de ``ExamType.choices``
+# /``ExamType.values`` — dashboard e filas legadas iteram ``ExamType.values`` e
+# sua inclusão mudaria leitores fora do intake antes do cutover. O valor é
+# escrito/removido exclusivamente pelo serviço central de declaração
+# (``apps.cases.procedures``) e desaparece no Slice 007 junto com a coluna.
+EDA_COLONOSCOPY: str = "eda_colonoscopy"
+
+
 class CaseStatus(models.TextChoices):
     """Todos os 17 estados do caso, preservados do legado."""
 
@@ -48,6 +57,75 @@ class CaseStatus(models.TextChoices):
     WAIT_R1_CLEANUP_THUMBS = "WAIT_R1_CLEANUP_THUMBS", "Wait R1 Cleanup"
     CLEANUP_RUNNING = "CLEANUP_RUNNING", "Cleanup Running"
     CLEANED = "CLEANED", "Cleaned"
+
+
+class ProcedureType(models.TextChoices):
+    """Procedimento endoscópico suportado como componente de um caso.
+
+    Um caso possui no máximo uma ocorrência de cada; combinação é o conjunto
+    das rows — nunca uma row genérica `combined`. CPRE fora de escopo.
+    """
+
+    EDA = "eda", "EDA"
+    COLONOSCOPY = "colonoscopy", "Colonoscopia"
+
+
+class DetectionStatus(models.TextChoices):
+    """Projeção operacional da detecção da análise (dimensão do médico)."""
+
+    PENDING = "pending", "Pendente"
+    DETECTED = "detected", "Detectado"
+    NOT_DETECTED = "not_detected", "Não detectado"
+
+
+class DoctorDisposition(models.TextChoices):
+    """Projeção operacional da decisão médica por componente."""
+
+    PENDING = "pending", "Pendente"
+    APPROVED = "approved", "Aprovado"
+    DENIED = "denied", "Negado"
+
+
+class CaseProcedure(models.Model):
+    """Componente normalizado de um caso (Slice 001, design D1).
+
+    Declaração NIR (``declared_by_nir``), detecção da análise
+    (``detection_status``) e disposição médica (``doctor_disposition``) são
+    fatos distintos por ``(case, procedure_type)``. Rows podem permanecer com
+    flags false/pending para preservar a projeção de uma transformação;
+    ``CaseEvent`` preserva a história integral. ``Case.exam_type`` é apenas a
+    ponte transitória atualizada pelo serviço central (nunca dual-write fora
+    dele). A razão é o único dado verdadeiramente por componente: ator/instante
+    globais continuam no ``Case``.
+    """
+
+    case = models.ForeignKey("Case", on_delete=models.CASCADE, related_name="procedures")
+    procedure_type = models.CharField(max_length=20, choices=ProcedureType.choices)
+    declared_by_nir = models.BooleanField(default=False)
+    detection_status = models.CharField(
+        max_length=20,
+        choices=DetectionStatus.choices,
+        default=DetectionStatus.PENDING,
+    )
+    doctor_disposition = models.CharField(
+        max_length=20,
+        choices=DoctorDisposition.choices,
+        default=DoctorDisposition.PENDING,
+    )
+    doctor_reason = models.TextField(blank=True)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(fields=["case", "procedure_type"], name="uniq_case_procedure_type"),
+        ]
+        indexes = [
+            models.Index(fields=["procedure_type", "declared_by_nir", "case"], name="proc_declared_idx"),
+            models.Index(fields=["procedure_type", "detection_status", "case"], name="proc_detection_idx"),
+            models.Index(fields=["procedure_type", "doctor_disposition", "case"], name="proc_disposition_idx"),
+        ]
+
+    def __str__(self) -> str:
+        return f"CaseProcedure {self.case_id} [{self.procedure_type}]"
 
 
 class Case(models.Model):

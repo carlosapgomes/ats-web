@@ -24,6 +24,11 @@ from apps.cases.admission import (
 from apps.cases.models import Case, CaseAttachment, CaseStatus, ExamType
 from apps.cases.navigation import resolve_safe_next_url
 from apps.cases.priority_signals import build_priority_signal_badges
+from apps.cases.procedures import (
+    format_procedure_selection,
+    get_declared_procedure_types,
+    selection_key,
+)
 from apps.cases.services import (
     CASE_COMMUNICATION_MAX_LENGTH,
     ELIGIBLE_SUPPLEMENTAL_STATUSES,
@@ -59,6 +64,19 @@ from .services import (
 logger = logging.getLogger(__name__)
 
 SUPPORTED_IMAGE_TYPES = frozenset({"image/jpeg", "image/png"})
+
+
+def _declared_badge(case: Case) -> dict[str, str]:
+    """Label/chave do badge declarado, projetados da projeção na view.
+
+    Templates NUNCA consultam rows ou o campo legado: recebem o label
+    textual (R6) e a chave de CSS derivados do conjunto declarado.
+    """
+    types = get_declared_procedure_types(case)
+    return {
+        "declared_label": format_procedure_selection(types),
+        "declared_type_key": selection_key(types),
+    }
 
 
 STATUS_LABELS: dict[str, str] = {
@@ -128,6 +146,7 @@ STEP_STATUS_INDEX: dict[str, int] = {
 # Labels em português para eventos de auditoria
 EVENT_LABELS: dict[str, str] = {
     "CASE_CREATED": "Caso criado",
+    "CASE_PROCEDURES_DECLARED": "Procedimentos declarados pelo NIR",
     "CASE_START_PROCESSING": "Processamento iniciado",
     "CASE_START_EXTRACTION": "Extração de dados iniciada",
     "CASE_EXTRACTION_OK": "Extração de dados concluída",
@@ -189,6 +208,7 @@ EVENT_LABELS: dict[str, str] = {
 # Cores do dot da timeline por event_type
 EVENT_DOT_CSS: dict[str, str] = {
     "CASE_CREATED": "reception",
+    "CASE_PROCEDURES_DECLARED": "nir",
     "CASE_START_PROCESSING": "system",
     "CASE_START_EXTRACTION": "system",
     "CASE_EXTRACTION_OK": "system",
@@ -299,13 +319,19 @@ def intake_home(request: HttpRequest) -> HttpResponse:
         form = CaseUploadForm()
 
     # Casos recentes do NIR logado
-    recent_cases = Case.objects.filter(created_by=user).exclude(status="CLEANED").order_by("-created_at")[:10]
+    recent_cases = (
+        Case.objects.filter(created_by=user)
+        .exclude(status="CLEANED")
+        .prefetch_related("procedures")
+        .order_by("-created_at")[:10]
+    )
 
     recent_cases_data = [
         {
             "case": c,
             "status_label": STATUS_LABELS.get(c.status, c.get_status_display()),
             "status_css": STATUS_CSS_CLASS.get(c.status, "status-pending"),
+            **_declared_badge(c),
         }
         for c in recent_cases
     ]
@@ -350,6 +376,7 @@ def _my_cases_context(request: HttpRequest) -> dict[str, object]:
     qs = (
         Case.objects.exclude(status=CaseStatus.CLEANED)
         .select_related("doctor", "created_by", "locked_by")
+        .prefetch_related("procedures")
         .order_by("-created_at")
     )
 
@@ -386,6 +413,9 @@ def _my_cases_context(request: HttpRequest) -> dict[str, object]:
             # Badges projetados exclusivamente do valor persistido (Slice 005) —
             # a view nunca redetecta sinais a partir de texto bruto.
             "priority_signal_badges": build_priority_signal_badges(c.priority_signals),
+            # Slice 001 (R6): label declarado projetado da projeção (rows);
+            # template não faz query por row nem infere do campo legado.
+            **_declared_badge(c),
             # Lock info for WAIT_R1_CLEANUP_THUMBS cases (other statuses: all clear)
             **(
                 compute_lock_display(c, user=user)
@@ -501,6 +531,10 @@ def case_detail(request: HttpRequest, case_id: uuid.UUID) -> HttpResponse:
             can_confirm = False
         else:
             can_confirm = False
+
+    # Slice 001 (R6): label declarado projetado da projeção — computado na view
+    # após o re-fetch do lock, nunca consultado no template.
+    declared_badge = _declared_badge(case)
 
     # Active attachments (non-suppressed, ordered by created_at)
     active_attachments = list(case.attachments.filter(is_suppressed=False).order_by("created_at"))
@@ -688,6 +722,8 @@ def case_detail(request: HttpRequest, case_id: uuid.UUID) -> HttpResponse:
             "current_step_idx": current_step_idx,
             "status_label": STATUS_LABELS.get(case.status, case.get_status_display()),
             "status_css": STATUS_CSS_CLASS.get(case.status, "status-pending"),
+            "declared_label": declared_badge["declared_label"],
+            "declared_type_key": declared_badge["declared_type_key"],
             "can_confirm_receipt": can_confirm,
             "lock_token": lock_token or "",
             "lock_error": lock_error,

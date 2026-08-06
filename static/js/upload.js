@@ -604,7 +604,7 @@
       // Exam type is mandatory — backend is the source of truth (Slice 002)
       if (!getSelectedExamType()) {
         e.preventDefault();
-        showAlert('warning', 'Selecione o tipo de exame (EDA ou Colonoscopia) antes de enviar.');
+        showAlert('warning', 'Selecione o tipo de exame (EDA, Colonoscopia ou EDA + Colonoscopia) antes de enviar.');
         return;
       }
 

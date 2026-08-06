@@ -20,11 +20,13 @@ from django.utils import timezone
 from apps.cases.models import (
     ACCEPTED_ATTACHMENT_CONTENT_TYPES,
     ACCEPTED_ATTACHMENT_EXTENSIONS,
+    EDA_COLONOSCOPY,
     Case,
     CaseAttachment,
     CaseStatus,
     ExamType,
 )
+from apps.cases.procedures import set_declared_procedures, sync_declared_projection
 
 if TYPE_CHECKING:
     from apps.accounts.models import User as AccountsUser
@@ -43,15 +45,23 @@ def is_colonoscopy_intake_enabled() -> bool:
     return bool(getattr(settings, "COLONOSCOPY_INTAKE_ENABLED", False))
 
 
-def validate_exam_type(exam_type: str | None) -> str:
-    """Valida e normaliza o tipo de exame declarado.
+# Seleção declarada aceita no intake (Slice 001): EDA, Colonoscopia ou a
+# combinação transitória eda_colonoscopy (ponte). O valor combinado NÃO é
+# membro de ExamType.values (dashboard/filas legadas o iteram).
+_DECLARED_SELECTION_VALUES: frozenset[str] = frozenset({ExamType.EDA, ExamType.COLONOSCOPY, EDA_COLONOSCOPY})
 
-    Levanta ``ValueError`` se ausente/inválido. Aceita somente valores do
-    enum ``ExamType`` — nunca inferência por texto (R1).
+
+def validate_exam_type(exam_type: str | None) -> str:
+    """Valida e normaliza a seleção declarada no intake.
+
+    Levanta ``ValueError`` se ausente/inválida. Aceita EDA, Colonoscopia ou a
+    combinação ``eda_colonoscopy`` (ponte transitória) — nunca inferência por
+    texto (R1). ``eda_colonoscopy`` é aceito apenas como seleção de NOVO intake;
+    a correção single→single valida separadamente (R3).
     """
     value = (exam_type or "").strip()
-    if value not in ExamType.values:
-        raise ValueError("Selecione o tipo de exame (EDA ou Colonoscopia).")
+    if value not in _DECLARED_SELECTION_VALUES:
+        raise ValueError("Selecione o tipo de exame (EDA, Colonoscopia ou EDA + Colonoscopia).")
     return value
 
 
@@ -59,15 +69,28 @@ def ensure_exam_type_allowed(exam_type: str | None) -> str:
     """Validação central de choice + flag para criação de novo caso.
 
     - tipo ausente/inválido → ValueError;
-    - colonoscopia com flag de intake desligada → ValueError;
+    - colonoscopia ou combinação com flag de intake desligada → ValueError;
     - EDA sempre permitido.
 
     Backend é a fonte de verdade; templates/JS apenas melhoram a UX.
     """
     value = validate_exam_type(exam_type)
-    if value == ExamType.COLONOSCOPY and not is_colonoscopy_intake_enabled():
-        raise ValueError("Colonoscopia ainda não está habilitada para novos envios. Envie lotes apenas de EDA.")
+    if value in (ExamType.COLONOSCOPY, EDA_COLONOSCOPY) and not is_colonoscopy_intake_enabled():
+        raise ValueError(
+            "Colonoscopia e EDA + Colonoscopia ainda não estão habilitadas para novos envios. "
+            "Envie lotes apenas de EDA."
+        )
     return value
+
+
+def _procedure_types_for_selection(exam_type: str) -> tuple[str, ...]:
+    """Mapeia a seleção declarada para o conjunto de procedimentos.
+
+    ``eda_colonoscopy`` (ponte) → (eda, colonoscopy); tipos únicos → o próprio.
+    """
+    if exam_type == EDA_COLONOSCOPY:
+        return (ExamType.EDA, ExamType.COLONOSCOPY)
+    return (exam_type,)
 
 
 # ── Correção de tipo e confirmação NIR serializadas (Slice 006) ───────────
@@ -220,6 +243,8 @@ def correct_case_exam_type(
         EnqueueAfterCommitError: enqueue pós-commit falhou (correção commitada).
     """
     validated_exam_type = validate_exam_type(new_exam_type)
+    if validated_exam_type not in (ExamType.EDA, ExamType.COLONOSCOPY):
+        raise ValueError("A correção de tipo aceita apenas EDA ou Colonoscopia isolados neste fluxo.")
     if reason_code not in EXAM_TYPE_CORRECTION_REASONS:
         raise ValueError("Motivo da correção inválido.")
     if lock_token is None:
@@ -251,7 +276,10 @@ def correct_case_exam_type(
                 "reason_code": reason_code,
             },
         )
-        case.exam_type = validated_exam_type
+        # R3 (Slice 001) — reroteamento pelo serviço único de declaração:
+        # projeção CaseProcedure.declared_by_nir e ponte Case.exam_type sob a
+        # MESMA transação/lock; falha reverte tudo (incl. derivados/eventos/FSM).
+        sync_declared_projection(case, [validated_exam_type])
         case.save()
 
         # R2 — transição FSM nomeada; CASE_REPROCESSING_REQUESTED é persistido
@@ -684,15 +712,24 @@ def _create_case_from_file(
     transition step.
     """
     # 1. Create case
-    case = Case.objects.create(created_by=user, exam_type=exam_type)
+    with transaction.atomic():
+        case = Case.objects.create(created_by=user, exam_type=exam_type)
 
-    # 2. Save PDF
-    case.pdf_file = file
-    case.save()
+        # 2. Save PDF
+        case.pdf_file = file
+        case.save()
 
-    # 3. FSM: NEW → R1_ACK_PROCESSING
-    case.start_processing(user=user)
-    case.save()
+        # Slice 001 (R5): projeção declarada + ponte no MESMO caso — um PDF
+        # combinado vira UM Case com DUAS rows; falha aqui reverte o caso.
+        set_declared_procedures(
+            case=case,
+            procedure_types=_procedure_types_for_selection(exam_type),
+            actor=user,
+        )
+
+        # 3. FSM: NEW → R1_ACK_PROCESSING
+        case.start_processing(user=user)
+        case.save()
 
     # 4. Enqueue async PDF extraction (runs in background cluster "pdf")
     from apps.intake.tasks import enqueue_pdf_extraction
@@ -757,22 +794,30 @@ def create_corrected_resubmission(
     if att_list:
         validate_attachments(att_list, pdf_count=1)
 
-    # 4. Create new Case with correction metadata
-    new_case = Case.objects.create(
-        created_by=user,
-        exam_type=validated_exam_type,
-        corrects_case=original_case,
-        correction_reason=reason,
-        correction_created_by=user,
-        correction_created_at=tz.now(),
-    )
+    # 4/5/6. Create new Case (atomic): PDF, projeção declarada e FSM inicial.
+    # Slice 001: reenvio é NOVO intake — a seleção declarada projeta rows
+    # (combinação → duas rows) e a ponte; falha reverte o caso inteiro.
+    with transaction.atomic():
+        new_case = Case.objects.create(
+            created_by=user,
+            exam_type=validated_exam_type,
+            corrects_case=original_case,
+            correction_reason=reason,
+            correction_created_by=user,
+            correction_created_at=tz.now(),
+        )
 
-    # 5. Save PDF and advance FSM: NEW → R1_ACK_PROCESSING
-    new_case.pdf_file = pdf_file
-    new_case.save()
+        new_case.pdf_file = pdf_file
+        new_case.save()
 
-    new_case.start_processing(user=user)
-    new_case.save()
+        set_declared_procedures(
+            case=new_case,
+            procedure_types=_procedure_types_for_selection(validated_exam_type),
+            actor=user,
+        )
+
+        new_case.start_processing(user=user)
+        new_case.save()
 
     # 6. Enqueue PDF extraction
     from apps.intake.tasks import enqueue_pdf_extraction

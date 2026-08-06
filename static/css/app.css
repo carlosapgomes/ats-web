@@ -1272,3 +1272,9 @@ html {
   color: var(--bs-success-text-emphasis, #0a3622);
   border: 1px solid var(--bs-success-border-subtle, #a3cfbb);
 }
+
+.exam-type-eda_colonoscopy {
+  background-color: var(--bs-purple-bg-subtle, #e6d8f5);
+  color: var(--bs-purple-text-emphasis, #4b2e83);
+  border: 1px solid var(--bs-purple-border-subtle, #b99add);
+}
