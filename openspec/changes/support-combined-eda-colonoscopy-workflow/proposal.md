@@ -6,7 +6,7 @@
 
 **Risco**: CRÍTICO / HIGH-ARCH (score determinístico anterior: 86,4)
 
-**ADR requerida antes do Slice 001**: `docs/adr/ADR-0004-procedimentos-multiplos-e-contrato-llm-neutro.md` (deve superar parcialmente a ADR-0003; este change não implementa a ADR por estar limitado a artefatos OpenSpec).
+**ADR aceita antes do Slice 001**: `docs/adr/ADR-0004-procedimentos-multiplos-e-contrato-llm-neutro.md`, que supera parcialmente as decisões 1, 2, 3, 5, 6, 8 e 9 da ADR-0003.
 
 **Base funcional**: change arquivado `openspec/archive/introduce-colonoscopy-exam-workflow/` e specs canônicas em `openspec/specs/`.
 

@@ -2,7 +2,7 @@
 
 ## Status
 
-Accepted
+Accepted — parcialmente superada pela [ADR-0004](ADR-0004-procedimentos-multiplos-e-contrato-llm-neutro.md) nas decisões 1, 2, 3, 5, 6, 8 e 9. As decisões 4, 7, 10 e 11 permanecem válidas.
 
 ## Contexto
 
@@ -93,3 +93,4 @@ Este ADR está associado ao change `openspec/archive/introduce-colonoscopy-exam-
 ## Histórico de Mudanças
 
 - 2026-08-04: ADR criada e aceita para o change `introduce-colonoscopy-exam-workflow`.
+- 2026-08-06: decisões 1, 2, 3, 5, 6, 8 e 9 parcialmente superadas pela ADR-0004; decisões 4, 7, 10 e 11 preservadas.

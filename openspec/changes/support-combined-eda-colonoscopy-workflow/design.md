@@ -320,9 +320,9 @@ Rollout exige backup, janela controlada, imagem nova, writers parados durante mi
 
 Rollback preferido: flag false e imagem nova, preservando schema novo. Voltar à imagem antiga é exceção e exige bridge executável que recrie/backfille `exam_type` de modo fail-fast a partir de `CaseProcedure`, com regra que recuse combinação ou converta somente após drenagem comprovada. Com todos os writers parados, a bridge deve reativar exatamente uma versão compatível de cada nome legado e verificá-las antes de subir imagem antiga. Forward posterior para novamente writers antigos, garante uma versão ativa por nome neutro, desativa nomes legados, remove a ponte e executa asserts binários antes de subir a imagem nova.
 
-### D20. ADR-0004 antes de código
+### D20. ADR-0004 aceita antes de código
 
-Este design supera parcialmente ADR-0003: fonte única, bloqueio de mixed, envelope incremental, prompts separados, filtro único e correção de tipo. Criar/aceitar ADR-0004 antes do Slice 001. A ADR-0003 não é apagada; seu status deve indicar supersessão parcial e preservar decisões ainda válidas (profiles/policy, FSM compartilhada, flag, medicamentos).
+A ADR-0004 foi criada, revisada e aceita antes do Slice 001. Ela supera parcialmente as decisões 1, 2, 3, 5, 6, 8 e 9 da ADR-0003: fonte única, bloqueio de mixed, envelope incremental, prompts separados, filtro único e correção de tipo. A ADR-0003 não é apagada; seu status indica supersessão parcial e preserva as decisões ainda válidas 4, 7, 10 e 11 (profiles/policy, FSM compartilhada, flag e medicamentos).
 
 ## 4. Dimensionamento dos slices
 
