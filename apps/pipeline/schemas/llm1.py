@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 EvidenceFlag = Literal["yes", "no", "unknown"]
 
@@ -51,6 +51,8 @@ EdaRequestedProcedureSubtype = Literal[
 ]
 AsaBucket = Literal["I-II", "III ou mais", "insufficient_data"]
 CardiovascularRiskLevel = Literal["low", "moderate_high", "unknown"]
+MedicationClass = Literal["anticoagulant", "antiplatelet", "other", "unknown"]
+MedicationUseStatus = Literal["current", "recent", "historical", "suspended", "unknown"]
 
 
 class StrictModel(BaseModel):
@@ -200,6 +202,33 @@ class Llm1Comorbidity(StrictModel):
     source_text_hint: str | None = None
 
 
+class Llm1Medication(StrictModel):
+    """A medication explicitly described in the source medical report.
+
+    Informative only: never used as an automatic clinical decision, never
+    recommends suspension, dose or pharmacological window.
+    """
+
+    name: str = Field(min_length=1, max_length=120)
+    normalized_name: str | None = None
+    medication_class: MedicationClass
+    use_status: MedicationUseStatus
+    last_dose_or_schedule: str | None = Field(default=None, max_length=200)
+    source_text_hint: str = Field(min_length=1, max_length=300)
+
+    @field_validator("name", "source_text_hint")
+    @classmethod
+    def _reject_whitespace_only(cls, value: str) -> str:
+        """Reject semantically empty whitespace-only values (local to medications).
+
+        Kept local to Llm1Medication on purpose: widening StrictModel would
+        change validation behaviour for every other schema field.
+        """
+        if not value.strip():
+            raise ValueError("campo não pode conter apenas espaços")
+        return value
+
+
 class Llm1RulebookSignals(StrictModel):
     """Grouped rulebook signals added for the rewritten supported EDA flow."""
 
@@ -214,7 +243,9 @@ class Llm1RulebookSignals(StrictModel):
 class Llm1PreopScreening(StrictModel):
     """Objective pre-procedure screening signals extracted from textual evidence."""
 
-    exam_type: Literal["eda", "non_eda", "unknown"]
+    # Slice 003: colonoscopy is now a supported exam type; non_eda remains for
+    # genuinely out-of-scope requests (e.g. CPRE).
+    exam_type: Literal["eda", "colonoscopy", "non_eda", "unknown"]
     has_cardiovascular_disease: EvidenceFlag
     has_active_respiratory_symptoms: EvidenceFlag
     has_prior_respiratory_disease: EvidenceFlag
@@ -227,6 +258,7 @@ class Llm1PreopScreening(StrictModel):
     evidence_spans: list[Llm1EvidenceSpan] = Field(default_factory=list)
     rulebook_signals: Llm1RulebookSignals = Field(default_factory=Llm1RulebookSignals)
     comorbidities_described: list[Llm1Comorbidity] = Field(default_factory=list, max_length=20)
+    medications_described: list[Llm1Medication] = Field(default_factory=list, max_length=20)
 
 
 class Llm1PolicyPrecheck(StrictModel):

@@ -10,14 +10,25 @@ Usage:
 from django.core.management.base import BaseCommand
 
 from apps.llm.models import PromptTemplate
-from apps.pipeline.llm1_service import LLM1_DEFAULT_SYSTEM_PROMPT, LLM1_DEFAULT_USER_PROMPT
+from apps.pipeline.llm1_service import (
+    COLONOSCOPY_LLM1_DEFAULT_SYSTEM_PROMPT,
+    COLONOSCOPY_LLM1_DEFAULT_USER_PROMPT,
+    LLM1_DEFAULT_SYSTEM_PROMPT,
+    LLM1_DEFAULT_USER_PROMPT,
+)
 
 # Canonical prompt names matching the legacy system and admin UI.
+# Slice 003 (R2): colonoscopy prompts are administráveis separately and never
+# replace the canonical EDA prompts (design D5 / ADR-0003).
 PROMPT_NAMES = [
     "llm1_system",
     "llm1_user",
     "llm2_system",
     "llm2_user",
+    "colonoscopy_llm1_system",
+    "colonoscopy_llm1_user",
+    "colonoscopy_llm2_system",
+    "colonoscopy_llm2_user",
 ]
 
 # Default contents ported from the legacy augmented-triage-system.
@@ -39,6 +50,22 @@ DEFAULT_CONTENTS = {
         "Tarefa: sugerir accept/deny e recomendacao de suporte para triagem EDA "
         "usando dados estruturados do LLM1 e contexto de caso anterior. "
         "Nao use palavras em ingles nos campos narrativos."
+    ),
+    "colonoscopy_llm1_system": COLONOSCOPY_LLM1_DEFAULT_SYSTEM_PROMPT,
+    "colonoscopy_llm1_user": COLONOSCOPY_LLM1_DEFAULT_USER_PROMPT,
+    "colonoscopy_llm2_system": (
+        "Voce e um assistente de apoio a decisao clinica para triagem de "
+        "Colonoscopia (endoscopia digestiva baixa). Retorne APENAS JSON valido que "
+        "siga estritamente o schema_version 1.1. Escreva todos os campos narrativos "
+        "em portugues brasileiro (pt-BR). Nao use palavras em ingles nos campos "
+        "narrativos. Use apenas valores de enum permitidos para suggestion e "
+        "support_recommendation. Nao inclua markdown, blocos de codigo ou chaves "
+        "extras."
+    ),
+    "colonoscopy_llm2_user": (
+        "Tarefa: sugerir accept/deny e recomendacao de suporte para triagem de "
+        "Colonoscopia usando dados estruturados do LLM1 e contexto de caso "
+        "anterior. Nao use palavras em ingles nos campos narrativos."
     ),
 }
 

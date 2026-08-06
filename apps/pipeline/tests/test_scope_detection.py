@@ -21,6 +21,7 @@ def _classify(
     cleaned_text: str = "",
     case_id: str = "test-case-id",
     agency_record_number: str = "test-agency-record",
+    expected_exam_type: str | None = None,
 ) -> dict[str, object] | None:
     """Dynamically import and invoke classify_exam_scope."""
 
@@ -31,6 +32,7 @@ def _classify(
         cleaned_text=cleaned_text,
         case_id=case_id,
         agency_record_number=agency_record_number,
+        expected_exam_type=expected_exam_type,
     )
     if result is None:
         return None
@@ -401,8 +403,13 @@ def test_ecoendoscopia_and_cpre_follows_eda_via_structured_subtype() -> None:
     assert result is None
 
 
-def test_eda_and_colonoscopia_follows_eda() -> None:
-    """Motivo com EDA + colonoscopia → EDA (EDA suportada prevalece)."""
+def test_eda_and_colonoscopia_both_current_block_mixed() -> None:
+    """Motivo com EDA + colonoscopia como pedidos atuais → mixed_exam_request (R3).
+
+    A precedência antiga (EDA prevalecia sobre colonoscopia simultânea) foi
+    substituída: duas solicitações atuais distintas são bloqueadas e o NIR
+    deve separar PDFs/casos.
+    """
 
     llm1: dict[str, object] = {"preop_screening": {"exam_type": "non_eda"}}
     cleaned_text = """
@@ -412,11 +419,35 @@ def test_eda_and_colonoscopia_follows_eda() -> None:
     HSA - HOSPITAL SANTO ANTONIO
     """
     result = _classify(llm1_structured_data=llm1, cleaned_text=cleaned_text)
+    assert result is not None
+    assert result["decision"] == "manual_review_required"
+    assert result["reason_code"] == "mixed_exam_request"
+    assert result["declared_exam_type"] == "eda"
+    assert result["detected_exam_type"] == "mixed"
+
+
+def test_colonoscopy_current_with_historical_eda_mention_passes() -> None:
+    """Motivo somente colonoscopia + menção histórica de EDA → colonoscopia aceita (R3)."""
+
+    llm1: dict[str, object] = {"preop_screening": {"exam_type": "non_eda"}}
+    cleaned_text = """
+    Motivo da Solicitação:
+    Colonoscopia de rastreamento
+    Unid. Origem:
+    HSA - HOSPITAL SANTO ANTONIO
+    Complemento da Solicitação:
+    Paciente com EDA prévia em 2023 sem alterações.
+    """
+    result = _classify(
+        llm1_structured_data=llm1,
+        cleaned_text=cleaned_text,
+        expected_exam_type="colonoscopy",
+    )
     assert result is None
 
 
-def test_only_colonoscopy_with_historical_eda_mention_preserves_manual_review() -> None:
-    """Motivo somente colonoscopia + menção histórica de EDA → revisão manual."""
+def test_colonoscopy_current_with_historical_eda_mention_mismatch_when_eda_declared() -> None:
+    """Declarado EDA + documento colonoscopia atual → mismatch com declared/detected (R3)."""
 
     llm1: dict[str, object] = {"preop_screening": {"exam_type": "non_eda"}}
     cleaned_text = """
@@ -430,7 +461,9 @@ def test_only_colonoscopy_with_historical_eda_mention_preserves_manual_review() 
     result = _classify(llm1_structured_data=llm1, cleaned_text=cleaned_text)
     assert result is not None
     assert result["decision"] == "manual_review_required"
-    assert result["reason_code"] == "non_eda_request"
+    assert result["reason_code"] == "exam_type_mismatch"
+    assert result["declared_exam_type"] == "eda"
+    assert result["detected_exam_type"] == "colonoscopy"
 
 
 def test_only_cpre_preserves_manual_review() -> None:
@@ -584,12 +617,13 @@ def test_non_eda_exam_type_returns_manual_review() -> None:
     assert result["exam_type"] == "non_eda"
 
 
-def test_non_eda_exam_type_wins_over_default_eda_subtype() -> None:
-    """Colonoscopia classified as non_eda must not reach doctor due to subtype noise.
+def test_non_eda_exam_type_detected_colonoscopy_mismatch() -> None:
+    """Colonoscopia classificada como non_eda pelo LLM1 + texto atual → mismatch.
 
-    Real OpenAI runs may correctly set preop_screening.exam_type=non_eda while
-    still leaving requested_procedure.subtype or rulebook eda_subtype as a
-    default EDA subtype. The explicit non_eda classification is authoritative.
+    Sob R3, o detector reconhece a solicitação atual de colonoscopia; com o
+    tipo declarado EDA (default) o resultado é ``exam_type_mismatch`` com
+    declared/detected, e o caso não chega ao médico. Com o tipo declarado
+    colonoscopia, o mesmo documento prossegue.
     """
 
     llm1: dict[str, object] = {
@@ -608,12 +642,20 @@ def test_non_eda_exam_type_wins_over_default_eda_subtype() -> None:
 
     assert result is not None
     assert result["decision"] == "manual_review_required"
-    assert result["reason_code"] == "non_eda_request"
-    assert result["exam_type"] == "non_eda"
+    assert result["reason_code"] == "exam_type_mismatch"
+    assert result["declared_exam_type"] == "eda"
+    assert result["detected_exam_type"] == "colonoscopy"
+
+    colon_result = _classify(
+        llm1_structured_data=llm1,
+        cleaned_text="Solicito colonoscopia para investigação.",
+        expected_exam_type="colonoscopy",
+    )
+    assert colon_result is None
 
 
-def test_motivo_endoscopia_digestiva_baixa_wins_over_later_eda_mentions() -> None:
-    """Top-level colonoscopy motive must not be overridden by later EDA text."""
+def test_motivo_endoscopia_digestiva_baixa_with_current_eda_blocks_mixed() -> None:
+    """Motivo colonoscopia + complemento com EDA atual → mixed_exam_request (R3)."""
 
     llm1: dict[str, object] = {
         "preop_screening": {"exam_type": "eda", "rulebook_signals": {"eda_subtype": "standard"}},
@@ -634,8 +676,9 @@ def test_motivo_endoscopia_digestiva_baixa_wins_over_later_eda_mentions() -> Non
 
     assert result is not None
     assert result["decision"] == "manual_review_required"
-    assert result["reason_code"] == "non_eda_request"
-    assert result["exam_type"] == "non_eda"
+    assert result["reason_code"] == "mixed_exam_request"
+    assert result["declared_exam_type"] == "eda"
+    assert result["detected_exam_type"] == "mixed"
 
 
 def test_cpre_non_eda_returns_manual_review() -> None:

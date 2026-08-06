@@ -16,6 +16,17 @@ class ReturnState:
         return result
 
 
+class ExamType(models.TextChoices):
+    """Tipo de exame operacional declarado no intake (Slice 002).
+
+    Fonte única para labels, filtros e seleção de perfil/prompt (Slice 003+).
+    Apenas EDA e Colonoscopia — CPRE não é escopo deste change.
+    """
+
+    EDA = "eda", "EDA"
+    COLONOSCOPY = "colonoscopy", "Colonoscopia"
+
+
 class CaseStatus(models.TextChoices):
     """Todos os 17 estados do caso, preservados do legado."""
 
@@ -43,6 +54,15 @@ class Case(models.Model):
     """Caso de triagem EDA — entidade central do sistema."""
 
     case_id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+
+    # Exam type — declared explicitly at intake (Slice 002)
+    # Historical default EDA kept for fixture compatibility (documented in
+    # migration 0014); new uploads REQUIRE an explicit type at service level.
+    exam_type = models.CharField(
+        max_length=20,
+        choices=ExamType.choices,
+        default=ExamType.EDA,
+    )
 
     # FSM Status
     status = FSMField(
@@ -176,6 +196,10 @@ class Case(models.Model):
             models.Index(fields=["status"]),
             models.Index(fields=["status", "locked_until"]),
             models.Index(fields=["agency_record_number", "created_at"]),
+            # Fila por status+tipo (Slices 004-008 filtram por exam_type).
+            # O prefixo status cobre lookups por status; exam_type composto
+            # evita índice adicional de coluna única.
+            models.Index(fields=["status", "exam_type"], name="cases_status_exam_type_idx"),
         ]
 
     def __str__(self) -> str:
@@ -338,6 +362,25 @@ class Case(models.Model):
             "SCOPE_GATE_BYPASS",
             user=user,
             payload={"reason_code": reason_code},
+        )
+
+    @transition(
+        field=status,
+        source=CaseStatus.WAIT_R1_CLEANUP_THUMBS,
+        target=CaseStatus.LLM_STRUCT,
+    )
+    def reprocess_after_exam_type_correction(self, *, user=None, payload=None):
+        """Retorna à análise automática após correção de tipo (Slice 006).
+
+        Transição nomeada WAIT_R1_CLEANUP_THUMBS → LLM_STRUCT usada
+        exclusivamente pelo serviço de correção de tipo do NIR. Preserva a
+        FSM protegida (nenhum status atribuído diretamente) e registra o
+        evento ``CASE_REPROCESSING_REQUESTED`` no save() subsequente.
+        """
+        self._record_event(
+            "CASE_REPROCESSING_REQUESTED",
+            user=user,
+            payload=payload or {},
         )
 
     @transition(

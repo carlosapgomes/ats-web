@@ -13,10 +13,12 @@ import fitz  # type: ignore[import-untyped]
 import pytest
 from django.contrib.auth import get_user_model
 from django.core.files.uploadedfile import SimpleUploadedFile
+from django.test import override_settings
 from django.urls import reverse
 from django.utils import timezone
 
-from apps.cases.models import Case, CaseAttachment, CaseEvent, CaseStatus
+from apps.cases.models import Case, CaseAttachment, CaseEvent, CaseStatus, ExamType
+from apps.intake.services import create_corrected_resubmission
 
 User = get_user_model()
 
@@ -272,6 +274,7 @@ class TestCorrectedResubmissionPost:
                     "correction_reason": "Documento incompleto. Enviando laudo corrigido.",
                     "pdf_file": pdf,
                     "confirmation": "on",
+                    "exam_type": "eda",
                 },
             )
 
@@ -334,6 +337,7 @@ class TestCorrectedResubmissionPost:
                     "correction_reason": "Laudo corrigido",
                     "pdf_file": pdf,
                     "confirmation": "on",
+                    "exam_type": "eda",
                 },
             )
 
@@ -364,7 +368,12 @@ class TestCorrectedResubmissionPost:
         with patch("apps.intake.tasks.enqueue_pdf_extraction"):
             response = nir_client.post(
                 url,
-                {"correction_reason": "Laudo corrigido", "pdf_file": pdf, "confirmation": "on"},
+                {
+                    "correction_reason": "Laudo corrigido",
+                    "pdf_file": pdf,
+                    "confirmation": "on",
+                    "exam_type": "eda",
+                },
             )
 
         assert response.status_code == 302
@@ -404,6 +413,7 @@ class TestCorrectedResubmissionPost:
                     "pdf_file": pdf,
                     "attachment_files": [new_att],
                     "confirmation": "on",
+                    "exam_type": "eda",
                 },
             )
 
@@ -429,7 +439,12 @@ class TestCorrectedResubmissionPost:
         with patch("apps.intake.tasks.enqueue_pdf_extraction"):
             nir_client.post(
                 url,
-                {"correction_reason": "Laudo corrigido", "pdf_file": pdf, "confirmation": "on"},
+                {
+                    "correction_reason": "Laudo corrigido",
+                    "pdf_file": pdf,
+                    "confirmation": "on",
+                    "exam_type": "eda",
+                },
             )
 
         new_case = Case.objects.exclude(case_id=original.case_id).first()
@@ -455,7 +470,12 @@ class TestCorrectedResubmissionPost:
         with patch("apps.intake.tasks.enqueue_pdf_extraction") as mock_enqueue:
             nir_client.post(
                 url,
-                {"correction_reason": "Documento corrigido", "pdf_file": pdf, "confirmation": "on"},
+                {
+                    "correction_reason": "Documento corrigido",
+                    "pdf_file": pdf,
+                    "confirmation": "on",
+                    "exam_type": "eda",
+                },
             )
 
         new_case = Case.objects.exclude(case_id=original.case_id).first()
@@ -521,3 +541,361 @@ class TestClosedCasesSearchCorrectionVisibility:
         assert response.status_code == 200
         content = response.content.decode()
         assert "corrigido" in content.lower() or "Corrigido" in content
+
+
+# ── Slice 007: reenvio corrigido exige tipo explícito (R3/R4) ────────────
+
+
+@pytest.mark.django_db
+class TestCorrectedResubmissionExamTypeFlag:
+    """R3/R4 — o reenvio corrigido NÃO herda tipo: exige escolha explícita no
+    novo caso. A escolha passa pela validação central (choice + flag de
+    intake) antes de qualquer efeito colateral. O original permanece intacto.
+    """
+
+    # ── Tipo ausente/inválido rejeitado (RED R3) ─────────────────────
+
+    def test_service_requires_exam_type(self) -> None:
+        """Sem tipo explícito, o serviço levanta ValueError sem efeitos."""
+        nir_user = _nir_user()
+        original = Case.objects.create(created_by=nir_user, exam_type=ExamType.EDA)
+        with patch("apps.intake.tasks.enqueue_pdf_extraction") as mock_enqueue:
+            with pytest.raises(ValueError):
+                create_corrected_resubmission(
+                    original_case=original,
+                    pdf_file=_simple_pdf(),
+                    user=nir_user,
+                    correction_reason="Laudo corrigido",
+                )
+
+        assert Case.objects.count() == 1
+        mock_enqueue.assert_not_called()
+        original = Case.objects.get(pk=original.pk)
+        assert original.exam_type == ExamType.EDA
+        assert original.status == CaseStatus.NEW
+        assert set(original.events.values_list("event_type", flat=True)) == {"CASE_CREATED"}
+
+    def test_post_without_exam_type_creates_no_case(self, client) -> None:
+        """View: POST sem tipo re-renderiza com warning; nada é criado."""
+        nir_client, nir_user = _nir_client(client)
+        original = Case.objects.create(created_by=nir_user, exam_type=ExamType.EDA)
+        url = reverse("intake:corrected_resubmission", args=[original.case_id])
+        with patch("apps.intake.tasks.enqueue_pdf_extraction") as mock_enqueue:
+            response = nir_client.post(
+                url,
+                {
+                    "correction_reason": "Laudo corrigido",
+                    "pdf_file": _simple_pdf(),
+                    "confirmation": "on",
+                },
+            )
+
+        assert response.status_code == 200
+        content = response.content.decode()
+        assert "Selecione o tipo de exame" in content
+        assert Case.objects.count() == 1
+        mock_enqueue.assert_not_called()
+
+    def test_post_with_invalid_exam_type_creates_no_case(self, client) -> None:
+        """Tipo inválido também é rejeitado pelo backend."""
+        nir_client, nir_user = _nir_client(client)
+        original = Case.objects.create(created_by=nir_user, exam_type=ExamType.EDA)
+        url = reverse("intake:corrected_resubmission", args=[original.case_id])
+        with patch("apps.intake.tasks.enqueue_pdf_extraction") as mock_enqueue:
+            response = nir_client.post(
+                url,
+                {
+                    "correction_reason": "Laudo corrigido",
+                    "pdf_file": _simple_pdf(),
+                    "confirmation": "on",
+                    "exam_type": "cpre",
+                },
+            )
+
+        assert response.status_code == 200
+        assert Case.objects.count() == 1
+        mock_enqueue.assert_not_called()
+
+    def test_form_has_no_prechecked_type(self, client) -> None:
+        """Formulário sem opção pré-marcada (radios EDA/Colonoscopia)."""
+        import re
+
+        nir_client, nir_user = _nir_client(client)
+        original = Case.objects.create(created_by=nir_user, exam_type=ExamType.EDA)
+        url = reverse("intake:corrected_resubmission", args=[original.case_id])
+        response = nir_client.get(url)
+        assert response.status_code == 200
+        content = response.content.decode()
+        assert 'name="exam_type"' in content
+        assert "Tipo de exame" in content
+        radios = re.findall(r"<input[^>]*name=[\"']exam_type[\"'][^>]*>", content)
+        assert len(radios) >= 2
+        for tag in radios:
+            assert "checked" not in tag, f"Radio pré-marcado: {tag}"
+
+    # ── Flag de intake vale para o novo caso (R3/F1) ──────────────────
+
+    def test_service_rejects_explicit_colonoscopy_when_flag_off(self) -> None:
+        """Flag false + tipo explícito colonoscopia → ValueError sem efeitos."""
+        with override_settings(COLONOSCOPY_INTAKE_ENABLED=False):
+            nir_user = _nir_user()
+            original = Case.objects.create(created_by=nir_user, exam_type=ExamType.EDA)
+            with pytest.raises(ValueError):
+                create_corrected_resubmission(
+                    original_case=original,
+                    pdf_file=_simple_pdf(),
+                    user=nir_user,
+                    correction_reason="Laudo corrigido",
+                    exam_type=ExamType.COLONOSCOPY,
+                )
+        assert Case.objects.count() == 1
+
+    def test_post_with_explicit_colonoscopy_flag_off_creates_no_case(self, client) -> None:
+        """View: flag false + colonoscopia explícita → tela com indisponibilidade."""
+        with override_settings(COLONOSCOPY_INTAKE_ENABLED=False):
+            nir_client, nir_user = _nir_client(client)
+            original = Case.objects.create(
+                created_by=nir_user,
+                exam_type=ExamType.COLONOSCOPY,
+                agency_record_number="2026-C1",
+            )
+            url = reverse("intake:corrected_resubmission", args=[original.case_id])
+            with patch("apps.intake.tasks.enqueue_pdf_extraction") as mock_enqueue:
+                response = nir_client.post(
+                    url,
+                    {
+                        "correction_reason": "Laudo corrigido",
+                        "pdf_file": _simple_pdf(),
+                        "confirmation": "on",
+                        "exam_type": "colonoscopy",
+                    },
+                )
+
+        assert response.status_code == 200
+        content = response.content.decode()
+        assert "colonoscopia" in content.lower()
+        assert "indispon" in content.lower() or "habilitad" in content.lower()
+
+        assert Case.objects.count() == 1
+        mock_enqueue.assert_not_called()
+        original = Case.objects.get(pk=original.pk)
+        assert original.exam_type == ExamType.COLONOSCOPY
+        assert original.status == CaseStatus.NEW
+        assert original.agency_record_number == "2026-C1"
+        event_types = set(original.events.values_list("event_type", flat=True))
+        assert "CASE_MARKED_SUPERSEDED" not in event_types
+        assert event_types == {"CASE_CREATED"}
+
+    # ── Tipo explícito válido persiste no novo caso (R3) ──────────────
+
+    def test_post_with_explicit_colonoscopy_flag_on_persists_type(self, client) -> None:
+        """Flag true + colonoscopia explícita → novo caso colonoscopia."""
+        with override_settings(COLONOSCOPY_INTAKE_ENABLED=True):
+            nir_client, nir_user = _nir_client(client)
+            original = Case.objects.create(created_by=nir_user, exam_type=ExamType.COLONOSCOPY)
+            url = reverse("intake:corrected_resubmission", args=[original.case_id])
+            with patch("apps.intake.tasks.enqueue_pdf_extraction") as mock_enqueue:
+                response = nir_client.post(
+                    url,
+                    {
+                        "correction_reason": "Laudo corrigido",
+                        "pdf_file": _simple_pdf(),
+                        "confirmation": "on",
+                        "exam_type": "colonoscopy",
+                    },
+                )
+
+        assert response.status_code == 302
+        new_case = Case.objects.exclude(case_id=original.case_id).first()
+        assert new_case is not None
+        assert new_case.exam_type == ExamType.COLONOSCOPY
+        mock_enqueue.assert_called_once_with(new_case.case_id)
+
+    def test_post_with_explicit_eda_flag_off_persists_type(self, client) -> None:
+        """Flag false + EDA explícito → novo caso EDA (EDA segue ok)."""
+        with override_settings(COLONOSCOPY_INTAKE_ENABLED=False):
+            nir_client, nir_user = _nir_client(client)
+            original = Case.objects.create(created_by=nir_user, exam_type=ExamType.EDA)
+            url = reverse("intake:corrected_resubmission", args=[original.case_id])
+            with patch("apps.intake.tasks.enqueue_pdf_extraction") as mock_enqueue:
+                response = nir_client.post(
+                    url,
+                    {
+                        "correction_reason": "Laudo corrigido",
+                        "pdf_file": _simple_pdf(),
+                        "confirmation": "on",
+                        "exam_type": "eda",
+                    },
+                )
+
+        assert response.status_code == 302
+        new_case = Case.objects.exclude(case_id=original.case_id).first()
+        assert new_case is not None
+        assert new_case.exam_type == ExamType.EDA
+        mock_enqueue.assert_called_once_with(new_case.case_id)
+
+    # ── R4: tipo pode divergir do original; original permanece intacto ──
+
+    def test_post_eda_original_to_colonoscopy_new_with_flag_on(self, client) -> None:
+        """Original EDA → novo Colonoscopia é válido com flag ativa."""
+        with override_settings(COLONOSCOPY_INTAKE_ENABLED=True):
+            nir_client, nir_user = _nir_client(client)
+            original = Case.objects.create(
+                created_by=nir_user,
+                exam_type=ExamType.EDA,
+                agency_record_number="2026-EDA-ORIG",
+            )
+            url = reverse("intake:corrected_resubmission", args=[original.case_id])
+            with patch("apps.intake.tasks.enqueue_pdf_extraction") as mock_enqueue:
+                response = nir_client.post(
+                    url,
+                    {
+                        "correction_reason": "Laudo corrigido",
+                        "pdf_file": _simple_pdf(),
+                        "confirmation": "on",
+                        "exam_type": "colonoscopy",
+                    },
+                )
+
+        assert response.status_code == 302
+        new_case = Case.objects.exclude(case_id=original.case_id).first()
+        assert new_case is not None
+        assert new_case.exam_type == ExamType.COLONOSCOPY
+        mock_enqueue.assert_called_once_with(new_case.case_id)
+
+        # Original permanece EDA e inalterado
+        original = Case.objects.get(pk=original.pk)
+        assert original.exam_type == ExamType.EDA
+        assert original.agency_record_number == "2026-EDA-ORIG"
+        assert original.status == CaseStatus.NEW
+
+    def test_correction_created_event_contains_exam_type(self, client) -> None:
+        """Evento de correção inclui o tipo do novo caso (R4)."""
+        with override_settings(COLONOSCOPY_INTAKE_ENABLED=True):
+            nir_client, nir_user = _nir_client(client)
+            original = Case.objects.create(created_by=nir_user, exam_type=ExamType.EDA)
+            url = reverse("intake:corrected_resubmission", args=[original.case_id])
+            with patch("apps.intake.tasks.enqueue_pdf_extraction"):
+                nir_client.post(
+                    url,
+                    {
+                        "correction_reason": "Laudo corrigido",
+                        "pdf_file": _simple_pdf(),
+                        "confirmation": "on",
+                        "exam_type": "colonoscopy",
+                    },
+                )
+
+        new_case = Case.objects.exclude(case_id=original.case_id).first()
+        assert new_case is not None
+        event = CaseEvent.objects.get(case=new_case, event_type="CASE_CORRECTION_CREATED")
+        assert event.payload.get("exam_type") == ExamType.COLONOSCOPY
+        assert "pdf" not in event.payload and "extracted_text" not in event.payload
+
+
+# ── Slice 007 — R2: filtro por tipo na busca de encerrados ───────────────
+
+
+@pytest.mark.django_db
+class TestClosedCasesSearchExamTypeFilter:
+    """R2: busca de encerrados recebe filtro exam_type compondo com o termo."""
+
+    SEARCH_URL = reverse("intake:closed_cases_search")
+
+    def _cleaned(self, user, exam_type: str, record: str) -> Case:
+        return Case.objects.create(
+            created_by=user,
+            exam_type=exam_type,
+            agency_record_number=record,
+            status=CaseStatus.CLEANED,
+        )
+
+    def test_default_todos_shows_both_types(self, client) -> None:
+        """Sem parâmetro, busca por termo mostra ambos os tipos."""
+        nir_client, nir_user = _nir_client(client)
+        self._cleaned(nir_user, ExamType.EDA, "CLOSED-EDA-001")
+        self._cleaned(nir_user, ExamType.COLONOSCOPY, "CLOSED-COL-001")
+
+        response = nir_client.get(self.SEARCH_URL, {"q": "CLOSED"})
+        content = response.content.decode()
+        assert "CLOSED-EDA-001" in content
+        assert "CLOSED-COL-001" in content
+
+    def test_filter_eda_composes_with_term(self, client) -> None:
+        """exam_type=eda + termo → somente EDA."""
+        nir_client, nir_user = _nir_client(client)
+        self._cleaned(nir_user, ExamType.EDA, "CLOSED-EDA-001")
+        self._cleaned(nir_user, ExamType.COLONOSCOPY, "CLOSED-COL-001")
+
+        response = nir_client.get(self.SEARCH_URL, {"q": "CLOSED", "exam_type": "eda"})
+        content = response.content.decode()
+        assert "CLOSED-EDA-001" in content
+        assert "CLOSED-COL-001" not in content
+
+    def test_filter_colonoscopy_composes_with_term(self, client) -> None:
+        """exam_type=colonoscopy + termo → somente Colonoscopia."""
+        nir_client, nir_user = _nir_client(client)
+        self._cleaned(nir_user, ExamType.EDA, "CLOSED-EDA-001")
+        self._cleaned(nir_user, ExamType.COLONOSCOPY, "CLOSED-COL-001")
+
+        response = nir_client.get(self.SEARCH_URL, {"q": "CLOSED", "exam_type": "colonoscopy"})
+        content = response.content.decode()
+        assert "CLOSED-COL-001" in content
+        assert "CLOSED-EDA-001" not in content
+
+    def test_specific_type_without_term_lists_recent_of_type(self, client) -> None:
+        """Tipo específico sem termo lista recentes do tipo (comportamento
+        definido no design D13, consistente com o histórico CHD)."""
+        nir_client, nir_user = _nir_client(client)
+        self._cleaned(nir_user, ExamType.EDA, "CLOSED-EDA-001")
+        self._cleaned(nir_user, ExamType.COLONOSCOPY, "CLOSED-COL-001")
+
+        response = nir_client.get(self.SEARCH_URL, {"exam_type": "eda"})
+        content = response.content.decode()
+        assert "CLOSED-EDA-001" in content
+        assert "CLOSED-COL-001" not in content
+
+    def test_invalid_type_falls_back_to_all(self, client) -> None:
+        """Tipo inválido cai para Todos (default)."""
+        nir_client, nir_user = _nir_client(client)
+        self._cleaned(nir_user, ExamType.EDA, "CLOSED-EDA-001")
+        self._cleaned(nir_user, ExamType.COLONOSCOPY, "CLOSED-COL-001")
+
+        response = nir_client.get(self.SEARCH_URL, {"q": "CLOSED", "exam_type": "cpre"})
+        content = response.content.decode()
+        assert "CLOSED-EDA-001" in content
+        assert "CLOSED-COL-001" in content
+
+    def test_all_without_term_keeps_empty_state(self, client) -> None:
+        """Todos sem termo mantém o estado vazio atual (tela de busca)."""
+        nir_client, _ = _nir_client(client)
+        response = nir_client.get(self.SEARCH_URL, {"exam_type": "all"})
+        assert response.status_code == 200
+        content = response.content.decode()
+        assert "Faça uma busca" in content
+
+    def test_cards_show_exam_type_badge(self, client) -> None:
+        """Cards de encerrados exibem badge persistido do tipo."""
+        nir_client, nir_user = _nir_client(client)
+        self._cleaned(nir_user, ExamType.COLONOSCOPY, "CLOSED-COL-BADGE")
+
+        response = nir_client.get(self.SEARCH_URL, {"q": "CLOSED-COL-BADGE"})
+        content = response.content.decode()
+        assert "exam-type-colonoscopy" in content
+        assert "Colonoscopia" in content
+
+    def test_template_has_exam_type_select(self, client) -> None:
+        """Formulário de encerrados possui controle de tipo com default Todos."""
+        nir_client, _ = _nir_client(client)
+        response = nir_client.get(self.SEARCH_URL)
+        content = response.content.decode()
+        assert 'name="exam_type"' in content
+        assert "Todos os tipos" in content
+        assert '<option value="all" selected' in content or 'value="all"' in content
+
+    def test_clear_button_restores_all_filters(self, client) -> None:
+        """Botão Limpar restaura Todos + sem termo."""
+        nir_client, _ = _nir_client(client)
+        response = nir_client.get(self.SEARCH_URL + "?exam_type=colonoscopy&q=0428")
+        content = response.content.decode()
+        assert f'href="{self.SEARCH_URL}"' in content

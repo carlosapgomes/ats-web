@@ -186,6 +186,9 @@ def _build_case_card(case: Case, wait_minutes: int, user: Any = None) -> dict[st
         "wait_display": _format_wait_minutes(wait_minutes),
         "is_urgent": wait_minutes <= 15,
         "regulation_days_on_screen": case.regulation_days_on_screen,
+        # Tipo de exame declarado (R6) — a fila identifica Colonoscopia.
+        "exam_type": case.exam_type,
+        "exam_type_label": case.get_exam_type_display(),
         # Badges projetados exclusivamente do valor persistido (R7) — a view
         # nunca redetecta sinais a partir de texto bruto.
         "priority_signal_badges": build_priority_signal_badges(case.priority_signals),

@@ -13,7 +13,10 @@ def record_case_event(sender: type[Case], instance: Case, created: bool, **kwarg
             event_type="CASE_CREATED",
             actor=instance.created_by,
             actor_type="human",
-            payload={"status": instance.status},
+            payload={
+                "status": instance.status,
+                "exam_type": instance.exam_type,
+            },
         )
         return
 

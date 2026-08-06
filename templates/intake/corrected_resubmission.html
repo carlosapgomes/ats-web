@@ -81,6 +81,34 @@
       </div>
     </div>
 
+    <!-- Tipo de exame — obrigatório, escolha explícita (Slice 007 R3) -->
+    <fieldset class="mb-4" id="exam-type-section">
+      <legend class="fw-semibold" id="exam-type-label">🩺 Tipo de exame do novo envio <span class="text-danger">*</span></legend>
+      <p class="text-muted small mb-2" id="exam-type-guidance">
+        Selecione o tipo de exame do novo caso. O tipo do caso anterior
+        <strong>não é herdado automaticamente</strong> — você pode corrigir
+        o tipo caso o relatório anterior estivesse classificado incorretamente.
+      </p>
+      <div class="d-flex flex-wrap gap-3" role="radiogroup" aria-labelledby="exam-type-label">
+        <div class="form-check">
+          <input class="form-check-input" type="radio" name="exam_type" value="eda" id="exam-type-eda">
+          <label class="form-check-label" for="exam-type-eda">EDA</label>
+        </div>
+        <div class="form-check">
+          {% if colonoscopy_intake_enabled %}
+          <input class="form-check-input" type="radio" name="exam_type" value="colonoscopy" id="exam-type-colonoscopy">
+          <label class="form-check-label" for="exam-type-colonoscopy">Colonoscopia</label>
+          {% else %}
+          <input class="form-check-input" type="radio" name="exam_type" value="colonoscopy" id="exam-type-colonoscopy" disabled>
+          <label class="form-check-label text-muted" for="exam-type-colonoscopy">
+            Colonoscopia
+            <span class="badge bg-secondary-subtle text-secondary-emphasis">indisponível para novos envios</span>
+          </label>
+          {% endif %}
+        </div>
+      </div>
+    </fieldset>
+
     <!-- Novo PDF principal -->
     <div class="mb-4">
       <label for="pdf_file" class="form-label fw-semibold">

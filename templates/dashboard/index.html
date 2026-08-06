@@ -23,13 +23,13 @@
       </div>
 
       <div class="metrics-period-options" role="group" aria-label="Período das métricas">
-        <a href="?metrics_period=today{% if search %}&search={{ search|urlencode }}{% endif %}{% if status_filter %}&status={{ status_filter }}{% endif %}{% if date_from %}&date_from={{ date_from }}{% endif %}{% if date_to %}&date_to={{ date_to }}{% endif %}{% if attention_filter %}&attention=1{% endif %}"
+        <a href="?metrics_period=today{% if search %}&search={{ search|urlencode }}{% endif %}{% if status_filter %}&status={{ status_filter }}{% endif %}{% if date_from %}&date_from={{ date_from }}{% endif %}{% if date_to %}&date_to={{ date_to }}{% endif %}{% if attention_filter %}&attention=1{% endif %}{% if exam_type and exam_type != 'all' %}&exam_type={{ exam_type }}{% endif %}"
            class="btn btn-sm metrics-period-option {% if metrics_period == 'today' or metrics_period == '' or not metrics_period %}is-active{% endif %}">Hoje</a>
-        <a href="?metrics_period=7d{% if search %}&search={{ search|urlencode }}{% endif %}{% if status_filter %}&status={{ status_filter }}{% endif %}{% if date_from %}&date_from={{ date_from }}{% endif %}{% if date_to %}&date_to={{ date_to }}{% endif %}{% if attention_filter %}&attention=1{% endif %}"
+        <a href="?metrics_period=7d{% if search %}&search={{ search|urlencode }}{% endif %}{% if status_filter %}&status={{ status_filter }}{% endif %}{% if date_from %}&date_from={{ date_from }}{% endif %}{% if date_to %}&date_to={{ date_to }}{% endif %}{% if attention_filter %}&attention=1{% endif %}{% if exam_type and exam_type != 'all' %}&exam_type={{ exam_type }}{% endif %}"
            class="btn btn-sm metrics-period-option {% if metrics_period == '7d' %}is-active{% endif %}">7 dias</a>
-        <a href="?metrics_period=30d{% if search %}&search={{ search|urlencode }}{% endif %}{% if status_filter %}&status={{ status_filter }}{% endif %}{% if date_from %}&date_from={{ date_from }}{% endif %}{% if date_to %}&date_to={{ date_to }}{% endif %}{% if attention_filter %}&attention=1{% endif %}"
+        <a href="?metrics_period=30d{% if search %}&search={{ search|urlencode }}{% endif %}{% if status_filter %}&status={{ status_filter }}{% endif %}{% if date_from %}&date_from={{ date_from }}{% endif %}{% if date_to %}&date_to={{ date_to }}{% endif %}{% if attention_filter %}&attention=1{% endif %}{% if exam_type and exam_type != 'all' %}&exam_type={{ exam_type }}{% endif %}"
            class="btn btn-sm metrics-period-option {% if metrics_period == '30d' %}is-active{% endif %}">30 dias</a>
-        <a href="?metrics_period=all{% if search %}&search={{ search|urlencode }}{% endif %}{% if status_filter %}&status={{ status_filter }}{% endif %}{% if date_from %}&date_from={{ date_from }}{% endif %}{% if date_to %}&date_to={{ date_to }}{% endif %}{% if attention_filter %}&attention=1{% endif %}"
+        <a href="?metrics_period=all{% if search %}&search={{ search|urlencode }}{% endif %}{% if status_filter %}&status={{ status_filter }}{% endif %}{% if date_from %}&date_from={{ date_from }}{% endif %}{% if date_to %}&date_to={{ date_to }}{% endif %}{% if attention_filter %}&attention=1{% endif %}{% if exam_type and exam_type != 'all' %}&exam_type={{ exam_type }}{% endif %}"
            class="btn btn-sm metrics-period-option {% if metrics_period == 'all' %}is-active{% endif %}">Tudo</a>
 
         <!-- Personalizado: dois mini-forms SSR independentes (data específica / intervalo).
@@ -64,6 +64,7 @@
                   {% if date_to %}<input type="hidden" name="date_to" value="{{ date_to }}">{% endif %}
                   {% if attention_filter %}<input type="hidden" name="attention" value="1">{% endif %}
                   {% if search %}<input type="hidden" name="search" value="{{ search }}">{% endif %}
+                  {% if exam_type and exam_type != 'all' %}<input type="hidden" name="exam_type" value="{{ exam_type }}">{% endif %}
                   <button type="submit" class="btn btn-sm btn-hospital-outline">Aplicar</button>
                 </div>
               </form>
@@ -101,6 +102,7 @@
                   {% if date_to %}<input type="hidden" name="date_to" value="{{ date_to }}">{% endif %}
                   {% if attention_filter %}<input type="hidden" name="attention" value="1">{% endif %}
                   {% if search %}<input type="hidden" name="search" value="{{ search }}">{% endif %}
+                  {% if exam_type and exam_type != 'all' %}<input type="hidden" name="exam_type" value="{{ exam_type }}">{% endif %}
                   <button type="submit" class="btn btn-sm btn-hospital-outline">Aplicar</button>
                 </div>
               </form>
@@ -154,6 +156,53 @@
       <div class="text-muted small">Em Andamento</div>
     </div>
   </div>
+</div>
+
+<!-- Breakdown por tipo de exame (Slice 008) -->
+<div class="card p-3 mb-4">
+  <div class="d-flex justify-content-between align-items-center flex-wrap gap-2 mb-2">
+    <h6 class="text-muted small mb-0">BREAKDOWN POR TIPO DE EXAME — {{ metrics_period_label }}</h6>
+    <span class="badge bg-secondary">Desfechos: período · Esperas: atual</span>
+  </div>
+  <div class="table-responsive">
+    <table class="table table-sm table-bordered align-middle mb-0">
+      <caption class="visually-hidden">
+        Métricas por tipo de exame: total, aceitos, negados, encerrados administrativamente e em andamento no período ativo; filas médica, agendamento e confirmação recepção no estado atual.
+      </caption>
+      <thead class="table-light">
+        <tr>
+          <th scope="col">Tipo de exame</th>
+          <th scope="col" class="text-center">Total</th>
+          <th scope="col" class="text-center">Aceitos</th>
+          <th scope="col" class="text-center">Negados</th>
+          <th scope="col" class="text-center">Encerrados admin.</th>
+          <th scope="col" class="text-center">Em Andamento</th>
+          <th scope="col" class="text-center">Fila Médica <span class="badge bg-secondary">atual</span></th>
+          <th scope="col" class="text-center">Fila Agendamento <span class="badge bg-secondary">atual</span></th>
+          <th scope="col" class="text-center">Confirmação Recepção <span class="badge bg-secondary">atual</span></th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for row in exam_type_breakdown_rows %}
+        <tr>
+          <th scope="row"><span class="badge exam-type-badge exam-type-{{ row.code }}">{{ row.label }}</span></th>
+          <td class="text-center">{{ row.total }}</td>
+          <td class="text-center">{{ row.accepted }}</td>
+          <td class="text-center">{{ row.denied }}</td>
+          <td class="text-center">{{ row.administratively_closed }}</td>
+          <td class="text-center">{{ row.in_progress }}</td>
+          <td class="text-center">{{ row.waiting_doctor }}</td>
+          <td class="text-center">{{ row.waiting_appt }}</td>
+          <td class="text-center">{{ row.waiting_confirm }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  <p class="text-muted small mb-0 mt-2">
+    Desfechos consideram o período ativo (<strong>{{ metrics_period_label }}</strong>).
+    Esperas por etapa refletem o estado atual (snapshot), como no card “Aguardando por etapa”.
+  </p>
 </div>
 
 <!-- Sub-metrics -->
@@ -247,7 +296,7 @@
   <!-- Header: Título + Atenção necessária -->
   <div class="d-flex justify-content-between align-items-center mb-3 flex-wrap gap-2">
     <h5 class="mb-0">Todos os Casos</h5>
-    <a href="{% url 'dashboard:index' %}?attention=1{% if metrics_period %}&metrics_period={{ metrics_period }}{% endif %}{% if metrics_date %}&metrics_date={{ metrics_date }}{% endif %}{% if metrics_start %}&metrics_start={{ metrics_start }}{% endif %}{% if metrics_end %}&metrics_end={{ metrics_end }}{% endif %}{% if search %}&search={{ search|urlencode }}{% endif %}" class="btn btn-sm {% if attention_filter %}btn-warning{% else %}btn-outline-warning{% endif %}">
+    <a href="{% url 'dashboard:index' %}?attention=1{% if metrics_period %}&metrics_period={{ metrics_period }}{% endif %}{% if metrics_date %}&metrics_date={{ metrics_date }}{% endif %}{% if metrics_start %}&metrics_start={{ metrics_start }}{% endif %}{% if metrics_end %}&metrics_end={{ metrics_end }}{% endif %}{% if search %}&search={{ search|urlencode }}{% endif %}{% if exam_type and exam_type != 'all' %}&exam_type={{ exam_type }}{% endif %}" class="btn btn-sm {% if attention_filter %}btn-warning{% else %}btn-outline-warning{% endif %}">
       ⚠ Atenção necessária{% if attention_count is not None %} ({{ attention_count }}){% endif %}
     </a>
   </div>
@@ -260,7 +309,15 @@
       <input type="search" name="search" id="search" class="form-control form-control-sm"
              value="{{ search }}" placeholder="Digite ao menos 3 caracteres">
     </div>
-    <div class="col-12 col-sm-6 col-lg-2">
+    <div class="col-12 col-sm-6 col-lg-3">
+      <label for="exam-type" class="form-label small text-muted mb-1">Tipo de exame</label>
+      <select name="exam_type" id="exam-type" class="form-select form-select-sm" aria-label="Filtrar por tipo de exame">
+        <option value="all" {% if exam_type == 'all' %}selected{% endif %}>Todos os tipos</option>
+        <option value="eda" {% if exam_type == 'eda' %}selected{% endif %}>EDA</option>
+        <option value="colonoscopy" {% if exam_type == 'colonoscopy' %}selected{% endif %}>Colonoscopia</option>
+      </select>
+    </div>
+    <div class="col-12 col-sm-6 col-lg-3">
       <label for="status" class="form-label small text-muted mb-1">Status</label>
       <select name="status" id="status" class="form-select form-select-sm">
         <option value="">Todos os status</option>
@@ -271,7 +328,17 @@
         {% endfor %}
       </select>
     </div>
-    <div class="col-6 col-lg-2">
+    <div class="col-12 col-lg-2 d-flex gap-1">
+      {% if metrics_period %}<input type="hidden" name="metrics_period" value="{{ metrics_period }}">{% endif %}
+      {% if metrics_date %}<input type="hidden" name="metrics_date" value="{{ metrics_date }}">{% endif %}
+      {% if metrics_start %}<input type="hidden" name="metrics_start" value="{{ metrics_start }}">{% endif %}
+      {% if metrics_end %}<input type="hidden" name="metrics_end" value="{{ metrics_end }}">{% endif %}
+      <button type="submit" class="btn btn-sm btn-hospital-outline">Filtrar</button>
+      {% if status_filter or date_from or date_to or search %}
+      <a href="{% url 'dashboard:index' %}" class="btn btn-sm btn-outline-secondary">Limpar</a>
+      {% endif %}
+    </div>
+    <div class="col-6 col-lg-5">
       <label for="date_from" class="form-label small text-muted mb-1">Data inicial</label>
       <div class="dashboard-date-control">
         <span class="dashboard-date-icon" aria-hidden="true">
@@ -284,7 +351,7 @@
                value="{{ date_from }}">
       </div>
     </div>
-    <div class="col-6 col-lg-2">
+    <div class="col-6 col-lg-5">
       <label for="date_to" class="form-label small text-muted mb-1">Data final</label>
       <div class="dashboard-date-control">
         <span class="dashboard-date-icon" aria-hidden="true">
@@ -296,16 +363,6 @@
         <input type="date" name="date_to" id="date_to" class="form-control form-control-sm dashboard-date-input"
                value="{{ date_to }}">
       </div>
-    </div>
-    <div class="col-12 col-lg-2 d-flex gap-1">
-      {% if metrics_period %}<input type="hidden" name="metrics_period" value="{{ metrics_period }}">{% endif %}
-      {% if metrics_date %}<input type="hidden" name="metrics_date" value="{{ metrics_date }}">{% endif %}
-      {% if metrics_start %}<input type="hidden" name="metrics_start" value="{{ metrics_start }}">{% endif %}
-      {% if metrics_end %}<input type="hidden" name="metrics_end" value="{{ metrics_end }}">{% endif %}
-      <button type="submit" class="btn btn-sm btn-hospital-outline">Filtrar</button>
-      {% if status_filter or date_from or date_to or search %}
-      <a href="{% url 'dashboard:index' %}" class="btn btn-sm btn-outline-secondary">Limpar</a>
-      {% endif %}
     </div>
   </form>
 

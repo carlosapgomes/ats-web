@@ -14,10 +14,11 @@ Resumo executivo para retomada rapida apos pausas e para onboarding de novos con
 
 ## Objetivo do Sistema
 
-Sistema de **triagem automatizada para EDA** (Endoscopia Digestiva Alta).
-Operadores NIR enviam PDFs de relatorios medicos, o sistema processa via pipeline
-LLM, apresenta ao medico para decisao, encaminha ao agendador, e retorna o
-resultado ao NIR. Monolito Django SSR, sem API REST e sem SPA.
+Sistema de **triagem automatizada para EDA e Colonoscopia** (Endoscopia
+Digestiva Alta e Baixa). Operadores NIR enviam PDFs de relatorios medicos, o
+sistema processa via pipeline LLM, apresenta ao medico para decisao, encaminha
+ao agendador, e retorna o resultado ao NIR. Monolito Django SSR, sem API REST
+e sem SPA.
 
 Projeto **greenfield** — reimplantacao de sistema legado (`augmented-triage-system`)
 que operava via salas Matrix. A interface Matrix desaparece completamente;
@@ -105,7 +106,7 @@ static/          # css/app.css (paleta hospitalar), js/upload.js, js/password-to
 
 - **User** (AbstractUser): multi-role via M2M(Role), `account_status`, papel ativo na sessao
 - **Role**: nir, doctor, scheduler, manager, admin
-- **Case**: FSM 17 estados, 30+ campos (PDF, LLM artifacts, decisao medica, agendamento). Vínculo opcional de reenvio corrigido: `corrects_case` (self-FK) + `correction_reason`/`correction_created_by`/`correction_created_at`.
+- **Case**: FSM 17 estados, 30+ campos (PDF, LLM artifacts, decisao medica, agendamento). `exam_type` (`eda`/`colonoscopy`, default histórico `eda`) distingue o tipo de exame declarado no intake. Vínculo opcional de reenvio corrigido: `corrects_case` (self-FK) + `correction_reason`/`correction_created_by`/`correction_created_at`.
 - **CaseEvent**: auditoria append-only (~40 tipos de evento)
 - **CaseCommunicationMessage**: thread operacional append-only vinculada a um `Case` (comunicação entre NIR/médico/scheduler para esclarecimentos; NÃO substitui decisão/agendamento/eventos estruturados). Suporta `message_type="user"` (manual, com autor) e `message_type="system"` (projeção automática de `CaseEvent`, sem autor) via `source_event` OneToOne idempotente + `system_event_type`.
 - **UserNotification**: notificação in-app user-scoped criada por menções explícitas (`@role`/`@username`) em `CaseCommunicationMessage`; badge SSR + inbox “Minhas notificações” + polling Vanilla JS do badge
@@ -125,6 +126,7 @@ static/          # css/app.css (paleta hospitalar), js/upload.js, js/password-to
 
 ## Contratos e Validações
 
+- **Tipo de exame explícito (colonoscopia)**: `Case.exam_type` (`eda` | `colonoscopy`) é declarado obrigatoriamente no upload (lote homogêneo) e no reenvio corrigido (escolha explícita, não herdada do original, pode divergir e respeita a flag de intake); casos históricos foram backfillados como `eda` sem reprocessamento (migration `0014`). Flag `COLONOSCOPY_INTAKE_ENABLED` (default `false`) é lida **somente no serviço `web`/intake** e bloqueia apenas **novos uploads** de colonoscopia — nenhum worker/pipeline consulta a flag para interromper casos existentes. PDF com solicitações atuais EDA+colonoscopia juntas é bloqueado (mixed) e exige PDFs separados. Correção de tipo pelo NIR **somente** em `WAIT_R1_CLEANUP_THUMBS` com `manual_review_required` e motivo `exam_type_mismatch`/`mixed_exam_request`/`unknown_exam_type`, sem decisão médica — reprocessamento auditável do mesmo caso (`EXAM_TYPE_MISMATCH_DETECTED`/`EXAM_TYPE_CORRECTED`/`CASE_REPROCESSING_REQUESTED`). Filtros por tipo em médico (Pendentes/Decididos Hoje), CHD (Pendentes/Processados/Histórico), NIR (operacionais/encerrados) e dashboard (tabela gerencial, compõe com busca/status/datas/atenção/paginação). Dashboard mantém métricas consolidadas e adiciona breakdown EDA/Colonoscopia no período ativo (desfechos = período; esperas por etapa = snapshot atual, rotulado). Prompts de colonoscopia (`colonoscopy_llm1_*`/`colonoscopy_llm2_*`) são administráveis e não substituem os canônicos EDA. Sem CPRE funcional; sem hard rule medicamentosa (alerta é informativo).
 - **Prompts canônicos**: nomes legados `llm1_system`, `llm1_user`, `llm2_system`, `llm2_user` são definitivos.
   `seed_prompts` cria versões ativas com defaults portados do legado. Fallback de código usa os mesmos defaults.
 - **Validação Pydantic v2**: schemas `apps/pipeline/schemas/llm1.py` (StructuredData) e `llm2.py` (Suggestion)
@@ -170,6 +172,17 @@ static/          # css/app.css (paleta hospitalar), js/upload.js, js/password-to
 ## State do Sistema
 
 - **Fase atual**: Fase 3 (débitos técnicos) — capacity de anexos clínicos entregue
+- **Change ativo**: nenhum — o último change foi **arquivado** em
+  `openspec/archive/introduce-colonoscopy-exam-workflow/`
+  (8 slices implementados e revisados; Slice 008: breakdown gerencial
+  EDA/Colonoscopia no dashboard, filtro de tipo na tabela gerencial, manual do
+  usuário e runbook `docs/deploy/introduce-colonoscopy-exam-workflow.md`;
+  rollback preferido mantém a imagem nova; bridge de schema binário fail-fast;
+  elegibilidade de correção exata; prompts colonoscopia ativos enquanto houver
+  casos em voo; flag de produção ainda desligada por padrão até ativação
+  explícita pela operação). Specs principais atualizadas em `openspec/specs/`
+  (5 specs: exam-type-analytics, exam-type-correction, exam-type-intake-routing,
+  exam-type-work-queues, medication-safety).
 - **Changes concluídos**:
   - `openspec/archive/bootstrap-django-ats-core/` (7 slices, Fase 0)
   - `openspec/archive/intake-nir/` (6 slices, Fase 1)
@@ -185,6 +198,7 @@ static/          # css/app.css (paleta hospitalar), js/upload.js, js/password-to
   - `openspec/archive/case-attachments-initial-upload/` (4 slices — anexos clínicos PDF/JPEG/PNG no upload NIR, supressão auditável e anexos complementares antes da decisão médica). Limitação aceita L1: lote de anexos complementares sem atomicidade transacional de batch — ver `design.md`.
   - `openspec/archive/fix-prior-case-lookup-after-closure/` (1 slice — correção de bug: prior-case lookup agora usa campos estáveis de decisão `doctor_decision`/`appointment_status` + `*_decided_at`, não status FSM transitório; negativas recentes continuam encontradas mesmo após o caso avançar para `CLEANED`)
   - `openspec/archive/corrected-case-resubmission-linkage/` (2 slices — fluxo NIR de reenvio corrigido explícito: novo `Case` vinculado via `corrects_case` + motivo obrigatório, sem herdar/reabrir o anterior; eventos `CASE_CORRECTION_CREATED`/`CASE_MARKED_SUPERSEDED`; visibilidade NIR e médico com deduplicação vs. prior-case lookup). Deploy runbook em `docs/deploy/corrected-case-resubmission-linkage.md`.
+  - `openspec/archive/introduce-colonoscopy-exam-workflow/` (8 slices — tipo de exame explícito EDA/Colonoscopia: declaração de tipo por lote no intake com gate de escopo e flag `COLONOSCOPY_INTAKE_ENABLED` web-only, roteamento para médico, filtros por tipo em médico/CHD/NIR, correção de tipo com reenvio explícito e reprocessamento seguro, breakdown gerencial no dashboard e runbook de rollout/rollback em `docs/deploy/introduce-colonoscopy-exam-workflow.md`; rollback preferido mantém a imagem nova; bridge de schema binário fail-fast; elegibilidade de correção exata em `WAIT_R1_CLEANUP_THUMBS`; prompts colonoscopia permanecem ativos enquanto houver casos em voo; specs principais atualizadas em `openspec/specs/`).
   - `openspec/archive/case-operational-communication-mvp/` (2 slices — thread operacional append-only por caso `CaseCommunicationMessage` para esclarecimentos entre NIR/médico/scheduler; serviço `post_case_communication_message` com validações + endpoint POST `/cases/<id>/communication/` com redirect seguro + partial reutilizado em 4 telas + evento auditável `CASE_COMMUNICATION_MESSAGE_POSTED`. Sem notificações/polling/HTMX/WebSocket; FSM inalterada).
   - `openspec/archive/case-communication-mentions-notifications/` (2 slices + 2 hardening pós-revisão — menções `@role`/`@username` em `CaseCommunicationMessage` criam `UserNotification` (UUID PK, indexes, unique constraint); parser + `create_case_communication_notifications` (exclui autor, deduplica, ignora inativos/blocked) + badge SSR via helper DRY `get_unread_notification_count()` + inbox “Minhas notificações” com redirect seguro por papel/status + endpoint `GET /notifications/unread-count/` (`@require_GET`) + polling Vanilla JS (`fetch()`, 45s, `document.visibilityState`, backoff). Sem autocomplete/aliases/push/SMS/email/WebSocket/SSE/marcação AJAX/polling de thread).
   - `openspec/archive/workflow-system-notices-in-case-communication/` (2 slices + 2 hardening pós-revisão — eventos estruturados selecionados projetam `CaseCommunicationMessage` sistêmica (`message_type="system"`) na thread via serviço central `create_system_communication_notice_for_event` + signal `CaseEvent.post_save` + formatadores por `event_type` (DRY); 7 eventos (`CASE_ATTACHMENT_SUPPRESSED`/`CASE_ATTACHMENT_SUPPLEMENT_ADDED`/`CASE_CORRECTION_CREATED`/`CASE_MARKED_SUPERSEDED`/`POST_SCHEDULE_ISSUE_OPENED`/`POST_SCHEDULE_ISSUE_RESPONDED`/`CASE_ADMINISTRATIVELY_CLOSED`), `POST_SCHEDULE_ISSUE_ACKNOWLEDGED` omitido (payload vazio); render “Sistema” + badge SISTEMA; idempotência por `source_event` OneToOne; sem `UserNotification`/badge/read-resolved/backfill/inbox. FSM e workflows estruturados inalterados).
@@ -213,12 +227,12 @@ static/          # css/app.css (paleta hospitalar), js/upload.js, js/password-to
   - `openspec/archive/restore-isolated-deterministic-test-baseline/` (1 slice — baseline de testes isolado e determinístico restaurado e endurecido (gates baseline-vs-final)).
 - **Apps criados**: `apps/accounts/`, `apps/cases/`, `apps/llm/`, `apps/intake/`, `apps/pipeline/`,
   `apps/doctor/`, `apps/scheduler/`, `apps/dashboard/`, `apps/admin_ui/`
-- **Testes**: 2187 passando, quality gate verde (ruff + mypy + pytest)
+- **Testes**: 2798 passando (baseline verificado no gate do commit de correção do Slice 008; inclui 19 testes de contrato de documentação do rollout), quality gate verde (ruff + mypy + pytest)
 - **Templates**: base.html com tema hospitalar, login, switch-role, perfil, password reset/change,
   intake (home, my_cases, case_detail), doctor (queue, decision)
 - **Documentacao de dominio**: `docs/DOMAIN_ANALYSIS.md`
 - **Investigações**: `docs/investigations/2026-05-18-nir-to-doctor-flow-review.md`
-- **ADR ativas**: ADR-0001 (arquitetura Django SSR), ADR-0002 (emails transacionais de conta/autenticação)
+- **ADR ativas**: ADR-0001 (arquitetura Django SSR), ADR-0002 (emails transacionais de conta/autenticação), ADR-0003 (perfis de procedimento e tipo de exame explícito — **Accepted**)
 - **Dívida técnica**: `django-fsm` deprecated → `viewflow.fsm` (não urgente); observabilidade de logs do gunicorn / falha SMTP (candidato a change de hardening)
 
 ## Quality Bar

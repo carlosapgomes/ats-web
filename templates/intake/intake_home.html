@@ -40,6 +40,33 @@
     <div class="d-none alert alert-info mb-3" id="upload-alert" role="alert">
     </div>
 
+    <!-- Tipo de exame — obrigatório, lote homogêneo (Slice 002) -->
+    <fieldset class="mb-3" id="exam-type-section">
+      <legend class="fw-semibold" id="exam-type-label">🩺 Tipo de exame <span class="text-danger">*</span></legend>
+      <p class="text-muted small mb-2" id="exam-type-guidance">
+        Selecione o tipo de exame. Cada lote deve conter PDFs do <strong>mesmo tipo</strong>;
+        para tipos diferentes, envie <strong>lotes separados</strong>.
+      </p>
+      <div class="d-flex flex-wrap gap-3" role="radiogroup" aria-labelledby="exam-type-label">
+        <div class="form-check">
+          <input class="form-check-input" type="radio" name="exam_type" value="eda" id="exam-type-eda">
+          <label class="form-check-label" for="exam-type-eda">EDA</label>
+        </div>
+        <div class="form-check">
+          {% if colonoscopy_intake_enabled %}
+          <input class="form-check-input" type="radio" name="exam_type" value="colonoscopy" id="exam-type-colonoscopy">
+          <label class="form-check-label" for="exam-type-colonoscopy">Colonoscopia</label>
+          {% else %}
+          <input class="form-check-input" type="radio" name="exam_type" value="colonoscopy" id="exam-type-colonoscopy" disabled>
+          <label class="form-check-label text-muted" for="exam-type-colonoscopy">
+            Colonoscopia
+            <span class="badge bg-secondary-subtle text-secondary-emphasis">indisponível para novos envios</span>
+          </label>
+          {% endif %}
+        </div>
+      </div>
+    </fieldset>
+
     <!-- Attachment upload section -->
     <div class="attachment-upload-section mt-3 mb-3" id="attachment-section">
       <hr>
@@ -113,7 +140,10 @@
       <div class="case-card card p-3">
         <div class="row align-items-center">
           <div class="col-md-4">
-            <div class="patient-name">{{ item.case.patient_name }}</div>
+            <div class="patient-name">
+              {{ item.case.patient_name }}
+              <span class="badge exam-type-badge exam-type-{{ item.case.exam_type }}">{{ item.case.get_exam_type_display }}</span>
+            </div>
             <div class="case-meta">
               {% if item.case.agency_record_number %}Reg. {{ item.case.agency_record_number }}{% endif %}
               {% if item.case.patient_age %} · {{ item.case.patient_age }} anos{% endif %}

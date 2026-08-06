@@ -9,6 +9,64 @@
 {% endblock %}
 
 {% block content %}
+{% if active_tab == 'pending' %}
+<div class="mb-3" id="scheduler-queue-type-filter">
+  <fieldset class="mb-3">
+    <legend class="form-label fw-semibold mb-2">Filtrar por tipo de exame</legend>
+    <div class="btn-group" role="group" aria-label="Filtrar por tipo de exame">
+      <input type="radio" class="btn-check" name="scheduler-queue-exam-type" id="scheduler-exam-type-all" value="all" checked data-scheduler-exam-filter>
+      <label class="btn btn-outline-secondary" for="scheduler-exam-type-all">Todos <span class="badge text-bg-secondary" data-exam-type-count="all">{{ exam_type_counts.all }}</span></label>
+      <input type="radio" class="btn-check" name="scheduler-queue-exam-type" id="scheduler-exam-type-eda" value="eda" data-scheduler-exam-filter>
+      <label class="btn btn-outline-secondary" for="scheduler-exam-type-eda">EDA <span class="badge text-bg-secondary" data-exam-type-count="eda">{{ exam_type_counts.eda }}</span></label>
+      <input type="radio" class="btn-check" name="scheduler-queue-exam-type" id="scheduler-exam-type-colonoscopy" value="colonoscopy" data-scheduler-exam-filter>
+      <label class="btn btn-outline-secondary" for="scheduler-exam-type-colonoscopy">Colonoscopia <span class="badge text-bg-secondary" data-exam-type-count="colonoscopy">{{ exam_type_counts.colonoscopy }}</span></label>
+    </div>
+  </fieldset>
+  <div
+    data-scheduler-queue-filter-status
+    class="mt-2 text-muted small"
+    aria-live="polite"
+  ></div>
+  <div
+    data-scheduler-queue-no-results
+    class="alert alert-info mt-2 mb-0"
+    role="status"
+    style="display: none;"
+  >
+    Nenhum caso pendente para o filtro selecionado.
+  </div>
+</div>
+{% endif %}
+
+{% if active_tab == 'processed' %}
+<div class="mb-3" id="scheduler-processed-type-filter">
+  <fieldset class="mb-3">
+    <legend class="form-label fw-semibold mb-2">Filtrar por tipo de exame</legend>
+    <div class="btn-group" role="group" aria-label="Filtrar por tipo de exame">
+      <input type="radio" class="btn-check" name="scheduler-processed-exam-type" id="scheduler-processed-type-all" value="all" checked data-scheduler-exam-filter>
+      <label class="btn btn-outline-secondary" for="scheduler-processed-type-all">Todos <span class="badge text-bg-secondary" data-exam-type-count="all">{{ processed_exam_type_counts.all }}</span></label>
+      <input type="radio" class="btn-check" name="scheduler-processed-exam-type" id="scheduler-processed-type-eda" value="eda" data-scheduler-exam-filter>
+      <label class="btn btn-outline-secondary" for="scheduler-processed-type-eda">EDA <span class="badge text-bg-secondary" data-exam-type-count="eda">{{ processed_exam_type_counts.eda }}</span></label>
+      <input type="radio" class="btn-check" name="scheduler-processed-exam-type" id="scheduler-processed-type-colonoscopy" value="colonoscopy" data-scheduler-exam-filter>
+      <label class="btn btn-outline-secondary" for="scheduler-processed-type-colonoscopy">Colonoscopia <span class="badge text-bg-secondary" data-exam-type-count="colonoscopy">{{ processed_exam_type_counts.colonoscopy }}</span></label>
+    </div>
+  </fieldset>
+  <div
+    data-scheduler-queue-filter-status
+    class="mt-2 text-muted small"
+    aria-live="polite"
+  ></div>
+  <div
+    data-scheduler-queue-no-results
+    class="alert alert-info mt-2 mb-0"
+    role="status"
+    style="display: none;"
+  >
+    Nenhum caso processado para o filtro selecionado.
+  </div>
+</div>
+{% endif %}
+
 <div
   id="scheduler-queue-content"
   hx-get="{% url 'scheduler:queue_partial' %}?tab={{ active_tab }}"
@@ -17,4 +75,8 @@
 >
   {% include "scheduler/_queue_content.html" %}
 </div>
+{% endblock %}
+
+{% block extra_js %}
+<script src="/static/js/scheduler_queue_filter.js"></script>
 {% endblock %}

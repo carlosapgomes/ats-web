@@ -11,6 +11,17 @@
 {% block content %}
 {% if active_tab == 'pending' %}
 <div class="mb-3" id="doctor-queue-search-bar">
+  <fieldset class="mb-3" id="doctor-queue-type-filter">
+    <legend class="form-label fw-semibold mb-2">Filtrar por tipo de exame</legend>
+    <div class="btn-group" role="group" aria-label="Filtrar por tipo de exame">
+      <input type="radio" class="btn-check" name="doctor-queue-exam-type" id="doctor-exam-type-all" value="all" checked data-doctor-exam-filter>
+      <label class="btn btn-outline-secondary" for="doctor-exam-type-all">Todos <span class="badge text-bg-secondary" data-exam-type-count="all">0</span></label>
+      <input type="radio" class="btn-check" name="doctor-queue-exam-type" id="doctor-exam-type-eda" value="eda" data-doctor-exam-filter>
+      <label class="btn btn-outline-secondary" for="doctor-exam-type-eda">EDA <span class="badge text-bg-secondary" data-exam-type-count="eda">0</span></label>
+      <input type="radio" class="btn-check" name="doctor-queue-exam-type" id="doctor-exam-type-colonoscopy" value="colonoscopy" data-doctor-exam-filter>
+      <label class="btn btn-outline-secondary" for="doctor-exam-type-colonoscopy">Colonoscopia <span class="badge text-bg-secondary" data-exam-type-count="colonoscopy">0</span></label>
+    </div>
+  </fieldset>
   <label for="doctor-queue-search-input" class="form-label fw-semibold">
     Buscar por nome ou ocorrência
   </label>
@@ -39,7 +50,7 @@
     aria-live="polite"
   >
     {% if pending_count > 0 %}
-      Mostrando todos os {{ pending_count }} paciente{{ pending_count|pluralize:"s" }} pendentes.
+      Mostrando todos os {{ pending_count }} caso{{ pending_count|pluralize:"s" }} pendentes.
     {% endif %}
   </div>
   <div
@@ -48,7 +59,36 @@
     role="status"
     style="display: none;"
   >
-    Nenhum paciente encontrado com o termo informado.
+    Nenhum caso encontrado para os filtros selecionados.
+  </div>
+</div>
+{% endif %}
+
+{% if active_tab == 'decided' %}
+<div class="mb-3" id="doctor-decided-type-filter">
+  <fieldset class="mb-3">
+    <legend class="form-label fw-semibold mb-2">Filtrar por tipo de exame</legend>
+    <div class="btn-group" role="group" aria-label="Filtrar por tipo de exame">
+      <input type="radio" class="btn-check" name="doctor-decided-exam-type" id="doctor-decided-type-all" value="all" checked data-doctor-exam-filter>
+      <label class="btn btn-outline-secondary" for="doctor-decided-type-all">Todos <span class="badge text-bg-secondary" data-exam-type-count="all">0</span></label>
+      <input type="radio" class="btn-check" name="doctor-decided-exam-type" id="doctor-decided-type-eda" value="eda" data-doctor-exam-filter>
+      <label class="btn btn-outline-secondary" for="doctor-decided-type-eda">EDA <span class="badge text-bg-secondary" data-exam-type-count="eda">0</span></label>
+      <input type="radio" class="btn-check" name="doctor-decided-exam-type" id="doctor-decided-type-colonoscopy" value="colonoscopy" data-doctor-exam-filter>
+      <label class="btn btn-outline-secondary" for="doctor-decided-type-colonoscopy">Colonoscopia <span class="badge text-bg-secondary" data-exam-type-count="colonoscopy">0</span></label>
+    </div>
+  </fieldset>
+  <div
+    data-doctor-queue-filter-status
+    class="mt-2 text-muted small"
+    aria-live="polite"
+  ></div>
+  <div
+    data-doctor-queue-no-results
+    class="alert alert-info mt-2 mb-0"
+    role="status"
+    style="display: none;"
+  >
+    Nenhum caso decidido para o filtro selecionado.
   </div>
 </div>
 {% endif %}

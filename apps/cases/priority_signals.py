@@ -517,12 +517,18 @@ def resolve_priority_signals(
     *,
     structured_data: dict[str, object],
     source_text: str,
+    exam_type: str = "eda",
 ) -> list[dict[str, object]]:
-    """Resolve the six canonical priority signals deterministically.
+    """Resolve the canonical priority signals deterministically.
 
     Signals are deduplicated by code and returned in canonical order.
     No LLM, no ORM, no I/O.
+
+    Slice 003 (R7): the declared exam profile restricts which signals are
+    persisted — colonoscopy keeps only ``pediatric``; EDA keeps all six.
     """
+    from apps.cases.exam_profiles import get_exam_profile
+
     normalized_text = _normalize_text(source_text or "")
 
     signals: list[dict[str, object]] = []
@@ -544,7 +550,9 @@ def resolve_priority_signals(
         seen.add(code)
         deduped.append(signal)
     deduped.sort(key=lambda s: CANONICAL_ORDER.index(str(s["code"])))
-    return deduped
+
+    allowed = get_exam_profile(exam_type).allowed_priority_signal_codes
+    return [signal for signal in deduped if str(signal["code"]) in allowed]
 
 
 # ── Badge projection (presentation metadata, single mapping) ──────────────

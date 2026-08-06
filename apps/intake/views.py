@@ -21,16 +21,14 @@ from apps.cases.admission import (
     is_operational_notice_flow,
     is_scheduled_admission_flow,
 )
-from apps.cases.models import Case, CaseAttachment, CaseStatus
+from apps.cases.models import Case, CaseAttachment, CaseStatus, ExamType
 from apps.cases.navigation import resolve_safe_next_url
 from apps.cases.priority_signals import build_priority_signal_badges
 from apps.cases.services import (
     CASE_COMMUNICATION_MAX_LENGTH,
     ELIGIBLE_SUPPLEMENTAL_STATUSES,
     CaseCommunicationError,
-    acknowledge_scheduled_post_acceptance_issue,
     add_supplemental_case_attachment,
-    assert_case_lock,
     claim_case_lock,
     compute_lock_display,
     expire_stale_locks_for_statuses,
@@ -46,7 +44,17 @@ from apps.cases.services import (
 )
 
 from .forms import CaseUploadForm
-from .services import process_uploaded_files, validate_attachment_file
+from .services import (
+    EXAM_TYPE_CORRECTION_REASONS,
+    EnqueueAfterCommitError,
+    confirm_case_receipt,
+    correct_case_exam_type,
+    ensure_exam_type_allowed,
+    is_colonoscopy_intake_enabled,
+    is_exam_type_correction_eligible,
+    process_uploaded_files,
+    validate_attachment_file,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -171,6 +179,9 @@ EVENT_LABELS: dict[str, str] = {
     # ── Reenvio corrigido ─────────────────────────────────────
     "CASE_CORRECTION_CREATED": "Reenvio corrigido criado",
     "CASE_MARKED_SUPERSEDED": "Caso corrigido por novo envio",
+    # ── Correção de tipo e reprocessamento (Slice 006) ────────
+    "EXAM_TYPE_CORRECTED": "Tipo de exame corrigido pelo NIR",
+    "CASE_REPROCESSING_REQUESTED": "Reprocessamento solicitado",
     # ── Comunicação operacional ───────────────────────────────
     "CASE_COMMUNICATION_MESSAGE_POSTED": "Mensagem operacional registrada",
 }
@@ -229,6 +240,9 @@ EVENT_DOT_CSS: dict[str, str] = {
     # ── Reenvio corrigido ─────────────────────────────────────
     "CASE_CORRECTION_CREATED": "nir",
     "CASE_MARKED_SUPERSEDED": "system",
+    # ── Correção de tipo e reprocessamento (Slice 006) ────────
+    "EXAM_TYPE_CORRECTED": "nir",
+    "CASE_REPROCESSING_REQUESTED": "system",
     # ── Comunicação operacional ───────────────────────────────
     "CASE_COMMUNICATION_MESSAGE_POSTED": "system",
 }
@@ -242,6 +256,15 @@ STEPS: list[dict[str, str]] = [
     {"icon": "✅", "label": "Resultado Final"},
 ]
 
+# Labels legíveis para o tipo detectado no card de correção (Slice 006).
+CORRECTION_DETECTED_TYPE_LABELS: dict[str, str] = {
+    "eda": "EDA",
+    "colonoscopy": "Colonoscopia",
+    "mixed": "Solicitação mista (EDA + Colonoscopia)",
+    "unknown": "Não identificado",
+    "non_eda": "Fora do escopo suportado",
+}
+
 
 @login_required
 @role_required("nir")
@@ -254,7 +277,13 @@ def intake_home(request: HttpRequest) -> HttpResponse:
         form = CaseUploadForm(request.POST, request.FILES)
         files = request.FILES.getlist("pdf_files")
         attachments = request.FILES.getlist("attachment_files")
-        cases, errors = process_uploaded_files(files, user, attachments=attachments or None)
+        exam_type = request.POST.get("exam_type", "")
+        cases, errors = process_uploaded_files(
+            files,
+            user,
+            attachments=attachments or None,
+            exam_type=exam_type,
+        )
 
         for error in errors:
             messages.warning(request, error)
@@ -287,6 +316,9 @@ def intake_home(request: HttpRequest) -> HttpResponse:
         {
             "form": form,
             "recent_cases": recent_cases_data,
+            # R3: UI explica indisponibilidade de colonoscopia quando a flag
+            # de intake está desligada (a opção ativa só aparece com flag on).
+            "colonoscopy_intake_enabled": is_colonoscopy_intake_enabled(),
         },
     )
 
@@ -328,6 +360,13 @@ def _my_cases_context(request: HttpRequest) -> dict[str, object]:
     search = request.GET.get("q", "")
     if search:
         qs = qs.filter(agency_record_number__icontains=search)
+
+    # R1 (Slice 007): filtro server-side por tipo de exame — default Todos;
+    # compõe com status e busca; tipo inválido cai para all.
+    raw_exam_type = request.GET.get("exam_type", "all")
+    exam_type = raw_exam_type if raw_exam_type in ExamType.values else "all"
+    if exam_type != "all":
+        qs = qs.filter(exam_type=exam_type)
 
     case_data = [
         {
@@ -372,6 +411,7 @@ def _my_cases_context(request: HttpRequest) -> dict[str, object]:
         "case_data": case_data,
         "status_filter": status_filter,
         "search": search,
+        "exam_type": exam_type,
         "status_labels": STATUS_LABELS,
         "status_css": STATUS_CSS_CLASS,
         "my_cases_partial_url": partial_url,
@@ -580,6 +620,20 @@ def case_detail(request: HttpRequest, case_id: uuid.UUID) -> HttpResponse:
         and case.status in ELIGIBLE_SUPPLEMENTAL_STATUSES
     )
 
+    # ── Correção de tipo (Slice 006): card NIR apenas em manual review elegível ──
+    can_correct_exam_type = False
+    correction_form_context = None
+    if lock_held and is_exam_type_correction_eligible(case):
+        can_correct_exam_type = True
+        suggested = case.suggested_action or {}
+        detected = suggested.get("detected_exam_type") or suggested.get("exam_type") or ""
+        correction_form_context = {
+            "declared_exam_type_label": case.get_exam_type_display(),
+            "detected_exam_type_label": CORRECTION_DETECTED_TYPE_LABELS.get(detected, detected or "—"),
+            "reason_text": suggested.get("reason_text", ""),
+            "correction_reason_choices": list(EXAM_TYPE_CORRECTION_REASONS.items()),
+        }
+
     # ── Correction context (R1: corrects_case card) ──────────────
     correction_context = None
     if case.corrects_case_id:
@@ -655,6 +709,8 @@ def case_detail(request: HttpRequest, case_id: uuid.UUID) -> HttpResponse:
             "attachments": active_attachments,
             "can_add_supplemental": can_add_supplemental,
             "supplemental_lock_blocked_by": supplemental_lock_blocked_by,
+            "can_correct_exam_type": can_correct_exam_type,
+            "correction_form_context": correction_form_context,
             "correction_context": correction_context,
             "corrected_by_cases": corrected_by_cases_list,
             # ── Comunicação operacional ───────────────────────────────
@@ -895,6 +951,7 @@ def corrected_resubmission(request: HttpRequest, case_id: uuid.UUID) -> HttpResp
         correction_reason = request.POST.get("correction_reason", "")
         pdf_file = request.FILES.get("pdf_file")
         attachment_files = request.FILES.getlist("attachment_files")
+        exam_type = request.POST.get("exam_type", "")
 
         errors: list[str] = []
 
@@ -910,6 +967,13 @@ def corrected_resubmission(request: HttpRequest, case_id: uuid.UUID) -> HttpResp
         if not request.POST.get("confirmation"):
             errors.append("Confirme que os documentos do caso anterior não serão herdados.")
 
+        # R3 (Slice 007): tipo explícito obrigatório — backend é a fonte de
+        # verdade (choice + flag de intake); o tipo do original não é herdado.
+        try:
+            ensure_exam_type_allowed(exam_type)
+        except ValueError as exc:
+            errors.append(str(exc))
+
         if errors:
             for err in errors:
                 messages.warning(request, err)
@@ -919,6 +983,7 @@ def corrected_resubmission(request: HttpRequest, case_id: uuid.UUID) -> HttpResp
                 {
                     "original_case": original_case,
                     "patient_name": original_case.patient_name,
+                    "colonoscopy_intake_enabled": is_colonoscopy_intake_enabled(),
                 },
             )
 
@@ -933,6 +998,9 @@ def corrected_resubmission(request: HttpRequest, case_id: uuid.UUID) -> HttpResp
                 user=request.user,
                 correction_reason=correction_reason,
                 attachments=attachment_files or None,
+                # Slice 007 (R3/R4): escolha explícita do NIR; pode divergir
+                # do original; nunca herda silenciosamente.
+                exam_type=exam_type,
             )
             messages.success(
                 request,
@@ -951,6 +1019,7 @@ def corrected_resubmission(request: HttpRequest, case_id: uuid.UUID) -> HttpResp
             {
                 "original_case": original_case,
                 "patient_name": original_case.patient_name,
+                "colonoscopy_intake_enabled": is_colonoscopy_intake_enabled(),
             },
         )
 
@@ -963,6 +1032,7 @@ def corrected_resubmission(request: HttpRequest, case_id: uuid.UUID) -> HttpResp
             "patient_name": original_case.patient_name,
             "status_label": STATUS_LABELS.get(original_case.status, original_case.get_status_display()),
             "status_css": STATUS_CSS_CLASS.get(original_case.status, "status-pending"),
+            "colonoscopy_intake_enabled": is_colonoscopy_intake_enabled(),
         },
     )
 
@@ -998,23 +1068,24 @@ def serve_pdf(request: HttpRequest, case_id: uuid.UUID) -> HttpResponseBase:
 def confirm_receipt(request: HttpRequest, case_id: uuid.UUID) -> HttpResponse:
     """Confirma recebimento do resultado final e conclui o caso.
 
-    Qualquer NIR autorizado pode confirmar recebimento de um resultado
-    pendente (WAIT_R1_CLEANUP_THUMBS), desde que possua a reserva (lock)
-    válida com token e contexto 'nir_receipt'.
-
-    Após confirmação, o caso vai para CLEANED e não fica mais acessível
-    pela rota operacional NIR — redireciona para a lista.
+    View fina: parseia o token, delega ao serviço transacional
+    ``confirm_case_receipt`` — que serializa com a correção de tipo pelo
+    MESMO row lock (``select_for_update``) e revalida estado + reserva na
+    instância bloqueada e atualizada — traduz erros esperados e redireciona.
+    Nenhuma regra de negócio duplicada na view e nenhum save sobre instância
+    obsoleta.
     """
     if request.method != "POST":
         return redirect("intake:case_detail", case_id=case_id)
 
     case = get_object_or_404(Case, case_id=case_id)
 
+    # Pré-checagem apenas para mensagem amigável; a validação autoritativa
+    # ocorre no serviço, sob o row lock.
     if case.status != CaseStatus.WAIT_R1_CLEANUP_THUMBS:
         messages.warning(request, "Este caso não está aguardando confirmação de recebimento.")
         return redirect("intake:case_detail", case_id=case.case_id)
 
-    # Validate lock token
     raw_token = request.POST.get("lock_token", "")
     try:
         token = uuid.UUID(raw_token) if raw_token else None
@@ -1028,47 +1099,104 @@ def confirm_receipt(request: HttpRequest, case_id: uuid.UUID) -> HttpResponse:
         )
         return redirect("intake:case_detail", case_id=case.case_id)
 
-    # Check lock validity before proceeding
+    user = request.user
+    assert user.is_authenticated  # garantido por @login_required
+
     try:
-        assert_case_lock(
-            case=case,
-            user=request.user,
-            token=token,
-            context="nir_receipt",
+        confirm_case_receipt(
+            case_id=case.case_id,
+            user=user,
+            active_role=request.session.get("active_role", ""),
+            lock_token=token,
         )
     except PermissionError as exc:
         messages.warning(request, str(exc))
         return redirect("intake:case_detail", case_id=case.case_id)
-
-    # Execute FSM transitions
-    if case.post_schedule_issue_status == "responded":
-        acknowledge_scheduled_post_acceptance_issue(case=case, user=request.user)
-    else:
-        case.cleanup_triggered(user=request.user)
-        case.save()
-        case.cleanup_completed(user=request.user)
-        case.save()
-
-    # Clear lock after completion
-    case.locked_by = None
-    case.locked_at = None
-    case.locked_until = None
-    case.lock_token = None
-    case.lock_context = ""
-    case.lock_role = ""
-    case.save(
-        update_fields=[
-            "locked_by",
-            "locked_at",
-            "locked_until",
-            "lock_token",
-            "lock_context",
-            "lock_role",
-        ]
-    )
+    except ValueError as exc:
+        messages.warning(request, str(exc))
+        return redirect("intake:case_detail", case_id=case.case_id)
 
     messages.success(request, "Recebimento confirmado. Caso concluído.")
     return redirect("intake:my_cases")
+
+
+@login_required
+@role_required("nir")
+def exam_type_correction(request: HttpRequest, case_id: uuid.UUID) -> HttpResponse:
+    """POST: corrige o tipo de exame de um caso em revisão manual (Slice 006).
+
+    View fina: parseia token e papel ativo da sessão, delega ao serviço
+    transacional ``correct_case_exam_type`` (que serializa com a confirmação
+    pelo MESMO row lock e valida ator + reserva sob o lock) e traduz erros.
+    Em caso inelegível o controle não existe na UI e o POST retorna 404
+    seguro, sem qualquer mutação.
+    """
+    if request.method != "POST":
+        raise Http404
+
+    case = get_object_or_404(Case, case_id=case_id)
+
+    if not is_exam_type_correction_eligible(case):
+        raise Http404("Caso não está em revisão manual elegível para correção de tipo.")
+
+    user = request.user
+    assert user.is_authenticated  # garantido por @login_required
+
+    raw_token = request.POST.get("lock_token", "")
+    try:
+        token = uuid.UUID(raw_token) if raw_token else None
+    except (ValueError, AttributeError):
+        token = None
+
+    if token is None:
+        messages.warning(
+            request,
+            "Token de reserva não encontrado. Volte para a lista e tente novamente.",
+        )
+        return redirect("intake:case_detail", case_id=case.case_id)
+
+    new_exam_type = request.POST.get("exam_type", "")
+    reason_code = request.POST.get("reason_code", "")
+    try:
+        case = correct_case_exam_type(
+            case_id=case.case_id,
+            new_exam_type=new_exam_type,
+            user=user,
+            active_role=request.session.get("active_role", ""),
+            lock_token=token,
+            reason_code=reason_code,
+        )
+    except PermissionError as exc:
+        messages.warning(request, str(exc))
+        return redirect("intake:case_detail", case_id=case.case_id)
+    except ValueError as exc:
+        messages.warning(request, str(exc))
+        return redirect("intake:case_detail", case_id=case.case_id)
+    except EnqueueAfterCommitError as exc:
+        # Falha PÓS-commit: a correção foi aplicada (LLM_STRUCT). Mensagem
+        # verdadeira: retry automático programado ou erro operacional explícito
+        # — sem prometer retomada automática inexistente.
+        if exc.recovery_scheduled:
+            messages.error(
+                request,
+                "Tipo de exame corrigido, mas o reprocessamento automático não pôde ser "
+                "agendado imediatamente. Uma nova tentativa automática foi programada; "
+                "o caso permanece em análise automática (LLM_STRUCT).",
+            )
+        else:
+            messages.error(
+                request,
+                "Tipo de exame corrigido, mas o reprocessamento automático não pôde ser "
+                "agendado. O caso permanece em análise automática (LLM_STRUCT); acione o "
+                "suporte para reenfileirar o pipeline manualmente.",
+            )
+        return redirect("intake:case_detail", case_id=case.case_id)
+
+    messages.success(
+        request,
+        f"Tipo de exame corrigido para {case.get_exam_type_display()}. Caso em reprocessamento.",
+    )
+    return redirect("intake:case_detail", case_id=case.case_id)
 
 
 @login_required
@@ -1155,20 +1283,24 @@ def closed_cases_search(request: HttpRequest) -> HttpResponse:
     )
 
     query = request.GET.get("q", "").strip()
+    # R2 (Slice 007): filtro server-side por tipo — default Todos; tipo
+    # inválido cai para all. Tipo específico sem termo lista os últimos 50
+    # do tipo (comportamento definido no design D13, consistente com o
+    # histórico CHD do Slice 005).
+    raw_exam_type = request.GET.get("exam_type", "all")
+    exam_type = raw_exam_type if raw_exam_type in ExamType.values else "all"
     results: list[dict[str, object]] = []
 
-    if query:
+    if query or exam_type != "all":
         # Busca: casos CLEANED + casos com intercorrência ativa (qualquer status)
-        qs = (
-            Case.objects.filter(
-                models.Q(status=CaseStatus.CLEANED) | models.Q(post_schedule_issue_status__in=["opened", "responded"])
-            )
-            .filter(
-                models.Q(agency_record_number__icontains=query)
-                | models.Q(structured_data__patient__name__icontains=query)
-            )
-            .order_by("-created_at")[:50]
+        qs = Case.objects.filter(
+            models.Q(status=CaseStatus.CLEANED) | models.Q(post_schedule_issue_status__in=["opened", "responded"])
         )
+        if exam_type != "all":
+            qs = qs.filter(exam_type=exam_type)
+        qs = qs.filter(
+            models.Q(agency_record_number__icontains=query) | models.Q(structured_data__patient__name__icontains=query)
+        ).order_by("-created_at")[:50]
 
         for c in qs:
             eligible_scheduled = is_post_acceptance_issue_eligible(c, context="scheduled")
@@ -1204,6 +1336,7 @@ def closed_cases_search(request: HttpRequest) -> HttpResponse:
         "intake/closed_cases_search.html",
         {
             "query": query,
+            "exam_type": exam_type,
             "results": results,
         },
     )

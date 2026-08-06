@@ -38,12 +38,13 @@
 
   /**
    * Retorna os parâmetros atuais do formulário de filtros como URLSearchParams.
-   * Preserva status, date_from, date_to, attention, metrics_period e
+   * Preserva status, exam_type, date_from, date_to, attention, metrics_period e
    * campos personalizados (metrics_date, metrics_start, metrics_end).
    */
   function getFilterParams() {
     var params = new URLSearchParams();
     var statusSelect = document.querySelector('select[name="status"]');
+    var examTypeSelect = document.querySelector('select[name="exam_type"]');
     var dateFromInput = document.querySelector('input[name="date_from"]');
     var dateToInput = document.querySelector('input[name="date_to"]');
     var attentionLink = document.querySelector('a[href*="attention=1"]');
@@ -59,6 +60,10 @@
 
     if (statusSelect && statusSelect.value) {
       params.set('status', statusSelect.value);
+    }
+    // Filtro de tipo de exame (Slice 008): preserva apenas quando != all
+    if (examTypeSelect && examTypeSelect.value && examTypeSelect.value !== 'all') {
+      params.set('exam_type', examTypeSelect.value);
     }
     if (dateFromInput && dateFromInput.value) {
       params.set('date_from', dateFromInput.value);
