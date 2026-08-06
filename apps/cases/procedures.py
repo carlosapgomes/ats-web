@@ -6,9 +6,9 @@
 
 Writes críticos (declaração) passam por este módulo: nenhuma view escreve rows
 diretamente. A declaração é atômica — falha em uma row não deixa caso/projeção
-parcial. Detecção (``set_detected_procedures``) e decisão médica
-(``record_doctor_procedure_decisions``) são slices posteriores e NÃO existem
-aqui (YAGNI — não antecipar pipeline/CHD/dashboard).
+parcial. Detecção (``set_detected_procedures``, Slice 002) e decisão médica
+(``record_doctor_procedure_decisions``, Slice 003) também são atômicas e
+centralizadas aqui (D4).
 """
 
 from __future__ import annotations
@@ -20,8 +20,10 @@ from django.db import transaction
 from apps.cases.models import (
     EDA_COLONOSCOPY,
     Case,
+    CaseEvent,
     CaseProcedure,
     DetectionStatus,
+    DoctorDisposition,
     ProcedureType,
 )
 
@@ -182,6 +184,63 @@ def set_detected_procedures(
     return locked
 
 
+def record_doctor_procedure_decisions(
+    *,
+    case: Case,
+    decisions: list[dict[str, Any]],
+    actor: Any = None,
+) -> Case:
+    """Persiste as decisões médicas por componente atomicamente (D9/R3).
+
+    Cada decisão: ``{procedure_type, disposition (approved|denied), reason,
+    added_by_doctor}``. Escreve ``doctor_disposition``/``doctor_reason`` na
+    row ``CaseProcedure`` correspondente (get_or_create — inclusão cria a row
+    sem alterar ``declared_by_nir``/``detection_status``) e registra o evento
+    enxuto ``DOCTOR_PROCEDURE_DECISIONS_RECORDED`` com a lista ordenada
+    (EDA antes de Colonoscopia). NUNCA reexecuta LLM e NUNCA escreve a
+    detecção/declaração. Toda falha reverte a operação inteira — nenhuma
+    disposição ou evento parcial.
+
+    Args:
+        case: instância do caso (relockada dentro da transação).
+        decisions: lista ordenável de decisões por componente (R2).
+        actor: usuário médico autor da decisão, para auditoria.
+
+    Returns:
+        Instância atualizada do caso.
+    """
+    with transaction.atomic():
+        locked = Case.objects.select_for_update().get(pk=case.pk)
+        entries: list[dict[str, Any]] = []
+        for decision in decisions:
+            procedure_type = str(decision["procedure_type"])
+            disposition = str(decision["disposition"])
+            if disposition not in (DoctorDisposition.APPROVED, DoctorDisposition.DENIED):
+                raise ValueError(f"Disposição inválida para {procedure_type}: {disposition!r}.")
+            reason = str(decision.get("reason") or "").strip()
+            row, _ = CaseProcedure.objects.get_or_create(case=locked, procedure_type=procedure_type)
+            row.doctor_disposition = disposition
+            row.doctor_reason = reason
+            row.save(update_fields=["doctor_disposition", "doctor_reason"])
+            entries.append(
+                {
+                    "procedure_type": procedure_type,
+                    "disposition": disposition,
+                    "reason_present": bool(reason),
+                    "added_by_doctor": bool(decision.get("added_by_doctor")),
+                }
+            )
+        entries.sort(key=lambda entry: _PROCEDURE_ORDER[entry["procedure_type"]])
+        CaseEvent.objects.create(
+            case=locked,
+            event_type="DOCTOR_PROCEDURE_DECISIONS_RECORDED",
+            actor=actor,
+            actor_type="human",
+            payload={"decisions": entries},
+        )
+    return locked
+
+
 # ── Leitura para consumo (templates NIR recebem label projetado na view) ──
 
 
@@ -203,6 +262,43 @@ def get_declared_procedure_types(case: Case) -> tuple[str, ...]:
         return (ProcedureType.EDA, ProcedureType.COLONOSCOPY)
     if case.exam_type in _DECLARED_SINGLE_TYPES:
         return (case.exam_type,)
+    return ()
+
+
+def get_detected_procedure_types(case: Case) -> tuple[str, ...]:
+    """Conjunto detectado ordenado (dimensão da fila médica Pendentes).
+
+    Fallback explícito da ponte transitória: casos sem rows (legado/fixtures)
+    refletem ``Case.exam_type`` — mantém a fila médica verde até o cutover.
+    """
+    detected = sorted(
+        (p.procedure_type for p in case.procedures.all() if p.detection_status == DetectionStatus.DETECTED),
+        key=lambda t: _PROCEDURE_ORDER[t],
+    )
+    if detected:
+        return tuple(detected)
+    if case.exam_type == EDA_COLONOSCOPY:
+        return (ProcedureType.EDA, ProcedureType.COLONOSCOPY)
+    if case.exam_type in _DECLARED_SINGLE_TYPES:
+        return (case.exam_type,)
+    return ()
+
+
+def get_approved_procedure_types(case: Case) -> tuple[str, ...]:
+    """Conjunto autorizado pelo médico, ordenado (dimensão do CHD/Decididos Hoje).
+
+    Fonte autoritativa é a row ``CaseProcedure.doctor_disposition=approved``;
+    fallback da ponte para casos legados aceitos sem rows
+    (``doctor_decision=accept``) preserva a fila até o cutover.
+    """
+    approved = sorted(
+        (p.procedure_type for p in case.procedures.all() if p.doctor_disposition == DoctorDisposition.APPROVED),
+        key=lambda t: _PROCEDURE_ORDER[t],
+    )
+    if approved:
+        return tuple(approved)
+    if case.doctor_decision == "accept":
+        return get_declared_procedure_types(case)
     return ()
 
 

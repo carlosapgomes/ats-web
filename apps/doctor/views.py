@@ -5,6 +5,7 @@ from typing import Any
 
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
+from django.db import transaction
 from django.db.models import F, QuerySet
 from django.http import FileResponse, Http404, HttpRequest, HttpResponse, HttpResponseBase, JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
@@ -20,9 +21,17 @@ from apps.cases.admission import (
     is_operational_notice_flow,
     is_scheduled_admission_flow,
 )
-from apps.cases.models import Case, CaseAttachment, CaseStatus
+from apps.cases.models import Case, CaseAttachment, CaseStatus, DetectionStatus, DoctorDisposition, ProcedureType
 from apps.cases.navigation import resolve_safe_next_url
 from apps.cases.priority_signals import build_priority_signal_badges
+from apps.cases.procedures import (
+    format_procedure_selection,
+    get_approved_procedure_types,
+    get_declared_procedure_types,
+    get_detected_procedure_types,
+    record_doctor_procedure_decisions,
+    selection_key,
+)
 from apps.cases.services import (
     CASE_COMMUNICATION_MAX_LENGTH,
     assert_case_lock,
@@ -125,19 +134,45 @@ def _get_diagnosis(case: Case) -> str:
 
 
 def _get_suggested_support(case: Case) -> str:
-    """Read support_recommendation from suggested_action and map to Portuguese."""
-    if case.suggested_action and isinstance(case.suggested_action, dict):
-        raw = case.suggested_action.get("support_recommendation", "none")
-        return SUPPORT_RECOMMENDATION_MAP.get(str(raw), str(raw))
-    return "Nenhum"
+    """Read support recommendation from suggested_action and map to Portuguese.
+
+    Contrato 2.0 (Slice 002/003, R5): a sugestão global é a mais restritiva
+    (``global_support_recommendation``); o médico mantém a escolha final.
+    Contrato 1.1: comportamento legado (``support_recommendation``).
+    """
+    suggested = case.suggested_action
+    if not isinstance(suggested, dict):
+        return "Nenhum"
+    if _is_v2_case(case):
+        raw = suggested.get("global_support_recommendation", "none")
+    else:
+        raw = suggested.get("support_recommendation", "none")
+    return SUPPORT_RECOMMENDATION_MAP.get(str(raw), str(raw))
 
 
 def _get_suggested_flow(case: Case) -> str:
-    """Read suggestion from suggested_action and map to display text."""
-    if case.suggested_action and isinstance(case.suggested_action, dict):
-        raw = case.suggested_action.get("suggestion", "")
-        return SUGGESTION_FLOW_MAP.get(str(raw), "—")
-    return "—"
+    """Read suggestion from suggested_action and map to display text.
+
+    Contrato 2.0: deriva das recomendações por componente (todas aceitam,
+    todas negam ou misto). Contrato 1.1: ``suggestion`` legado.
+    """
+    suggested = case.suggested_action
+    if not isinstance(suggested, dict):
+        return "—"
+    if _is_v2_case(case):
+        recommendations = suggested.get("procedure_recommendations")
+        if not isinstance(recommendations, list) or not recommendations:
+            return "—"
+        suggestions = {str(rec.get("suggestion")) for rec in recommendations if isinstance(rec, dict)}
+        if suggestions == {"accept"}:
+            return "Aceitar"
+        if suggestions == {"deny"}:
+            return "Negar"
+        if suggestions:
+            return "Misto"
+        return "—"
+    raw = suggested.get("suggestion", "")
+    return SUGGESTION_FLOW_MAP.get(str(raw), "—")
 
 
 def _get_doctor_decision_display(case: Case) -> str:
@@ -166,8 +201,19 @@ def _format_wait_minutes(total_minutes: int) -> str:
     return f"{hours} h {minutes:02d} min"
 
 
+def _is_v2_case(case: Case) -> bool:
+    """True quando o caso usa o contrato 2.0 procedure-neutral."""
+    structured = case.structured_data
+    return isinstance(structured, dict) and structured.get("schema_version") == "2.0"
+
+
 def _build_case_card(case: Case, wait_minutes: int, user: Any = None) -> dict[str, Any]:
     """Build a dict with all display data for a case card."""
+    detected_types = get_detected_procedure_types(case)
+    approved_types = get_approved_procedure_types(case)
+    declared_types = get_declared_procedure_types(case)
+    exam_type_label = case.get_exam_type_display()
+
     card: dict[str, Any] = {
         "case_id": str(case.case_id),
         "patient_name": _get_patient_name(case),
@@ -188,7 +234,25 @@ def _build_case_card(case: Case, wait_minutes: int, user: Any = None) -> dict[st
         "regulation_days_on_screen": case.regulation_days_on_screen,
         # Tipo de exame declarado (R6) — a fila identifica Colonoscopia.
         "exam_type": case.exam_type,
-        "exam_type_label": case.get_exam_type_display(),
+        "exam_type_label": exam_type_label,
+        # Dimensões projetadas (R7): Pendentes filtra pelo detectado;
+        # Decididos Hoje pelo autorizado. A ponte ``data-exam-type``
+        # permanece para compatibilidade legada com o JS.
+        "detected_selection_key": selection_key(detected_types) or "none",
+        "detected_label": format_procedure_selection(detected_types) if detected_types else exam_type_label,
+        "approved_selection_key": selection_key(approved_types) or "none",
+        "approved_label": format_procedure_selection(approved_types) if approved_types else "Nenhum autorizado",
+        # Transformação (cards): quando o conjunto da dimensão diverge.
+        "transformation_detected": (
+            f"Detectado: {format_procedure_selection(detected_types)}"
+            if detected_types and detected_types != declared_types
+            else ""
+        ),
+        "transformation_approved": (
+            f"Autorizado: {format_procedure_selection(approved_types)}"
+            if approved_types and approved_types != detected_types
+            else ""
+        ),
         # Badges projetados exclusivamente do valor persistido (R7) — a view
         # nunca redetecta sinais a partir de texto bruto.
         "priority_signal_badges": build_priority_signal_badges(case.priority_signals),
@@ -224,6 +288,7 @@ def _doctor_queue_context(request: HttpRequest) -> dict[str, Any]:
     pending_cases: QuerySet[Case] = (
         Case.objects.filter(status=CaseStatus.WAIT_DOCTOR)
         .select_related("locked_by")
+        .prefetch_related("procedures")
         .order_by(F("regulation_days_on_screen").desc(nulls_last=True), "created_at")
     )
 
@@ -239,12 +304,16 @@ def _doctor_queue_context(request: HttpRequest) -> dict[str, Any]:
 
     # ── Decided today cases ───────────────────────────────────────
     start, end = local_day_bounds()
-    decided_qs: QuerySet[Case] = Case.objects.filter(
-        doctor=doctor_user,
-        doctor_decision__in=["accept", "deny"],
-        doctor_decided_at__gte=start,
-        doctor_decided_at__lt=end,
-    ).order_by("-doctor_decided_at")
+    decided_qs: QuerySet[Case] = (
+        Case.objects.filter(
+            doctor=doctor_user,
+            doctor_decision__in=["accept", "deny"],
+            doctor_decided_at__gte=start,
+            doctor_decided_at__lt=end,
+        )
+        .prefetch_related("procedures")
+        .order_by("-doctor_decided_at")
+    )
 
     decided_cards: list[dict[str, Any]] = []
     for case in decided_qs:
@@ -293,6 +362,162 @@ def doctor_queue_partial(request: HttpRequest) -> HttpResponse:
 # ── Decision helpers ─────────────────────────────────────────────────────
 
 
+def _build_procedure_entries(case: Case) -> list[dict[str, Any]]:
+    """Entradas EDA/Colonoscopia do formulário v2 (R1).
+
+    Cada entrada expõe origem (declarada/detectada) e recomendação da análise
+    quando existente; procedimento não detectado é candidato a inclusão.
+    """
+    rows = {row.procedure_type: row for row in case.procedures.all()}
+    recommendations: dict[str, str] = {}
+    suggested = case.suggested_action or {}
+    recs = suggested.get("procedure_recommendations")
+    if isinstance(recs, list):
+        for rec in recs:
+            if isinstance(rec, dict) and rec.get("procedure_type"):
+                raw = rec.get("suggestion", "")
+                recommendations[str(rec["procedure_type"])] = SUGGESTION_FLOW_MAP.get(str(raw), "—")
+
+    entries: list[dict[str, Any]] = []
+    for procedure_type in (ProcedureType.EDA, ProcedureType.COLONOSCOPY):
+        row = rows.get(procedure_type)
+        detected = row is not None and row.detection_status == DetectionStatus.DETECTED
+        declared = bool(row and row.declared_by_nir)
+        if detected:
+            origin_label = "Detectado na análise"
+        elif declared:
+            origin_label = "Declarado pelo NIR · não detectado"
+        else:
+            origin_label = "Não detectado"
+        entries.append(
+            {
+                "procedure_type": procedure_type,
+                "procedure_label": ProcedureType(procedure_type).label,
+                "detected": detected,
+                "declared": declared,
+                "origin_label": origin_label,
+                "recommendation": recommendations.get(procedure_type, ""),
+            }
+        )
+    return entries
+
+
+def _build_procedure_decisions(cleaned: dict[str, Any], case: Case) -> list[dict[str, Any]]:
+    """Converte o formulário validado em decisões por componente (R1/R2).
+
+    ``added_by_doctor`` é True quando a row não estava detectada (inclusão) —
+    a razão de inclusão é obrigatória e o LLM não é reexecutado (R8).
+    """
+    detected = {row.procedure_type for row in case.procedures.all() if row.detection_status == DetectionStatus.DETECTED}
+    decisions: list[dict[str, Any]] = []
+    for procedure_type in (ProcedureType.EDA, ProcedureType.COLONOSCOPY):
+        disposition = str(cleaned.get(f"procedure_{procedure_type}") or "")
+        if disposition not in (DoctorDisposition.APPROVED, DoctorDisposition.DENIED):
+            continue
+        decisions.append(
+            {
+                "procedure_type": procedure_type,
+                "disposition": disposition,
+                "reason": str(cleaned.get(f"procedure_{procedure_type}_reason") or "").strip(),
+                "added_by_doctor": disposition == DoctorDisposition.APPROVED and procedure_type not in detected,
+            }
+        )
+    return decisions
+
+
+def _derive_global_deny_reason(decisions: list[dict[str, Any]]) -> str:
+    """Razão global derivada para compatibilidade (D9).
+
+    As razões autoritativas são por row (``CaseProcedure.doctor_reason``);
+    ``Case.doctor_reason`` recebe uma apresentação derivada apenas no deny.
+    """
+    lines = []
+    for decision in decisions:
+        if decision["disposition"] == DoctorDisposition.DENIED:
+            label = ProcedureType(decision["procedure_type"]).label
+            lines.append(f"{label}: {decision['reason'] or 'não informado'}")
+    return "; ".join(lines)
+
+
+def _submit_v2_procedure_decisions(
+    *,
+    request: HttpRequest,
+    case: Case,
+    form: DoctorDecisionForm,
+    token: uuid.UUID,
+) -> HttpResponse:
+    """Persiste decisões por componente atomicamente (R3) e mapeia para a FSM existente (R4).
+
+    Zero aprovados → ``deny``; ≥1 aprovado → ``accept``. Preserva suporte,
+    fluxo de admissão, observação e os fluxos scheduled/operational atuais.
+    Revalida status e lease na instância bloqueada; nenhum write parcial,
+    evento ou transição ocorre em falha (fail-closed).
+    """
+    decisions = _build_procedure_decisions(form.cleaned_data, case)
+    approved_count = sum(1 for d in decisions if d["disposition"] == DoctorDisposition.APPROVED)
+    decision = "accept" if approved_count else "deny"
+
+    try:
+        with transaction.atomic():
+            locked = Case.objects.select_for_update().get(pk=case.pk)
+            if locked.status != CaseStatus.WAIT_DOCTOR:
+                raise Http404("Caso não está aguardando decisão médica.")
+            # Revalidação de lease na instância bloqueada (R3).
+            assert_case_lock(case=locked, user=request.user, token=token, context="doctor_decision")
+
+            record_doctor_procedure_decisions(case=locked, decisions=decisions, actor=request.user)
+
+            if decision == "accept":
+                locked.doctor_observation = form.cleaned_data.get("observation", "").strip()
+                locked.doctor_reason = ""
+            else:
+                locked.doctor_observation = ""
+                locked.doctor_reason = _derive_global_deny_reason(decisions)
+            locked.doctor_decision = decision
+            locked.doctor_support_flag = form.cleaned_data.get("support_flag", "") or "none"
+            locked.doctor_admission_flow = form.cleaned_data.get("admission_flow", "")
+            locked.doctor = request.user  # type: ignore[assignment]  # garantido por @login_required
+            locked.doctor_decided_at = timezone.now()
+
+            locked.doctor_decide(decision=decision, user=request.user)
+            locked.save()
+
+            if decision == "accept" and is_operational_notice_flow(locked.doctor_admission_flow):
+                locked._record_event(
+                    "ADMISSION_FLOW_OPERATIONAL_NOTICE",
+                    user=request.user,
+                    payload={
+                        "support_flag": locked.doctor_support_flag,
+                        "admission_flow": locked.doctor_admission_flow,
+                    },
+                )
+                locked.save()
+                locked.final_reply_posted(user=request.user)
+                locked.save()
+            elif decision == "accept" and is_scheduled_admission_flow(locked.doctor_admission_flow):
+                locked.ready_for_scheduler(user=request.user)
+                locked.save()
+                locked.scheduler_request_posted(user=request.user)
+                locked.save()
+            else:
+                locked.final_reply_posted(user=request.user)
+                locked.save()
+    except PermissionError as exc:
+        ctx = _build_decision_context(case, form, request=request)
+        ctx["lock_error"] = str(exc)
+        messages.warning(request, str(exc))
+        return render(request, "doctor/decision.html", ctx)
+
+    release_lock_service(
+        case_id=case.case_id,
+        user=request.user,
+        token=token,
+        context="doctor_decision",
+    )
+
+    return redirect("doctor:queue")
+
+
 def _get_active_attachments(case: Case) -> list[CaseAttachment]:
     """Return non-suppressed attachments for a case, ordered by created_at."""
     return list(case.attachments.filter(is_suppressed=False).order_by("created_at"))
@@ -338,6 +563,10 @@ def _build_decision_context(case: Case, form: DoctorDecisionForm, request: HttpR
     prior_context = prepared.prior_context
     prior_decision_display = prepared.prior_decision_display
 
+    # ── Slice 003: decisão e histórico por procedimento (v2) ─────────────
+    per_procedure = _is_v2_case(case)
+    procedure_entries = _build_procedure_entries(case) if per_procedure else []
+
     # ── Suppress duplicate prior-case card when same as correction (R7) ──
     # If the case has an explicit correction and the prior case lookup
     # found the same case, hide the generic prior-case card to avoid
@@ -365,6 +594,9 @@ def _build_decision_context(case: Case, form: DoctorDecisionForm, request: HttpR
         "report": report,
         "correction_context": correction_context,
         "hide_prior_case_card": hide_prior_case_card,
+        # ── Slice 003: decisão e histórico por procedimento (v2) ──────
+        "per_procedure": per_procedure,
+        "procedure_entries": procedure_entries,
         # ── Comunicação operacional ───────────────────────────────
         "communication_messages": case.communication_messages.select_related("author").all(),
         "can_post_communication": case.status != CaseStatus.CLEANED,
@@ -417,7 +649,7 @@ def doctor_decision(request: HttpRequest, case_id: uuid.UUID) -> HttpResponse:
 
     # Use fresh DB instance (refresh_from_db conflicts with django-fsm)
     case = get_object_or_404(Case, pk=case_id)
-    form = DoctorDecisionForm()
+    form = DoctorDecisionForm(case=case)
     context = _build_decision_context(case, form, request=request)
     context["lock_token"] = str(result.token)
     return render(request, "doctor/decision.html", context)
@@ -447,7 +679,7 @@ def doctor_submit(request: HttpRequest, case_id: uuid.UUID) -> HttpResponse:
         token = None
 
     if token is None:
-        form = DoctorDecisionForm(request.POST)
+        form = DoctorDecisionForm(request.POST, case=case)
         ctx = _build_decision_context(case, form, request=request)
         ctx["lock_error"] = "Sua reserva para este caso expirou ou não é válida. Volte para a fila e tente novamente."
         messages.warning(request, "Token de reserva não encontrado. Volte para a fila.")
@@ -462,18 +694,21 @@ def doctor_submit(request: HttpRequest, case_id: uuid.UUID) -> HttpResponse:
             context="doctor_decision",
         )
     except PermissionError as exc:
-        form = DoctorDecisionForm(request.POST)
+        form = DoctorDecisionForm(request.POST, case=case)
         ctx = _build_decision_context(case, form, request=request)
         ctx["lock_error"] = str(exc)
         messages.warning(request, str(exc))
         return render(request, "doctor/decision.html", ctx)
 
-    form = DoctorDecisionForm(request.POST)
+    form = DoctorDecisionForm(request.POST, case=case)
 
     if not form.is_valid():
         ctx = _build_decision_context(case, form, request=request)
         ctx["lock_token"] = raw_token
         return render(request, "doctor/decision.html", ctx)
+
+    if form.is_v2_mode:
+        return _submit_v2_procedure_decisions(request=request, case=case, form=form, token=token)
 
     decision = form.cleaned_data["decision"]
 

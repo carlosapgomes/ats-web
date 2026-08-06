@@ -52,7 +52,7 @@
     return document.querySelectorAll("[data-doctor-queue-card]");
   }
 
-  /** Return the selected exam type: "all" | "eda" | "colonoscopy". */
+  /** Return the selected exam type: all | eda | colonoscopy | eda_colonoscopy | none. */
   function getSelectedType() {
     for (var i = 0; i < typeButtons.length; i++) {
       if (typeButtons[i].checked) {
@@ -66,6 +66,8 @@
   function scopeLabel(type) {
     if (type === "eda") return "EDA";
     if (type === "colonoscopy") return "Colonoscopia";
+    if (type === "eda_colonoscopy") return "EDA + Colonoscopia";
+    if (type === "none") return "Nenhum autorizado";
     return "Todos";
   }
 
@@ -74,14 +76,22 @@
     return n !== 1 ? "casos" : "caso";
   }
 
+  /** Card dimension: Pendentes = detectado; Decididos Hoje = autorizado.
+   *  Fallback para a ponte legada (data-exam-type) em cards sem projeção. */
+  function cardSelectionKey(card) {
+    var projected = card.getAttribute("data-proc-selection");
+    if (projected) return projected;
+    return card.getAttribute("data-exam-type") || "";
+  }
+
   // ── Counters ──────────────────────────────────────────────────────
 
   /** Recompute per-type counters from the persisted card attribute. */
   function updateCounts() {
     var cards = getCards();
-    var counts = { all: cards.length, eda: 0, colonoscopy: 0 };
+    var counts = { all: cards.length, eda: 0, colonoscopy: 0, eda_colonoscopy: 0, none: 0 };
     Array.prototype.forEach.call(cards, function (card) {
-      var type = card.getAttribute("data-exam-type") || "";
+      var type = cardSelectionKey(card);
       if (counts[type] !== undefined) counts[type]++;
     });
     Array.prototype.forEach.call(
@@ -120,7 +130,7 @@
     var visibleCount = 0;
     Array.prototype.forEach.call(cards, function (card) {
       var matchesType =
-        type === "all" || (card.getAttribute("data-exam-type") || "") === type;
+        type === "all" || cardSelectionKey(card) === type;
       var matchesTerm = true;
       if (trimmed.length > 0 && !thresholdHint) {
         var name = card.getAttribute("data-patient-name") || "";

@@ -134,6 +134,21 @@
     </div>
     {% endif %}
 
+    {% if report.prior_sections %}
+    <div class="report-block border-warning border rounded p-2 bg-warning bg-opacity-10 mt-3">
+      <div class="report-block-title">🕓 Histórico Anterior por Procedimento</div>
+      {% for section in report.prior_sections %}
+      <div class="small mb-2">
+        <strong>{{ section.procedure_label }}</strong> — {{ section.decision_display }}
+        {% if section.prior_denial_count_7d %}<span class="badge bg-danger ms-1">{{ section.prior_denial_count_7d }} negações em 7 dias</span>{% endif %}
+        <div>Motivo: {{ section.reason_display }}</div>
+        <div>Data: {{ section.decided_at_display }} · Caso anterior: {{ section.prior_case_id|slice:":8" }}</div>
+        <div>Responsável: {{ section.decided_by }}</div>
+      </div>
+      {% endfor %}
+    </div>
+    {% endif %}
+
     {% if suggested_action %}
     <div class="mt-3">
       <a data-bs-toggle="collapse" href="#llmFullReport" class="text-decoration-none small">Ver JSON completo do sistema ▾</a>
@@ -299,6 +314,102 @@
     <form id="decision-form" method="post" action="{% url 'doctor:submit' case.case_id %}" novalidate>
       {% csrf_token %}
 
+      {% if per_procedure %}
+      <!-- Decisão por procedimento (contrato 2.0, Slice 003) -->
+      <div class="mb-4">
+        <label class="form-label">Decisão por procedimento <span class="text-danger">*</span></label>
+        <p class="decision-hint small text-muted mb-3">
+          Defina a disposição de cada procedimento. Procedimentos não detectados podem ser incluídos com
+          justificativa própria; negativas exigem razão específica por componente.
+        </p>
+        {% for entry in procedure_entries %}
+        {% if entry.procedure_type == "eda" %}
+        {% with pfield=form.procedure_eda preason=form.procedure_eda_reason %}
+        <div class="procedure-decision-row mb-3 p-3 border rounded">
+          <div class="d-flex flex-wrap align-items-center gap-2 mb-2">
+            <strong>{{ entry.procedure_label }}</strong>
+            <span class="badge bg-secondary">{{ entry.origin_label }}</span>
+            {% if entry.recommendation %}<span class="badge bg-info text-dark">Sugestão do sistema: {{ entry.recommendation }}</span>{% endif %}
+          </div>
+          <div class="row g-2">
+            <div class="col-md-4">
+              <select class="form-select{% if pfield.errors %} is-invalid{% endif %}" id="procedure-{{ entry.procedure_type }}" name="procedure_{{ entry.procedure_type }}">
+                <option value="" selected>Selecione...</option>
+                <option value="approved"{% if pfield.value == "approved" %} selected{% endif %}>Aprovar</option>
+                {% if entry.detected %}<option value="denied"{% if pfield.value == "denied" %} selected{% endif %}>Negar</option>{% endif %}
+              </select>
+              {% if pfield.errors %}<div class="invalid-feedback d-block">{{ pfield.errors.0 }}</div>{% endif %}
+            </div>
+            <div class="col-md-8">
+              <textarea class="form-control{% if preason.errors %} is-invalid{% endif %}" id="procedure-{{ entry.procedure_type }}-reason" name="procedure_{{ entry.procedure_type }}_reason" rows="2" placeholder="{% if entry.detected %}Razão da negativa (obrigatória se negar); aprovação pode incluir observação{% else %}Justificativa de inclusão (obrigatória){% endif %}">{{ preason.value|default:"" }}</textarea>
+              {% if preason.errors %}<div class="invalid-feedback d-block">{{ preason.errors.0 }}</div>{% endif %}
+            </div>
+          </div>
+        </div>
+        {% endwith %}
+        {% else %}
+        {% with pfield=form.procedure_colonoscopy preason=form.procedure_colonoscopy_reason %}
+        <div class="procedure-decision-row mb-3 p-3 border rounded">
+          <div class="d-flex flex-wrap align-items-center gap-2 mb-2">
+            <strong>{{ entry.procedure_label }}</strong>
+            <span class="badge bg-secondary">{{ entry.origin_label }}</span>
+            {% if entry.recommendation %}<span class="badge bg-info text-dark">Sugestão do sistema: {{ entry.recommendation }}</span>{% endif %}
+          </div>
+          <div class="row g-2">
+            <div class="col-md-4">
+              <select class="form-select{% if pfield.errors %} is-invalid{% endif %}" id="procedure-{{ entry.procedure_type }}" name="procedure_{{ entry.procedure_type }}">
+                <option value="" selected>Selecione...</option>
+                <option value="approved"{% if pfield.value == "approved" %} selected{% endif %}>Aprovar</option>
+                {% if entry.detected %}<option value="denied"{% if pfield.value == "denied" %} selected{% endif %}>Negar</option>{% endif %}
+              </select>
+              {% if pfield.errors %}<div class="invalid-feedback d-block">{{ pfield.errors.0 }}</div>{% endif %}
+            </div>
+            <div class="col-md-8">
+              <textarea class="form-control{% if preason.errors %} is-invalid{% endif %}" id="procedure-{{ entry.procedure_type }}-reason" name="procedure_{{ entry.procedure_type }}_reason" rows="2" placeholder="{% if entry.detected %}Razão da negativa (obrigatória se negar); aprovação pode incluir observação{% else %}Justificativa de inclusão (obrigatória){% endif %}">{{ preason.value|default:"" }}</textarea>
+              {% if preason.errors %}<div class="invalid-feedback d-block">{{ preason.errors.0 }}</div>{% endif %}
+            </div>
+          </div>
+        </div>
+        {% endwith %}
+        {% endif %}
+        {% endfor %}
+      </div>
+
+      <div class="decision-section active">
+        <h6 class="text-muted fw-semibold mb-3">Dados do aceite</h6>
+        <div class="row g-3">
+          <div class="col-md-6">
+            <label for="support-flag" class="form-label">Suporte Necessário <span class="text-danger">*</span></label>
+            <select class="form-select{% if form.support_flag.errors %} is-invalid{% endif %}" id="support-flag" name="support_flag">
+              <option value="" selected disabled>Selecione...</option>
+              <option value="none"{% if form.support_flag.value == "none" %} selected{% endif %}>Nenhum</option>
+              <option value="anesthesist"{% if form.support_flag.value == "anesthesist" %} selected{% endif %}>Anestesista</option>
+            </select>
+            {% if form.support_flag.errors %}<div class="invalid-feedback d-block">{{ form.support_flag.errors.0 }}</div>{% else %}<div class="invalid-feedback">Selecione o tipo de suporte.</div>{% endif %}
+            <div class="form-text">Sugestão do sistema (mais restritiva): <strong>{{ suggested_support }}</strong>. A escolha final é médica.</div>
+          </div>
+          <div class="col-md-6">
+            <label for="admission-flow" class="form-label">Fluxo de Admissão <span class="text-danger">*</span></label>
+            <select class="form-select{% if form.admission_flow.errors %} is-invalid{% endif %}" id="admission-flow" name="admission_flow">
+              <option value="" selected disabled>Selecione...</option>
+              <option value="scheduled"{% if form.admission_flow.value == "scheduled" %} selected{% endif %}>Agendamento</option>
+              <option value="immediate"{% if form.admission_flow.value == "immediate" %} selected{% endif %}>Vinda Imediata</option>
+              <option value="pre_icu"{% if form.admission_flow.value == "pre_icu" %} selected{% endif %}>Vinda prévia para UTI</option>
+              <option value="ward_icu_backup"{% if form.admission_flow.value == "ward_icu_backup" %} selected{% endif %}>Vinda para enfermaria (para retaguarda em UTI)</option>
+              <option value="pediatric_appt"{% if form.admission_flow.value == "pediatric_appt" %} selected{% endif %}>Compartilhar com EM pediátrica — com agendamento</option>
+            </select>
+            {% if form.admission_flow.errors %}<div class="invalid-feedback d-block">{{ form.admission_flow.errors.0 }}</div>{% else %}<div class="invalid-feedback">Selecione o fluxo de admissão.</div>{% endif %}
+          </div>
+        </div>
+        <div class="mb-3">
+          <label for="doctor-observation" class="form-label">{{ form.observation.label }}</label>
+          <textarea class="form-control{% if form.observation.errors %} is-invalid{% endif %}" id="doctor-observation" name="observation" rows="2" maxlength="500" placeholder="{{ form.observation.field.widget.attrs.placeholder }}">{{ form.observation.value|default:"" }}</textarea>
+          {% if form.observation.errors %}<div class="invalid-feedback d-block">{{ form.observation.errors.0 }}</div>{% endif %}
+          <div class="form-text">{{ form.observation.help_text }}</div>
+        </div>
+      </div>
+      {% else %}
+
       <div class="mb-4">
         <label class="form-label">Decisão <span class="text-danger">*</span></label>
         <p class="decision-hint small text-muted mb-3">Escolha Aceitar ou Negar para revelar os campos necessários.</p>
@@ -380,6 +491,7 @@
           {% if form.reason.errors %}<div class="invalid-feedback d-block">{{ form.reason.errors.0 }}</div>{% else %}<div class="invalid-feedback">Informe o motivo da negativa.</div>{% endif %}
         </div>
       </div>
+      {% endif %}
 
       <input type="hidden" name="case_id_hidden" value="{{ case.case_id }}">
 
@@ -435,6 +547,8 @@
 {% endblock %}
 
 {% block extra_js %}
+{% if not per_procedure %}
 <script src="{% static 'js/decision.js' %}"></script>
+{% endif %}
 <script src="{% static 'js/work_lock.js' %}"></script>
 {% endblock %}

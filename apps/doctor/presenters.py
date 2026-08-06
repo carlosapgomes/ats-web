@@ -214,6 +214,9 @@ class DoctorReportPresenter:
     # Slice 003 (R6): declared exam type drives the canonical procedure name.
     # Never infer the type from the legacy ``eda`` envelope block.
     exam_type: str = "eda"
+    # Slice 003 (R6/D10): seções de histórico anterior por procedimento,
+    # preparadas por ``reporting.prepare_doctor_case_report`` (modo 2.0).
+    prior_sections: list[dict[str, Any]] = field(default_factory=list)
 
     # ── Public API ───────────────────────────────────────────────────────
 
@@ -236,6 +239,7 @@ class DoctorReportPresenter:
             "context": self._build_context(),
             "recent_denial": self._build_recent_denial(),
             "priority_signal_badges": build_priority_signal_badges(self.priority_signals),
+            "prior_sections": self._build_prior_sections(),
         }
 
     # ── Priority signals (persisted — Slice 003) ────────────────────────
@@ -371,6 +375,18 @@ class DoctorReportPresenter:
         if denial:
             lines.append("## Histórico de negativa recente:")
             lines.extend(denial["lines"])
+            lines.append("")
+
+        # Prior sections (per-procedure, Slice 003)
+        prior_sections = report.get("prior_sections") or []
+        if prior_sections:
+            lines.append("## Histórico anterior por procedimento:")
+            for section in prior_sections:
+                lines.append(f"- {section['procedure_label']}: {section['decision_display']}.")
+                lines.append(f"  Motivo: {section['reason_display']}")
+                lines.append(f"  Data/hora: {section['decided_at_display']}")
+                if section.get("prior_denial_count_7d"):
+                    lines.append(f"  Total de negativas nos últimos 7 dias: {section['prior_denial_count_7d']}")
             lines.append("")
 
         return "\n".join(lines)
@@ -908,6 +924,32 @@ class DoctorReportPresenter:
             return _extract_nested(self.structured_data, "policy_precheck", "pediatric_flag") is True
         is_pediatric = _extract_nested(self.structured_data, "eda", "is_pediatric")
         return is_pediatric is True
+
+    # ── Prior sections (Slice 003, R6/D10) ───────────────────────────────
+
+    def _build_prior_sections(self) -> list[dict[str, Any]]:
+        """Renderiza as seções de histórico anterior por procedimento.
+
+        Cada seção usa a decisão/razão da própria row do caso anterior
+        (``doctor_denied`` | ``appointment_denied`` | ``doctor_approved``),
+        preservando a ordem D10 e a janela de sete dias já aplicada no
+        lookup (``reporting._build_prior_sections``).
+        """
+        sections: list[dict[str, Any]] = []
+        for section in self.prior_sections:
+            decision = section.get("decision_display") or section.get("decision") or "—"
+            sections.append(
+                {
+                    "procedure_label": section.get("procedure_label") or "—",
+                    "decision_display": decision,
+                    "reason_display": self._format_denial_reason(section.get("reason")),
+                    "decided_at_display": self._format_denial_decided_at(section.get("decided_at")),
+                    "decided_by": section.get("decided_by") or "—",
+                    "prior_case_id": section.get("prior_case_id") or "",
+                    "prior_denial_count_7d": section.get("prior_denial_count_7d", 0),
+                }
+            )
+        return sections
 
     # ── Recent denial ────────────────────────────────────────────────────
 

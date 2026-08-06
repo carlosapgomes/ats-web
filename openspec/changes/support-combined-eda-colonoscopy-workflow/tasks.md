@@ -28,7 +28,7 @@ A ADR-0004 deve ser commitada, enviada e aprovada explicitamente antes de entreg
 
 - [x] Slice 001 — NIR cria e acompanha um único caso combinado (`slices/slice-001-combined-intake-procedure-projection.md`)
 - [x] Slice 002 — Pipeline neutro analisa um ou dois procedimentos e entrega ao médico (`slices/slice-002-procedure-neutral-pipeline.md`)
-- [ ] Slice 003 — Médico decide cada procedimento com justificativa e histórico próprio (`slices/slice-003-per-procedure-doctor-decision.md`)
+- [x] Slice 003 — Médico decide cada procedimento com justificativa e histórico próprio (`slices/slice-003-per-procedure-doctor-decision.md`)
 - [ ] Slice 004 — CHD recebe conjunto autorizado e faz um agendamento casado (`slices/slice-004-paired-scheduler-appointment.md`)
 - [ ] Slice 005 — NIR corrige, filtra e recebe resposta comparativa (`slices/slice-005-nir-correction-and-final-response.md`)
 - [ ] Slice 006 — Gestor acompanha casos, procedimentos e conversões (`slices/slice-006-procedure-dimension-analytics.md`)
@@ -57,12 +57,12 @@ A ADR-0004 deve ser commitada, enviada e aprovada explicitamente antes de entreg
 
 ### Médico e histórico
 
-- [ ] Médico aprova/nega cada procedimento.
-- [ ] Procedimento negado exige razão específica.
-- [ ] Procedimento adicionado exige razão específica e não reexecuta LLM.
-- [ ] Troca completa exige razão em ambos os componentes afetados.
-- [ ] Lock, role e FSM existentes permanecem protegidos.
-- [ ] Históricos EDA/Colonoscopia são consultados e exibidos separadamente.
+- [x] Médico aprova/nega cada procedimento.
+- [x] Procedimento negado exige razão específica.
+- [x] Procedimento adicionado exige razão específica e não reexecuta LLM.
+- [x] Troca completa exige razão em ambos os componentes afetados.
+- [x] Lock, role e FSM existentes permanecem protegidos.
+- [x] Históricos EDA/Colonoscopia são consultados e exibidos separadamente.
 
 ### CHD e NIR
 
