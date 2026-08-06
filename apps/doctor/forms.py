@@ -97,7 +97,12 @@ class DoctorDecisionForm(forms.Form):
         return self._clean_procedure_mode(cleaned)
 
     def _clean_legacy(self, cleaned: dict[str, Any]) -> dict[str, Any]:
-        """Modo 1.1: decisão global com validação condicional anterior."""
+        """Modo 1.1: decisão global com validação condicional anterior.
+
+        Decisão ausente/inválida é rejeitada (fail-closed): sem isso,
+        ``doctor_decide(decision="")`` gravaria o evento corrompido ``DOCTOR_``
+        e aceitaria o caso (qualquer valor ≠ "deny" vira accept).
+        """
         decision: str = str(cleaned.get("decision", ""))
         support_flag: str = str(cleaned.get("support_flag", ""))
         admission_flow: str = str(cleaned.get("admission_flow", ""))
@@ -111,6 +116,8 @@ class DoctorDecisionForm(forms.Form):
         elif decision == "deny":
             if not reason:
                 self.add_error("reason", "Informe o motivo da negativa.")
+        else:
+            self.add_error("decision", "Selecione a decisão.")
 
         return cleaned
 
@@ -126,10 +133,14 @@ class DoctorDecisionForm(forms.Form):
         """
         detected = self._detected_procedure_types()
         approved_count = 0
+        saw_disposition = False
 
         for procedure_type in (ProcedureType.EDA, ProcedureType.COLONOSCOPY):
             disposition = str(cleaned.get(f"procedure_{procedure_type}") or "")
             reason = str(cleaned.get(f"procedure_{procedure_type}_reason") or "").strip()
+
+            if disposition in (DoctorDisposition.APPROVED, DoctorDisposition.DENIED):
+                saw_disposition = True
 
             if disposition == DoctorDisposition.DENIED:
                 if procedure_type not in detected:
@@ -160,5 +171,13 @@ class DoctorDecisionForm(forms.Form):
                 self.add_error("support_flag", "Selecione o tipo de suporte.")
             if not cleaned.get("admission_flow"):
                 self.add_error("admission_flow", "Selecione o fluxo de admissão.")
+        elif not saw_disposition and not detected:
+            # Sem nenhuma disposição e sem procedimento detectado, o submit
+            # não pode decidir nada (um deny global vazio não tem razão de
+            # componente) — fail-closed (BUG 2 pós-verificação).
+            self.add_error(
+                "procedure_eda",
+                "Defina a decisão de ao menos um procedimento.",
+            )
 
         return cleaned
