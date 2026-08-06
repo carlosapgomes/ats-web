@@ -25,7 +25,11 @@ RUNBOOK_PATH = PROJECT_ROOT / "docs" / "deploy" / "introduce-colonoscopy-exam-wo
 MANUAL_PATH = PROJECT_ROOT / "docs" / "manual" / "manual-usuarios.md"
 CONTEXT_PATH = PROJECT_ROOT / "PROJECT_CONTEXT.md"
 PROD_COMPOSE_PATH = PROJECT_ROOT / "docker-compose.prod.yml"
-TASKS_PATH = PROJECT_ROOT / "openspec" / "changes" / "introduce-colonoscopy-exam-workflow" / "tasks.md"
+# O change foi arquivado; o tasks.md canônico agora vive em openspec/archive.
+# Resolução dinâmica preserva o contrato mesmo se o diretório ativo voltar a existir.
+_TASKS_ACTIVE = PROJECT_ROOT / "openspec" / "changes" / "introduce-colonoscopy-exam-workflow" / "tasks.md"
+_TASKS_ARCHIVED = PROJECT_ROOT / "openspec" / "archive" / "introduce-colonoscopy-exam-workflow" / "tasks.md"
+TASKS_PATH = _TASKS_ARCHIVED if _TASKS_ARCHIVED.exists() else _TASKS_ACTIVE
 
 COLONOSCOPY_PROMPT_NAMES = (
     "colonoscopy_llm1_system",

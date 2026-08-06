@@ -538,7 +538,7 @@ exigem janela controlada):
   medicamentoso informativo, correção em revisão manual com
   mismatch/mixed/unknown, flag não é assunto de usuário comum).
 - O change **não** arquiva como concluído enquanto houver item do DoD global
-  não comprovado em `openspec/changes/introduce-colonoscopy-exam-workflow/tasks.md`.
+  não comprovado em `openspec/archive/introduce-colonoscopy-exam-workflow/tasks.md`.
 
 ## 7. Notas operacionais
 

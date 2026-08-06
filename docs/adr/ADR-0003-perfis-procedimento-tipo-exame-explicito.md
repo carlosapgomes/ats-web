@@ -12,7 +12,7 @@ Há previsão próxima de CPRE, cujo conjunto de requisitos será mais amplo. Co
 
 O tipo também precisa ser uma dimensão operacional nas filas médica, CHD, NIR e dashboard. Confiar apenas na classificação LLM não é suficiente para roteamento clínico e auditoria: o NIR deve declarar a intenção e o sistema deve verificar a compatibilidade documental.
 
-Este ADR está associado ao change `openspec/changes/introduce-colonoscopy-exam-workflow/` e ao branch `feature/colonoscopy-exam-workflow`.
+Este ADR está associado ao change `openspec/archive/introduce-colonoscopy-exam-workflow/` e ao branch `feature/colonoscopy-exam-workflow`.
 
 ## Decisão
 
