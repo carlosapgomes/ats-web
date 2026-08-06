@@ -63,7 +63,7 @@ Mostrar sugestão mais restritiva calculada no Slice 002 e manter escolha final 
 
 ### R6. Históricos separados
 
-Lookup por `procedure_type` e seção EDA/Colonoscopia. Caso anterior combinado pode aparecer em ambas as seções com contexto próprio, sem atribuir decisão errada. Preservar deduplicação de corrected resubmission quando aplicável.
+Consumir o lookup procedure-aware entregue no Slice 002 e renderizar seções EDA/Colonoscopia. A fonte médica autoritativa é cada `CaseProcedure.doctor_disposition/doctor_reason`, nunca `Case.doctor_decision` isolado. Preservar a ordem D10: row negada → `doctor_denied`; row aprovada + agenda negada → `appointment_denied`; row aprovada → `doctor_approved`. Caso anterior combinado pode aparecer em ambas as seções com o mesmo `prior_case_id`, mas decisão/razão próprias. Preservar janela de sete dias, ordenação e deduplicação de corrected resubmission; aprovação pode ser contexto recente, mas não incrementa `prior_denial_count_7d`.
 
 ### R7. Queue e filtros médicos
 
@@ -97,17 +97,19 @@ Proibido scheduler/NIR/dashboard/migration/FSM/prompts/schema LLM.
 9. inclusão não chama/enfileira LLM;
 10. lock/role/status inválidos bloqueiam;
 11. support sugerido estrito mas escolha final persiste;
-12. históricos separados sem cruzar tipo;
-13. same prior combined mantém contexto correto;
-14. filtros detectado/autorizado + busca/polling;
-15. fluxos accept/deny/admission existentes regressam verdes.
+12. EDA prévia negada + Colon prévia aprovada aparecem nas seções/decisões corretas;
+13. same prior combined mantém `prior_case_id`, mas razão/disposição próprias por row;
+14. agenda global negada aplica-se somente às rows previamente aprovadas;
+15. janela de sete dias e deduplicação permanecem, e aprovação não incrementa `prior_denial_count_7d`;
+16. filtros detectado/autorizado + busca/polling;
+17. fluxos accept/deny/admission existentes regressam verdes.
 
 ## Inspeções obrigatórias
 
 ```bash
 rg -n "doctor_disposition|doctor_reason|added_by_doctor|DOCTOR_PROCEDURE_DECISIONS_RECORDED" apps/doctor apps/cases
 rg -n "transaction\.atomic|select_for_update|assert_case_lock|role_required" apps/doctor apps/cases
-rg -n "lookup_prior.*procedure|procedure_type" apps/pipeline/prior_case.py apps/doctor
+rg -n "lookup_prior.*procedure|procedure_type|doctor_disposition|doctor_approved|doctor_denied|appointment_denied" apps/pipeline/prior_case.py apps/doctor
 rg -n "eda_colonoscopy|Nenhum autorizado|data-.*procedure" templates/doctor static/js/doctor_queue_filter.js
 rg -n "async_task|Schedule|run_pipeline|execute_.*llm" apps/doctor apps/cases || true
 rg -n "CaseStatus|@transition" apps/doctor apps/cases/models.py
@@ -122,7 +124,8 @@ git diff -- apps/scheduler apps/intake apps/dashboard apps/pipeline/schemas apps
 - [ ] Razões por componente fail-closed.
 - [ ] Inclusão/troca funcionam sem rerun.
 - [ ] Lock/role/FSM preservados.
-- [ ] Histórico separado.
+- [ ] Histórico separado usa disposição/razão da row e semântica D10.
+- [ ] Aprovação histórica, negativa médica e negativa global de agenda são distinguíveis.
 - [ ] Filtros usam dimensão certa.
 - [ ] ≤12 arquivos e nenhum app futuro.
 - [ ] Baseline/gates/relatório completos.
@@ -136,14 +139,15 @@ Responder objetivamente no relatório:
 3. Qual teste prova que inclusão médica não reexecuta LLM?
 4. Como disposições mapeiam para accept/deny sem FSM nova?
 5. Qual teste prova sugestão restritiva com override médico?
-6. Como prior lookup impede cruzamento de procedimento?
-7. Quais dimensões alimentam Pendentes e Decididos Hoje?
-8. Quais arquivos mudaram e por quê?
-9. Qual a comparação baseline-final com zero failures/errors?
+6. Como prior lookup impede cruzamento e qual teste prova EDA negada + Colon aprovada no mesmo caso anterior?
+7. Como negativa global de agenda é limitada às rows aprovadas e como janela/dedup são preservadas?
+8. Quais dimensões alimentam Pendentes e Decididos Hoje?
+9. Quais arquivos mudaram e por quê?
+10. Qual a comparação baseline-final com zero failures/errors?
 
 ### Condições automáticas de INCOMPLETO
 
-Qualquer protocolo ausente; decisão parcial; razão faltante aceita; inclusão altera detected/declared ou roda LLM; lock/role relaxado; FSM nova; support imposto; prior cruza procedimento; filtros usam legado; app futuro tocado; >12 sem revisão; regressão de flows; final falha/passed menor; relatório ausente.
+Qualquer protocolo ausente; decisão parcial; razão faltante aceita; inclusão altera detected/declared ou roda LLM; lock/role relaxado; FSM nova; support imposto; prior usa decisão global isolada, cruza procedimento, omite aprovação, aplica agenda negada a row médica negada ou perde janela/dedup; filtros usam legado; app futuro tocado; >12 sem revisão; regressão de flows; final falha/passed menor; relatório ausente.
 
 ## Relatório obrigatório
 
@@ -165,7 +169,7 @@ Criar `/tmp/support-combined-eda-colonoscopy-workflow-slice-003-report.md` conte
 ```text
 Read all project/change artifacts, accepted ADR-0004, approved reports 001-002 and Slice 003 implementation files. Implement ONLY Slice 003 on the required branch. Follow the full DeepSeek4-Flash protocol: baseline, real RED, minimal GREEN, clean/DRY/YAGNI local refactor, inspections, exact quality gate, baseline comparison and evidence report. Any missing/failing item or cap violation means INCOMPLETE with no task/commit/push.
 
-Deliver atomic per-procedure doctor decisions, per-component denial/addition reasons, doctor-added procedure without LLM rerun, existing FSM accept/deny mapping, strictest support suggestion with physician override, separate prior histories, and doctor filters by detected/approved selection. Preserve locks, roles, admission flows and corrected-case context. Do not touch CHD, NIR, dashboard, schemas/prompts, migrations or FSM.
+Deliver atomic per-procedure doctor decisions, per-component denial/addition reasons, doctor-added procedure without LLM rerun, existing FSM accept/deny mapping, strictest support suggestion with physician override, D10 prior-history presentation sourced from each procedure row, and doctor filters by detected/approved selection. Preserve locks, roles, admission flows and corrected-case context. Do not touch CHD, NIR, dashboard, schemas/prompts, migrations or FSM.
 
 Create /tmp/support-combined-eda-colonoscopy-workflow-slice-003-report.md; if complete mark only Slice 003, commit, push, reply REPORT_PATH and STOP.
 ```

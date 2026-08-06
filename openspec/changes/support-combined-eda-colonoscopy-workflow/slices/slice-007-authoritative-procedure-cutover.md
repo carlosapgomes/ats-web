@@ -12,7 +12,7 @@ Leia todos os artefatos/ADR/relatórios 001–006, código inteiro via buscas ab
 
 ### Fluxo entregue
 
-Até agora `Case.exam_type` e prompts específicos formam ponte interna. Este slice torna a arquitetura final autoritativa:
+Até agora `Case.exam_type` forma a ponte interna. O Slice 002 já direcionou novos jobs aos prompts neutros, mas nomes/templates específicos podem permanecer como resíduos de resolução e rollback. Este slice torna a arquitetura final autoritativa:
 
 ```text
 todos os readers/writers usam CaseProcedure
@@ -64,9 +64,9 @@ Migration remove `Case.exam_type` após comprovar backfill/projeção válida pa
 
 Todo intake, pipeline, doctor, CHD, NIR e dashboard usa helpers/querysets por dimensão. Templates usam dados projetados. Nenhum filtro usa substring/label para inferir conjunto.
 
-### R4. Prompt cutover
+### R4. Limpeza final de prompts legados
 
-Novos jobs resolvem somente quatro nomes neutros. Seed/admin/fallback continuam idempotentes. Oito templates antigos não são deletados do banco/histórico; podem permanecer reconhecíveis apenas para leitura/rollback, nunca dispatch novo.
+Remover qualquer dispatch, profile mapping, fallback ou resolução residual dos oito nomes antigos e provar por teste que novos jobs continuam resolvendo somente os quatro nomes neutros introduzidos no Slice 002. Após drenagem comprovada, desativar todas as versões ativas dos nomes antigos. Seed/admin/fallback neutros continuam idempotentes. Templates e versões antigas não são deletados do banco/histórico; permanecem reconhecíveis apenas para auditoria ou bridge excepcional, nunca dispatch novo.
 
 ### R5. Fixtures e APIs explícitas
 
@@ -78,7 +78,7 @@ Schema JSON 1.1 e eventos/payloads históricos com chave `exam_type` continuam l
 
 ### R7. No schema drift
 
-`makemigrations --check --dry-run` sem mudanças após migration criada. Índices/constraints CaseProcedure adequados às queries verificadas. Nenhuma migration destrói CaseEvent/JSON/PDF/agenda.
+`makemigrations --check --dry-run` sem mudanças após migration criada. Revalidar que constraints e índices dimensionais criados no Slice 001 cobrem as queries reais; qualquer ajuste exige evidência de plano de query, não criação tardia sem justificativa. Nenhuma migration destrói CaseEvent/JSON/PDF/agenda.
 
 ## Arquivos esperados
 
@@ -92,8 +92,8 @@ Proibido nova funcionalidade, UI redesign, FSM/roles, docs rollout (Slice008), C
 2. migration remove coluna e preserva rows/dados;
 3. Case combinado continua todos os fluxos após remoção;
 4. nenhum query/form depende de exam_type;
-5. novos jobs usam só prompts neutros;
-6. prompts antigos preservados como histórico, não dispatch;
+5. novos jobs já neutros continuam sem qualquer resolução de nome legado;
+6. versões antigas ficam inativas e preservadas como histórico, não dispatch;
 7. factories explícitas e boundary inválido;
 8. legacy JSON/event payload renderiza;
 9. filas/filtros/analytics regressam;
@@ -144,7 +144,7 @@ Responder no relatório:
 
 ### Condições automáticas de INCOMPLETO
 
-Inventário ausente; qualquer reader/write/query residual da coluna; migration inventa EDA, perde dados ou permite Case sem rows; dual-write/default permanece; job novo usa prompt antigo; prompt histórico apagado; JSON 1.1 quebra; fixture oculta ausência; schema drift; cap excedido sem revisão; gate/teste falha; passed menor; relatório ausente.
+Inventário ausente; qualquer reader/write/query residual da coluna; migration inventa EDA, perde dados ou permite Case sem rows; dual-write/default permanece; dispatch/profile/fallback ainda resolve nome antigo; versão legada permanece ativa após drenagem ou histórico é apagado; JSON 1.1 quebra; fixture oculta ausência; índices Slice 001 não são revalidados; schema drift; cap excedido sem revisão; gate/teste falha; passed menor; relatório ausente.
 
 ## Relatório obrigatório
 
@@ -157,7 +157,7 @@ Incluir **Handoff para verificador** com arquivos alterados, comandos exatos de 
 ```text
 Read all artifacts, accepted ADR-0004, approved reports 001-006 and perform the mandatory global inventory before editing. Implement ONLY Slice 007. Follow the DeepSeek4-Flash protocol and cap strictly; if footprint exceeds 14, stop for planner review rather than partial cutover.
 
-Remove Case.exam_type and every operational dependency/dual-write only after fail-closed migration validation; make CaseProcedure authoritative across all readers/queries; use only four neutral prompts for new jobs while retaining old prompt history; make fixtures explicit; preserve schema 1.1/event payload readers. Run full gates plus makemigrations/OpenSpec/diff. Any unexplained residual or failing evidence means INCOMPLETE and no tasks/commit/push.
+Remove Case.exam_type and every operational dependency/dual-write only after fail-closed migration validation; make CaseProcedure authoritative across all readers/queries; remove every residual legacy-prompt resolution and deactivate old active versions after drainage while retaining their history; revalidate Slice 001 indexes; make fixtures explicit; preserve schema 1.1/event payload readers. Run full gates plus makemigrations/OpenSpec/diff. Any unexplained residual or failing evidence means INCOMPLETE and no tasks/commit/push.
 
 Create /tmp/support-combined-eda-colonoscopy-workflow-slice-007-report.md; if complete mark only Slice 007, commit, push, reply REPORT_PATH and STOP.
 ```

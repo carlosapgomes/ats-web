@@ -112,7 +112,7 @@ Sobrescrever um único tipo apagaria a diferença entre o que o NIR declarou, o 
 - LLM sugerir procedimento que não foi detectado.
 - Decisão automática final sem médico.
 - Preparo intestinal, biópsia, polipectomia ou suspensão medicamentosa.
-- Alteração dos 17 estados FSM.
+- Alteração dos 18 valores executáveis atuais de `CaseStatus`.
 - Nova role, atribuição por especialidade, REST API, SPA, WebSocket ou framework JS.
 - Reescrita/inferência de JSON clínico legado.
 - Reset obrigatório de banco de produção.

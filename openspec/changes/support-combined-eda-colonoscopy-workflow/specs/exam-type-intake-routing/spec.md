@@ -31,6 +31,8 @@ Todo novo upload MUST escolher exatamente uma seleção válida — EDA, Colonos
 
 Migration MUST criar uma projeção de procedimento declarado a partir do `exam_type` atual e MUST preservar todos os demais dados.
 
+> Nota de identidade OpenSpec: o título corresponde ao requisito canônico anterior. O comportamento modificado preserva o tipo histórico já persistido, que pode ser EDA ou Colonoscopia.
+
 #### Scenario: Caso histórico EDA ou Colonoscopia
 
 - **GIVEN** caso anterior ao change
@@ -59,6 +61,8 @@ Migration MUST criar uma projeção de procedimento declarado a partir do `exam_
 ### Requirement: Solicitações atuais mistas são bloqueadas
 
 Um documento com solicitações atuais de EDA e Colonoscopia MUST ser tratado como combinado quando reconciliado pelas regras de detecção.
+
+> Nota de identidade OpenSpec: o título corresponde ao requisito canônico anterior. O comportamento modificado aceita a combinação atual quando a reconciliação comprova ambos os procedimentos.
 
 #### Scenario: Combinado declarado e confirmado
 

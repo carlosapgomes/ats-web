@@ -10,9 +10,9 @@ Branch diferente, árvore suja herdada ou ausência da ADR-0004 aceita antes do 
 
 ## Pré-condição arquitetural
 
-- [ ] Criar e aceitar `docs/adr/ADR-0004-procedimentos-multiplos-e-contrato-llm-neutro.md`, marcando as decisões 1, 2, 3, 5, 6, 8 e 9 da ADR-0003 como parcialmente superadas.
+- [ ] **Responsável: planner/humano, antes do Slice 001.** Criar com `.pi/skills/adr-generator/SKILL.md` e `docs/adr/template.md`, revisar e aceitar `docs/adr/ADR-0004-procedimentos-multiplos-e-contrato-llm-neutro.md`, marcando as decisões 1, 2, 3, 5, 6, 8 e 9 da ADR-0003 como parcialmente superadas.
 
-A pré-condição não autoriza implementação. Cada slice ainda exige confirmação explícita após revisão do relatório anterior.
+A ADR-0004 deve ser commitada, enviada e aprovada explicitamente antes de entregar o prompt do Slice 001 ao implementador. O Slice 008 somente ajusta status/links finais da ADR-0003/ADR-0004; não é responsável por criar ou aceitar a decisão. A pré-condição não autoriza implementação. Cada slice ainda exige confirmação explícita após revisão do relatório anterior.
 
 ## Regra de execução
 

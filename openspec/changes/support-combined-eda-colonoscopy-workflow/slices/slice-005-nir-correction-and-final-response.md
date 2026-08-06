@@ -20,6 +20,12 @@ combined declarado mas single detectado / mismatch / unknown
 
 ou
 
+caso em voo com upgrade automático
+→ NIR vê `Declarado: EDA` e `Detectado: EDA + Colonoscopia`
+→ não há CTA/ACK bloqueante
+
+ou
+
 caso concluído
 → NIR vê declarado → detectado → autorizado
 → razões por componente + agenda casada
@@ -77,7 +83,7 @@ Operacionais e encerrados aceitam Todos/EDA/Colonoscopia/Combinado, compõem fil
 
 ### R6. Resposta comparativa
 
-Detalhe/resultado mostra declarado, detectado e autorizado. Por procedimento: aprovado/negado/incluído pelo médico e razão própria. Combinado autorizado mostra uma agenda casada/data-hora. Não esconder declaração original após upgrade.
+Detalhe/acompanhamento mostra declarado e detectado assim que a detecção estiver disponível, inclusive enquanto o caso segue para `WAIT_DOCTOR`, sem aguardar conclusão. Upgrade automático single→combined deve exibir explicitamente, por exemplo, `Declarado: EDA` e `Detectado: EDA + Colonoscopia`, sem CTA/ACK bloqueante. Quando houver decisão, mostrar também autorizado e, por procedimento, aprovado/negado/incluído pelo médico e razão própria. Combinado autorizado mostra uma agenda casada/data-hora. Nunca esconder a declaração original após upgrade.
 
 ### R7. Auditoria e ACK
 
@@ -96,17 +102,18 @@ Proibido schemas/prompts/policy/doctor/scheduler/dashboard/model/migration/FSM.
 
 1. combined→single elegível corrige e reprocessa;
 2. unique mismatch/unknown continuam;
-3. auto-upgrade não mostra correction CTA;
-4. WAIT_DOCTOR/decisão existente bloqueia;
-5. ator/role/lease inválidos bloqueiam;
-6. concurrent requests serializam, um job;
-7. derivados v2/detection limpos, fontes preservadas, sem extração;
-8. retry do mesmo case funciona no cluster pdf;
-9. corrected resubmission combinado não herda e respeita flag;
-10. filtros declared em operational/closed, combinados com demais;
-11. resposta final partial/inclusion/combined com razões;
-12. ACK/cleanup sem duplicação;
-13. eventos enxutos.
+3. caso em voo após auto-upgrade mostra declarado single + detectado combinado e não mostra correction CTA/ACK;
+4. a comparação em voo permanece visível em polling/refresh antes da decisão médica;
+5. WAIT_DOCTOR/decisão existente bloqueia;
+6. ator/role/lease inválidos bloqueiam;
+7. concurrent requests serializam, um job;
+8. derivados v2/detection limpos, fontes preservadas, sem extração;
+9. retry do mesmo case funciona no cluster pdf;
+10. corrected resubmission combinado não herda e respeita flag;
+11. filtros declared em operational/closed, combinados com demais;
+12. resposta final partial/inclusion/combined com razões;
+13. ACK/cleanup sem duplicação;
+14. eventos enxutos.
 
 ## Inspeções obrigatórias
 
@@ -127,7 +134,7 @@ git diff -- apps/pipeline apps/doctor apps/scheduler apps/dashboard apps/cases/m
 - [ ] R1–R7 provados.
 - [ ] Correção race-safe e um recovery.
 - [ ] Fontes preservadas; derivados invalidados.
-- [ ] Upgrade não exige ACK.
+- [ ] Upgrade em voo exibe declarado versus detectado sem CTA/ACK.
 - [ ] Reenvio e filtros por declarado.
 - [ ] Resposta final completa/acessível.
 - [ ] ≤12 arquivos e gates/relatório completos.
@@ -136,19 +143,20 @@ git diff -- apps/pipeline apps/doctor apps/scheduler apps/dashboard apps/cases/m
 
 Responder no relatório:
 
-1. Qual é a elegibilidade exata e qual teste bloqueia auto-upgrade/WAIT_DOCTOR?
+1. Qual é a elegibilidade exata e qual teste bloqueia correção do auto-upgrade/WAIT_DOCTOR sem esconder sua comparação em voo?
 2. Como atomicidade, actor, active_role e lease são revalidados?
 3. Qual prova preservação de fontes e ausência de reextração?
 4. Qual prova cluster pdf, um job e retry do mesmo case?
 5. Qual dimensão alimenta cada filtro NIR?
 6. Qual teste prova não-herança no reenvio combinado?
-7. Como resposta final apresenta cada componente/razão?
-8. Quais arquivos mudaram e por quê?
-9. Qual a comparação baseline-final com zero failures/errors?
+7. Qual teste prova `Declarado` versus `Detectado` durante o voo, antes da decisão, inclusive após polling/refresh?
+8. Como resposta final apresenta cada componente/razão?
+9. Quais arquivos mudaram e por quê?
+10. Qual a comparação baseline-final com zero failures/errors?
 
 ### Condições automáticas de INCOMPLETO
 
-Protocolo ausente; auto-upgrade bloqueado; correção após médico; role/lease relaxado; parcial/race/job duplo; reextração; fonte apagada; derived residual; retry suprimido/cluster errado; resubmission herda; filtro usa dimensão errada; resposta omite razão/transformação; app proibido/model/FSM tocado; >12 sem revisão; final falha/passed menor; relatório ausente.
+Protocolo ausente; auto-upgrade bloqueado ou invisível durante o voo; CTA/ACK exigido para upgrade; correção após médico; role/lease relaxado; parcial/race/job duplo; reextração; fonte apagada; derived residual; retry suprimido/cluster errado; resubmission herda; filtro usa dimensão errada; resposta omite razão/transformação; app proibido/model/FSM tocado; >12 sem revisão; final falha/passed menor; relatório ausente.
 
 ## Relatório obrigatório
 
@@ -161,7 +169,7 @@ Incluir **Handoff para verificador** com arquivos alterados, comandos exatos de 
 ```text
 Read all artifacts, accepted ADR-0004, approved reports 001-004 and Slice 005 files. Implement ONLY Slice 005. Follow the DeepSeek4-Flash protocol exactly; any missing/failing item or cap violation means INCOMPLETE and no tasks/commit/push.
 
-Adapt safe NIR correction/reprocessing to procedure sets, keep auto-upgrade non-blocking, preserve sources and invalidate v2 derivatives without extraction, enqueue exactly one recoverable pdf-cluster job, support combined corrected resubmission, filter NIR by declared selection, and render declared→detected→authorized with per-component reasons and paired appointment. Preserve locks, roles, ACK/cleanup and no-heredity. Do not touch LLM, doctor, CHD, dashboard, models/migrations or FSM.
+Adapt safe NIR correction/reprocessing to procedure sets, render declared-versus-detected for in-flight auto-upgrade without CTA/ACK, preserve sources and invalidate v2 derivatives without extraction, enqueue exactly one recoverable pdf-cluster job, support combined corrected resubmission, filter NIR by declared selection, and render final declared→detected→authorized with per-component reasons and paired appointment. Preserve locks, roles, ACK/cleanup and no-heredity. Do not touch LLM, doctor, CHD, dashboard, models/migrations or FSM.
 
 Create /tmp/support-combined-eda-colonoscopy-workflow-slice-005-report.md; if complete mark only Slice 005, commit, push, reply REPORT_PATH and STOP.
 ```

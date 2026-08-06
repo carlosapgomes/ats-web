@@ -27,7 +27,7 @@ Case com 1–2 declarados
 → WAIT_DOCTOR com relatório neutro legível
 ```
 
-Decisão por componente e prior histories completos são Slice 003.
+Decisão médica por componente e apresentação do histórico são Slice 003. Como o lookup atual alimenta o LLM2 dentro do orchestrator, este slice já deve tornar o backend de prior-case procedure-aware conforme D10; adiar isso faria o LLM2 v2 cruzar decisões case-level.
 
 ## Protocolo obrigatório DeepSeek4-Flash
 
@@ -80,6 +80,8 @@ Rodar base comum para cada detectado. Exceção de corpo estranho só EDA. Prior
 
 Uma chamada recebe exatamente os detectados e resultados de policy; resposta contém exatamente um item por tipo, sem duplicata/omissão/adição. Reconciliar deterministicamente cada item. Suporte global é máximo explícito `none < anesthesist < anesthesist_icu`.
 
+Antes da chamada, montar contexto anterior separado para cada detectado via `lookup_prior_case_context(procedure_type=...)` e semântica fechada D10: negativa médica vem de `CaseProcedure.doctor_disposition/reason`; negativa global de agendamento só se aplica a row aprovada; aprovação usa `doctor_approved`. Preservar janela de sete dias, precedência, normalização e deduplicação. `prior_denial_count_7d` conta somente negativas do procedimento, nunca `doctor_approved`. O payload LLM2 identifica o `procedure_type` de cada contexto; não mistura nem duplica contexto entre componentes.
+
 ### R7. Chegada ao médico
 
 Happy paths EDA, Colonoscopia e combinado chegam `WAIT_DOCTOR`. Relatório mínimo mostra história comum, dois procedimentos/recomendações quando combinados e alerta medicamentoso existente. Não alterar form/submit médico ainda.
@@ -96,7 +98,7 @@ Casos/artefatos 1.1 históricos continuam renderizáveis. Testes EDA/Colonoscopi
 
 - schemas LLM1/LLM2 (preferir arquivos novos v2 + adapters estreitos, máximo 3);
 - services LLM1/LLM2;
-- orchestrator e scope detector;
+- orchestrator, scope detector e `prior_case.py`;
 - até dois arquivos policy/profile/signals;
 - serviço de projeção de procedimentos;
 - seed prompts e admin form;
@@ -118,16 +120,18 @@ Justifique cada arquivo. Não tocar scheduler/dashboard/intake templates/correct
 7. combined→single e mismatch não chegam médico/LLM2;
 8. policy executa uma vez por componente e foreign-body não vaza;
 9. uma chamada LLM2; igualdade exata do conjunto;
-10. suporte mais restritivo;
-11. combinado chega WAIT_DOCTOR com duas recomendações;
-12. EDA/Colon simples continuam;
-13. invalid v2 não persiste parcial;
-14. schema 1.1 ainda renderiza;
-15. flag falsa após criação não bloqueia pipeline.
+10. prior context por componente cobre EDA negada + Colon aprovada sem cruzar decisão;
+11. negativa de agendamento global só aparece para row aprovada; janela/dedup permanecem e aprovação não aumenta `prior_denial_count_7d`;
+12. suporte mais restritivo;
+13. combinado chega WAIT_DOCTOR com duas recomendações;
+14. EDA/Colon simples continuam;
+15. invalid v2 não persiste parcial;
+16. schema 1.1 ainda renderiza;
+17. flag falsa após criação não bloqueia pipeline.
 
 ### GREEN/REFACTOR
 
-Implementar dispatch por coleção, não `if combined` espalhado. Extrair somente helpers necessários. Não migrar prior-case completo nem form médico.
+Implementar dispatch por coleção, não `if combined` espalhado. Extrair somente helpers necessários. Migrar o backend de prior-case exigido pelo LLM2 conforme D10, mas não implementar sua UI nem o form médico.
 
 ## Inspeções obrigatórias
 
@@ -135,6 +139,7 @@ Implementar dispatch por coleção, não `if combined` espalhado. Extrair soment
 rg -n "schema_version.*2\.0|requested_procedures|procedure_recommendations|common_preop" apps/pipeline apps/doctor
 rg -n "exam_llm[12]_(system|user)" apps/pipeline apps/llm apps/admin_ui
 rg -n "PROCEDURE_SELECTION_AUTO_UPGRADED|CASE_PROCEDURES_DETECTED|detection_status" apps/cases apps/pipeline
+rg -n "lookup_prior_case_context|doctor_disposition|doctor_approved|appointment_denied|procedure_type" apps/pipeline/prior_case.py apps/pipeline/orchestrator.py
 rg -n "foreign_body|allows_foreign_body|evaluate_preop_policy" apps/pipeline/policy apps/pipeline/orchestrator.py
 rg -n "COLONOSCOPY_INTAKE_ENABLED" apps/pipeline apps/doctor apps/llm || true
 rg -n "run\(|complete\(" apps/pipeline/orchestrator.py apps/pipeline/llm1_service.py apps/pipeline/llm2_service.py
@@ -152,7 +157,8 @@ Inspecione que número de chamadas é garantido por teste (rg sozinho não prova
 - [ ] Uma chamada por estágio em combinado.
 - [ ] Matriz de reconciliação completa.
 - [ ] Combined happy path chega médico; incompatíveis não.
-- [ ] LLM2 conjunto exato e suporte máximo.
+- [ ] LLM2 conjunto exato, prior context separado e suporte máximo.
+- [ ] Histórico anterior usa disposição/razão da row sem cruzar componente.
 - [ ] Foreign-body apenas EDA.
 - [ ] Legacy 1.1 legível.
 - [ ] Nenhum form médico/CHD/dashboard antecipado.
@@ -167,18 +173,20 @@ Inspecione que número de chamadas é garantido por teste (rg sozinho não prova
 4. Qual teste prova combined→single retorna NIR?
 5. Como declaration fica imutável?
 6. Como policy diverge sem duplicação?
-7. Como suporte global é ordenado?
-8. Como 1.1 continua legível?
-9. Alguma flag aparece downstream?
-10. Arquivos/cap e baseline vs final?
+7. Como prior lookup distingue negativa, aprovação e negativa de agenda por componente?
+8. Qual teste preserva janela de sete dias e deduplicação?
+9. Como suporte global é ordenado?
+10. Como 1.1 continua legível?
+11. Alguma flag aparece downstream?
+12. Arquivos/cap e baseline vs final?
 
 ### Condições automáticas de INCOMPLETO
 
-Ausência de baseline/RED/gate/relatório; duas chamadas por estágio; schema aceita duplicata/outro tipo; upgrade apaga declaração ou depende só de afirmação sem evidência; combined→single chega médico; mismatch passa; LLM2 altera conjunto; foreign-body vaza; suporte não usa máximo; 1.1 quebra; flag downstream; form médico/CHD antecipado; CPRE/preparo/hard rule; >18 sem revisão; teste removido para ficar verde; final falha/passed menor.
+Ausência de baseline/RED/gate/relatório; duas chamadas por estágio; schema aceita duplicata/outro tipo; upgrade apaga declaração ou depende só de afirmação sem evidência; combined→single chega médico; mismatch passa; LLM2 altera conjunto; prior lookup usa decisão global isolada, cruza componente, perde janela/dedup ou omite aprovação; foreign-body vaza; suporte não usa máximo; 1.1 quebra; flag downstream; form médico/CHD antecipado; CPRE/preparo/hard rule; >18 sem revisão; teste removido para ficar verde; final falha/passed menor.
 
 ## Relatório obrigatório
 
-`/tmp/support-combined-eda-colonoscopy-workflow-slice-002-report.md` com matriz, baseline, RED/GREEN/REFACTOR, snippets dos schemas/prompts/reconciliação/policy/orchestrator/presenter, contagem de chamadas, inspeções, diff/cap, quality gate, baseline-final, gates e Handoff para verificador com reruns/checklist R1–R9.
+`/tmp/support-combined-eda-colonoscopy-workflow-slice-002-report.md` com matriz, baseline, RED/GREEN/REFACTOR, snippets dos schemas/prompts/reconciliação/policy/orchestrator/prior lookup/presenter, matriz de contexto anterior por componente, contagem de chamadas, inspeções, diff/cap, quality gate, baseline-final, gates e Handoff para verificador com reruns/checklist R1–R9.
 
 ## Prompt pronto
 
@@ -187,7 +195,7 @@ Read AGENTS.md, PROJECT_CONTEXT.md, all OpenSpec artifacts for support-combined-
 
 Follow the DeepSeek4-Flash protocol exactly: clean BASE_REF, full pytest baseline before edits, requirement matrix, real RED, minimal GREEN, narrow clean-code/DRY/YAGNI refactor, all rg/diff checks, exact full gate and passed comparison. Any missing/failing evidence, final failure/error, passed_final < baseline, or >18 files without approval means INCOMPLETE: no task update/commit/push.
 
-Deliver schema 2.0 with one shared-history LLM1 call, conservative procedure reconciliation including audited single→combined upgrade, per-procedure deterministic policy, one exact-set LLM2 call, strictest global support, neutral managed prompts and combined arrival at WAIT_DOCTOR. Preserve EDA/Colon simple and legacy schema 1.1. Do not implement doctor per-component decisions, prior histories UI, CHD, NIR correction, dashboard, CPRE or FSM changes.
+Deliver schema 2.0 with one shared-history LLM1 call, conservative procedure reconciliation including audited single→combined upgrade, per-procedure deterministic policy, procedure-aware prior contexts following D10, one exact-set LLM2 call, strictest global support, neutral managed prompts and combined arrival at WAIT_DOCTOR. Preserve EDA/Colon simple, the seven-day prior window/dedup and legacy schema 1.1. Do not implement doctor per-component decisions, prior-history UI, CHD, NIR correction, dashboard, CPRE or FSM changes.
 
 Create /tmp/support-combined-eda-colonoscopy-workflow-slice-002-report.md, then if complete mark only Slice 002, commit, push, reply REPORT_PATH=... and STOP.
 ```

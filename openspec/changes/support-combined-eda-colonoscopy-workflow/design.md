@@ -29,7 +29,7 @@ LLM1 schema 1.1 mantém história clínica e procedimento dentro do envelope leg
 7. CHD agenda somente procedimentos aprovados e não altera o conjunto.
 8. Histórico é append-only via eventos; models guardam a projeção operacional atual.
 9. Novos artefatos usam schema 2.0; históricos 1.1 são lidos, não reescritos.
-10. Os 17 estados FSM permanecem.
+10. Os **18 valores executáveis atuais** de `CaseStatus` permanecem; o change não adiciona, remove nem renomeia estados FSM.
 
 ## 3. Decisões arquiteturais
 
@@ -62,7 +62,14 @@ class CaseProcedure(models.Model):
 
     class Meta:
         constraints = [UniqueConstraint(fields=["case", "procedure_type"], ...)]
+        indexes = [
+            Index(fields=["procedure_type", "declared_by_nir", "case"]),
+            Index(fields=["procedure_type", "detection_status", "case"]),
+            Index(fields=["procedure_type", "doctor_disposition", "case"]),
+        ]
 ```
+
+A constraint cobre lookup por caso; os índices dimensionais cobrem os predicados planejados de NIR, médico, CHD e analytics antes que essas filas sejam migradas. O Slice 001 os cria e testa; slices consumidores devem validar as queries reais e somente ajustar índice com evidência (`EXPLAIN`/plano de query), nunca adiar toda a indexação ao cutover.
 
 Não adicionar row genérica `combined`: combinação é o conjunto das duas rows. Não adicionar CPRE. Não duplicar `doctor`, timestamps e support em cada row: ator/instante global continuam no `Case`/eventos, e razão é o único dado verdadeiramente por componente.
 
@@ -83,13 +90,26 @@ Dual-write fora do serviço central é proibido. `CaseProcedure` é a fonte alvo
 
 ### D3. Migration preserva dados sem inferência
 
-Backfill cria uma row declarada correspondente ao `exam_type` atual. Para casos já decididos:
+O backfill cria exatamente uma row com `declared_by_nir=True` e `procedure_type=Case.exam_type`; nunca cria combinação histórica nem reprocessa o caso. O mapeamento é fechado e deve cobrir os **18** valores atuais de `CaseStatus`:
 
-- `doctor_decision=accept` ou downstream: disposição correspondente pode ser `approved` somente quando a semântica anterior é inequívoca;
-- `doctor_decision=deny`: `denied` com `doctor_reason` existente;
-- antes da decisão: `pending`.
+| Condição histórica, avaliada nesta ordem | `detection_status` |
+| --- | --- |
+| `NEW`, `R1_ACK_PROCESSING`, `EXTRACTING` ou `LLM_STRUCT` | `pending` |
+| `LLM_SUGGEST`, `R2_POST_WIDGET`, `WAIT_DOCTOR`, `DOCTOR_DENIED`, `DOCTOR_ACCEPTED`, `R3_POST_REQUEST`, `WAIT_APPT`, `APPT_CONFIRMED` ou `APPT_DENIED` | `detected` |
+| `FAILED`, `R1_FINAL_REPLY_POSTED`, `WAIT_R1_CLEANUP_THUMBS`, `CLEANUP_RUNNING` ou `CLEANED` com marcador downstream inequívoco | `detected` |
+| `FAILED`, `R1_FINAL_REPLY_POSTED`, `WAIT_R1_CLEANUP_THUMBS`, `CLEANUP_RUNNING` ou `CLEANED` sem marcador downstream inequívoco | `pending` |
 
-Detecção histórica não deve ser inferida de texto clínico nem de heurística nova. Para casos que já alcançaram `WAIT_DOCTOR` ou estado posterior após o scope gate, a seleção operacional antiga é evidência inequívoca de match e pode ser projetada como detectada; casos anteriores ao gate ou em manual review permanecem `pending`, salvo payload/evento estruturado inequívoco já persistido. A regra exata deve ser codificada por grupos de status e testada na migration. Nenhum JSON, evento, status, PDF ou agenda é alterado. Produção não exige reset.
+Para a linha condicional, marcador downstream inequívoco significa `doctor_decision in {accept, deny}`, `appointment_status` preenchido ou existência de evento `LLM2_OK`, `LLM2_FAILED`, `CASE_READY_FOR_DOCTOR`, `DOCTOR_ACCEPT`, `DOCTOR_DENY` ou `CASE_READY_FOR_SCHEDULER`. `LLM1_OK` isolado **não** basta, pois pode anteceder manual review de escopo. A migration não lê texto clínico nem inventa `not_detected`.
+
+A disposição médica também usa tabela fechada, independentemente do status:
+
+| Campo legado | `doctor_disposition` | Razão |
+| --- | --- | --- |
+| `doctor_decision="accept"` | `approved` | vazia |
+| `doctor_decision="deny"` | `denied` | cópia exata de `doctor_reason`, inclusive vazia |
+| qualquer outro valor | `pending` | vazia |
+
+Status downstream sem `doctor_decision` não autoriza inferir aprovação. Forward e reverse devem ser determinísticos e testados com representantes de cada linha, incluindo os cinco estados condicionais com e sem marcador. Nenhum JSON, evento, status, PDF ou agenda é alterado. Produção não exige reset.
 
 ### D4. API de domínio centraliza conjuntos
 
@@ -143,7 +163,7 @@ exam_llm2_system
 exam_llm2_user
 ```
 
-Prompts descrevem história comum e coleção de procedimentos. Regras determinísticas/thresholds permanecem em código; prompt não vira rule engine. Seed/admin/fallback usam conteúdo equivalente e idempotente. Prompts antigos permanecem no banco, inicialmente ativos se necessário para rollback, e são desativados somente após drenagem/cutover comprovados. Não deletar histórico de versões.
+Prompts descrevem história comum e coleção de procedimentos. Regras determinísticas/thresholds permanecem em código; prompt não vira rule engine. Seed/admin/fallback usam conteúdo equivalente e idempotente. **O Slice 002 troca o dispatch de todos os novos jobs para os quatro nomes neutros.** Prompts antigos permanecem no banco e podem continuar ativos temporariamente somente para rollback/casos drenados; o Slice 007 remove qualquer resolução/dispatch residual e os desativa após drenagem comprovada. Não deletar histórico de versões.
 
 ### D7. Reconciliação de detecção é conservadora
 
@@ -201,7 +221,16 @@ Evento `DOCTOR_PROCEDURE_DECISIONS_RECORDED` inclui lista de `{procedure_type, d
 
 ### D10. Históricos anteriores são consultados por procedimento
 
-`lookup_prior_case_context` evolui para receber `procedure_type`. Caso combinado executa duas consultas lógicas e renderiza seções EDA/Colonoscopia. Se o mesmo caso anterior combinado servir aos dois componentes, a UI pode identificá-lo uma vez visualmente, mas cada seção deve manter sua decisão por componente. Não usar igualdade de uma combinação inteira.
+`lookup_prior_case_context` evolui para receber `procedure_type` e selecionar candidatos pela row `CaseProcedure` correspondente, nunca por igualdade da combinação inteira nem por `Case.doctor_decision` isolado. O Slice 002 entrega o lookup/backend usado pelo LLM2 v2; o Slice 003 entrega sua apresentação médica e regressões com as novas decisões.
+
+Para cada componente anterior, a decisão contextual é determinada nesta ordem fechada:
+
+1. row com `doctor_disposition=denied` → `doctor_denied`, usando `CaseProcedure.doctor_reason` e `Case.doctor_decided_at`;
+2. row com `doctor_disposition=approved` e `Case.appointment_status=denied` → `appointment_denied`, usando razão/instante/ator do agendamento global;
+3. row com `doctor_disposition=approved` → `doctor_approved`, usando `Case.doctor_decided_at` e ator médico;
+4. row pending ou timestamps fora da janela → não entra no contexto.
+
+Uma negativa global de agendamento aplica-se a cada row que estava aprovada, nunca a componente medicamente negado. Preservar janela atual de sete dias, ordenação temporal, normalização de razão e deduplicação de corrected resubmission. `prior_denial_count_7d` continua contando somente `doctor_denied|appointment_denied` do procedimento solicitado; `doctor_approved` pode ser o contexto mais recente, mas nunca aumenta esse contador. Caso combinado executa duas consultas lógicas; o mesmo `prior_case_id` pode aparecer nas duas seções, cada qual com sua decisão/razão correta. O contrato de `PriorCaseSummary` deve aceitar aprovação, além das negativas legadas, para tornar verificável o cenário “EDA negada / Colonoscopia aceita”.
 
 ### D11. CHD agenda o conjunto aprovado uma vez
 
@@ -279,7 +308,7 @@ Slice 007 deve:
 1. provar por `rg`/testes que nenhum reader/write operacional usa `Case.exam_type`;
 2. remover coluna, enum combinado transitório e adapters de dual-write;
 3. tornar `CaseProcedure` única fonte operacional;
-4. trocar prompts canônicos para os quatro neutros;
+4. remover resolução/dispatch residual dos oito nomes antigos, desativá-los após drenagem e provar que novos jobs continuam usando somente os quatro nomes neutros introduzidos no Slice 002;
 5. preservar adapters de leitura schema 1.1;
 6. atualizar fixtures/factories sem defaults silenciosos.
 
@@ -287,9 +316,9 @@ Se algum consumidor residual depender do campo, Slice 007 é `INCOMPLETE`; não 
 
 ### D19. Rollout e rollback
 
-Rollout exige backup, janela controlada, imagem nova, writers parados durante migrations, quatro prompts neutros ativos e prechecks binários. Casos em `LLM_STRUCT/LLM_SUGGEST` devem ser drenados ou tratados por procedimento explícito antes do cutover; não misturar imagens old/new escrevendo schemas diferentes.
+Rollout exige backup, janela controlada, imagem nova, writers parados durante migrations, exatamente uma versão ativa para cada nome neutro, nenhuma versão legada ativa após cutover e prechecks binários. Casos em `LLM_STRUCT/LLM_SUGGEST` devem ser drenados ou tratados por procedimento explícito antes do cutover; não misturar imagens old/new escrevendo schemas diferentes.
 
-Rollback preferido: flag false e imagem nova, preservando schema novo. Voltar à imagem antiga é exceção e exige bridge executável que recrie/backfille `exam_type` de modo fail-fast a partir de `CaseProcedure`, com regra que recuse combinação ou converta somente após drenagem comprovada. Forward posterior remove novamente a ponte somente com writers antigos parados e assert binário.
+Rollback preferido: flag false e imagem nova, preservando schema novo. Voltar à imagem antiga é exceção e exige bridge executável que recrie/backfille `exam_type` de modo fail-fast a partir de `CaseProcedure`, com regra que recuse combinação ou converta somente após drenagem comprovada. Com todos os writers parados, a bridge deve reativar exatamente uma versão compatível de cada nome legado e verificá-las antes de subir imagem antiga. Forward posterior para novamente writers antigos, garante uma versão ativa por nome neutro, desativa nomes legados, remove a ponte e executa asserts binários antes de subir a imagem nova.
 
 ### D20. ADR-0004 antes de código
 
@@ -300,8 +329,8 @@ Este design supera parcialmente ADR-0003: fonte única, bloqueio de mixed, envel
 Foram escolhidos **8 slices**. Menos juntaria intake/model/pipeline/decisão em mudanças impossíveis de revisar; mais criaria slices horizontais de schema, templates ou testes sem fluxo observável.
 
 1. **Intake + projeção**: NIR cria e acompanha um caso combinado; ponte mantém sistema verde.
-2. **Pipeline neutro**: história única, detecção/reconciliação, policy/LLM2 por componente e chegada ao médico. É o slice central e possui cap maior explicitamente.
-3. **Decisão médica**: decisão/razão por componente, inclusão sem rerun, histórico e filtros médicos.
+2. **Pipeline neutro**: história única, detecção/reconciliação, policy/LLM2 e lookup anterior por componente, além da chegada ao médico. É o slice central e possui cap maior explicitamente.
+3. **Decisão médica**: decisão/razão por componente, inclusão sem rerun, apresentação do histórico e filtros médicos.
 4. **CHD**: conjunto aprovado, uma agenda casada e filtros/histórico.
 5. **NIR**: correção/reprocessamento, reenvio, filtros e resposta final.
 6. **Analytics**: dimensões, volumes e conversões.

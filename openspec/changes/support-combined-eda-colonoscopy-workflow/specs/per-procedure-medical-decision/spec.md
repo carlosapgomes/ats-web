@@ -71,15 +71,23 @@ O sistema MUST sugerir o nível mais restritivo entre recomendações por proced
 
 ### Requirement: Histórico é separado por procedimento
 
-O relatório médico MUST consultar contexto anterior de EDA e Colonoscopia independentemente.
+O relatório médico MUST consultar contexto anterior de EDA e Colonoscopia independentemente pela `CaseProcedure` correspondente. Negativa médica MUST usar disposição/razão do componente; negativa global de agendamento MUST aplicar-se somente a componente previamente aprovado; aprovação anterior MUST permanecer representável. A janela temporal e a deduplicação vigentes MUST ser preservadas; aprovação anterior MUST NOT incrementar o contador de negativas.
 
 #### Scenario: Histórico distinto
 
 - **GIVEN** paciente possui EDA prévia negada e Colonoscopia prévia aceita
 - **WHEN** caso combinado chega ao médico
-- **THEN** seção EDA mostra o histórico EDA
-- **AND** seção Colonoscopia mostra o histórico Colonoscopia
-- **AND** uma decisão não é atribuída ao procedimento errado.
+- **THEN** seção EDA mostra `doctor_denied` e a razão da row EDA
+- **AND** seção Colonoscopia mostra `doctor_approved` a partir da row Colonoscopia
+- **AND** ambas podem referenciar o mesmo caso anterior sem compartilhar decisão ou razão.
+
+#### Scenario: Negativa global de agendamento
+
+- **GIVEN** caso anterior combinado teve EDA negada pelo médico e Colonoscopia aprovada, seguida de agenda negada
+- **WHEN** histórico por procedimento é consultado dentro da janela vigente
+- **THEN** EDA mantém `doctor_denied`
+- **AND** somente Colonoscopia mostra `appointment_denied`
+- **AND** corrected resubmissions continuam deduplicados.
 
 ### Requirement: Concorrência, permissão e FSM são preservadas
 

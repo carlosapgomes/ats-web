@@ -57,7 +57,7 @@ Dump PostgreSQL com `set -euo pipefail`/falha propagada, marker + mínimo de con
 
 ### R3. Preflight de dados/estados
 
-Queries machine-readable verificam: nenhum Case sem 1–2 CaseProcedure; nenhuma duplicata; combinações válidas; estados `LLM_STRUCT/LLM_SUGGEST` drenados ou listados para tratamento; quatro prompts neutros ativos exatamente uma versão; flag false. Assert mismatch termina não zero.
+Queries machine-readable verificam: nenhum Case sem 1–2 CaseProcedure; nenhuma duplicata; combinações válidas; estados `LLM_STRUCT/LLM_SUGGEST` drenados ou listados para tratamento; **exatamente uma versão ativa para cada um dos quatro nomes de prompt neutro** (versões históricas inativas podem coexistir); zero versão ativa dos oito nomes legados após o cutover; flag false. Assert mismatch termina não zero.
 
 ### R4. Deploy serializado
 
@@ -73,11 +73,11 @@ Desligar flag/recriar web, manter imagem nova/schema, drenar casos e preservar p
 
 ### R7. Bridge para imagem antiga
 
-Exceção exige writers parados, ausência comprovada de casos combinados/incompatíveis em voo e SQL/script fail-fast que recria `exam_type`, backfilla somente seleção única inequívoca, recusa `eda_colonoscopy`/ambiguidade e usa `psql -v ON_ERROR_STOP=1`, `-At` e asserts binários antes de subir old writers. Forward: build new → stop old → migrations/drop bridge → assert schema → up new. Cada bloco tem `set -euo pipefail` próprio.
+Exceção exige writers parados, ausência comprovada de casos combinados/incompatíveis em voo e SQL/script fail-fast que recria `exam_type`, backfilla somente seleção única inequívoca, recusa `eda_colonoscopy`/ambiguidade e usa `psql -v ON_ERROR_STOP=1`, `-At` e asserts binários. Ainda com writers parados, reativar exatamente uma versão compatível de cada um dos oito nomes legados e verificar neutral/legacy mode antes de subir old writers. Forward: build new → stop old → garantir exatamente uma versão ativa por nome neutro → desativar legados → migrations/drop bridge → assert schema/prompts → up new. Cada bloco tem `set -euo pipefail` próprio.
 
 ### R8. Manual/contexto/ADR/specs
 
-Atualizar manual com intake combinado, upgrade, decisão por componente, agendamento casado e resposta final; PROJECT_CONTEXT com schema v2/model/semântica de filtros; ADR-0003 superseded-in-part por ADR-0004; docs index. Não alterar OpenSpec para mascarar implementação divergente.
+Atualizar manual com intake combinado, upgrade, decisão por componente, agendamento casado e resposta final; PROJECT_CONTEXT com schema v2/model/semântica de filtros; ADR-0003 superseded-in-part por ADR-0004; docs index. A ADR-0004 já deve existir e estar aceita desde a pré-condição do Slice 001: este slice apenas ajusta status/links finais, nunca cria ou decide a ADR. Não alterar OpenSpec para mascarar implementação divergente.
 
 ### R9. Contratos automatizados
 
@@ -99,14 +99,14 @@ Proibido apps/models/migrations/settings/Compose/pipeline/prompts/FSM/queries de
 Testes devem falhar antes por ausência de:
 
 1. backup pipefail/content/tar asserts;
-2. preflight rows/duplicates/states/prompts;
+2. preflight rows/duplicates/states e exatamente uma versão ativa por nome neutro, com legados inativos;
 3. stop all writers before migration;
 4. verify schema/prompts before up;
 5. flag somente web e ativação pós-smoke;
 6. smoke matrix completa;
 7. preferred rollback preserves new image/data/prompts;
-8. old-image bridge refuses combined/ambiguous and asserts binary;
-9. safe forward ordering;
+8. old-image bridge refuses combined/ambiguous, reativa/verifica exatamente uma versão por nome legado e asserts binary;
+9. safe forward reestabelece modo neutro e desativa legados antes de subir writers novos;
 10. manual/context/ADR links.
 
 ## Inspeções obrigatórias
@@ -154,7 +154,7 @@ Responder no relatório:
 
 ### Condições automáticas de INCOMPLETO
 
-Protocolo ausente; comando depende de shell anterior; pipeline backup fail-open; assert é só comentário/SELECT visual; writer antigo ativo em migration/bridge; flag em worker; prompt v2 desativado com caso em voo; rollback destrutivo; bridge converte combinado silenciosamente; old image sobe antes de assert; forward drop antes de stop; zero-downtime claim; bug de código corrigido fora de escopo; app/Compose/settings alterado; >8 sem revisão; gate falha/passed menor; relatório ausente.
+Protocolo ausente; comando depende de shell anterior; pipeline backup fail-open; assert é só comentário/SELECT visual; writer antigo ativo em migration/bridge; flag em worker; algum nome neutro tem zero ou múltiplas versões ativas; nome legado permanece ativo após cutover; prompt v2 desativado com caso em voo; rollback destrutivo; bridge converte combinado silenciosamente; imagem antiga sobe sem exatamente uma versão ativa por nome legado; old image sobe antes de assert; forward não reestabelece modo neutro/legados inativos antes de subir new writers; forward drop antes de stop; ADR-0004 criada/decidida tardiamente neste slice; zero-downtime claim; bug de código corrigido fora de escopo; app/Compose/settings alterado; >8 sem revisão; gate falha/passed menor; relatório ausente.
 
 ## Relatório obrigatório
 
@@ -167,7 +167,7 @@ Incluir **Handoff para verificador** com arquivos alterados, comandos exatos de 
 ```text
 Read all artifacts, accepted ADR-0004, approved reports 001-007, final code/schema/prompts and the prior colonoscopy runbook. Implement ONLY Slice 008 documentation/contracts on the required branch. Follow the DeepSeek4-Flash protocol exactly. Any non-executable/human-only assert, unsafe order, missing test, code/infra diff, failing gate or cap violation means INCOMPLETE and no tasks/commit/push.
 
-Produce a CRITICAL fail-closed rollout: verified DB/media backups, machine-readable projection/state/prompt preflight, new-image serialized migration with all writers stopped, flag-false smoke matrix then web-only activation, monitoring, preferred new-image rollback, and an exceptional old-image bridge that refuses combined/ambiguous rows and uses independent fail-fast binary asserts in rollback and forward. Align manual, context and ADR links; add adversarial doc tests and independent verifier. Do not change business code, models, migrations, settings, Compose, pipeline, prompts or dashboard formulas.
+Produce a CRITICAL fail-closed rollout: verified DB/media backups, machine-readable projection/state/prompt preflight, new-image serialized migration with all writers stopped, flag-false smoke matrix then web-only activation, monitoring, preferred new-image rollback, and an exceptional old-image bridge that refuses combined/ambiguous rows, safely switches prompt activation to legacy mode, and restores neutral-only mode during forward with independent fail-fast binary asserts. Align manual, context and ADR links; add adversarial doc tests and independent verifier. Do not change business code, models, migrations, settings, Compose, pipeline, prompts or dashboard formulas.
 
 Create /tmp/support-combined-eda-colonoscopy-workflow-slice-008-report.md; if complete mark only Slice 008/true DoD items, commit, push, reply REPORT_PATH and STOP.
 ```

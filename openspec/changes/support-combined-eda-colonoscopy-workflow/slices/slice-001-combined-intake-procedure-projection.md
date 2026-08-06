@@ -45,15 +45,15 @@ Este slice será implementado por um modelo rápido e com tendência a concluir 
 
 ### R1. Projeção mínima por procedimento
 
-Adicionar `ProcedureType`, `DetectionStatus`, `DoctorDisposition` e `CaseProcedure` conforme design D1, com unique constraint `(case, procedure_type)`. Não adicionar CPRE, tabela de appointment ou framework genérico.
+Adicionar `ProcedureType`, `DetectionStatus`, `DoctorDisposition` e `CaseProcedure` conforme design D1, com unique constraint `(case, procedure_type)` e os três índices dimensionais fechados em D1 para declarado, detectado e autorizado. Não adicionar CPRE, tabela de appointment ou framework genérico.
 
 ### R2. Backfill conservador
 
-Migration cria exatamente uma row declarada correspondente ao `Case.exam_type` atual; não reprocessa nem altera status/eventos/PDF/JSON/agenda. Casos que já alcançaram `WAIT_DOCTOR` ou estado posterior após scope gate podem projetar o tipo antigo como detectado; anteriores ao gate/manual review permanecem pending salvo payload estruturado inequívoco. Definir/testar grupos de status e regra conservadora de disposição médica histórica. Migration forward e reverse devem ser determinísticas.
+Migration cria exatamente uma row declarada correspondente ao `Case.exam_type` atual; não reprocessa nem altera status/eventos/PDF/JSON/agenda. Implementar literalmente as duas tabelas fechadas de D3: cobrir os 18 valores de `CaseStatus`, os cinco estados condicionais com e sem marcador downstream, `LLM1_OK` isolado insuficiente e o mapeamento exato de `doctor_decision`. Não inferir `not_detected`, combinação, aprovação por status ou conteúdo clínico. Forward e reverse devem ser determinísticos.
 
 ### R3. Serviço único de declaração
 
-Centralizar criação/atualização de conjunto declarado, validação de `eda|colonoscopy|eda_colonoscopy`, ordenação/label e ponte transitória. Write atômico: falha em uma row não deixa caso/projeção parcial. Nenhuma view escreve rows diretamente.
+Centralizar criação/atualização de conjunto declarado, validação de `eda|colonoscopy|eda_colonoscopy`, ordenação/label e ponte transitória. Write atômico: falha em uma row não deixa caso/projeção parcial. Nenhuma view escreve rows diretamente. **O fluxo legado ativo `correct_case_exam_type()` deve ser reroteado neste slice pelo mesmo serviço para correção single→single**, atualizando `CaseProcedure.declared_by_nir` e a ponte sob a transação/lock já existentes. Não ampliar ainda elegibilidade, form ou reason codes para combinado.
 
 ### R4. Intake combinado e flag
 
@@ -78,12 +78,16 @@ Esperados (preferir consolidação):
 1. `apps/cases/models.py`;
 2. uma migration nova em `apps/cases/migrations/`;
 3. `apps/cases/services.py` ou módulo coeso único para seleção;
-4. `apps/intake/forms.py`;
-5. `apps/intake/services.py`;
-6. templates/JS de upload e acompanhamento estritamente necessários;
-7. até três arquivos de teste focados.
+4. `apps/intake/forms.py` somente se a seleção for validada pelo form;
+5. `apps/intake/services.py`, incluindo o reroteamento da correção legada;
+6. `templates/intake/intake_home.html`;
+7. `templates/intake/_my_cases_content.html`;
+8. `templates/intake/case_detail.html`;
+9. `templates/intake/my_cases.html` somente se necessário ao controle de acompanhamento;
+10. `static/js/upload.js`;
+11. até três arquivos de teste focados.
 
-**Cap: 11 arquivos produto/teste, ignorando `tasks.md`.** Acima disso: INCOMPLETE sem aprovação prévia do planner. Justifique cada extra no relatório.
+**Cap: 13 arquivos produto/teste, ignorando `tasks.md`.** Arquivo opcional não precisa ser tocado; acima do cap: INCOMPLETE sem aprovação prévia do planner. Justifique cada arquivo no relatório.
 
 ## Fora de escopo/proibido
 
@@ -91,7 +95,7 @@ Esperados (preferir consolidação):
 - decisão médica por componente;
 - CHD/dashboard;
 - remoção de `Case.exam_type`;
-- corrected resubmission/correção NIR (Slice 005);
+- corrected resubmission e expansão da UI/elegibilidade de correção para combinado (Slice 005); o reroteamento interno obrigatório do fluxo single→single existente pertence a este slice;
 - FSM/roles/permissões;
 - CPRE ou terceiro procedimento.
 
@@ -101,16 +105,18 @@ Esperados (preferir consolidação):
 
 Cobertura mínima:
 
-1. constraint impede duplicata do mesmo procedimento;
-2. migration EDA/Colon cria uma row e preserva campos/eventos;
+1. constraint impede duplicata do mesmo procedimento e migration contém os índices D1;
+2. migration cobre as tabelas D3, inclusive os 18 estados e condicionais, preservando campos/eventos;
 3. combinado cria um caso e exatamente duas rows;
 4. lote de N PDFs cria N casos, nunca 2N;
 5. ausência/valor inválido não cria nada;
 6. flag falsa rejeita colon e combinado, aceita EDA;
 7. falha transacional não deixa rows/caso parcial;
-8. cards/detalhe exibem labels simples/combinado pela projeção;
-9. evento contém conjunto ordenado sem texto clínico;
-10. regressões de upload/anexos existentes passam.
+8. correção legada EDA→Colon e Colon→EDA atualiza ponte e projeção declarada atomicamente;
+9. falha na projeção durante correção faz rollback também de `Case.exam_type`, derivados, eventos e FSM;
+10. cards/detalhe exibem labels simples/combinado pela projeção;
+11. evento contém conjunto ordenado sem texto clínico;
+12. regressões de upload, correção e anexos existentes passam.
 
 Registre comando RED, testes falhando e motivo funcional esperado.
 
@@ -125,9 +131,10 @@ Eliminar lógica duplicada de parsing/labels criada no slice; não generalizar p
 ## Inspeções obrigatórias
 
 ```bash
-rg -n "class (ProcedureType|CaseProcedure|DetectionStatus|DoctorDisposition)|UniqueConstraint" apps/cases
+rg -n "class (ProcedureType|CaseProcedure|DetectionStatus|DoctorDisposition)|UniqueConstraint|declared_by_nir.*detection_status|doctor_disposition" apps/cases
+rg -n "NEW|R1_ACK_PROCESSING|EXTRACTING|LLM_STRUCT|LLM_SUGGEST|R2_POST_WIDGET|WAIT_DOCTOR|DOCTOR_DENIED|DOCTOR_ACCEPTED|R3_POST_REQUEST|WAIT_APPT|APPT_CONFIRMED|APPT_DENIED|FAILED|R1_FINAL_REPLY_POSTED|WAIT_R1_CLEANUP_THUMBS|CLEANUP_RUNNING|CLEANED" apps/cases/migrations
 rg -n "eda_colonoscopy|EDA \+ Colonoscopia|COLONOSCOPY_INTAKE_ENABLED" apps/intake templates/intake static/js/upload.js
-rg -n "CASE_PROCEDURES_DECLARED|set_declared|get_declared|format_procedure" apps/cases apps/intake
+rg -n "CASE_PROCEDURES_DECLARED|set_declared|get_declared|format_procedure|correct_case_exam_type" apps/cases apps/intake
 rg -n "CaseProcedure\.objects\.(create|update)|procedures\.(create|add)" apps/intake || true
 rg -n "CPRE|ERCP" apps/cases apps/intake templates/intake || true
 
@@ -141,7 +148,9 @@ Interprete: writes devem passar pelo serviço; apps proibidas sem diff; CPRE aus
 
 - [ ] R1–R7 provados por teste/inspeção.
 - [ ] Um combinado é um Case com duas rows.
-- [ ] Backfill não infere/reprocessa.
+- [ ] Backfill aplica as tabelas fechadas D3 aos 18 estados sem inferir/reprocessar.
+- [ ] Correção single→single existente mantém ponte/projeção atômicas.
+- [ ] Índices D1 existem antes dos consumers de fila.
 - [ ] Flag bloqueia colon/combinado somente no intake.
 - [ ] NIR vê badge combinado sem duplicar cards.
 - [ ] Ponte legada está centralizada e rotulada temporária.
@@ -154,18 +163,20 @@ Responder no relatório:
 
 1. Qual teste prova 1 PDF combinado → 1 Case + 2 rows?
 2. Qual prova atomicidade?
-3. O que migration altera e preserva?
-4. Existe write direto fora do serviço?
-5. Como flag trata cada seleção?
-6. Algum reader de pipeline foi antecipado?
-7. Como label é derivado sem query no template?
-8. Qual é a limitação transitória até Slice 002?
-9. Quantos arquivos e por quê?
-10. Baseline vs final e zero failures/errors?
+3. Qual teste cobre cada linha D3, todos os 18 estados e os marcadores condicionais?
+4. Qual teste prova que correção single→single atualiza ponte/projeção e reverte tudo em falha?
+5. Existe write direto fora do serviço?
+6. Como flag trata cada seleção?
+7. Algum reader de pipeline foi antecipado?
+8. Como label é derivado sem query no template?
+9. Quais índices dimensionais foram criados e quais predicados cobrem?
+10. Qual é a limitação transitória até Slice 002?
+11. Quantos arquivos e por quê?
+12. Baseline vs final e zero failures/errors?
 
 ### Condições automáticas de INCOMPLETO
 
-Baseline/RED/gate/relatório ausentes; ADR não aceita; mais de um Case por PDF; row duplicada; estado parcial; flag permite combinado desligada ou bloqueia EDA; migration altera JSON/status/evento; UI infere label do campo legado; write direto em view; pipeline/doctor/CHD/dashboard antecipado; FSM/role alterado; >11 arquivos sem revisão; final falha ou passed menor; `tasks.md` marcado antes das evidências.
+Baseline/RED/gate/relatório ausentes; ADR não aceita; mais de um Case por PDF; row duplicada; estado parcial; tabela D3 incompleta ou algum dos 18 estados sem teste; índice D1 ausente; correção single→single diverge ponte/projeção ou não faz rollback total; flag permite combinado desligada ou bloqueia EDA; migration altera JSON/status/evento; UI infere label do campo legado; write direto em view; pipeline/doctor/CHD/dashboard antecipado; FSM/role alterado; >13 arquivos sem revisão; final falha ou passed menor; `tasks.md` marcado antes das evidências.
 
 ## Relatório obrigatório
 
@@ -189,7 +200,7 @@ Read AGENTS.md, PROJECT_CONTEXT.md, every artifact under openspec/changes/suppor
 
 Follow the DeepSeek4-Flash protocol literally: clean branch/BASE_REF, full pytest baseline before edits, requirement matrix, real RED, minimal GREEN, narrow clean-code/DRY/YAGNI REFACTOR, all inspection checks, exact full quality gate and baseline-vs-final comparison. Any missing/failing item, final failure/error, passed_final < passed_baseline, or cap violation means INCOMPLETE: do not update tasks.md, commit or push.
 
-Deliver one combined NIR upload as one Case with two normalized CaseProcedure rows, conservative backfill, atomic declaration service, flag enforcement and combined badge in NIR tracking. Keep the legacy exam_type only as centralized temporary bridge. Do not implement neutral LLM, doctor, CHD, dashboard, correction/resubmission, FSM or CPRE.
+Deliver one combined NIR upload as one Case with two normalized CaseProcedure rows, the closed D3 backfill for all 18 statuses, D1 indexes, atomic declaration service, flag enforcement and combined badge in NIR tracking. Reroute the existing single-to-single NIR correction through the same service so bridge and projection cannot diverge; do not expand its UI/eligibility to combined yet. Keep legacy exam_type only as a centralized temporary bridge. Do not implement neutral LLM, doctor, CHD, dashboard, corrected resubmission, FSM or CPRE.
 
 Create /tmp/support-combined-eda-colonoscopy-workflow-slice-001-report.md with evidence and Handoff para verificador. If complete, mark only Slice 001, commit, push, reply REPORT_PATH=... and STOP.
 ```
