@@ -20,6 +20,11 @@ BACKUP_DIR=/archive/backups/2026-XXX-colonoscopy
 DPROD="docker compose --project-directory ${PROJECT_DIR} \
   -f ${PROJECT_DIR}/docker-compose.yml -f ${PROJECT_DIR}/docker-compose.prod.yml"
 
+# FAIL-FAST (obrigatório em cópia de mão): qualquer falha de build/stop/migrate/
+# seed/up ABORTA o bloco imediatamente. Sem `|| true`/`&&` que engula erro: um
+# migrate ou seed falho NUNCA pode chegar ao up. Em falha: PARAR (Seção 5).
+set -euo pipefail
+
 # 1. (pré) Backup já feito, validado por conteúdo e movido para /archive/backups/ (Passo 1).
 
 # 2. Atualizar código
@@ -64,7 +69,7 @@ $DPROD up -d --force-recreate web worker pdf_worker
 | **Dados sensíveis** | Backfill não lê conteúdo clínico. Nenhum PDF/JSON/texto é migrado. |
 | **Variáveis de ambiente novas** | `COLONOSCOPY_INTAKE_ENABLED` (default `false`). No Compose de produção **somente o serviço `web` recebe a variável** (`docker-compose.prod.yml`); `worker`/`pdf_worker` **não** recebem nem consultam a flag. |
 | **Prompts** | `seed_prompts` cria os 8 nomes canônicos (4 EDA + 4 colonoscopia) quando ausentes; **não** reativa versões inativas. Precheck binário exige os 4 nomes colonoscopia **ativos** antes de ligar a flag (Passo 7). |
-| **Rollback** | Não destrutivo: desligar flag, drenar/encerrar casos em voo, reverter imagem, manter coluna/índice/prompts. Detalhes na Seção 5. |
+| **Rollback** | Não destrutivo e **preferido**: desligar flag e **manter a imagem nova rodando** (schema-compatible; coluna sem default é ok porque a imagem nova sempre envia `exam_type`). Reverter para a imagem antiga é **exceção** e exige bridge de schema verificável (`SET DEFAULT 'eda'` após drenagem) — código antigo omite `exam_type` no INSERT. Detalhes na Seção 5. |
 
 ### O que o change entrega
 
@@ -135,9 +140,16 @@ docker run --rm \
   -v "${BACKUP_DIR}":/backup \
   alpine tar czf "/backup/media_pre_colonoscopy_${STAMP}.tar.gz" -C /media .
 
-# 1d. VALIDAÇÃO do tar por conteúdo (listagem completa, não apenas tamanho)
-tar -tzf "${BACKUP_DIR}/media_pre_colonoscopy_${STAMP}.tar.gz" > /dev/null \
-  && echo "Tar de mídia OK: $(tar -tzf "${BACKUP_DIR}/media_pre_colonoscopy_${STAMP}.tar.gz" | wc -l) entradas"
+# 1d. VALIDAÇÃO do tar por CONTEÚDO (listagem completa + mínimo de entradas).
+#     Falha ABORTA a execução (exit 1) — sob set -e, um comando à esquerda de
+#     `&&` que falha NÃO encerra o script; por isso usa-se `|| { ...; exit 1; }`.
+MEDIA_TAR="${BACKUP_DIR}/media_pre_colonoscopy_${STAMP}.tar.gz"
+tar -tzf "$MEDIA_TAR" > /dev/null \
+  || { echo "ERRO: tar de mídia inválido/truncado: $MEDIA_TAR"; exit 1; }
+MEDIA_ENTRIES=$(tar -tzf "$MEDIA_TAR" | wc -l)
+[ "${MEDIA_ENTRIES}" -ge 1 ] \
+  || { echo "ERRO: tar de mídia sem entradas: $MEDIA_TAR"; exit 1; }
+echo "Tar de mídia OK: ${MEDIA_ENTRIES} entradas"
 
 # Confirmar presença/ausência esperada de arquivos
 ls -lh "${BACKUP_DIR}"/ats_web_pre_colonoscopy_*.sql.gz "${BACKUP_DIR}"/media_pre_colonoscopy_*.tar.gz
@@ -397,10 +409,48 @@ $DPROD up -d --force-recreate web
      (manager/admin) com motivo e texto — isso remove o caso das filas
      operacionais e o mantém na auditoria.
 
-3. **Reverter a imagem** somente quando **não houver casos colonoscopia
-   incompatíveis em voo** (nenhum caso colonoscopia com status que o código
-   antigo não consiga ler). A coluna `exam_type`, o índice e os prompts
-   permanecem no banco — **rollback destrutivo não é o padrão**.
+3. **Caminho PREFERIDO — MANTER a imagem nova rodando.** A imagem nova é
+   schema-compatible: `Case.exam_type` existe, a coluna fica **sem default**
+   (`0014` removeu o default de banco) e **todo insert da imagem nova envia
+   `exam_type` explicitamente**. Com a flag desligada, EDA continua normal e
+   colonoscopia não aceita novos uploads; casos existentes seguem
+   processáveis. Nenhum bridge de banco é necessário e **nenhuma** migration
+   destrutiva.
+
+4. **Reverter para a imagem ANTIGA — apenas se exigido, com bridge de schema
+   verificável (fail-fast).** A imagem antiga omite `exam_type` no INSERT;
+   com a coluna `NOT NULL` **sem default**, **todo novo caso EDA falharia**.
+   Drenar colonoscopias NÃO corrige isso. Antes de subir o código antigo,
+   depois de confirmar **zero** casos colonoscopia em voo (Seção 4.1),
+   restaurar o default temporário e verificá-lo:
+
+```bash
+$DPROD exec -T db psql -U ats_web -d ats_web -c \
+  "ALTER TABLE cases_case ALTER COLUMN exam_type SET DEFAULT 'eda';"
+$DPROD exec -T db psql -U ats_web -d ats_web -c \
+  "SELECT column_default FROM information_schema.columns \
+   WHERE table_name='cases_case' AND column_name='exam_type';"
+# Esperado: 'eda'::character varying — se vazio/NULL, PARAR (STOP): não subir o código antigo.
+```
+
+   Depois: rebuild da imagem antiga, `$DPROD up -d --force-recreate web worker
+   pdf_worker` e validar um upload EDA em homologação antes de liberar.
+
+   **Remoção do default temporário no redeploy forward:** quando voltar para a
+   imagem nova (re-rollout), executar na mesma janela de manutenção, antes de
+   abrir escritas:
+
+```bash
+$DPROD exec -T db psql -U ats_web -d ats_web -c \
+  "ALTER TABLE cases_case ALTER COLUMN exam_type DROP DEFAULT;"
+$DPROD exec -T db psql -U ats_web -d ats_web -c \
+  "SELECT column_default FROM information_schema.columns \
+   WHERE table_name='cases_case' AND column_name='exam_type';"
+# Esperado: NULL (sem default) — equivalente ao schema pós-0014.
+```
+
+> A coluna `exam_type`, o índice e os prompts permanecem no banco em todos os
+> caminhos — **rollback destrutivo não é o padrão**.
 
 ### 5.2 Rollback de contrato medicamentoso (prompts EDA)
 
@@ -410,7 +460,9 @@ canônicos (`llm1_system`/`llm1_user`/`llm2_system`/`llm2_user`):
 
 - na UI de admin (Gestão de Prompts), localizar a versão anterior de cada
   nome, **desativar** a versão atual e **ativar** a anterior (1 ativo por nome);
-- só então reverter o código para a imagem antiga;
+- só então reverter o código para a imagem antiga — **o que exige o bridge de
+  schema da Seção 5.1** (`SET DEFAULT 'eda'` após drenagem, verificável) para
+  a imagem antiga continuar aceitando inserts EDA;
 - validar um upload EDA em homologação antes de liberar.
 
 > **Os prompts de colonoscopia NÃO podem ser desativados enquanto houver casos em voo —
@@ -431,6 +483,12 @@ exigem janela controlada):
    (Passo 1, validada por `tar -tzf`), se necessário;
 2. voltar o código para o commit anterior e rebuild;
 3. `$DPROD up -d` e validar.
+
+> O dump pré-migration (Passo 1) devolve o schema **anterior** (sem
+> `exam_type`) — compatível com a imagem antiga; nesse caminho de restauração
+> destrutiva não há coluna sem default, então **nenhum bridge é necessário**
+> (o bridge da Seção 5.1 só se aplica ao rollback suave mantendo o schema
+> pós-0014).
 
 ---
 

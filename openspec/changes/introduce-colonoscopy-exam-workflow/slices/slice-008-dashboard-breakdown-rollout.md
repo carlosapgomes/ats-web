@@ -82,7 +82,7 @@ Criar `docs/deploy/introduce-colonoscopy-exam-workflow.md` com:
 5. smoke tests EDA/colonoscopia/mixed/medication;
 6. queries/checks de casos em voo por tipo/status;
 7. monitoramento de falhas/mismatch/filas;
-8. rollback: desligar intake, drenar/encerrar, reverter imagem, manter coluna;
+8. rollback: desligar intake, drenar/encerrar; preferir manter a imagem nova; reverter imagem antiga exige bridge de schema (`SET DEFAULT 'eda'`, verificável);
 9. reativação de prompt EDA anterior se rollback de contrato medicamentoso exigir;
 10. confirmação de que worker não usa flag para bloquear existentes.
 

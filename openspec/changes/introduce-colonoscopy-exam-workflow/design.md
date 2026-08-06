@@ -369,9 +369,10 @@ Payloads enxutos, sem PDF/texto integral. `CASE_CREATED` pode passar a incluir `
 1. Desligar `COLONOSCOPY_INTAKE_ENABLED`.
 2. Consultar casos colonoscopia não `CLEANED`.
 3. Permitir conclusão ou encerramento administrativo individual.
-4. Reverter imagem somente sem casos incompatíveis em voo.
-5. Manter coluna/index e prompts no banco; rollback destrutivo não é o padrão.
-6. Se prompts EDA forem versionados pelo change de medicamentos, reativar a versão anterior antes de rollback para código que não aceite o novo campo.
+4. **Preferido: manter a imagem nova rodando** (schema-compatible — coluna sem default é ok porque a imagem nova sempre envia `exam_type`).
+5. Se a reversão para a imagem antiga for exigida: **bridge de schema obrigatório e verificável** (`ALTER COLUMN exam_type SET DEFAULT 'eda'` após drenagem completa) — código antigo omite `exam_type` no INSERT e falharia NOT NULL mantendo a coluna sem default; remover o default temporário no redeploy forward (`DROP DEFAULT`, mesma janela de manutenção).
+6. Manter coluna/index e prompts no banco; rollback destrutivo não é o padrão.
+7. Se prompts EDA forem versionados pelo change de medicamentos, reativar a versão anterior antes de rollback para código que não aceite o novo campo.
 
 ## 3. Dimensionamento dos slices
 

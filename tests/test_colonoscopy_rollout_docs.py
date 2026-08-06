@@ -115,7 +115,7 @@ class TestRunbookFlagAndPrompts:
         )
         assert "worker" in lower, "Runbook deve explicar por que worker não recebe a flag"
         # A ATIVAÇÃO da flag (Passo 8) recria apenas web — nunca worker como leitor.
-        passo8 = runbook.split("### Passo 8", 1)[1]
+        passo8 = runbook.split("### Passo 8", 1)[1].split("### Passo 9", 1)[0]
         assert "--force-recreate web worker" not in passo8, (
             "Ativação da flag não deve recriar worker como leitor da flag"
         )
@@ -380,3 +380,142 @@ class TestTasksTraceability:
             assert "handoff" in snippet.lower() or "prompt" in snippet.lower(), (
                 f"Menção a prompt sem rótulo handoff/prompt: {snippet}"
             )
+
+
+# ── D1: Rollback schema-compatible (bridge para imagem antiga) ─────────────
+
+
+class TestRunbookRollbackSchemaCompatibility:
+    def test_soft_rollback_keeps_new_image_by_default(self) -> None:
+        """Rollback suave PREFERIDO: manter a imagem nova rodando, só desligar intake."""
+        runbook = _read(RUNBOOK_PATH)
+        sec51 = runbook.split("### 5.1", 1)[1].split("### 5.2", 1)[0]
+        assert re.search(
+            r"(manter|permanecer|continuar).{0,80}(imagem nova|imagem atual)",
+            sec51,
+            re.I | re.S,
+        ), "Rollback suave deve recomendar manter a imagem nova rodando"
+
+    def test_old_image_revert_requires_schema_bridge(self) -> None:
+        """Reverter para a imagem antiga exige bridge de schema verificável + remoção."""
+        runbook = _read(RUNBOOK_PATH)
+        sec51 = runbook.split("### 5.1", 1)[1].split("### 5.2", 1)[0]
+        says_revert = "reverter a imagem" in sec51.lower()
+        bridge = (
+            "SET DEFAULT" in sec51
+            or "set default" in sec51.lower()
+            or "migrate cases 0013" in sec51.lower()
+            or "não reverter" in sec51.lower()
+            or "nao reverter" in sec51.lower()
+        )
+        assert not says_revert or bridge, (
+            "0014 remove o default de banco; código antigo omite exam_type no INSERT "
+            "e não pode rodar mantendo a coluna sem bridge de schema"
+        )
+        if says_revert:
+            assert "DROP DEFAULT" in sec51, "Bridge temporária deve documentar a remoção do default no redeploy forward"
+
+    def test_drain_alone_with_old_image_no_default_not_claimed_safe(self) -> None:
+        """A afirmação perigosa (drenar + reverter + coluna sem default) é removida."""
+        runbook = _read(RUNBOOK_PATH)
+        assert "somente quando não houver casos colonoscopia incompatíveis em voo" not in runbook, (
+            "Drenar colonoscopias não torna a coluna sem default compatível com a imagem antiga"
+        )
+        sec51 = runbook.split("### 5.1", 1)[1].split("### 5.2", 1)[0]
+        if "reverter a imagem" in sec51.lower():
+            assert "SET DEFAULT" in sec51 or "migrate cases 0013" in sec51.lower()
+
+    def test_risk_table_rollback_row_aligned(self) -> None:
+        """Tabela de risco alinhada: rollback preferido mantém a imagem nova."""
+        runbook = _read(RUNBOOK_PATH)
+        risk_row = runbook.split("| **Rollback** |", 1)[1].split(" |", 1)[0]
+        assert "imagem nova" in risk_row or "manter a imagem" in risk_row, (
+            "Linha Rollback da tabela de risco deve refletir o caminho preferido"
+        )
+
+
+# ── D2: Validação do tar de mídia aborta explicitamente ────────────────────
+
+
+class TestRunbookMediaArchiveValidation:
+    def _passo1_validation(self) -> str:
+        runbook = _read(RUNBOOK_PATH)
+        passo1 = runbook.split("### Passo 1", 1)[1].split("### Passo 2", 1)[0]
+        return passo1.split("# 1d.", 1)[1]
+
+    def test_media_tar_validation_aborts_explicitly(self) -> None:
+        """tar -tzf com falha ABORTA (|| exit 1); falha à esquerda de && não aborta sob set -e."""
+        validation = self._passo1_validation()
+        assert re.search(r"tar\s+-tzf[^\n]+(?:\n\s*)?\|\|\s*\{", validation, re.S), (
+            "Validação do tar deve usar || { ...; exit 1; } — sob set -e, falha à esquerda de && NÃO encerra o script"
+        )
+        assert "exit 1" in validation
+
+    def test_media_tar_asserts_minimum_entries(self) -> None:
+        """Validação do tar exige ao menos 1 entrada, não apenas imprime a contagem."""
+        validation = self._passo1_validation()
+        assert re.search(r"-ge\s+1|-gt\s+0", validation), (
+            "Validação deve comparar o número de entradas contra um mínimo"
+        )
+        assert "exit 1" in validation
+
+    def test_media_volume_resolution_and_dump_checks_preserved(self) -> None:
+        """Resolução do volume real e checks do dump (pipefail/marker/linhas) preservados."""
+        runbook = _read(RUNBOOK_PATH)
+        assert "set -euo pipefail" in runbook or "set -o pipefail" in runbook
+        assert "PostgreSQL database dump" in runbook
+        assert re.search(r"-ge\s+100", runbook), "Dump deve manter o mínimo de 100 linhas"
+        assert "docker inspect" in runbook and "ps -q web" in runbook
+
+
+# ── D3: Quick reference fail-fast ──────────────────────────────────────────
+
+
+class TestRunbookQuickReferenceFailFast:
+    def _quick(self) -> str:
+        return _read(RUNBOOK_PATH).split("## Quick reference", 1)[1].split("\n---", 1)[0]
+
+    def test_quick_reference_activates_pipefail_before_mutable_sequence(self) -> None:
+        """Quick reference ativa set -euo pipefail ANTES do stop/migrate/seed/up."""
+        quick = self._quick()
+        safety = [pos for token in ("set -euo pipefail", "set -o pipefail") if (pos := quick.find(token)) >= 0]
+        stop = quick.find("$DPROD stop web")
+        assert safety and min(safety) < stop, (
+            "Quick reference (cópia de mão) precisa de fail-fast antes da sequência mutável"
+        )
+
+    def test_quick_reference_failure_cannot_be_swallowed(self) -> None:
+        """Sem `|| true`/`|| echo` que engula falha; ordem stop->migrate->seed->up."""
+        quick = self._quick()
+        body = quick.split("set -euo pipefail", 1)[1]
+        assert "|| true" not in body, "Swallower de falha não pode existir na quick reference"
+        stop = body.find("stop web")
+        migrate = body.find("manage.py migrate")
+        seed = body.find("seed_prompts")
+        up = body.find("up -d")
+        assert -1 < stop < migrate < seed < up, "Ordem da quick reference deve espelhar os Passos 4-6"
+
+    def test_quick_reference_stop_semantics_explicit(self) -> None:
+        """Falha no meio da sequência é PARAR (nenhum up em estado parcial)."""
+        quick = self._quick()
+        lower = quick.lower()
+        assert "não continuar" in lower or "parar" in lower or "stop" in lower or "abort" in lower, (
+            "Quick reference deve explicitar a semântica de PARAR em falha"
+        )
+
+
+# ── D4: Elegibilidade exata em tasks.md ────────────────────────────────────
+
+
+class TestTasksEligibilityExact:
+    def test_tasks_dod_eligibility_is_exact(self) -> None:
+        """DoD registra a condição exata; elegibilidade ampla 'antes de WAIT_DOCTOR' removida."""
+        tasks = _read(TASKS_PATH)
+        assert "somente antes de `WAIT_DOCTOR`/em manual review seguro" not in tasks, (
+            "Elegibilidade ampla não pode constar como concluída"
+        )
+        assert "WAIT_R1_CLEANUP_THUMBS" in tasks
+        assert "manual_review_required" in tasks
+        assert "exam_type_mismatch" in tasks
+        assert "mixed_exam_request" in tasks
+        assert "unknown_exam_type" in tasks

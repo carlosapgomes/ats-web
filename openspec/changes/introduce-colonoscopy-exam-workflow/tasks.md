@@ -85,7 +85,7 @@ Se o branch atual for outro, o implementador deve parar e reportar `INCOMPLETE/B
 
 ### Correção e auditoria
 
-- [x] NIR corrige tipo somente antes de `WAIT_DOCTOR`/em manual review seguro.
+- [x] NIR corrige tipo somente em `WAIT_R1_CLEANUP_THUMBS` com `manual_review_required` e motivo `exam_type_mismatch`/`mixed_exam_request`/`unknown_exam_type`, sem decisão médica.
 - [x] Mesmo caso é reprocessado sem novo upload e sem reextrair PDF.
 - [x] Artefatos derivados são invalidados; PDF, anexos, texto e timeline são preservados.
 - [x] Eventos append-only registram mismatch, correção e reprocessamento.
