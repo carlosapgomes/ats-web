@@ -365,14 +365,19 @@ def _colon_procedure(**overrides: Any) -> dict[str, Any]:
     return item
 
 
-def _llm1_v2_json(*, procedures: list[dict[str, Any]], one_liner: str = "EDA e Colonoscopia indicadas.") -> str:
+def _llm1_v2_json(
+    *,
+    procedures: list[dict[str, Any]],
+    one_liner: str = "EDA e Colonoscopia indicadas.",
+    hb_g_dl: float = 13.0,
+) -> str:
     payload: dict[str, Any] = {
         "schema_version": "2.0",
         "language": "pt-BR",
         "agency_record_number": "12345",
         "patient": {"name": "Paciente", "age": 35, "sex": "M", "document_id": None},
         "common_preop": {
-            "labs": {"hb_g_dl": 13.0, "platelets_per_mm3": 200000, "inr": 1.0, "source_text_hint": None},
+            "labs": {"hb_g_dl": hb_g_dl, "platelets_per_mm3": 200000, "inr": 1.0, "source_text_hint": None},
             "ecg": {"report_present": "unknown", "abnormal_flag": "unknown", "source_text_hint": None},
             "asa": {"bucket": "I-II", "source_text_hint": None},
             "cardiovascular_risk": {"level": "low", "source_text_hint": None},
@@ -988,3 +993,131 @@ class TestLegacy11Render:
         assert any("Colonoscopia" in line and "negar" in line for line in decision_lines)
         # Alerta medicamentoso existente (comum no v2).
         assert any("Varfarina" in line for line in report["blocks"]["achados_criticos"])
+
+
+# ── FIX Slice 002: override determinístico preop-deny no pipeline v2 ────────
+
+
+def _single_eda_recommendation(*, suggestion: str = "accept") -> list[dict[str, Any]]:
+    """Recomendação única EDA para casos simples (aceita no contrato v2)."""
+    return [
+        {
+            "procedure_type": "eda",
+            "suggestion": suggestion,
+            "support_recommendation": "none",
+            "rationale": {
+                "short_reason": "OK.",
+                "details": ["1", "2"],
+                "missing_info_questions": [],
+            },
+            "policy_alignment": {
+                "excluded_request": False,
+                "labs_ok": "yes",
+                "ecg_ok": "yes",
+                "pediatric_flag": False,
+                "notes": None,
+            },
+            "confidence": "alta",
+        }
+    ]
+
+
+@pytest.mark.django_db
+class TestPreopDenyOverride:
+    def test_preop_deny_overrides_llm2_accept(self, django_user_model) -> None:
+        """R5/R6: policy determinística (Hb < threshold) vence LLM2 accept."""
+        case = _make_v2_case(
+            django_user_model.objects.create_user(username="nir_ovr1", password="pw"),
+            exam_type="eda",
+            extracted_text="Solicito EDA para dispepsia.",
+        )
+        client = RecordingLlmClient(
+            responses=[
+                _llm1_v2_json(procedures=[_eda_procedure()], one_liner="EDA indicada.", hb_g_dl=6.0),
+                _llm2_v2_json(str(case.case_id), recommendations=_single_eda_recommendation(suggestion="accept")),
+            ]
+        )
+        from apps.pipeline.orchestrator import run_pipeline
+
+        run_pipeline(
+            case.case_id,
+            llm_client=client,
+            llm1_system_prompt="sp1",
+            llm1_user_template="ut1",
+            llm2_system_prompt="sp2",
+            llm2_user_template="ut2",
+        )
+
+        case = _reload(case)
+        assert case.status == CaseStatus.WAIT_DOCTOR
+        assert len(client.calls) == 2
+        assert case.suggested_action is not None
+        recommendation = case.suggested_action["procedure_recommendations"][0]
+        assert recommendation["suggestion"] == "deny"
+        assert recommendation["preop_decision"]["reason_code"] == "hb_below_threshold"
+
+    def test_preop_deny_with_llm2_deny_stays_deny(self, django_user_model) -> None:
+        """Variante: LLM2 deny + preop deny → continua deny (sem regressão)."""
+        case = _make_v2_case(
+            django_user_model.objects.create_user(username="nir_ovr2", password="pw"),
+            exam_type="eda",
+            extracted_text="Solicito EDA para dispepsia.",
+        )
+        client = RecordingLlmClient(
+            responses=[
+                _llm1_v2_json(procedures=[_eda_procedure()], one_liner="EDA indicada.", hb_g_dl=6.0),
+                _llm2_v2_json(str(case.case_id), recommendations=_single_eda_recommendation(suggestion="deny")),
+            ]
+        )
+        from apps.pipeline.orchestrator import run_pipeline
+
+        run_pipeline(
+            case.case_id,
+            llm_client=client,
+            llm1_system_prompt="sp1",
+            llm1_user_template="ut1",
+            llm2_system_prompt="sp2",
+            llm2_user_template="ut2",
+        )
+
+        case = _reload(case)
+        assert case.status == CaseStatus.WAIT_DOCTOR
+        assert len(client.calls) == 2
+        assert case.suggested_action is not None
+        recommendation = case.suggested_action["procedure_recommendations"][0]
+        assert recommendation["suggestion"] == "deny"
+        assert recommendation["preop_decision"]["reason_code"] == "hb_below_threshold"
+
+    def test_llm2_ok_event_carries_schema_version_and_prompt_names(self, django_user_model) -> None:
+        """R8: evento LLM2_OK do fluxo v2 audita schema/prompt names/versions."""
+        case = _make_v2_case(
+            django_user_model.objects.create_user(username="nir_ovr3", password="pw"),
+            exam_type="eda_colonoscopy",
+            extracted_text="Motivo da Solicitacao: EDA e colonoscopia para rastreamento",
+        )
+        client = RecordingLlmClient(
+            responses=[
+                _llm1_v2_json(procedures=[_eda_procedure(), _colon_procedure()]),
+                _llm2_v2_json(str(case.case_id)),
+            ]
+        )
+        from apps.pipeline.orchestrator import run_pipeline
+
+        run_pipeline(
+            case.case_id,
+            llm_client=client,
+            llm1_system_prompt="SP1",
+            llm1_user_template="ut1",
+            llm2_system_prompt="SP2",
+            llm2_user_template="ut2",
+        )
+
+        case = _reload(case)
+        assert case.status == CaseStatus.WAIT_DOCTOR
+        llm2_event = CaseEvent.objects.filter(case=case, event_type="LLM2_OK").latest("timestamp")
+        payload: dict[str, Any] = llm2_event.payload or {}
+        assert payload.get("schema_version") == "2.0"
+        assert payload.get("prompt_system_name") == "exam_llm2_system"
+        assert payload.get("prompt_user_name") == "exam_llm2_user"
+        assert payload.get("detected_procedures") == ["eda", "colonoscopy"]
+        assert "Motivo da Solicitacao" not in json.dumps(payload)

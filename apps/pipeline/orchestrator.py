@@ -631,13 +631,13 @@ def _run_v2_pipeline(
 
     # ── 9. LLM2 v2 — uma chamada com conjunto exato (R6) ──────────────
     if llm2_system_prompt is not None:
-        sp2 = llm2_system_prompt
+        sp2, sp2_version = llm2_system_prompt, 0
     else:
-        sp2, _ = _resolve_prompt("exam_llm2_system")
+        sp2, sp2_version = _resolve_prompt("exam_llm2_system")
     if llm2_user_template is not None:
-        ut2 = llm2_user_template
+        ut2, ut2_version = llm2_user_template, 0
     else:
-        ut2, _ = _resolve_prompt("exam_llm2_user")
+        ut2, ut2_version = _resolve_prompt("exam_llm2_user")
 
     service2 = Llm2ServiceV2(client_llm2)
     result2 = service2.run(
@@ -665,6 +665,13 @@ def _run_v2_pipeline(
             allow_foreign_body_exception=profile.allows_foreign_body_exception,
         )
         reconciled = reconcile_eda_policy(precheck=precheck, llm2=_build_llm2_suggestion_input(item))
+        # Invariante legada (R5/R6): a política determinística vence o LLM. Se
+        # ``evaluate_preop_policy`` negou (exames mínimos, thresholds, gates
+        # condicionais), a sugestão final do item é ``deny`` — espelha
+        # ``_apply_reconciliation`` do fluxo 1.1.
+        suggestion = reconciled.suggestion
+        if policy_results[procedure_type].get("decision") == "deny":
+            suggestion = "deny"
         support_ctx = synthesize_eda_support_context(structured_data=projection)
         contradictions = [
             {
@@ -678,7 +685,7 @@ def _run_v2_pipeline(
         recommendations.append(
             {
                 **item,
-                "suggestion": reconciled.suggestion,
+                "suggestion": suggestion,
                 "policy_alignment": {
                     "excluded_request": reconciled.policy_alignment.excluded_request,
                     "labs_ok": reconciled.policy_alignment.labs_ok,
@@ -707,7 +714,20 @@ def _run_v2_pipeline(
     case.save()
 
     # ── 11. Transições finais (LLM_SUGGEST → R2_POST_WIDGET → WAIT_DOCTOR) ─
+    # llm2_complete não aceita payload (ao contrário de llm1_complete); o evento
+    # LLM2_OK do fluxo v2 é re-registrado com payload enxuto ANTES do save — o
+    # slot _pending_event é sobrescrito, persistindo exatamente UM evento com a
+    # auditoria de prompt/schema (R8), sem alterar FSM nem o fluxo legado 1.1.
     case.llm2_complete(success=True, user=None)
+    case._record_event(
+        "LLM2_OK",
+        payload=_build_v2_llm2_ok_payload(
+            case=case,
+            prompt_system_version=sp2_version,
+            prompt_user_version=ut2_version,
+            detected_procedure_types=reconciliation.detected_procedure_types,
+        ),
+    )
     case.save()
     case.ready_for_doctor()
     case.save()
@@ -725,6 +745,24 @@ def _build_v2_llm1_ok_payload(case: Case, result1: Llm1V2Result) -> dict[str, ob
         "prompt_system_version": result1.prompt_system_version,
         "prompt_user_name": result1.prompt_user_name,
         "prompt_user_version": result1.prompt_user_version,
+    }
+
+
+def _build_v2_llm2_ok_payload(
+    *,
+    case: Case,
+    prompt_system_version: int,
+    prompt_user_version: int,
+    detected_procedure_types: tuple[str, ...],
+) -> dict[str, object]:
+    """Payload enxuto de LLM2_OK para o fluxo v2 (R8, sem texto clínico)."""
+    return {
+        "schema_version": "2.0",
+        "prompt_system_name": "exam_llm2_system",
+        "prompt_system_version": prompt_system_version,
+        "prompt_user_name": "exam_llm2_user",
+        "prompt_user_version": prompt_user_version,
+        "detected_procedures": list(detected_procedure_types),
     }
 
 
