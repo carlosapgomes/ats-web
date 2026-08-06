@@ -1,7 +1,8 @@
-# Capability: Correção auditável do tipo de exame
+# exam-type-correction Specification
 
-## ADDED Requirements
-
+## Purpose
+TBD - created by archiving change introduce-colonoscopy-exam-workflow. Update Purpose after archive.
+## Requirements
 ### Requirement: Divergência pode ser corrigida antes da fila médica
 
 O NIR MUST poder corrigir o tipo no mesmo caso quando houver revisão manual de escopo ou estado estável anterior a `WAIT_DOCTOR`.
@@ -63,3 +64,4 @@ Um novo caso criado pelo fluxo de reenvio corrigido MUST aceitar tipo diferente 
 - **THEN** novo caso é Colonoscopia
 - **AND** original permanece EDA
 - **AND** demais regras de não herança continuam válidas.
+

@@ -1,7 +1,8 @@
-# Capability: Busca NIR e métricas por tipo de exame
+# exam-type-analytics Specification
 
-## ADDED Requirements
-
+## Purpose
+TBD - created by archiving change introduce-colonoscopy-exam-workflow. Update Purpose after archive.
+## Requirements
 ### Requirement: NIR filtra casos operacionais e encerrados
 
 O sistema MUST permitir que o NIR componha o tipo de exame com os filtros existentes nas listas operacional e histórica.
@@ -66,3 +67,4 @@ A operação MUST poder bloquear novos uploads de colonoscopia sem apagar dados 
 - **THEN** novos uploads são bloqueados
 - **AND** casos existentes continuam visíveis/processáveis
 - **AND** nenhuma migration destrutiva é necessária.
+

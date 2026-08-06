@@ -1,7 +1,8 @@
-# Capability: Segurança medicamentosa pré-procedimento
+# medication-safety Specification
 
-## ADDED Requirements
-
+## Purpose
+TBD - created by archiving change introduce-colonoscopy-exam-workflow. Update Purpose after archive.
+## Requirements
 ### Requirement: Medicamentos descritos são extraídos de forma estruturada
 
 O sistema MUST extrair somente medicamentos explicitamente descritos no relatório e MUST preservar evidência textual para cada item.
@@ -59,3 +60,4 @@ A extração e a apresentação MUST ser aplicáveis a todos os tipos suportados
 - **WHEN** cada caso chega ao relatório médico
 - **THEN** ambos exibem alerta com a mesma semântica
 - **AND** nenhum perfil cria hard rule medicamentosa.
+

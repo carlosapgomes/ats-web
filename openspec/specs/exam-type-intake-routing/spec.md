@@ -1,7 +1,8 @@
-# Capability: Tipo explícito e roteamento multi-exame
+# exam-type-intake-routing Specification
 
-## ADDED Requirements
-
+## Purpose
+TBD - created by archiving change introduce-colonoscopy-exam-workflow. Update Purpose after archive.
+## Requirements
 ### Requirement: NIR declara um tipo por lote
 
 Todo novo upload MUST ter exatamente um tipo válido aplicado a todos os PDFs do lote.
@@ -98,8 +99,6 @@ Um PDF com EDA e colonoscopia solicitadas atualmente MUST NOT entrar na fila mé
 - **THEN** resultado é revisão manual com `mixed_exam_request`
 - **AND** NIR é orientado a enviar PDFs/casos separados.
 
-## MODIFIED Requirements
-
 ### Requirement: EDA suportada em documento com outro exame
 
 EDA suportada MUST prevalecer apenas quando a menção ao outro exame for histórica, negada ou não constituir segunda solicitação atual. Duas solicitações atuais distintas MUST ser bloqueadas.
@@ -116,3 +115,4 @@ EDA suportada MUST prevalecer apenas quando a menção ao outro exame for histó
 - **WHEN** scope gate executa
 - **THEN** não aplica precedência EDA
 - **AND** retorna revisão manual para separação dos documentos.
+

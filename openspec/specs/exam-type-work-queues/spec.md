@@ -1,7 +1,8 @@
-# Capability: Filas operacionais por tipo de exame
+# exam-type-work-queues Specification
 
-## ADDED Requirements
-
+## Purpose
+TBD - created by archiving change introduce-colonoscopy-exam-workflow. Update Purpose after archive.
+## Requirements
 ### Requirement: Médico filtra pendências sem perder a busca
 
 A aba médica `Pendentes` MUST manter o lifecycle primário e oferecer filtro secundário `Todos | EDA | Colonoscopia`.
@@ -94,3 +95,4 @@ EDA e colonoscopia MUST reutilizar os mesmos forms, locks, permissões e transi�
 - **WHEN** médico/CHD executa ação válida
 - **THEN** usam os mesmos forms, locks, permissões e transições
 - **AND** não existe atribuição automática por tipo.
+
