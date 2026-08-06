@@ -418,36 +418,72 @@ $DPROD up -d --force-recreate web
    destrutiva.
 
 4. **Reverter para a imagem ANTIGA — apenas se exigido, com bridge de schema
-   verificável (fail-fast).** A imagem antiga omite `exam_type` no INSERT;
-   com a coluna `NOT NULL` **sem default**, **todo novo caso EDA falharia**.
-   Drenar colonoscopias NÃO corrige isso. Antes de subir o código antigo,
-   depois de confirmar **zero** casos colonoscopia em voo (Seção 4.1),
-   restaurar o default temporário e verificá-lo:
+   binário, serializado e fail-fast.** A imagem antiga omite `exam_type` no
+   INSERT; com a coluna `NOT NULL` **sem default**, **todo novo caso EDA
+   falharia**. Drenar colonoscopias NÃO corrige isso. Antes de subir o código
+   antigo, depois de confirmar **zero** casos colonoscopia em voo (Seção 4.1),
+   restaurar o default temporário e verificá-lo com **assert binário** — o
+   bloco pode rodar em shell novo e NÃO depende do fail-fast de outra sessão:
 
 ```bash
-$DPROD exec -T db psql -U ats_web -d ats_web -c \
+set -euo pipefail
+
+# ALTER com SQL errors fatais: falha no SET DEFAULT aborta aqui (ON_ERROR_STOP)
+$DPROD exec -T db psql -U ats_web -d ats_web -v ON_ERROR_STOP=1 -c \
   "ALTER TABLE cases_case ALTER COLUMN exam_type SET DEFAULT 'eda';"
-$DPROD exec -T db psql -U ats_web -d ats_web -c \
+
+# Assert binário: column_default DEVE ser exatamente o default EDA.
+# psql -At sai limpo (sem cabeçalho); um SELECT simples retorna exit 0 mesmo
+# com NULL — a comparação abaixo é quem garante o fail-fast real.
+DEFAULT_NOW=$($DPROD exec -T db psql -U ats_web -d ats_web -At -v ON_ERROR_STOP=1 -c \
   "SELECT column_default FROM information_schema.columns \
-   WHERE table_name='cases_case' AND column_name='exam_type';"
-# Esperado: 'eda'::character varying — se vazio/NULL, PARAR (STOP): não subir o código antigo.
+   WHERE table_name='cases_case' AND column_name='exam_type';")
+[ "${DEFAULT_NOW}" = "'eda'::character varying" ] \
+  || { echo "ERRO: default inesperado: '${DEFAULT_NOW}' — PARAR; NÃO subir a imagem antiga"; exit 1; }
+echo "OK: default temporário instalado e verificado ('eda')"
 ```
 
    Depois: rebuild da imagem antiga, `$DPROD up -d --force-recreate web worker
    pdf_worker` e validar um upload EDA em homologação antes de liberar.
 
-   **Remoção do default temporário no redeploy forward:** quando voltar para a
-   imagem nova (re-rollout), executar na mesma janela de manutenção, antes de
-   abrir escritas:
+   **Remoção do default temporário no redeploy forward (serializada e
+   fail-fast):** a imagem antiga depende do default temporário — removê-lo
+   antes de parar os writers reabre exatamente a race que o bridge evita.
+   Sequência única e executável, na mesma janela de manutenção: a imagem nova
+   é construída ANTES do downtime; os writers antigos são parados ANTES da
+   remoção; a subida da imagem nova ocorre apenas após o assert binário de
+   `NULL`:
 
 ```bash
-$DPROD exec -T db psql -U ats_web -d ats_web -c \
+set -euo pipefail
+
+# 1. Build/pull da imagem NOVA antes do downtime (janela de manutenção reduzida)
+$DPROD build --pull web worker pdf_worker
+
+# 2. Parar os writers da imagem ANTIGA (dependem do default temporário)
+$DPROD stop web worker pdf_worker
+
+# 3. Remover o default com SQL errors fatais (ON_ERROR_STOP)
+$DPROD exec -T db psql -U ats_web -d ats_web -v ON_ERROR_STOP=1 -c \
   "ALTER TABLE cases_case ALTER COLUMN exam_type DROP DEFAULT;"
-$DPROD exec -T db psql -U ats_web -d ats_web -c \
+
+# 4. Assert binário: column_default DEVE ser NULL/empty (não basta comentário)
+DEFAULT_NOW=$($DPROD exec -T db psql -U ats_web -d ats_web -At -v ON_ERROR_STOP=1 -c \
   "SELECT column_default FROM information_schema.columns \
-   WHERE table_name='cases_case' AND column_name='exam_type';"
-# Esperado: NULL (sem default) — equivalente ao schema pós-0014.
+   WHERE table_name='cases_case' AND column_name='exam_type';")
+[ -z "${DEFAULT_NOW}" ] \
+  || { echo "ERRO: default ainda presente: '${DEFAULT_NOW}' — PARAR"; exit 1; }
+echo "OK: sem default (NULL) — equivalente ao schema pós-0014"
+
+# 5. Só agora subir a imagem NOVA
+$DPROD up -d --force-recreate web worker pdf_worker
 ```
+
+   **Se qualquer check falhar:** os writers já estão parados — **manter
+   parados** e **não continuar**; **não subir a imagem nova**. Investigar o
+   estado do default (`SELECT column_default ...`), restaurar o bridge se
+   necessário (bloco de `SET DEFAULT` acima, com assert) e só retomar a
+   sequência depois de nova verificação.
 
 > A coluna `exam_type`, o índice e os prompts permanecem no banco em todos os
 > caminhos — **rollback destrutivo não é o padrão**.

@@ -519,3 +519,76 @@ class TestTasksEligibilityExact:
         assert "exam_type_mismatch" in tasks
         assert "mixed_exam_request" in tasks
         assert "unknown_exam_type" in tasks
+
+
+# ── E1: Bridge de rollback executável, binário e serializado ───────────────
+
+
+class TestRunbookRollbackBridgeExecutable:
+    def _bridge(self) -> str:
+        """Bloco de INSTALAÇÃO do bridge (SET DEFAULT + verificação binária)."""
+        runbook = _read(RUNBOOK_PATH)
+        sec51 = runbook.split("### 5.1", 1)[1].split("### 5.2", 1)[0]
+        return sec51.split("restaurar o default temporário", 1)[1].split("Depois:", 1)[0]
+
+    def _forward(self) -> str:
+        """Bloco de REMOÇÃO do bridge no redeploy forward (DROP DEFAULT serializado)."""
+        runbook = _read(RUNBOOK_PATH)
+        sec51 = runbook.split("### 5.1", 1)[1].split("### 5.2", 1)[0]
+        return sec51.split("Remoção do default temporário no redeploy forward", 1)[1]
+
+    def test_bridge_block_fail_fast_on_its_own(self) -> None:
+        """Bloco do bridge ativa fail-fast próprio; não depende de shell de sessão anterior."""
+        bridge = self._bridge()
+        assert (
+            "set -euo pipefail" in bridge
+            or "set -o pipefail" in bridge
+            or re.search(r"ALTER TABLE[^\n]+SET DEFAULT[^\n]*(?:\|\||&&)", bridge, re.I)
+        ), "Bridge pode rodar em shell novo: precisa de set -euo pipefail ou handler explícito"
+
+    def test_set_default_uses_on_error_stop(self) -> None:
+        """ALTER do bridge usa psql -v ON_ERROR_STOP=1 (falha SQL = falha de comando)."""
+        assert "ON_ERROR_STOP" in self._bridge(), "ALTER schema-changing precisa de psql -v ON_ERROR_STOP=1"
+
+    def test_set_default_verification_is_binary(self) -> None:
+        """Verificação captura column_default (-At) e faz assert binário com exit 1."""
+        bridge = self._bridge()
+        assert re.search(r"\w+\s*=\s*\"?\$\([^)]*column_default", bridge, re.I | re.S), (
+            "Captura da saída do default com -At necessária"
+        )
+        assert re.search(r"(?:\[\[?|test\s).{0,240}'eda'::character varying", bridge, re.I | re.S), (
+            "Assert binário contra o default esperado 'eda'::character varying"
+        )
+        assert "exit 1" in bridge, "Mismatch do default deve abortar (exit 1)"
+
+    def test_forward_sequence_build_stop_drop_assert_up(self) -> None:
+        """Forward serializado: build/pull → stop writers antigos → DROP → assert NULL → up novo."""
+        forward = self._forward()
+        build = forward.find("build")
+        stop = forward.find("stop web")
+        drop = forward.find("DROP DEFAULT")
+        up = forward.find("up -d")
+        assert -1 < build < stop < drop < up, (
+            "Imagem nova buildada antes do downtime; writers antigos parados antes do DROP; "
+            "up novo apenas após o assert NULL"
+        )
+
+    def test_forward_drop_uses_on_error_stop(self) -> None:
+        """DROP DEFAULT do forward com SQL errors fatais."""
+        assert "ON_ERROR_STOP" in self._forward()
+
+    def test_forward_null_assert_is_binary(self) -> None:
+        """Forward exige NULL/empty real (binário), não comentário de saída esperada."""
+        forward = self._forward()
+        assert re.search(r"\w+\s*=\s*\"?\$\([^)]*column_default", forward, re.I | re.S)
+        assert re.search(r"(?:\[\[?|test\s)", forward)
+        assert "exit 1" in forward
+
+    def test_forward_recovery_keeps_writers_stopped(self) -> None:
+        """Recuperação documentada: check falho → manter writers parados, não continuar."""
+        forward = self._forward()
+        lower = forward.lower()
+        assert "manter" in lower and ("parados" in lower or "parado" in lower), (
+            "Falha no check deve manter os writers parados (não subir imagem nova)"
+        )
+        assert "não continuar" in lower or "não subir" in lower
