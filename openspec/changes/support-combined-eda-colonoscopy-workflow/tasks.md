@@ -27,7 +27,7 @@ A ADR-0004 deve ser commitada, enviada e aprovada explicitamente antes de entreg
 ## Slices verticais
 
 - [x] Slice 001 — NIR cria e acompanha um único caso combinado (`slices/slice-001-combined-intake-procedure-projection.md`)
-- [ ] Slice 002 — Pipeline neutro analisa um ou dois procedimentos e entrega ao médico (`slices/slice-002-procedure-neutral-pipeline.md`)
+- [x] Slice 002 — Pipeline neutro analisa um ou dois procedimentos e entrega ao médico (`slices/slice-002-procedure-neutral-pipeline.md`)
 - [ ] Slice 003 — Médico decide cada procedimento com justificativa e histórico próprio (`slices/slice-003-per-procedure-doctor-decision.md`)
 - [ ] Slice 004 — CHD recebe conjunto autorizado e faz um agendamento casado (`slices/slice-004-paired-scheduler-appointment.md`)
 - [ ] Slice 005 — NIR corrige, filtra e recebe resposta comparativa (`slices/slice-005-nir-correction-and-final-response.md`)
@@ -47,13 +47,13 @@ A ADR-0004 deve ser commitada, enviada e aprovada explicitamente antes de entreg
 
 ### Pipeline e prompts
 
-- [ ] Novos processamentos usam schema procedure-neutral v2.
-- [ ] LLM1 extrai história comum uma vez e lista somente procedimentos sustentados por evidência.
-- [ ] Single→combined recebe upgrade automático auditável.
-- [ ] Combinado→single, unique mismatch e unknown retornam ao NIR.
-- [ ] Policy e LLM2 produzem resultado por procedimento sem duas execuções completas.
-- [ ] LLM2 não adiciona/remove procedimentos e suporte global usa nível mais restritivo.
-- [ ] Artefatos 1.1 permanecem legíveis, sem rewrite.
+- [x] Novos processamentos usam schema procedure-neutral v2.
+- [x] LLM1 extrai história comum uma vez e lista somente procedimentos sustentados por evidência.
+- [x] Single→combined recebe upgrade automático auditável.
+- [x] Combinado→single, unique mismatch e unknown retornam ao NIR.
+- [x] Policy e LLM2 produzem resultado por procedimento sem duas execuções completas.
+- [x] LLM2 não adiciona/remove procedimentos e suporte global usa nível mais restritivo.
+- [x] Artefatos 1.1 permanecem legíveis, sem rewrite.
 
 ### Médico e histórico
 

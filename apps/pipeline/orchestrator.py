@@ -12,6 +12,7 @@ import uuid
 from apps.cases.exam_profiles import get_exam_profile
 from apps.cases.models import Case
 from apps.cases.priority_signals import resolve_priority_signals
+from apps.cases.procedures import get_declared_procedure_types, set_detected_procedures
 from apps.llm.models import PromptTemplate
 from apps.pipeline.llm import LlmClient
 from apps.pipeline.llm1_service import (
@@ -21,7 +22,19 @@ from apps.pipeline.llm1_service import (
     LLM1_DEFAULT_USER_PROMPT,
     Llm1Service,
 )
+from apps.pipeline.llm1_service_v2 import (
+    LLM1_V2_DEFAULT_SYSTEM_PROMPT,
+    LLM1_V2_DEFAULT_USER_PROMPT,
+    Llm1ServiceV2,
+    Llm1V2Result,
+)
 from apps.pipeline.llm2_service import Llm2Service
+from apps.pipeline.llm2_service_v2 import (
+    LLM2_V2_DEFAULT_SYSTEM_PROMPT,
+    LLM2_V2_DEFAULT_USER_PROMPT,
+    Llm2ServiceV2,
+    strictest_global_support,
+)
 from apps.pipeline.policy import (
     EdaPolicyPrecheckInput,
     Llm2PolicyAlignmentInput,
@@ -30,7 +43,16 @@ from apps.pipeline.policy import (
     reconcile_eda_policy,
     synthesize_eda_support_context,
 )
-from apps.pipeline.scope_detection import classify_exam_scope
+from apps.pipeline.prior_case import PriorCaseContext, lookup_prior_case_context
+from apps.pipeline.procedure_reconciliation import (
+    build_v2_review_payload,
+    reconcile_detected_procedures,
+)
+from apps.pipeline.schemas.adapters import project_v2_to_llm1_shape
+from apps.pipeline.scope_detection import (
+    classify_exam_scope,
+    detect_requested_procedures_v2,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -67,18 +89,29 @@ def run_pipeline(
         client_llm2 = llm_client
 
     try:
-        _run_llm1_step(
-            case=case,
-            client=client_llm1,
-            system_prompt=llm1_system_prompt,
-            user_template=llm1_user_template,
-        )
-        _run_scope_and_llm2(
-            case=case,
-            client=client_llm2,
-            llm2_system_prompt=llm2_system_prompt,
-            llm2_user_template=llm2_user_template,
-        )
+        if _uses_v2_pipeline(case):
+            _run_v2_pipeline(
+                case=case,
+                client_llm1=client_llm1,
+                client_llm2=client_llm2,
+                llm1_system_prompt=llm1_system_prompt,
+                llm1_user_template=llm1_user_template,
+                llm2_system_prompt=llm2_system_prompt,
+                llm2_user_template=llm2_user_template,
+            )
+        else:
+            _run_llm1_step(
+                case=case,
+                client=client_llm1,
+                system_prompt=llm1_system_prompt,
+                user_template=llm1_user_template,
+            )
+            _run_scope_and_llm2(
+                case=case,
+                client=client_llm2,
+                llm2_system_prompt=llm2_system_prompt,
+                llm2_user_template=llm2_user_template,
+            )
     except Exception as exc:
         logger.exception("Pipeline failed for case %s", case_id)
         try:
@@ -381,6 +414,337 @@ def _build_llm2_suggestion_input(suggested_action: dict[str, object]) -> Llm2Sug
     )
 
 
+# ── V2 pipeline (Slice 002 — procedure-neutral) ────────────────────────────
+
+
+_PROCEDURE_TYPES: tuple[str, ...] = ("eda", "colonoscopy")
+
+
+def _uses_v2_pipeline(case: Case) -> bool:
+    """Novos processamentos usam o contrato 2.0 (D5/ADR-0004).
+
+    Casos criados após o Slice 001 possuem rows declaradas na projeção
+    ``CaseProcedure``; casos/artefatos 1.1 históricos (sem rows) permanecem no
+    fluxo legado, sempre legíveis (R9).
+    """
+    return case.procedures.filter(declared_by_nir=True).exists()
+
+
+def _resolve_prompt(name: str) -> tuple[str, int]:
+    """Resolve conteúdo + versão de um prompt ativo (fallback com versão 0)."""
+    template = PromptTemplate.get_active(name)
+    if template is not None:
+        return template.content, template.version
+    return _get_prompt_content(name), 0
+
+
+def _collect_v2_evidence_spans(structured_data: dict[str, object]) -> list[dict[str, str]]:
+    """Spans comuns + por procedimento para payload enxuto de revisão (R8)."""
+    spans: list[dict[str, str]] = []
+    common = structured_data.get("common_preop")
+    if isinstance(common, dict):
+        raw = common.get("evidence_spans")
+        if isinstance(raw, list):
+            spans.extend(item for item in raw if isinstance(item, dict))
+    raw_procedures = structured_data.get("requested_procedures")
+    if isinstance(raw_procedures, list):
+        for procedure in raw_procedures:
+            if not isinstance(procedure, dict):
+                continue
+            raw_spans = procedure.get("evidence_spans")
+            if isinstance(raw_spans, list):
+                spans.extend(item for item in raw_spans if isinstance(item, dict))
+    return spans
+
+
+def _run_v2_pipeline(
+    *,
+    case: Case,
+    client_llm1: LlmClient,
+    client_llm2: LlmClient,
+    llm1_system_prompt: str | None,
+    llm1_user_template: str | None,
+    llm2_system_prompt: str | None,
+    llm2_user_template: str | None,
+) -> None:
+    """Pipeline procedure-neutral 2.0 para casos novos (uma chamada por estágio).
+
+    Fluxo entregue (R1–R8): LLM1 v2 (história comum + requested_procedures) →
+    detecção/reconciliação D7 → projeção atômica → policy por componente →
+    prior context por componente (D10) → LLM2 v2 (conjunto exato) → suporte
+    global mais restritivo → WAIT_DOCTOR com relatório neutro legível. Gates de
+    revisão NIR (combined→single, mismatch, unknown) nunca executam LLM2.
+    """
+    declared = get_declared_procedure_types(case)
+
+    # ── 1. LLM1 v2 — uma chamada ────────────────────────────────────────
+    if llm1_system_prompt is not None:
+        sp1, sp1_version = llm1_system_prompt, 0
+    else:
+        sp1, sp1_version = _resolve_prompt("exam_llm1_system")
+    if llm1_user_template is not None:
+        ut1, ut1_version = llm1_user_template, 0
+    else:
+        ut1, ut1_version = _resolve_prompt("exam_llm1_user")
+
+    service1 = Llm1ServiceV2(client_llm1)
+    result1 = service1.run(
+        case_id=str(case.case_id),
+        agency_record_number=case.agency_record_number,
+        extracted_text=case.extracted_text,
+        declared_procedure_types=declared,
+        system_prompt=sp1,
+        user_prompt_template=ut1,
+        prompt_system_version=sp1_version,
+        prompt_user_version=ut1_version,
+    )
+
+    case.structured_data = result1.structured_data
+    case.summary_text = result1.summary_text
+
+    # ── 2. Detecção + reconciliação (D7) ───────────────────────────────
+    detection = detect_requested_procedures_v2(
+        llm1_structured_data=result1.structured_data,
+        cleaned_text=case.extracted_text,
+    )
+    strong = tuple(t for t in _PROCEDURE_TYPES if detection[t]["strong"])
+    any_evidence = tuple(t for t in _PROCEDURE_TYPES if detection[t]["any"])
+    reconciliation = reconcile_detected_procedures(
+        declared=declared,
+        strong=strong,
+        any_evidence=any_evidence,
+    )
+
+    # ── 3. Projeção de detecção atômica (R4) ───────────────────────────
+    set_detected_procedures(
+        case=case,
+        detected_types=reconciliation.detected_procedure_types,
+    )
+
+    # Sinais prioritários por projeção compatível (R5): EDA quando presente,
+    # senão Colonoscopia (perfil restringe códigos permitidos).
+    signals_type = "eda" if "eda" in reconciliation.detected_procedure_types else "colonoscopy"
+    signals_projection = project_v2_to_llm1_shape(
+        v2_data=result1.structured_data,
+        procedure_type=signals_type,
+    )
+    case.priority_signals = resolve_priority_signals(
+        structured_data=signals_projection,
+        source_text=case.extracted_text,
+        exam_type=signals_type,
+    )
+
+    # ── 4. Eventos de detecção (R8: versões de schema/prompt + conjuntos) ─
+    detection_payload: dict[str, object] = {
+        "schema_version": "2.0",
+        "declared_procedures": list(declared),
+        "detected_procedures": list(reconciliation.detected_procedure_types),
+        "reason_code": reconciliation.reason_code,
+        "prompt_system_name": result1.prompt_system_name,
+        "prompt_system_version": result1.prompt_system_version,
+        "prompt_user_name": result1.prompt_user_name,
+        "prompt_user_version": result1.prompt_user_version,
+    }
+    case._record_event("CASE_PROCEDURES_DETECTED", payload=detection_payload)
+    case.save()
+    if reconciliation.upgraded:
+        case._record_event(
+            "PROCEDURE_SELECTION_AUTO_UPGRADED",
+            payload={
+                "schema_version": "2.0",
+                "declared_procedures": list(declared),
+                "detected_procedures": list(reconciliation.detected_procedure_types),
+                "reason_code": reconciliation.reason_code,
+            },
+        )
+        case.save()
+
+    # ── 5. Gate de revisão NIR (sem LLM2) ──────────────────────────────
+    if reconciliation.action == "nir_review":
+        review_payload = build_v2_review_payload(
+            case_id=str(case.case_id),
+            agency_record_number=case.agency_record_number,
+            reason_code=reconciliation.reason_code,
+            reason_text=reconciliation.reason_text,
+            declared=declared,
+            detected=reconciliation.detected_procedure_types,
+            evidence_spans=_collect_v2_evidence_spans(result1.structured_data),
+        )
+        case.suggested_action = review_payload
+        case.save()
+        case._record_event(
+            "EDA_SCOPE_GATED_MANUAL_REVIEW",
+            payload=review_payload,
+        )
+        case.save()
+        reason_code = str(review_payload.get("reason_code", ""))
+        case.scope_gate_bypass(reason_code=reason_code)
+        case.save()
+        case._record_event("FINAL_REPLY_POSTED")
+        case.save()
+        return
+
+    # ── 6. LLM1 concluído (LLM_STRUCT → LLM_SUGGEST) ──────────────────
+    case.llm1_complete(success=True, user=None, payload=_build_v2_llm1_ok_payload(case, result1))
+    case.save()
+
+    # ── 7. Policy determinística por componente (R5/D8) ────────────────
+    policy_results: dict[str, dict[str, object]] = {}
+    for procedure_type in reconciliation.detected_procedure_types:
+        projection = project_v2_to_llm1_shape(
+            v2_data=result1.structured_data,
+            procedure_type=procedure_type,
+        )
+        decision = evaluate_preop_policy(structured_data=projection, exam_type=procedure_type)
+        policy_results[procedure_type] = decision
+        case._record_event(
+            "EDA_PREOP_POLICY_DECISION",
+            payload={**decision, "procedure_type": procedure_type, "schema_version": "2.0"},
+        )
+        case.save()
+
+    # ── 8. Prior case por componente (D10) ─────────────────────────────
+    prior_contexts: dict[str, dict[str, object]] = {}
+    for procedure_type in reconciliation.detected_procedure_types:
+        context = lookup_prior_case_context(
+            case_id=case.case_id,
+            agency_record_number=case.agency_record_number,
+            procedure_type=procedure_type,
+        )
+        prior_contexts[procedure_type] = _serialize_prior_context(context)
+        if context.prior_case is not None:
+            case._record_event(
+                "PRIOR_CASE_LOOKUP",
+                payload={
+                    "procedure_type": procedure_type,
+                    "schema_version": "2.0",
+                    "prior_case_id": context.prior_case.prior_case_id,
+                    "decision": context.prior_case.decision,
+                    "reason": context.prior_case.reason,
+                    "decided_at": context.prior_case.decided_at,
+                    "decided_by": context.prior_case.decided_by,
+                    "decided_by_role": context.prior_case.decided_by_role,
+                    "prior_denial_count_7d": context.prior_denial_count_7d,
+                },
+            )
+            case.save()
+
+    # ── 9. LLM2 v2 — uma chamada com conjunto exato (R6) ──────────────
+    if llm2_system_prompt is not None:
+        sp2 = llm2_system_prompt
+    else:
+        sp2, _ = _resolve_prompt("exam_llm2_system")
+    if llm2_user_template is not None:
+        ut2 = llm2_user_template
+    else:
+        ut2, _ = _resolve_prompt("exam_llm2_user")
+
+    service2 = Llm2ServiceV2(client_llm2)
+    result2 = service2.run(
+        case_id=str(case.case_id),
+        agency_record_number=case.agency_record_number,
+        llm1_structured_data=result1.structured_data,
+        detected_procedure_types=reconciliation.detected_procedure_types,
+        policy_results=policy_results,
+        prior_contexts=prior_contexts,
+        system_prompt=sp2,
+        user_prompt_template=ut2,
+    )
+
+    # ── 10. Reconciliação por item + suporte global (D8) ──────────────
+    recommendations: list[dict[str, object]] = []
+    for item in result2.procedure_recommendations:
+        procedure_type = str(item["procedure_type"])
+        projection = project_v2_to_llm1_shape(
+            v2_data=result1.structured_data,
+            procedure_type=procedure_type,
+        )
+        profile = get_exam_profile(procedure_type)
+        precheck = _build_policy_precheck(
+            projection,
+            allow_foreign_body_exception=profile.allows_foreign_body_exception,
+        )
+        reconciled = reconcile_eda_policy(precheck=precheck, llm2=_build_llm2_suggestion_input(item))
+        support_ctx = synthesize_eda_support_context(structured_data=projection)
+        contradictions = [
+            {
+                "rule": c.rule,
+                "field": c.field,
+                "previous_value": c.previous_value,
+                "reconciled_value": c.reconciled_value,
+            }
+            for c in reconciled.contradictions
+        ]
+        recommendations.append(
+            {
+                **item,
+                "suggestion": reconciled.suggestion,
+                "policy_alignment": {
+                    "excluded_request": reconciled.policy_alignment.excluded_request,
+                    "labs_ok": reconciled.policy_alignment.labs_ok,
+                    "ecg_ok": reconciled.policy_alignment.ecg_ok,
+                    "pediatric_flag": reconciled.policy_alignment.pediatric_flag,
+                    "notes": reconciled.policy_alignment.notes,
+                },
+                "contradictions": contradictions,
+                # Suporte por componente é recomendação (soft) do LLM2 v2;
+                # a síntese determinística de ASA segue apenas para exibição.
+                "support_recommendation": item["support_recommendation"],
+                "asa": {
+                    "bucket": support_ctx.asa_bucket,
+                    "display_text": support_ctx.asa_display,
+                },
+                "preop_decision": policy_results[procedure_type],
+            }
+        )
+
+    global_support = strictest_global_support(tuple(str(r["support_recommendation"]) for r in recommendations))
+    case.suggested_action = {
+        "schema_version": "2.0",
+        "procedure_recommendations": recommendations,
+        "global_support_recommendation": global_support,
+    }
+    case.save()
+
+    # ── 11. Transições finais (LLM_SUGGEST → R2_POST_WIDGET → WAIT_DOCTOR) ─
+    case.llm2_complete(success=True, user=None)
+    case.save()
+    case.ready_for_doctor()
+    case.save()
+    case._record_event("CASE_READY_FOR_DOCTOR")
+    case.save()
+
+
+def _build_v2_llm1_ok_payload(case: Case, result1: Llm1V2Result) -> dict[str, object]:
+    """Payload enxuto de LLM1_OK para contrato 2.0 (sem texto clínico integral)."""
+    return {
+        "schema_version": "2.0",
+        "summary_text": case.summary_text,
+        "priority_signal_codes": [signal["code"] for signal in case.priority_signals],
+        "prompt_system_name": result1.prompt_system_name,
+        "prompt_system_version": result1.prompt_system_version,
+        "prompt_user_name": result1.prompt_user_name,
+        "prompt_user_version": result1.prompt_user_version,
+    }
+
+
+def _serialize_prior_context(context: PriorCaseContext) -> dict[str, object]:
+    """Serializa PriorCaseContext por componente para o prompt do LLM2 (D10)."""
+    if context.prior_case is None:
+        return {"prior_case": None, "prior_denial_count_7d": context.prior_denial_count_7d}
+    return {
+        "prior_case": {
+            "prior_case_id": context.prior_case.prior_case_id,
+            "decided_at": context.prior_case.decided_at,
+            "decision": context.prior_case.decision,
+            "reason": context.prior_case.reason,
+            "decided_by": context.prior_case.decided_by,
+            "decided_by_role": context.prior_case.decided_by_role,
+        },
+        "prior_denial_count_7d": context.prior_denial_count_7d,
+    }
+
+
 # ── Prompt helpers ───────────────────────────────────────────────────────────
 
 
@@ -397,6 +761,10 @@ def _get_prompt_content(name: str) -> str:
         "llm1_user": LLM1_DEFAULT_USER_PROMPT,
         "colonoscopy_llm1_system": COLONOSCOPY_LLM1_DEFAULT_SYSTEM_PROMPT,
         "colonoscopy_llm1_user": COLONOSCOPY_LLM1_DEFAULT_USER_PROMPT,
+        "exam_llm1_system": LLM1_V2_DEFAULT_SYSTEM_PROMPT,
+        "exam_llm1_user": LLM1_V2_DEFAULT_USER_PROMPT,
+        "exam_llm2_system": LLM2_V2_DEFAULT_SYSTEM_PROMPT,
+        "exam_llm2_user": LLM2_V2_DEFAULT_USER_PROMPT,
         "llm2_system": (
             "Voce e um assistente de apoio a decisao clinica para triagem de "
             "Endoscopia Digestiva Alta (EDA). Retorne APENAS JSON valido que siga estritamente "
@@ -469,7 +837,9 @@ def _try_fail_case(case: Case) -> None:
             case.save()
             return
         except TransitionNotAllowed:
-            case.refresh_from_db()  # reset state for next attempt
+            # A instância já está no estado salvo atual (cada etapa persiste);
+            # refresh_from_db violaria a proteção do FSMField e a reatribuição
+            # quebraria os métodos bound desta instância.
             continue
 
     # Could not transition — still persist the event

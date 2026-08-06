@@ -49,7 +49,8 @@ class TestSeedPromptsCanonicalNames:
         call_command("seed_prompts")
         count2 = PromptTemplate.objects.count()
         assert count1 == count2
-        assert count1 == 8  # exactly 8 prompts (4 EDA + 4 colonoscopy, Slice 003)
+        # 4 EDA + 4 colonoscopia + 4 neutros (Slice 002) = 12; antigos não apagados.
+        assert count1 == 12
 
     def test_no_endoscopy_fallback(self) -> None:
         """Seed content must NOT reference 'relatório de endoscopia'."""

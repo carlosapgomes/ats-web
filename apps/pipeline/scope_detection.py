@@ -911,3 +911,159 @@ def classify_exam_scope(
         declared=expected,
         evidence_spans=evidence_spans,
     )
+
+
+# ── Detecção v2 (Slice 002, D7) ──────────────────────────────────────────────
+#
+# Contrato 2.0 procedure-neutral: a detecção é por procedimento (EDA e/ou
+# Colonoscopia) com dois níveis — ``strong`` (proveniência: lista estruturada
+# v2 com evidence spans e/ou Motivo da Solicitação) e ``any`` (strong OU
+# ocorrência textual de solicitação atual). Histórico/negação nunca criam
+# componente (máquinas por ocorrência compartilhadas com o fluxo 1.1).
+
+
+def _extract_v2_requested_procedures(
+    *,
+    llm1_structured_data: dict[str, object],
+) -> set[str]:
+    """Procedimentos da lista estruturada v2 com evidence spans válidos.
+
+    O schema 2.0 exige evidence_spans por item; aqui apenas confirmamos que
+    os spans sobreviveram à validação (proveniência estruturada).
+    """
+    raw = llm1_structured_data.get("requested_procedures")
+    if not isinstance(raw, list):
+        return set()
+    result: set[str] = set()
+    for item in raw:
+        if not isinstance(item, dict):
+            continue
+        procedure_type = item.get("procedure_type")
+        spans = item.get("evidence_spans")
+        if procedure_type not in {"eda", "colonoscopy"}:
+            continue
+        if not isinstance(spans, list) or not spans:
+            continue
+        result.add(procedure_type)
+    return result
+
+
+def _occurrence_has_qualifier(
+    *,
+    normalized_text: str,
+    pattern: re.Pattern[str],
+    historical: bool,
+) -> bool:
+    """True quando ao menos uma ocorrência do termo é negada/histórica (D7).
+
+    Usado para cancelar uma afirmação estruturada do LLM contradita pelo texto:
+    referência histórica/negação nunca adiciona componente, mesmo quando o
+    LLM listou o procedimento em ``requested_procedures``.
+    """
+    for match in pattern.finditer(normalized_text):
+        prefix, suffix = _clause_context(normalized_text, match.start(), match.end())
+        if historical:
+            if _HISTORICAL_BEFORE_OCCURRENCE_PATTERN.search(prefix) or _HISTORICAL_AFTER_OCCURRENCE_PATTERN.match(
+                suffix
+            ):
+                return True
+        elif _NEGATION_BEFORE_OCCURRENCE_PATTERN.search(prefix) or _NEGATION_AFTER_OCCURRENCE_PATTERN.match(suffix):
+            return True
+    return False
+
+
+def detect_requested_procedures_v2(
+    *,
+    llm1_structured_data: dict[str, object],
+    cleaned_text: str,
+) -> dict[str, dict[str, bool]]:
+    """Detecta solicitações atuais por procedimento para o contrato 2.0 (D7).
+
+    Returns:
+        {"eda": {"strong": bool, "any": bool},
+         "colonoscopy": {"strong": bool, "any": bool}}
+
+    ``strong`` = proveniência de solicitação atual (lista estruturada v2 com
+    spans OU Motivo da Solicitação). ``any`` = evidência textual de solicitação
+    atual OU (``strong`` confirmado pelo texto: termo presente e sem negação/
+    histórico exclusivo). Uma afirmação do LLM sem correspondência no texto
+    (hallucination) ou contradita por negação/histórico nunca vira componente
+    detectado (D7 — evidência forte exige proveniência suficiente).
+    """
+    structured_strong = _extract_v2_requested_procedures(
+        llm1_structured_data=llm1_structured_data,
+    )
+
+    strong_eda = "eda" in structured_strong
+    strong_colon = "colonoscopy" in structured_strong
+
+    motive_text = _extract_motivo_solicitacao_text(cleaned_text=cleaned_text)
+    if motive_text is not None:
+        normalized_motive = _normalize_scope_keyword_text(value=motive_text)
+        if _motive_mentions_supported_eda(normalized_motive=normalized_motive):
+            strong_eda = True
+        if _motive_mentions_colonoscopy(normalized_motive=normalized_motive):
+            strong_colon = True
+
+    normalized_text = _normalize_scope_keyword_text(value=cleaned_text)
+    eda_current = _occurrence_is_current_request(
+        normalized_text=normalized_text,
+        pattern=_EDA_TERM_PATTERN,
+    ) or _contains_eus_with_local_request_context(normalized_text=normalized_text)
+    colon_current = _occurrence_is_current_request(
+        normalized_text=normalized_text,
+        pattern=_COLONOSCOPY_TERM_PATTERN,
+    ) or _occurrence_is_current_request(
+        normalized_text=normalized_text,
+        pattern=_COLONOSCOPY_ACRONYM_PATTERN,
+    )
+
+    eda_mentions = _EDA_TERM_PATTERN.search(normalized_text) is not None
+    colon_mentions = (
+        _COLONOSCOPY_TERM_PATTERN.search(normalized_text) is not None
+        or _COLONOSCOPY_ACRONYM_PATTERN.search(normalized_text) is not None
+    )
+    eda_neg_or_hist = _occurrence_has_qualifier(
+        normalized_text=normalized_text,
+        pattern=_EDA_TERM_PATTERN,
+        historical=False,
+    ) or _occurrence_has_qualifier(
+        normalized_text=normalized_text,
+        pattern=_EDA_TERM_PATTERN,
+        historical=True,
+    )
+    colon_neg_or_hist = (
+        _occurrence_has_qualifier(
+            normalized_text=normalized_text,
+            pattern=_COLONOSCOPY_TERM_PATTERN,
+            historical=False,
+        )
+        or _occurrence_has_qualifier(
+            normalized_text=normalized_text,
+            pattern=_COLONOSCOPY_TERM_PATTERN,
+            historical=True,
+        )
+        or _occurrence_has_qualifier(
+            normalized_text=normalized_text,
+            pattern=_COLONOSCOPY_ACRONYM_PATTERN,
+            historical=False,
+        )
+        or _occurrence_has_qualifier(
+            normalized_text=normalized_text,
+            pattern=_COLONOSCOPY_ACRONYM_PATTERN,
+            historical=True,
+        )
+    )
+
+    def _any(strong: bool, current: bool, mentions: bool, neg_or_hist: bool) -> bool:
+        if current:
+            return True
+        return strong and mentions and not neg_or_hist
+
+    return {
+        "eda": {"strong": strong_eda, "any": _any(strong_eda, eda_current, eda_mentions, eda_neg_or_hist)},
+        "colonoscopy": {
+            "strong": strong_colon,
+            "any": _any(strong_colon, colon_current, colon_mentions, colon_neg_or_hist),
+        },
+    }

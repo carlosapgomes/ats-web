@@ -217,6 +217,10 @@ class DoctorReportPresenter:
 
     # ── Public API ───────────────────────────────────────────────────────
 
+    def _is_v2(self) -> bool:
+        """True quando o structured_data é contrato 2.0 procedure-neutral."""
+        return isinstance(self.structured_data, dict) and self.structured_data.get("schema_version") == "2.0"
+
     def build_report(self) -> dict[str, Any]:
         """Return the full report structure with blocks, context, and denial info.
 
@@ -291,16 +295,11 @@ class DoctorReportPresenter:
     # ── Block builders ───────────────────────────────────────────────────
 
     def _build_comorbidities_line(self) -> str:
-        """Build the comorbidities display line from structured_data.
-
-        Returns one of:
-        - "Comorbidades descritas: <comma-separated names>" when items exist.
-        - "Comorbidades descritas: sem comorbidades descritas no relatório" when
-          the field is present but empty or all items are invalid.
-        - "Comorbidades descritas: extração de comorbidades não disponível neste caso"
-          when the field is absent (old case without extraction).
-        """
-        preop = _extract_nested(self.structured_data, "preop_screening")
+        """Build the comorbidities display line from structured_data."""
+        if self._is_v2():
+            preop = _extract_nested(self.structured_data, "common_preop")
+        else:
+            preop = _extract_nested(self.structured_data, "preop_screening")
         if not isinstance(preop, dict) or "comorbidities_described" not in preop:
             return "Comorbidades descritas: extração de comorbidades não disponível neste caso"
 
@@ -420,11 +419,20 @@ class DoctorReportPresenter:
         return lines
 
     def _build_critical_findings(self) -> list[str]:
-        hb = _extract_nested(self.structured_data, "eda", "labs", "hb_g_dl")
-        platelets = _extract_nested(self.structured_data, "eda", "labs", "platelets_per_mm3")
-        inr = _extract_nested(self.structured_data, "eda", "labs", "inr")
-        ecg_present = _extract_nested(self.structured_data, "eda", "ecg", "report_present")
-        ecg_alert = _extract_nested(self.structured_data, "eda", "ecg", "abnormal_flag")
+        if self._is_v2():
+            labs = _extract_nested(self.structured_data, "common_preop", "labs") or {}
+            ecg = _extract_nested(self.structured_data, "common_preop", "ecg") or {}
+            hb = labs.get("hb_g_dl")
+            platelets = labs.get("platelets_per_mm3")
+            inr = labs.get("inr")
+            ecg_present = ecg.get("report_present")
+            ecg_alert = ecg.get("abnormal_flag")
+        else:
+            hb = _extract_nested(self.structured_data, "eda", "labs", "hb_g_dl")
+            platelets = _extract_nested(self.structured_data, "eda", "labs", "platelets_per_mm3")
+            inr = _extract_nested(self.structured_data, "eda", "labs", "inr")
+            ecg_present = _extract_nested(self.structured_data, "eda", "ecg", "report_present")
+            ecg_alert = _extract_nested(self.structured_data, "eda", "ecg", "abnormal_flag")
         lab_lines = [
             f"- Hb: {_format_value_or_fallback(hb)}",
             f"- Plaquetas: {_format_value_or_fallback(platelets)}",
@@ -461,18 +469,44 @@ class DoctorReportPresenter:
         ]
 
     def _build_decision(self) -> list[str]:
+        if self._is_v2():
+            recommendations = self.suggested_action.get("procedure_recommendations")
+            if not isinstance(recommendations, list) or not recommendations:
+                return ["- não informado"]
+            lines: list[str] = []
+            for recommendation in recommendations:
+                if not isinstance(recommendation, dict):
+                    continue
+                procedure_name = "EDA" if recommendation.get("procedure_type") == "eda" else "Colonoscopia"
+                suggestion_text = (
+                    _format_scalar(recommendation.get("suggestion")) if recommendation.get("suggestion") else ""
+                )
+                lines.append(f"- {procedure_name}: {suggestion_text}")
+            return lines or ["- não informado"]
         suggestion = self.suggested_action.get("suggestion")
         if isinstance(suggestion, str):
             return [f"- {_format_scalar(suggestion)}"]
         return ["- não informado"]
 
     def _build_support(self) -> list[str]:
+        if self._is_v2():
+            support = self.suggested_action.get("global_support_recommendation")
+            if isinstance(support, str):
+                return [f"- {_format_scalar(support)}"]
+            return ["- não informado"]
         support = self.suggested_action.get("support_recommendation")
         if isinstance(support, str):
             return [f"- {_format_scalar(support)}"]
         return ["- não informado"]
 
     def _build_asa(self) -> list[str]:
+        if self._is_v2():
+            asa_payload = _extract_nested(self.structured_data, "common_preop", "asa")
+            if isinstance(asa_payload, dict):
+                bucket = asa_payload.get("bucket")
+                if isinstance(bucket, str) and bucket.strip():
+                    return [f"- {self._format_asa_bucket(bucket.strip())}"]
+            return ["- não informado"]
         asa_payload = self.suggested_action.get("asa")
         if isinstance(asa_payload, dict):
             display_text = asa_payload.get("display_text")
@@ -613,7 +647,10 @@ class DoctorReportPresenter:
 
     def _iter_medications(self) -> list[dict[str, Any]]:
         """Return the structured medications_described items, ignoring malformed input."""
-        preop = _extract_nested(self.structured_data, "preop_screening")
+        if self._is_v2():
+            preop = _extract_nested(self.structured_data, "common_preop")
+        else:
+            preop = _extract_nested(self.structured_data, "preop_screening")
         if not isinstance(preop, dict):
             return []
         items = preop.get("medications_described")
@@ -687,12 +724,34 @@ class DoctorReportPresenter:
         }
 
     def _resolve_canonical_procedure_name(self) -> str:
-        """Resolve the canonical procedure name from the declared exam type.
+        """Resolve the canonical procedure name for the report context.
 
-        Colonoscopy is identified by ``Case.exam_type`` (R6): the canonical
-        procedure never says EDA and the legacy subtype envelope is not used
-        as the type source. EDA keeps the existing subtype-aware names.
+        Contrato 2.0 (Slice 002): o conjunto declarado/detectado vem de
+        ``requested_procedures``; combinado exibe EDA + Colonoscopia.
+        Contrato 1.1: comportamento legado preservado (``exam_type`` + sinais).
         """
+        if self._is_v2():
+            from apps.pipeline.schemas.adapters import (
+                requested_procedure_for_type,
+                requested_procedure_types_v2,
+            )
+
+            types = requested_procedure_types_v2(self.structured_data)
+            if len(types) == 2:
+                return "EDA + Colonoscopia"
+            if len(types) == 1 and types[0] == "colonoscopy":
+                return "Colonoscopia"
+            procedure = requested_procedure_for_type(self.structured_data, "eda")
+            subtype = procedure.get("subtype") or "standard"
+            if subtype == "foreign_body":
+                return "EDA para retirada de corpo estranho"
+            if subtype == "gastrostomy":
+                return "EDA para gastrostomia"
+            if subtype == "esophageal_dilation":
+                return "EDA para dilatação esofágica"
+            if subtype == "echoendoscopy":
+                return "EDA com ecoendoscopia"
+            return "EDA"
         if self.exam_type == "colonoscopy":
             return "Colonoscopia"
         subtype = self._extract_eda_subtype()
@@ -840,9 +899,13 @@ class DoctorReportPresenter:
             if age < 16:
                 return True
             # Age >= 16, but also check explicit pediatric flag
+            if self._is_v2():
+                return _extract_nested(self.structured_data, "policy_precheck", "pediatric_flag") is True
             is_pediatric = _extract_nested(self.structured_data, "eda", "is_pediatric")
             return is_pediatric is True
 
+        if self._is_v2():
+            return _extract_nested(self.structured_data, "policy_precheck", "pediatric_flag") is True
         is_pediatric = _extract_nested(self.structured_data, "eda", "is_pediatric")
         return is_pediatric is True
 

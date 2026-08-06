@@ -21,6 +21,7 @@ from apps.cases.models import (
     EDA_COLONOSCOPY,
     Case,
     CaseProcedure,
+    DetectionStatus,
     ProcedureType,
 )
 
@@ -122,6 +123,60 @@ def set_declared_procedures(
             "CASE_PROCEDURES_DECLARED",
             user=actor,
             payload={"procedures": list(types)},
+        )
+        locked.save()
+    return locked
+
+
+def normalize_detected_set(detected_types: Any) -> tuple[str, ...]:
+    """Valida e ordena um conjunto detectado (apenas EDA/Colonoscopia, sem duplicatas).
+
+    Conjunto vazio é aceito (nenhum procedimento detectado) — usado pela
+    projeção quando a análise não sustenta nenhum procedimento.
+    """
+    seen: list[str] = []
+    for raw in detected_types or ():
+        value = str(raw)
+        if value not in _DECLARED_SINGLE_TYPES:
+            raise ValueError(f"Procedimento detectado inválido: {value!r}. Aceitos: EDA/Colonoscopia.")
+        if value not in seen:
+            seen.append(value)
+    seen.sort(key=lambda t: _PROCEDURE_ORDER[t])
+    return tuple(seen)
+
+
+def set_detected_procedures(
+    *,
+    case: Case,
+    detected_types: Any,
+    actor: Any = None,
+) -> Case:
+    """Projeta a detecção da análise atomicamente (D4/R4, Slice 002).
+
+    Marca ``detection_status=DETECTED`` para cada procedimento detectado,
+    criando row não declarada quando o segundo procedimento é detectado, e
+    marca ``NOT_DETECTED`` nas rows existentes fora do conjunto. NUNCA altera
+    ``declared_by_nir`` (LLM não escreve a declaração). Falha reverte a
+    operação inteira — nenhum conjunto parcial.
+
+    Args:
+        case: instância do caso (relockada dentro da transação).
+        detected_types: iterável com eda/colonoscopy detectados (pode ser vazio).
+        actor: usuário/autor do pipeline para auditoria (opcional).
+
+    Returns:
+        Instância atualizada do caso.
+    """
+    types = normalize_detected_set(detected_types)
+    with transaction.atomic():
+        locked = Case.objects.select_for_update().get(pk=case.pk)
+        for procedure_type in types:
+            row, _ = CaseProcedure.objects.get_or_create(case=locked, procedure_type=procedure_type)
+            if row.detection_status != DetectionStatus.DETECTED:
+                row.detection_status = DetectionStatus.DETECTED
+                row.save(update_fields=["detection_status"])
+        CaseProcedure.objects.filter(case=locked).exclude(procedure_type__in=types).update(
+            detection_status=DetectionStatus.NOT_DETECTED
         )
         locked.save()
     return locked

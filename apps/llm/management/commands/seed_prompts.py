@@ -16,10 +16,21 @@ from apps.pipeline.llm1_service import (
     LLM1_DEFAULT_SYSTEM_PROMPT,
     LLM1_DEFAULT_USER_PROMPT,
 )
+from apps.pipeline.llm1_service_v2 import (
+    LLM1_V2_DEFAULT_SYSTEM_PROMPT,
+    LLM1_V2_DEFAULT_USER_PROMPT,
+)
+from apps.pipeline.llm2_service_v2 import (
+    LLM2_V2_DEFAULT_SYSTEM_PROMPT,
+    LLM2_V2_DEFAULT_USER_PROMPT,
+)
 
 # Canonical prompt names matching the legacy system and admin UI.
-# Slice 003 (R2): colonoscopy prompts are administráveis separately and never
-# replace the canonical EDA prompts (design D5 / ADR-0003).
+# Slice 003 (R2): colonoscopy prompts are administráveis separadamente e nunca
+# substituem os canônicos EDA. Slice 002 (R2/D6): quatro prompts NEUTROS
+# (exam_llm1_system/user, exam_llm2_system/user) tornam-se canônicos para
+# novos jobs; versões antigas permanecem (nunca apagadas) para auditoria/
+# rollback até o cutover (Slice 007).
 PROMPT_NAMES = [
     "llm1_system",
     "llm1_user",
@@ -29,6 +40,10 @@ PROMPT_NAMES = [
     "colonoscopy_llm1_user",
     "colonoscopy_llm2_system",
     "colonoscopy_llm2_user",
+    "exam_llm1_system",
+    "exam_llm1_user",
+    "exam_llm2_system",
+    "exam_llm2_user",
 ]
 
 # Default contents ported from the legacy augmented-triage-system.
@@ -67,6 +82,10 @@ DEFAULT_CONTENTS = {
         "Colonoscopia usando dados estruturados do LLM1 e contexto de caso "
         "anterior. Nao use palavras em ingles nos campos narrativos."
     ),
+    "exam_llm1_system": LLM1_V2_DEFAULT_SYSTEM_PROMPT,
+    "exam_llm1_user": LLM1_V2_DEFAULT_USER_PROMPT,
+    "exam_llm2_system": LLM2_V2_DEFAULT_SYSTEM_PROMPT,
+    "exam_llm2_user": LLM2_V2_DEFAULT_USER_PROMPT,
 }
 
 

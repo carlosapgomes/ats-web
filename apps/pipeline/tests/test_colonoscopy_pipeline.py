@@ -122,14 +122,15 @@ class TestColonoscopyPromptsSeedAdmin:
             assert template is not None, f"Missing colonoscopy prompt: {name}"
             assert template.content.strip(), f"Empty content for {name}"
 
-    def test_seed_is_idempotent_with_eight_prompts(self) -> None:
+    def test_seed_is_idempotent_with_twelve_prompts(self) -> None:
         from apps.llm.models import PromptTemplate
 
         call_command("seed_prompts")
         count1 = PromptTemplate.objects.count()
         call_command("seed_prompts")
         count2 = PromptTemplate.objects.count()
-        assert count1 == count2 == 8
+        # 4 EDA + 4 Colonoscopia + 4 neutros (Slice 002) = 12; antigos não apagados.
+        assert count1 == count2 == 12
 
     def test_seed_colonoscopy_llm1_user_requires_medications_and_ptbr(self) -> None:
         from apps.llm.models import PromptTemplate

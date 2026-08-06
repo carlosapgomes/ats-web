@@ -178,6 +178,8 @@ EVENT_LABELS: dict[str, str] = {
     "EDA_PREOP_POLICY_DECISION": "Política pré-operatória avaliada",
     "PIPELINE_FAILED": "Falha no processamento",
     "PRIOR_CASE_LOOKUP": "Casos anteriores consultados",
+    "CASE_PROCEDURES_DETECTED": "Procedimentos detectados na análise",
+    "PROCEDURE_SELECTION_AUTO_UPGRADED": "Upgrade automático para EDA + Colonoscopia",
     "REGULATION_REPORT_GATE_FAILED": "Laudo de regulação inválido",
     # ── Work locks ────────────────────────────────────────────
     "WORK_LOCK_CLAIMED": "Caso reservado",
@@ -240,6 +242,8 @@ EVENT_DOT_CSS: dict[str, str] = {
     "EDA_PREOP_POLICY_DECISION": "system",
     "PIPELINE_FAILED": "system",
     "PRIOR_CASE_LOOKUP": "system",
+    "CASE_PROCEDURES_DETECTED": "system",
+    "PROCEDURE_SELECTION_AUTO_UPGRADED": "system",
     "REGULATION_REPORT_GATE_FAILED": "system",
     # ── Work locks ────────────────────────────────────────────
     "WORK_LOCK_CLAIMED": "system",

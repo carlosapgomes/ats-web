@@ -66,6 +66,10 @@ PROMPT_NAME_CHOICES = [
     ("colonoscopy_llm1_user", "Colonoscopia - LLM1 User Prompt"),
     ("colonoscopy_llm2_system", "Colonoscopia - LLM2 System Prompt"),
     ("colonoscopy_llm2_user", "Colonoscopia - LLM2 User Prompt"),
+    ("exam_llm1_system", "Neutro - LLM1 System Prompt"),
+    ("exam_llm1_user", "Neutro - LLM1 User Prompt"),
+    ("exam_llm2_system", "Neutro - LLM2 System Prompt"),
+    ("exam_llm2_user", "Neutro - LLM2 User Prompt"),
 ]
 
 
