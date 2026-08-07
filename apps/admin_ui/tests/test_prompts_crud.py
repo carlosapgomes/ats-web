@@ -45,7 +45,7 @@ def _create_prompt(name: str, version: int = 1, is_active: bool = True, content:
     )
 
 
-PROMPT_NAMES = ["llm1_system", "llm1_user", "llm2_system", "llm2_user"]
+PROMPT_NAMES = ["exam_llm1_system", "exam_llm1_user", "exam_llm2_system", "exam_llm2_user"]
 
 
 # ── Access Control ──────────────────────────────────────────────────────
@@ -94,42 +94,42 @@ class TestPromptAccessControl:
     def test_prompt_detail_accessible_for_admin(self, client) -> None:
         """Admin pode ver detalhe do prompt."""
         _login_as(client, "admin")
-        prompt = _create_prompt("llm1_system")
+        prompt = _create_prompt("exam_llm1_system")
         response = client.get(reverse("admin_ui:prompt_detail", args=[prompt.pk]))
         assert response.status_code == 200
 
     def test_prompt_detail_accessible_for_manager(self, client) -> None:
         """Manager pode ver detalhe do prompt."""
         _login_as(client, "manager")
-        prompt = _create_prompt("llm1_system")
+        prompt = _create_prompt("exam_llm1_system")
         response = client.get(reverse("admin_ui:prompt_detail", args=[prompt.pk]))
         assert response.status_code == 200
 
     def test_prompt_activate_accessible_for_admin(self, client) -> None:
         """Admin pode ativar prompt (POST)."""
         _login_as(client, "admin")
-        prompt = _create_prompt("llm1_system", version=1, is_active=False)
+        prompt = _create_prompt("exam_llm1_system", version=1, is_active=False)
         response = client.post(reverse("admin_ui:prompt_activate", args=[prompt.pk]))
         assert response.status_code == 302
 
     def test_prompt_activate_blocked_for_manager(self, client) -> None:
         """Manager NÃO pode ativar prompt."""
         _login_as(client, "manager")
-        prompt = _create_prompt("llm1_system", version=1, is_active=False)
+        prompt = _create_prompt("exam_llm1_system", version=1, is_active=False)
         response = client.post(reverse("admin_ui:prompt_activate", args=[prompt.pk]))
         assert response.status_code == 302
 
     def test_prompt_deactivate_accessible_for_admin(self, client) -> None:
         """Admin pode desativar prompt (POST)."""
         _login_as(client, "admin")
-        prompt = _create_prompt("llm1_system")
+        prompt = _create_prompt("exam_llm1_system")
         response = client.post(reverse("admin_ui:prompt_deactivate", args=[prompt.pk]))
         assert response.status_code == 302
 
     def test_prompt_deactivate_blocked_for_manager(self, client) -> None:
         """Manager NÃO pode desativar prompt."""
         _login_as(client, "manager")
-        prompt = _create_prompt("llm1_system")
+        prompt = _create_prompt("exam_llm1_system")
         response = client.post(reverse("admin_ui:prompt_deactivate", args=[prompt.pk]))
         assert response.status_code == 302
 
@@ -155,8 +155,8 @@ class TestPromptList:
     def test_shows_active_version_highlighted(self, client) -> None:
         """Versão ativa aparece destacada na lista."""
         _login_as(client, "admin")
-        _create_prompt("llm1_system", version=1, is_active=True)
-        _create_prompt("llm1_system", version=2, is_active=False)
+        _create_prompt("exam_llm1_system", version=1, is_active=True)
+        _create_prompt("exam_llm1_system", version=2, is_active=False)
         response = client.get(reverse("admin_ui:prompt_list"))
         assert response.status_code == 200
         content = response.content.decode()
@@ -166,7 +166,7 @@ class TestPromptList:
     def test_shows_new_version_button_for_admin(self, client) -> None:
         """Admin vê botão 'Nova Versão'."""
         _login_as(client, "admin")
-        _create_prompt("llm1_system")
+        _create_prompt("exam_llm1_system")
         response = client.get(reverse("admin_ui:prompt_list"))
         assert response.status_code == 200
         assert "Nova Versão" in response.content.decode()
@@ -174,7 +174,7 @@ class TestPromptList:
     def test_manager_cannot_see_new_version_button(self, client) -> None:
         """Manager NÃO vê botão 'Nova Versão'."""
         _login_as(client, "manager")
-        _create_prompt("llm1_system")
+        _create_prompt("exam_llm1_system")
         response = client.get(reverse("admin_ui:prompt_list"))
         assert response.status_code == 200
         assert "Nova Versão" not in response.content.decode()
@@ -205,37 +205,37 @@ class TestPromptCreate:
     def test_post_creates_new_version(self, client) -> None:
         """POST cria nova versão do prompt."""
         _login_as(client, "admin")
-        _create_prompt("llm1_system", version=1)
-        data = {"name": "llm1_system", "content": "New version content"}
+        _create_prompt("exam_llm1_system", version=1)
+        data = {"name": "exam_llm1_system", "content": "New version content"}
         response = client.post(reverse("admin_ui:prompt_create"), data)
         assert response.status_code == 302
-        assert PromptTemplate.objects.filter(name="llm1_system", version=2).exists()
+        assert PromptTemplate.objects.filter(name="exam_llm1_system", version=2).exists()
 
     def test_post_auto_increments_version(self, client) -> None:
         """Versão é auto-incrementada (1 → 2)."""
         _login_as(client, "admin")
-        data = {"name": "llm1_user", "content": "First version"}
+        data = {"name": "exam_llm1_user", "content": "First version"}
         client.post(reverse("admin_ui:prompt_create"), data)
-        v1 = PromptTemplate.objects.get(name="llm1_user", version=1)
+        v1 = PromptTemplate.objects.get(name="exam_llm1_user", version=1)
         assert v1.is_active is True
 
-        data2 = {"name": "llm1_user", "content": "Second version"}
+        data2 = {"name": "exam_llm1_user", "content": "Second version"}
         client.post(reverse("admin_ui:prompt_create"), data2)
-        assert PromptTemplate.objects.filter(name="llm1_user", version=2).exists()
+        assert PromptTemplate.objects.filter(name="exam_llm1_user", version=2).exists()
 
     def test_post_creates_first_version_as_1(self, client) -> None:
         """Primeira versão de um nome é sempre 1."""
         _login_as(client, "admin")
-        data = {"name": "llm2_system", "content": "Brand new prompt"}
+        data = {"name": "exam_llm2_system", "content": "Brand new prompt"}
         response = client.post(reverse("admin_ui:prompt_create"), data)
         assert response.status_code == 302
-        prompt = PromptTemplate.objects.get(name="llm2_system")
+        prompt = PromptTemplate.objects.get(name="exam_llm2_system")
         assert prompt.version == 1
 
     def test_post_redirects_to_list(self, client) -> None:
         """Após criar, redireciona para lista."""
         _login_as(client, "admin")
-        data = {"name": "llm2_user", "content": "Redirect test"}
+        data = {"name": "exam_llm2_user", "content": "Redirect test"}
         response = client.post(reverse("admin_ui:prompt_create"), data)
         assert response.status_code == 302
         assert response.url == reverse("admin_ui:prompt_list")
@@ -250,19 +250,19 @@ class TestPromptCreate:
     def test_post_requires_content(self, client) -> None:
         """POST sem content mostra erro."""
         _login_as(client, "admin")
-        data = {"name": "llm1_system", "content": ""}
+        data = {"name": "exam_llm1_system", "content": ""}
         response = client.post(reverse("admin_ui:prompt_create"), data)
         assert response.status_code == 200
 
     def test_new_version_is_active_and_others_deactivated(self, client) -> None:
         """Nova versão fica ativa e desativa as demais do mesmo nome."""
         _login_as(client, "admin")
-        _create_prompt("llm1_system", version=1, is_active=True)
-        data = {"name": "llm1_system", "content": "New active version"}
+        _create_prompt("exam_llm1_system", version=1, is_active=True)
+        data = {"name": "exam_llm1_system", "content": "New active version"}
         response = client.post(reverse("admin_ui:prompt_create"), data)
         assert response.status_code == 302
-        v1 = PromptTemplate.objects.get(name="llm1_system", version=1)
-        v2 = PromptTemplate.objects.get(name="llm1_system", version=2)
+        v1 = PromptTemplate.objects.get(name="exam_llm1_system", version=1)
+        v2 = PromptTemplate.objects.get(name="exam_llm1_system", version=2)
         assert v1.is_active is False
         assert v2.is_active is True
 
@@ -277,18 +277,18 @@ class TestPromptDetail:
     def test_shows_metadata(self, client) -> None:
         """Detail mostra nome, versão, status e conteúdo."""
         _login_as(client, "admin")
-        prompt = _create_prompt("llm1_system", version=1, content="Test content")
+        prompt = _create_prompt("exam_llm1_system", version=1, content="Test content")
         response = client.get(reverse("admin_ui:prompt_detail", args=[prompt.pk]))
         assert response.status_code == 200
         content = response.content.decode()
-        assert "llm1_system" in content
+        assert "exam_llm1_system" in content
         assert "v1" in content or "1" in content
         assert "Test content" in content
 
     def test_shows_activate_button_when_inactive(self, client) -> None:
         """Prompt inativo mostra botão 'Ativar'."""
         _login_as(client, "admin")
-        prompt = _create_prompt("llm1_system", version=1, is_active=False)
+        prompt = _create_prompt("exam_llm1_system", version=1, is_active=False)
         response = client.get(reverse("admin_ui:prompt_detail", args=[prompt.pk]))
         assert response.status_code == 200
         assert "Ativar" in response.content.decode()
@@ -296,7 +296,7 @@ class TestPromptDetail:
     def test_shows_deactivate_button_when_active(self, client) -> None:
         """Prompt ativo mostra botão 'Desativar'."""
         _login_as(client, "admin")
-        prompt = _create_prompt("llm1_system", version=1, is_active=True)
+        prompt = _create_prompt("exam_llm1_system", version=1, is_active=True)
         response = client.get(reverse("admin_ui:prompt_detail", args=[prompt.pk]))
         assert response.status_code == 200
         assert "Desativar" in response.content.decode()
@@ -304,7 +304,7 @@ class TestPromptDetail:
     def test_manager_does_not_see_action_buttons(self, client) -> None:
         """Manager NÃO vê botões Ativar/Desativar."""
         _login_as(client, "manager")
-        prompt = _create_prompt("llm1_system", version=1, is_active=True)
+        prompt = _create_prompt("exam_llm1_system", version=1, is_active=True)
         response = client.get(reverse("admin_ui:prompt_detail", args=[prompt.pk]))
         assert response.status_code == 200
         assert "Ativar" not in response.content.decode()
@@ -328,7 +328,7 @@ class TestPromptActivate:
     def test_activate_sets_is_active_true(self, client) -> None:
         """Ativação seta is_active=True."""
         _login_as(client, "admin")
-        prompt = _create_prompt("llm1_system", version=1, is_active=False)
+        prompt = _create_prompt("exam_llm1_system", version=1, is_active=False)
         client.post(reverse("admin_ui:prompt_activate", args=[prompt.pk]))
         prompt.refresh_from_db()
         assert prompt.is_active is True
@@ -336,8 +336,8 @@ class TestPromptActivate:
     def test_activate_deactivates_others(self, client) -> None:
         """Ativar um prompt desativa outros do mesmo nome."""
         _login_as(client, "admin")
-        v1 = _create_prompt("llm1_system", version=1, is_active=True)
-        v2 = _create_prompt("llm1_system", version=2, is_active=False)
+        v1 = _create_prompt("exam_llm1_system", version=1, is_active=True)
+        v2 = _create_prompt("exam_llm1_system", version=2, is_active=False)
         client.post(reverse("admin_ui:prompt_activate", args=[v2.pk]))
         v1.refresh_from_db()
         v2.refresh_from_db()
@@ -347,7 +347,7 @@ class TestPromptActivate:
     def test_activate_redirects_to_detail(self, client) -> None:
         """Após ativar, redireciona para detail."""
         _login_as(client, "admin")
-        prompt = _create_prompt("llm1_system", version=1, is_active=False)
+        prompt = _create_prompt("exam_llm1_system", version=1, is_active=False)
         response = client.post(reverse("admin_ui:prompt_activate", args=[prompt.pk]))
         assert response.status_code == 302
         assert response.url == reverse("admin_ui:prompt_detail", args=[prompt.pk])
@@ -363,7 +363,7 @@ class TestPromptDeactivate:
     def test_deactivate_sets_is_active_false(self, client) -> None:
         """Desativação seta is_active=False."""
         _login_as(client, "admin")
-        prompt = _create_prompt("llm1_system")
+        prompt = _create_prompt("exam_llm1_system")
         client.post(reverse("admin_ui:prompt_deactivate", args=[prompt.pk]))
         prompt.refresh_from_db()
         assert prompt.is_active is False
@@ -371,7 +371,7 @@ class TestPromptDeactivate:
     def test_deactivate_redirects_to_detail(self, client) -> None:
         """Após desativar, redireciona para detail."""
         _login_as(client, "admin")
-        prompt = _create_prompt("llm1_system")
+        prompt = _create_prompt("exam_llm1_system")
         response = client.post(reverse("admin_ui:prompt_deactivate", args=[prompt.pk]))
         assert response.status_code == 302
         assert response.url == reverse("admin_ui:prompt_detail", args=[prompt.pk])
@@ -403,7 +403,7 @@ class TestPromptNavPills:
     def test_prompt_list_has_nav_pills(self, client) -> None:
         """Template prompt_list tem nav pills."""
         _login_as(client, "admin")
-        _create_prompt("llm1_system")
+        _create_prompt("exam_llm1_system")
         response = client.get(reverse("admin_ui:prompt_list"))
         assert response.status_code == 200
         content = response.content.decode()

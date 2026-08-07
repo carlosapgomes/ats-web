@@ -442,10 +442,11 @@ class TestNeutralPrompts:
         from apps.llm.models import PromptTemplate
 
         call_command("seed_prompts")
-        # 4 EDA + 4 Colonoscopia + 4 neutros = 12; versões antigas não apagadas.
-        assert PromptTemplate.objects.count() == 12
-        assert PromptTemplate.objects.filter(name="llm1_system").exists()
-        assert PromptTemplate.objects.filter(name="colonoscopy_llm1_system").exists()
+        # Slice 007: seed cria SOMENTE os 4 neutros (versões ativas); os 8
+        # nomes legados não são criados pelo seed.
+        assert PromptTemplate.objects.count() == 4
+        assert not PromptTemplate.objects.filter(name="llm1_system").exists()
+        assert not PromptTemplate.objects.filter(name="colonoscopy_llm1_system").exists()
 
     def test_admin_ui_exposes_four_neutral_prompt_names(self) -> None:
         from apps.admin_ui.forms import PROMPT_NAME_CHOICES

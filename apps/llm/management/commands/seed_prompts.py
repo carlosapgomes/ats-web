@@ -1,7 +1,11 @@
 """Seed initial LLM prompt templates — idempotent management command.
 
-Creates version 1 of each prompt template with starter content.
-Safe to run multiple times — skips if prompts already exist.
+Slice 007 (D6/ADR-0004): o seed tornou-se canônico para os QUATRO prompts
+neutros ``exam_llm{1,2}_{system,user}``. Ao rodar, ele garante exatamente uma
+versão ativa por nome neutro (cria v1 ativa quando ausente) e desativa toda
+versão ATIVA dos oito nomes legados (``llm{1,2}_*`` e ``colonoscopy_llm{1,2}_*``)
+preservando linhas/versões históricas para auditoria/rollback. Reexecutar não
+cria versões extras nem reativa nome antigo.
 
 Usage:
     uv run python manage.py seed_prompts --settings=config.settings.dev
@@ -10,12 +14,6 @@ Usage:
 from django.core.management.base import BaseCommand
 
 from apps.llm.models import PromptTemplate
-from apps.pipeline.llm1_service import (
-    COLONOSCOPY_LLM1_DEFAULT_SYSTEM_PROMPT,
-    COLONOSCOPY_LLM1_DEFAULT_USER_PROMPT,
-    LLM1_DEFAULT_SYSTEM_PROMPT,
-    LLM1_DEFAULT_USER_PROMPT,
-)
 from apps.pipeline.llm1_service_v2 import (
     LLM1_V2_DEFAULT_SYSTEM_PROMPT,
     LLM1_V2_DEFAULT_USER_PROMPT,
@@ -25,13 +23,19 @@ from apps.pipeline.llm2_service_v2 import (
     LLM2_V2_DEFAULT_USER_PROMPT,
 )
 
-# Canonical prompt names matching the legacy system and admin UI.
-# Slice 003 (R2): colonoscopy prompts are administráveis separadamente e nunca
-# substituem os canônicos EDA. Slice 002 (R2/D6): quatro prompts NEUTROS
-# (exam_llm1_system/user, exam_llm2_system/user) tornam-se canônicos para
-# novos jobs; versões antigas permanecem (nunca apagadas) para auditoria/
-# rollback até o cutover (Slice 007).
+# Quatro prompts NEUTROS canônicos para novos jobs (dispatch v2 exclusivo,
+# Slice 007). Seed/admin/fallback usam somente estes nomes.
 PROMPT_NAMES = [
+    "exam_llm1_system",
+    "exam_llm1_user",
+    "exam_llm2_system",
+    "exam_llm2_user",
+]
+
+# Oito nomes legados (1.1) que deixam de participar do dispatch após o cutover.
+# O seed desativa versões ativas existentes, mas NUNCA apaga linhas/versões —
+# o histórico permanece consultável para auditoria/rollback.
+LEGACY_PROMPT_NAMES = [
     "llm1_system",
     "llm1_user",
     "llm2_system",
@@ -40,48 +44,10 @@ PROMPT_NAMES = [
     "colonoscopy_llm1_user",
     "colonoscopy_llm2_system",
     "colonoscopy_llm2_user",
-    "exam_llm1_system",
-    "exam_llm1_user",
-    "exam_llm2_system",
-    "exam_llm2_user",
 ]
 
-# Default contents ported from the legacy augmented-triage-system.
-# llm1: most recent versions (v6 from 0018_prompt_templates_llm1_ptbr_v6).
-# llm2: most recent versions (v3 from 0005_prompt_templates_ptbr_v3).
+# Default contents portados do contrato neutro 2.0.
 DEFAULT_CONTENTS = {
-    "llm1_system": LLM1_DEFAULT_SYSTEM_PROMPT,
-    "llm1_user": LLM1_DEFAULT_USER_PROMPT,
-    "llm2_system": (
-        "Voce e um assistente de apoio a decisao clinica para triagem de "
-        "Endoscopia Digestiva Alta (EDA). Retorne APENAS JSON valido que siga "
-        "estritamente o schema_version 1.1. Escreva todos os campos narrativos em "
-        "portugues brasileiro (pt-BR). Nao use palavras em ingles nos campos "
-        "narrativos. Use apenas valores de enum permitidos para suggestion e "
-        "support_recommendation. Nao inclua markdown, blocos de codigo ou chaves "
-        "extras."
-    ),
-    "llm2_user": (
-        "Tarefa: sugerir accept/deny e recomendacao de suporte para triagem EDA "
-        "usando dados estruturados do LLM1 e contexto de caso anterior. "
-        "Nao use palavras em ingles nos campos narrativos."
-    ),
-    "colonoscopy_llm1_system": COLONOSCOPY_LLM1_DEFAULT_SYSTEM_PROMPT,
-    "colonoscopy_llm1_user": COLONOSCOPY_LLM1_DEFAULT_USER_PROMPT,
-    "colonoscopy_llm2_system": (
-        "Voce e um assistente de apoio a decisao clinica para triagem de "
-        "Colonoscopia (endoscopia digestiva baixa). Retorne APENAS JSON valido que "
-        "siga estritamente o schema_version 1.1. Escreva todos os campos narrativos "
-        "em portugues brasileiro (pt-BR). Nao use palavras em ingles nos campos "
-        "narrativos. Use apenas valores de enum permitidos para suggestion e "
-        "support_recommendation. Nao inclua markdown, blocos de codigo ou chaves "
-        "extras."
-    ),
-    "colonoscopy_llm2_user": (
-        "Tarefa: sugerir accept/deny e recomendacao de suporte para triagem de "
-        "Colonoscopia usando dados estruturados do LLM1 e contexto de caso "
-        "anterior. Nao use palavras em ingles nos campos narrativos."
-    ),
     "exam_llm1_system": LLM1_V2_DEFAULT_SYSTEM_PROMPT,
     "exam_llm1_user": LLM1_V2_DEFAULT_USER_PROMPT,
     "exam_llm2_system": LLM2_V2_DEFAULT_SYSTEM_PROMPT,
@@ -96,11 +62,19 @@ class Command(BaseCommand):
         created_count = 0
         skipped_count = 0
 
+        # 1. Quatro nomes neutros: cria v1 ativa quando ausente (idempotente).
+        # Garante exatamente uma versão ativa por nome neutro. Reexecutar não
+        # cria versões extras nem sobrescreve versão ativa existente.
         for name in PROMPT_NAMES:
-            exists = PromptTemplate.objects.filter(name=name).exists()
-            if exists:
+            if PromptTemplate.get_active(name) is not None:
                 skipped_count += 1
-                self.stdout.write(f"  Skipped (already exists): {name}")
+                self.stdout.write(f"  Skipped (active exists): {name}")
+                continue
+            if PromptTemplate.objects.filter(name=name).exists():
+                # Nome existe, porém sem versão ativa: não sobrescreve estado
+                # operacional (mantém idempotência do cutover).
+                skipped_count += 1
+                self.stdout.write(f"  Skipped (inactive only): {name}")
                 continue
 
             content = DEFAULT_CONTENTS.get(name, "{case_id}")
@@ -113,4 +87,16 @@ class Command(BaseCommand):
             created_count += 1
             self.stdout.write(self.style.SUCCESS(f"  Created: {name} v1"))
 
-        self.stdout.write(self.style.SUCCESS(f"\nDone. {created_count} created, {skipped_count} skipped."))
+        # 2. Desativa toda versão ATIVA dos oito nomes legados (preserva
+        # histórico). Idempotente: reexecutar é no-op (não reativa nada).
+        deactivated_count = PromptTemplate.objects.filter(name__in=LEGACY_PROMPT_NAMES, is_active=True).update(
+            is_active=False
+        )
+        if deactivated_count:
+            self.stdout.write(self.style.WARNING(f"  Deactivated {deactivated_count} active legacy prompt version(s)."))
+
+        self.stdout.write(
+            self.style.SUCCESS(
+                f"\nDone. {created_count} created, {skipped_count} skipped, {deactivated_count} deactivated."
+            )
+        )

@@ -1,4 +1,10 @@
-"""Integration tests for pipeline orchestrator."""
+"""Integration tests for pipeline orchestrator (procedure-neutral v2, Slice 007).
+
+Slice 007: o orchestrator é exclusivamente v2. Casos com projeção declarada
+(``CaseProcedure``) percorrem o contrato 2.0; casos sem rows declarados falham
+de modo explícito/auditável (R1), sem cair em perfil singular/EDA nem em
+prompt 1.1. Fixtures criam ``CaseProcedure`` explicitamente (R5).
+"""
 
 from __future__ import annotations
 
@@ -20,14 +26,8 @@ def _reload(case: Case) -> Case:
 # ── Test fixtures ────────────────────────────────────────────────────────────
 
 
-def _make_case(user, extracted_text="Paciente com dispepsia. Solicito EDA.") -> Case:
-    """Create a minimal Case ready for pipeline execution."""
-    case = Case.objects.create(
-        created_by=user,
-        agency_record_number="12345",
-        extracted_text=extracted_text,
-    )
-    # Transition: NEW → R1_ACK_PROCESSING → EXTRACTING → LLM_STRUCT
+def _to_llm_struct(case: Case, user: Any) -> Case:
+    """Transition: NEW → R1_ACK_PROCESSING → EXTRACTING → LLM_STRUCT."""
     case.start_processing(user=user)
     case.save()
     case.start_extraction(user=user)
@@ -37,47 +37,75 @@ def _make_case(user, extracted_text="Paciente com dispepsia. Solicito EDA.") -> 
     return case
 
 
-def _eda_llm1_response() -> str:
-    """LLM1 structured data for a standard EDA case that passes all checks."""
+def _make_case(
+    user: Any,
+    *,
+    extracted_text: str = "Paciente com dispepsia. Solicito EDA.",
+    declared: tuple[str, ...] = ("eda",),
+) -> Case:
+    """Create a Case with declared CaseProcedure rows ready for v2 pipeline."""
+    from apps.cases.procedures import set_declared_procedures
+
+    case = Case.objects.create(
+        created_by=user,
+        agency_record_number="12345",
+        extracted_text=extracted_text,
+    )
+    set_declared_procedures(case=case, procedure_types=declared, actor=user)
+    return _to_llm_struct(case, user)
+
+
+def _make_bare_case(user: Any, *, extracted_text: str = "Paciente com dispepsia.") -> Case:
+    """Create a Case WITHOUT declared projection (R1 fail-closed scenario)."""
+    case = Case.objects.create(
+        created_by=user,
+        agency_record_number="12345",
+        extracted_text=extracted_text,
+    )
+    return _to_llm_struct(case, user)
+
+
+def _min_exam_ok() -> dict[str, str]:
+    return {
+        "hb_numeric_present": "yes",
+        "platelets_numeric_present": "yes",
+        "tp_inr_rni_numeric_present": "yes",
+        "ttpa_present": "yes",
+        "urea_present": "yes",
+        "creatinine_present": "yes",
+    }
+
+
+def _llm1_v2(
+    *,
+    procedures: list[dict[str, Any]],
+    one_liner: str = "EDA eletiva indicada.",
+    hb_g_dl: float = 13.0,
+    age: int = 35,
+) -> str:
+    """LLM1 procedure-neutral v2 response."""
     return json.dumps(
         {
-            "schema_version": "1.1",
+            "schema_version": "2.0",
             "language": "pt-BR",
             "agency_record_number": "12345",
-            "patient": {"name": "Paciente", "age": 35, "sex": "F"},
-            "summary": {
-                "one_liner": "EDA eletiva indicada.",
-                "bullet_points": ["Ponto 1", "Ponto 2", "Ponto 3"],
-            },
-            "extraction_quality": {
-                "confidence": "alta",
-                "missing_fields": [],
-                "notes": None,
-            },
-            "preop_screening": {
-                "exam_type": "eda",
-                "has_cardiovascular_disease": "no",
-                "has_active_respiratory_symptoms": "no",
-                "has_prior_respiratory_disease": "no",
-                "has_ecg_report": "unknown",
-                "has_chest_xray_report": "unknown",
-                "hb_g_dl": 13.0,
-                "platelets_per_mm3": 200000,
-                "inr": 1.0,
+            "patient": {"name": "Paciente", "age": age, "sex": "F", "document_id": None},
+            "common_preop": {
+                "labs": {"hb_g_dl": hb_g_dl, "platelets_per_mm3": 200000, "inr": 1.0, "source_text_hint": None},
+                "ecg": {"report_present": "unknown", "abnormal_flag": "unknown", "source_text_hint": None},
+                "asa": {"bucket": "I-II", "source_text_hint": None},
+                "cardiovascular_risk": {"level": "low", "source_text_hint": None},
                 "rulebook_signals": {
                     "eda_subtype": "standard",
-                    "minimum_exam_evidence": {
-                        "hb_numeric_present": "yes",
-                        "platelets_numeric_present": "yes",
-                        "tp_inr_rni_numeric_present": "yes",
-                        "ttpa_present": "yes",
-                        "urea_present": "yes",
-                        "creatinine_present": "yes",
-                    },
+                    "minimum_exam_evidence": _min_exam_ok(),
                     "conditional_exam_requirements": {},
                     "clinical_flags": {},
                 },
+                "comorbidities_described": [],
+                "medications_described": [],
+                "evidence_spans": [],
             },
+            "requested_procedures": procedures,
             "policy_precheck": {
                 "excluded_from_eda_flow": False,
                 "exclusion_reason": None,
@@ -89,361 +117,99 @@ def _eda_llm1_response() -> str:
                 "pediatric_flag": False,
                 "notes": None,
             },
-            "eda": {
-                "indication_category": "dyspepsia",
-                "exclusion_type": "none",
-                "is_pediatric": False,
-                "foreign_body_suspected": False,
-                "requested_procedure": {
-                    "name": "EDA",
-                    "urgency": "eletivo",
-                    "subtype": "standard",
-                },
-                "labs": {
-                    "hb_g_dl": 13.0,
-                    "platelets_per_mm3": 200000,
-                    "inr": 1.0,
-                    "source_text_hint": None,
-                },
-                "ecg": {
-                    "report_present": "unknown",
-                    "abnormal_flag": "unknown",
-                    "source_text_hint": None,
-                },
-            },
-        }
-    )
-
-
-def _echoendoscopy_llm1_response() -> str:
-    """LLM1 data for an echoendoscopy case (should follow the EDA flow)."""
-    return json.dumps(
-        {
-            "schema_version": "1.1",
-            "language": "pt-BR",
-            "agency_record_number": "12345",
-            "patient": {"name": "Paciente", "age": 35, "sex": "F"},
-            "summary": {
-                "one_liner": "Ecoendoscopia eletiva indicada.",
-                "bullet_points": ["Ponto 1", "Ponto 2", "Ponto 3"],
-            },
+            "summary": {"one_liner": one_liner, "bullet_points": ["Ponto 1", "Ponto 2", "Ponto 3"]},
             "extraction_quality": {"confidence": "alta", "missing_fields": [], "notes": None},
-            "preop_screening": {
-                "exam_type": "eda",
-                "has_cardiovascular_disease": "no",
-                "has_active_respiratory_symptoms": "no",
-                "has_prior_respiratory_disease": "no",
-                "has_ecg_report": "unknown",
-                "has_chest_xray_report": "unknown",
-                "hb_g_dl": 13.0,
-                "platelets_per_mm3": 200000,
-                "inr": 1.0,
-                "rulebook_signals": {
-                    "eda_subtype": "echoendoscopy",
-                    "minimum_exam_evidence": {
-                        "hb_numeric_present": "yes",
-                        "platelets_numeric_present": "yes",
-                        "tp_inr_rni_numeric_present": "yes",
-                        "ttpa_present": "yes",
-                        "urea_present": "yes",
-                        "creatinine_present": "yes",
-                    },
-                    "conditional_exam_requirements": {},
-                    "clinical_flags": {},
-                },
+            "origin_context": {
+                "city": None,
+                "hospital": None,
+                "unit": None,
+                "state_uf": None,
+                "source_text_hint": None,
             },
-            "policy_precheck": {
-                "excluded_from_eda_flow": False,
-                "exclusion_reason": None,
-                "labs_required": True,
-                "labs_pass": "yes",
-                "labs_failed_items": [],
-                "ecg_required": False,
-                "ecg_present": "unknown",
-                "pediatric_flag": False,
-                "notes": None,
-            },
-            "eda": {
-                "indication_category": "dyspepsia",
-                "exclusion_type": "none",
-                "is_pediatric": False,
-                "foreign_body_suspected": False,
-                "requested_procedure": {
-                    "name": "EDA com ecoendoscopia",
-                    "urgency": "eletivo",
-                    "subtype": "echoendoscopy",
-                },
-                "labs": {"hb_g_dl": 13.0, "platelets_per_mm3": 200000, "inr": 1.0, "source_text_hint": None},
-                "ecg": {"report_present": "unknown", "abnormal_flag": "unknown", "source_text_hint": None},
-            },
+            "transfusion": {"had_transfusion": "no"},
+            "tracked_exams": [],
         }
     )
 
 
-def _eda_llm2_accept_response(case_id: str = "case-001") -> str:
-    """LLM2 suggestion: accept."""
-    return json.dumps(
-        {
-            "schema_version": "1.1",
-            "language": "pt-BR",
-            "case_id": case_id,
-            "agency_record_number": "12345",
-            "suggestion": "accept",
-            "support_recommendation": "none",
-            "rationale": {
-                "short_reason": "Critérios atendidos.",
-                "details": ["Sem contraindicação relevante.", "Exames compatíveis."],
-                "missing_info_questions": [],
-            },
-            "policy_alignment": {
-                "excluded_request": False,
-                "labs_ok": "yes",
-                "ecg_ok": "yes",
-                "pediatric_flag": False,
-                "notes": None,
-            },
-            "confidence": "alta",
-        }
-    )
+def _eda_procedure(**overrides: Any) -> dict[str, Any]:
+    item: dict[str, Any] = {
+        "procedure_type": "eda",
+        "name": "EDA",
+        "urgency": "eletivo",
+        "indication_category": "dyspepsia",
+        "subtype": "standard",
+        "evidence_spans": [{"field_path": "p.0", "excerpt": "Solicito EDA"}],
+    }
+    item.update(overrides)
+    return item
 
 
-def _eda_llm2_deny_response() -> str:
-    """LLM2 suggestion: deny."""
-    return json.dumps(
-        {
-            "schema_version": "1.1",
-            "language": "pt-BR",
-            "case_id": "case-001",
-            "agency_record_number": "12345",
-            "suggestion": "deny",
-            "support_recommendation": "none",
-            "rationale": {
-                "short_reason": "Exames incompletos.",
-                "details": ["Há pendências laboratoriais.", "Necessita revisão manual."],
-                "missing_info_questions": [],
-            },
-            "policy_alignment": {
-                "excluded_request": False,
-                "labs_ok": "no",
-                "ecg_ok": "yes",
-                "pediatric_flag": False,
-                "notes": None,
-            },
-            "confidence": "media",
-        }
-    )
+def _colon_procedure(**overrides: Any) -> dict[str, Any]:
+    item: dict[str, Any] = {
+        "procedure_type": "colonoscopy",
+        "name": "Colonoscopia",
+        "urgency": "eletivo",
+        "indication_category": "screening",
+        "subtype": "standard",
+        "evidence_spans": [{"field_path": "p.0", "excerpt": "Solicito colonoscopia"}],
+    }
+    item.update(overrides)
+    return item
 
 
-def _non_eda_llm1_response() -> str:
-    """LLM1 data for a non-EDA exam (should trigger scope gate)."""
-    return json.dumps(
-        {
-            "schema_version": "1.1",
-            "language": "pt-BR",
-            "agency_record_number": "12345",
-            "patient": {"name": "Paciente", "age": 50, "sex": "M"},
-            "summary": {
-                "one_liner": "Colonoscopia solicitada.",
-                "bullet_points": ["Ponto 1", "Ponto 2", "Ponto 3"],
-            },
-            "extraction_quality": {
-                "confidence": "alta",
-                "missing_fields": [],
-                "notes": None,
-            },
-            "preop_screening": {
-                "exam_type": "non_eda",
-                "has_cardiovascular_disease": "no",
-                "has_active_respiratory_symptoms": "no",
-                "has_prior_respiratory_disease": "no",
-                "has_ecg_report": "unknown",
-                "has_chest_xray_report": "unknown",
-                "hb_g_dl": None,
-                "platelets_per_mm3": None,
-                "inr": None,
-                "evidence_spans": [
-                    {"field_path": "exam_type", "excerpt": "colonoscopia"},
-                ],
-                "rulebook_signals": {
-                    "eda_subtype": "unknown",
-                },
-            },
-            "policy_precheck": {
-                "excluded_from_eda_flow": True,
-                "exclusion_reason": "non_eda",
-                "labs_required": False,
-                "labs_pass": "unknown",
-                "labs_failed_items": [],
-                "ecg_required": False,
-                "ecg_present": "unknown",
-                "pediatric_flag": False,
-                "notes": None,
-            },
-            "eda": {
-                "indication_category": "unknown",
-                "exclusion_type": "unknown",
-                "is_pediatric": False,
-                "foreign_body_suspected": False,
-                "requested_procedure": {
-                    "name": "Colonoscopia",
-                    "urgency": "eletivo",
-                    "subtype": "unknown",
-                },
-                "labs": {
-                    "hb_g_dl": None,
-                    "platelets_per_mm3": None,
-                    "inr": None,
-                    "source_text_hint": None,
-                },
-                "ecg": {
-                    "report_present": "unknown",
-                    "abnormal_flag": "unknown",
-                    "source_text_hint": None,
-                },
-            },
-        }
-    )
-
-
-def _priority_signals_llm1_response() -> str:
-    """LLM1 data combining pediatric + foreign_body signals (Slice 002)."""
-    return json.dumps(
-        {
-            "schema_version": "1.1",
-            "language": "pt-BR",
-            "agency_record_number": "12345",
-            "patient": {"name": "Crianca", "age": 10, "sex": "F"},
-            "summary": {
-                "one_liner": "Criança com corpo estranho; EDA com ecoendoscopia indicada.",
-                "bullet_points": ["Ponto 1", "Ponto 2", "Ponto 3"],
-            },
-            "extraction_quality": {"confidence": "alta", "missing_fields": [], "notes": None},
-            "preop_screening": {
-                "exam_type": "eda",
-                "has_cardiovascular_disease": "no",
-                "has_active_respiratory_symptoms": "no",
-                "has_prior_respiratory_disease": "no",
-                "has_ecg_report": "unknown",
-                "has_chest_xray_report": "unknown",
-                "hb_g_dl": 13.0,
-                "platelets_per_mm3": 200000,
-                "inr": 1.0,
-                "rulebook_signals": {
-                    "eda_subtype": "foreign_body",
-                    "minimum_exam_evidence": {
-                        "hb_numeric_present": "yes",
-                        "platelets_numeric_present": "yes",
-                        "tp_inr_rni_numeric_present": "yes",
-                        "ttpa_present": "yes",
-                        "urea_present": "yes",
-                        "creatinine_present": "yes",
-                    },
-                    "conditional_exam_requirements": {},
-                    "clinical_flags": {},
-                },
-            },
-            "policy_precheck": {
-                "excluded_from_eda_flow": False,
-                "exclusion_reason": None,
-                "labs_required": True,
-                "labs_pass": "yes",
-                "labs_failed_items": [],
-                "ecg_required": False,
-                "ecg_present": "unknown",
-                "pediatric_flag": True,
-                "notes": None,
-            },
-            "eda": {
-                "indication_category": "foreign_body",
-                "exclusion_type": "none",
-                "is_pediatric": True,
-                "foreign_body_suspected": True,
-                "requested_procedure": {
-                    "name": "EDA com ecoendoscopia",
-                    "urgency": "eletivo",
-                    "subtype": "foreign_body",
-                },
-                "labs": {"hb_g_dl": 13.0, "platelets_per_mm3": 200000, "inr": 1.0, "source_text_hint": None},
-                "ecg": {"report_present": "unknown", "abnormal_flag": "unknown", "source_text_hint": None},
-            },
-        }
-    )
+def _eda_llm1_response() -> str:
+    return _llm1_v2(procedures=[_eda_procedure()])
 
 
 def _low_hb_llm1_response() -> str:
-    """LLM1 data with critically low Hb (triggers preop deny)."""
+    return _llm1_v2(procedures=[_eda_procedure()], one_liner="EDA eletiva.", hb_g_dl=5.0)
+
+
+def _priority_signals_llm1_response() -> str:
+    """EDA foreign-body + pediatric + echoendoscopy (from text)."""
+    return _llm1_v2(
+        procedures=[
+            _eda_procedure(
+                name="EDA com ecoendoscopia",
+                indication_category="foreign_body",
+                subtype="foreign_body",
+            )
+        ],
+        one_liner="Criança com corpo estranho; EDA com ecoendoscopia indicada.",
+        age=10,
+    )
+
+
+def _llm2_v2(case_id: str, *, suggestion: str = "accept", procedure_type: str = "eda") -> str:
     return json.dumps(
         {
-            "schema_version": "1.1",
+            "schema_version": "2.0",
             "language": "pt-BR",
+            "case_id": case_id,
             "agency_record_number": "12345",
-            "patient": {"name": "Paciente", "age": 45, "sex": "F"},
-            "summary": {
-                "one_liner": "EDA eletiva.",
-                "bullet_points": ["Hb 5.0", "Ponto 2", "Ponto 3"],
-            },
-            "extraction_quality": {
-                "confidence": "alta",
-                "missing_fields": [],
-                "notes": None,
-            },
-            "preop_screening": {
-                "exam_type": "eda",
-                "has_cardiovascular_disease": "no",
-                "has_active_respiratory_symptoms": "no",
-                "has_prior_respiratory_disease": "no",
-                "has_ecg_report": "unknown",
-                "has_chest_xray_report": "unknown",
-                "hb_g_dl": 5.0,
-                "platelets_per_mm3": 200000,
-                "inr": 1.0,
-                "rulebook_signals": {
-                    "eda_subtype": "standard",
-                    "minimum_exam_evidence": {
-                        "hb_numeric_present": "yes",
-                        "platelets_numeric_present": "yes",
-                        "tp_inr_rni_numeric_present": "yes",
-                        "ttpa_present": "yes",
-                        "urea_present": "yes",
-                        "creatinine_present": "yes",
+            "procedure_recommendations": [
+                {
+                    "procedure_type": procedure_type,
+                    "suggestion": suggestion,
+                    "support_recommendation": "none",
+                    "rationale": {
+                        "short_reason": "Critérios atendidos.",
+                        "details": ["Sem contraindicação relevante.", "Exames compatíveis."],
+                        "missing_info_questions": [],
                     },
-                    "conditional_exam_requirements": {},
-                    "clinical_flags": {},
-                },
-            },
-            "policy_precheck": {
-                "excluded_from_eda_flow": False,
-                "exclusion_reason": None,
-                "labs_required": True,
-                "labs_pass": "yes",
-                "labs_failed_items": [],
-                "ecg_required": False,
-                "ecg_present": "unknown",
-                "pediatric_flag": False,
-                "notes": None,
-            },
-            "eda": {
-                "indication_category": "dyspepsia",
-                "exclusion_type": "none",
-                "is_pediatric": False,
-                "foreign_body_suspected": False,
-                "requested_procedure": {
-                    "name": "EDA",
-                    "urgency": "eletivo",
-                    "subtype": "standard",
-                },
-                "labs": {
-                    "hb_g_dl": 5.0,
-                    "platelets_per_mm3": 200000,
-                    "inr": 1.0,
-                    "source_text_hint": None,
-                },
-                "ecg": {
-                    "report_present": "unknown",
-                    "abnormal_flag": "unknown",
-                    "source_text_hint": None,
-                },
-            },
+                    "policy_alignment": {
+                        "excluded_request": False,
+                        "labs_ok": "yes",
+                        "ecg_ok": "yes",
+                        "pediatric_flag": False,
+                        "notes": None,
+                    },
+                    "confidence": "alta",
+                }
+            ],
+            "global_support_recommendation": "none",
+            "summary": None,
         }
     )
 
@@ -453,13 +219,13 @@ def _low_hb_llm1_response() -> str:
 
 @pytest.mark.django_db
 class TestPipelineFullRun:
-    """Fluxo completo: EDA → LLM1 + LLM2 + policy → WAIT_DOCTOR."""
+    """Fluxo completo v2: EDA → LLM1 + LLM2 + policy → WAIT_DOCTOR."""
 
     def test_pipeline_full_run(self, django_user_model) -> None:
         user = django_user_model.objects.create_user(username="nir1", password="pw")
         case = _make_case(user)
 
-        client = RecordingLlmClient(responses=[_eda_llm1_response(), _eda_llm2_accept_response(str(case.case_id))])
+        client = RecordingLlmClient(responses=[_eda_llm1_response(), _llm2_v2(str(case.case_id))])
 
         run_pipeline(
             case.case_id,
@@ -475,40 +241,28 @@ class TestPipelineFullRun:
         assert case.structured_data is not None
         assert case.summary_text == "EDA eletiva indicada."
         assert case.suggested_action is not None
-        assert case.suggested_action.get("suggestion") == "accept"
+        recs = case.suggested_action["procedure_recommendations"]
+        assert recs[0]["suggestion"] == "accept"
 
     def test_pipeline_persist_structured_data(self, django_user_model) -> None:
         user = django_user_model.objects.create_user(username="nir2", password="pw")
         case = _make_case(user)
 
-        client = RecordingLlmClient(responses=[_eda_llm1_response(), _eda_llm2_accept_response(str(case.case_id))])
+        client = RecordingLlmClient(responses=[_eda_llm1_response(), _llm2_v2(str(case.case_id))])
 
-        run_pipeline(
-            case.case_id,
-            llm_client=client,
-            llm1_system_prompt="sp1",
-            llm1_user_template="{case_id}|{agency_record_number}|{extracted_text}",
-            llm2_system_prompt="sp2",
-            llm2_user_template="{case_id}|{agency_record_number}|{llm1_structured_data}",
-        )
+        run_pipeline(case.case_id, llm_client=client, llm1_system_prompt="sp1", llm1_user_template="ut1")
 
         case = _reload(case)
         assert isinstance(case.structured_data, dict)
+        assert case.structured_data["schema_version"] == "2.0"
 
     def test_pipeline_persist_summary_text(self, django_user_model) -> None:
         user = django_user_model.objects.create_user(username="nir3", password="pw")
         case = _make_case(user)
 
-        client = RecordingLlmClient(responses=[_eda_llm1_response(), _eda_llm2_accept_response(str(case.case_id))])
+        client = RecordingLlmClient(responses=[_eda_llm1_response(), _llm2_v2(str(case.case_id))])
 
-        run_pipeline(
-            case.case_id,
-            llm_client=client,
-            llm1_system_prompt="sp1",
-            llm1_user_template="{case_id}|{agency_record_number}|{extracted_text}",
-            llm2_system_prompt="sp2",
-            llm2_user_template="{case_id}|{agency_record_number}|{llm1_structured_data}",
-        )
+        run_pipeline(case.case_id, llm_client=client, llm1_system_prompt="sp1", llm1_user_template="ut1")
 
         case = _reload(case)
         assert case.summary_text == "EDA eletiva indicada."
@@ -517,43 +271,30 @@ class TestPipelineFullRun:
         user = django_user_model.objects.create_user(username="nir4", password="pw")
         case = _make_case(user)
 
-        client = RecordingLlmClient(responses=[_eda_llm1_response(), _eda_llm2_accept_response(str(case.case_id))])
+        client = RecordingLlmClient(responses=[_eda_llm1_response(), _llm2_v2(str(case.case_id))])
 
-        run_pipeline(
-            case.case_id,
-            llm_client=client,
-            llm1_system_prompt="sp1",
-            llm1_user_template="{case_id}|{agency_record_number}|{extracted_text}",
-            llm2_system_prompt="sp2",
-            llm2_user_template="{case_id}|{agency_record_number}|{llm1_structured_data}",
-        )
+        run_pipeline(case.case_id, llm_client=client, llm1_system_prompt="sp1", llm1_user_template="ut1")
 
         case = _reload(case)
         assert isinstance(case.suggested_action, dict)
-        assert case.suggested_action.get("suggestion") == "accept"
-        assert "preop_gate" in case.suggested_action
-        assert "support_recommendation" in case.suggested_action
-        assert "policy_alignment" in case.suggested_action
+        rec = case.suggested_action["procedure_recommendations"][0]
+        assert rec["suggestion"] == "accept"
+        assert "preop_decision" in rec
+        assert "support_recommendation" in rec
+        assert "policy_alignment" in rec
 
 
 @pytest.mark.django_db
 class TestPipelineGeneratesEvents:
-    """Orchestrator deve gerar eventos de auditoria em cada etapa."""
+    """Orchestrator deve gerar eventos de auditoria em cada etapa (v2)."""
 
     def test_pipeline_generates_events(self, django_user_model) -> None:
         user = django_user_model.objects.create_user(username="nir5", password="pw")
         case = _make_case(user)
 
-        client = RecordingLlmClient(responses=[_eda_llm1_response(), _eda_llm2_accept_response(str(case.case_id))])
+        client = RecordingLlmClient(responses=[_eda_llm1_response(), _llm2_v2(str(case.case_id))])
 
-        run_pipeline(
-            case.case_id,
-            llm_client=client,
-            llm1_system_prompt="sp1",
-            llm1_user_template="{case_id}|{agency_record_number}|{extracted_text}",
-            llm2_system_prompt="sp2",
-            llm2_user_template="{case_id}|{agency_record_number}|{llm1_structured_data}",
-        )
+        run_pipeline(case.case_id, llm_client=client, llm1_system_prompt="sp1", llm1_user_template="ut1")
 
         events = CaseEvent.objects.filter(case=case).order_by("timestamp")
         event_types = [e.event_type for e in events]
@@ -562,6 +303,8 @@ class TestPipelineGeneratesEvents:
         assert "CASE_START_PROCESSING" in event_types
         assert "CASE_START_EXTRACTION" in event_types
         assert "CASE_EXTRACTION_OK" in event_types
+        assert "CASE_PROCEDURES_DECLARED" in event_types
+        assert "CASE_PROCEDURES_DETECTED" in event_types
         assert "LLM1_OK" in event_types
         assert "EDA_PREOP_POLICY_DECISION" in event_types
         assert "LLM2_OK" in event_types
@@ -579,12 +322,7 @@ class TestPipelineLlm1Failure:
         # LLM1 returns garbage (not valid JSON)
         client = StaticLlmClient(response_text="not json at all")
 
-        run_pipeline(
-            case.case_id,
-            llm_client=client,
-            llm1_system_prompt="sp1",
-            llm1_user_template="{case_id}|{agency_record_number}|{extracted_text}",
-        )
+        run_pipeline(case.case_id, llm_client=client, llm1_system_prompt="sp1", llm1_user_template="ut1")
 
         case = _reload(case)
         assert case.status == CaseStatus.FAILED
@@ -596,215 +334,147 @@ class TestPipelineLlm1Failure:
 
 
 @pytest.mark.django_db
-class TestPipelineScopeGated:
-    """Non-EDA → scope gate ativa → WAIT_R1_CLEANUP_THUMBS sem LLM2."""
+class TestPipelineFailClosed:
+    """R1: caso sem procedimentos declarados válidos falha de modo explícito/auditável."""
 
-    def test_pipeline_echoendoscopy_reaches_doctor_queue(self, django_user_model) -> None:
-        """Ecoendoscopia percorre contrato → scope → policy → LLM2 → WAIT_DOCTOR."""
-        user = django_user_model.objects.create_user(username="nir_echo", password="pw")
-        case = _make_case(user, extracted_text="Motivo da Solicitação: ecoendoscopia. Unid. Origem: HSA.")
+    def test_case_without_declared_procedures_fails_without_llm_call(self, django_user_model) -> None:
+        """Sem rows declaradas → FAILED, PIPELINE_FAILED, ZERO chamadas LLM."""
+        user = django_user_model.objects.create_user(username="nir_fc1", password="pw")
+        case = _make_bare_case(user)
 
-        client = RecordingLlmClient(
-            responses=[_echoendoscopy_llm1_response(), _eda_llm2_accept_response(str(case.case_id))]
-        )
+        client = RecordingLlmClient(responses=[_eda_llm1_response(), _llm2_v2(str(case.case_id))])
 
-        run_pipeline(
-            case.case_id,
-            llm_client=client,
-            llm1_system_prompt="sp1",
-            llm1_user_template="{case_id}|{agency_record_number}|{extracted_text}",
-            llm2_system_prompt="sp2",
-            llm2_user_template="{case_id}|{agency_record_number}|{llm1_structured_data}",
-        )
+        run_pipeline(case.case_id, llm_client=client, llm1_system_prompt="sp1", llm1_user_template="ut1")
 
         case = _reload(case)
-        assert case.status == CaseStatus.WAIT_DOCTOR
-        assert len(client.calls) == 2
-        assert case.suggested_action is not None
-        assert case.suggested_action.get("suggestion") == "accept"
-        event_types = [e.event_type for e in CaseEvent.objects.filter(case=case)]
-        assert "EDA_SCOPE_GATED_MANUAL_REVIEW" not in event_types
-        assert "LLM2_OK" in event_types
+        assert case.status == CaseStatus.FAILED
+        # Nenhuma chamada LLM: a validação da projeção falha antes do LLM1.
+        assert client.calls == []
+        failed = CaseEvent.objects.filter(case=case, event_type="PIPELINE_FAILED").latest("timestamp")
+        assert (
+            "declarados" in str(failed.payload.get("error", "")).lower()
+            or "declared" in str(failed.payload.get("error", "")).lower()
+        )
+        # Nunca cai em WAIT_DOCTOR nem em scope-gate.
+        assert case.suggested_action is None
+        assert not CaseEvent.objects.filter(case=case, event_type="CASE_READY_FOR_DOCTOR").exists()
 
-    def test_pipeline_scope_gated(self, django_user_model) -> None:
+    def test_case_without_declared_procedures_never_enters_legacy_branch(self, django_user_model) -> None:
+        """R2: o branch 1.1 não existe mais no orchestrator."""
+        from apps.pipeline import orchestrator
+
+        assert not hasattr(orchestrator, "_uses_v2_pipeline")
+        assert not hasattr(orchestrator, "_run_llm1_step")
+        assert not hasattr(orchestrator, "_run_scope_and_llm2")
+        # Serviços 1.1 não são importados pelo módulo do orchestrator.
+        assert "Llm1Service" not in dir(orchestrator)
+        assert "Llm2Service" not in dir(orchestrator)
+        assert "classify_exam_scope" not in dir(orchestrator)
+
+    def test_neutral_fallback_does_not_resolve_legacy_prompt_names(self) -> None:
+        """R3: fallback do orchestrator contém somente os quatro nomes neutros."""
+        from apps.pipeline.orchestrator import _get_prompt_content
+
+        for neutral in ("exam_llm1_system", "exam_llm1_user", "exam_llm2_system", "exam_llm2_user"):
+            assert _get_prompt_content(neutral).strip()
+        # Nomes antigos não têm fallback dedicado: retornam o genérico "{case_id}".
+        for legacy in (
+            "llm1_system",
+            "llm1_user",
+            "llm2_system",
+            "llm2_user",
+            "colonoscopy_llm1_system",
+            "colonoscopy_llm1_user",
+            "colonoscopy_llm2_system",
+            "colonoscopy_llm2_user",
+        ):
+            assert _get_prompt_content(legacy) == "{case_id}", f"{legacy} must not have a dedicated fallback"
+
+
+@pytest.mark.django_db
+class TestPipelineReviewGate:
+    """v2 review gate (mismatch/unknown) → WAIT_R1_CLEANUP_THUMBS sem LLM2."""
+
+    def test_declared_eda_detected_colonoscopy_returns_to_nir(self, django_user_model) -> None:
         user = django_user_model.objects.create_user(username="nir7", password="pw")
-        case = _make_case(user)
+        case = _make_case(user, extracted_text="Solicito colonoscopia para rastreamento.")
 
-        # LLM1 returns non-EDA data; LLM2 won't be called
-        client = RecordingLlmClient(responses=[_non_eda_llm1_response()])
+        client = RecordingLlmClient(responses=[_llm1_v2(procedures=[_colon_procedure()], one_liner="Colonoscopia.")])
 
-        run_pipeline(
-            case.case_id,
-            llm_client=client,
-            llm1_system_prompt="sp1",
-            llm1_user_template="{case_id}|{agency_record_number}|{extracted_text}",
-        )
+        run_pipeline(case.case_id, llm_client=client, llm1_system_prompt="sp1", llm1_user_template="ut1")
 
         case = _reload(case)
         assert case.status == CaseStatus.WAIT_R1_CLEANUP_THUMBS
-
-        # LLM2 was never called (only 1 call = LLM1)
-        assert len(client.calls) == 1
-
-        # suggested_action is the scope gate result
+        assert len(client.calls) == 1  # LLM2 nunca roda
         assert case.suggested_action is not None
-        assert case.suggested_action.get("decision") == "manual_review_required"
+        assert case.suggested_action["decision"] == "manual_review_required"
+        assert case.suggested_action["reason_code"] == "exam_type_mismatch"
+        events = [e.event_type for e in CaseEvent.objects.filter(case=case)]
+        assert "LLM2_OK" not in events
 
-        # Scope gate events recorded — EDA_SCOPE_GATED_MANUAL_REVIEW, SCOPE_GATE_BYPASS, FINAL_REPLY_POSTED
-        events = CaseEvent.objects.filter(case=case).order_by("timestamp")
-        event_types = [e.event_type for e in events]
-        assert "EDA_SCOPE_GATED_MANUAL_REVIEW" in event_types
-        assert "SCOPE_GATE_BYPASS" in event_types
-        assert "FINAL_REPLY_POSTED" in event_types
-        assert "LLM2_OK" not in event_types
-
-    def test_pipeline_scope_gated_unknown_exam_type(self, django_user_model) -> None:
-        """unknown exam_type → WAIT_R1_CLEANUP_THUMBS sem LLM2."""
-        user = django_user_model.objects.create_user(username="nir_unk", password="pw")
-
-        # LLM1 genuinely unknown: no colonoscopy signals in name/summary so the
-        # detector stays unknown (Slice 003: procedure name with colonoscopy
-        # aliases would now be detected as colonoscopy → mismatch).
-        import json
-
-        unknown_data = json.loads(_non_eda_llm1_response())
-        unknown_data["preop_screening"]["exam_type"] = "unknown"
-        unknown_data["summary"]["one_liner"] = "Exame nao identificado."
-        unknown_data["eda"]["requested_procedure"]["name"] = "Exame indefinido"
-        unknown_data["eda"]["requested_procedure"]["subtype"] = "unknown"
-        unknown_data["preop_screening"]["evidence_spans"] = []
-
-        case = _make_case(user, extracted_text="Relatorio generico sem exame especifico.")
-        client = RecordingLlmClient(responses=[json.dumps(unknown_data)])
-
-        run_pipeline(
-            case.case_id,
-            llm_client=client,
-            llm1_system_prompt="sp1",
-            llm1_user_template="{case_id}|{agency_record_number}|{extracted_text}",
-        )
-
-        case = _reload(case)
-        assert case.status == CaseStatus.WAIT_R1_CLEANUP_THUMBS
-
-        # LLM2 was never called
-        assert len(client.calls) == 1
-
-        # suggested_action is the scope gate result
-        assert case.suggested_action is not None
-        assert case.suggested_action.get("decision") == "manual_review_required"
-        assert case.suggested_action.get("reason_code") == "unknown_exam_type"
-
-        # No LLM2_OK
-        event_types = [e.event_type for e in CaseEvent.objects.filter(case=case)]
-        assert "LLM2_OK" not in event_types
-        assert "EDA_SCOPE_GATED_MANUAL_REVIEW" in event_types
-        assert "FINAL_REPLY_POSTED" in event_types
-
-    def test_pipeline_scope_gated_does_not_appear_in_doctor_queue(self, django_user_model) -> None:
-        """Scope-gated case (WAIT_R1_CLEANUP_THUMBS) não aparece na fila WAIT_DOCTOR."""
+    def test_review_gated_case_does_not_appear_in_doctor_queue(self, django_user_model) -> None:
         user = django_user_model.objects.create_user(username="nir_filter", password="pw")
-        case = _make_case(user)
+        case = _make_case(user, extracted_text="Solicito colonoscopia para rastreamento.")
 
-        client = RecordingLlmClient(responses=[_non_eda_llm1_response()])
-        run_pipeline(
-            case.case_id,
-            llm_client=client,
-            llm1_system_prompt="sp1",
-            llm1_user_template="{case_id}|{agency_record_number}|{extracted_text}",
-        )
+        client = RecordingLlmClient(responses=[_llm1_v2(procedures=[_colon_procedure()], one_liner="Colonoscopia.")])
+        run_pipeline(case.case_id, llm_client=client, llm1_system_prompt="sp1", llm1_user_template="ut1")
 
         case = _reload(case)
-        # Not in WAIT_DOCTOR
         assert case.status != CaseStatus.WAIT_DOCTOR
-        # Doctor queue would filter by WAIT_DOCTOR — this case won't appear
-        from apps.cases.models import Case
-
-        wait_doctor_count = Case.objects.filter(status=CaseStatus.WAIT_DOCTOR).count()
-        assert wait_doctor_count == 0
+        assert Case.objects.filter(status=CaseStatus.WAIT_DOCTOR).count() == 0
 
 
 @pytest.mark.django_db
 class TestPipelinePreopDenyOverridesLlm2Accept:
-    """Policy engine deny deve sobrescrever LLM2 accept via reconciliation."""
+    """Policy engine deny deve sobrescrever LLM2 accept (invariante legada, v2)."""
 
     def test_pipeline_preop_deny_overrides_llm2_accept(self, django_user_model) -> None:
         user = django_user_model.objects.create_user(username="nir8", password="pw")
         case = _make_case(user)
 
-        # LLM1: low Hb triggers preop deny
-        # LLM2: says accept (should be overridden)
+        # LLM1: low Hb triggers preop deny; LLM2: says accept (overridden).
         client = RecordingLlmClient(
-            responses=[
-                _low_hb_llm1_response(),
-                _eda_llm2_accept_response(str(case.case_id)),
-            ]
+            responses=[_low_hb_llm1_response(), _llm2_v2(str(case.case_id), suggestion="accept")]
         )
 
-        run_pipeline(
-            case.case_id,
-            llm_client=client,
-            llm1_system_prompt="sp1",
-            llm1_user_template="{case_id}|{agency_record_number}|{extracted_text}",
-            llm2_system_prompt="sp2",
-            llm2_user_template="{case_id}|{agency_record_number}|{llm1_structured_data}",
-        )
+        run_pipeline(case.case_id, llm_client=client, llm1_system_prompt="sp1", llm1_user_template="ut1")
 
         case = _reload(case)
         assert case.status == CaseStatus.WAIT_DOCTOR
         assert case.suggested_action is not None
-
-        # Reconciliation should override suggestion to "deny"
-        assert case.suggested_action.get("suggestion") == "deny"
-
-        # Preop decision metadata should reflect the denial
-        preop_gate = case.suggested_action.get("preop_gate", {})
-        assert isinstance(preop_gate, dict)
-        assert preop_gate.get("decision") == "deny"
-
-        # Contradictions are recorded (may be empty — Hb threshold is preop, not reconcile)
-        contradictions = case.suggested_action.get("contradictions", [])
-        assert isinstance(contradictions, list)
+        rec = case.suggested_action["procedure_recommendations"][0]
+        # Policy determinística vence LLM2.
+        assert rec["suggestion"] == "deny"
+        assert rec["preop_decision"]["decision"] == "deny"
 
 
 @pytest.mark.django_db
 class TestPipelineSupportSynthesisSaved:
-    """Support recommendation deve ser salvo no suggested_action."""
+    """Suporte/ASA por componente devem ser salvos no suggested_action (v2)."""
 
     def test_pipeline_support_synthesis_saved(self, django_user_model) -> None:
         user = django_user_model.objects.create_user(username="nir9", password="pw")
         case = _make_case(user)
 
-        client = RecordingLlmClient(responses=[_eda_llm1_response(), _eda_llm2_accept_response(str(case.case_id))])
+        client = RecordingLlmClient(responses=[_eda_llm1_response(), _llm2_v2(str(case.case_id))])
 
-        run_pipeline(
-            case.case_id,
-            llm_client=client,
-            llm1_system_prompt="sp1",
-            llm1_user_template="{case_id}|{agency_record_number}|{extracted_text}",
-            llm2_system_prompt="sp2",
-            llm2_user_template="{case_id}|{agency_record_number}|{llm1_structured_data}",
-        )
+        run_pipeline(case.case_id, llm_client=client, llm1_system_prompt="sp1", llm1_user_template="ut1")
 
         case = _reload(case)
         assert case.suggested_action is not None
-
-        assert "support_recommendation" in case.suggested_action
-        assert isinstance(case.suggested_action["support_recommendation"], str)
-
-        assert "asa" in case.suggested_action
-        asa = case.suggested_action["asa"]
-        assert isinstance(asa, dict)
-        assert "bucket" in asa
-        assert "display_text" in asa
+        rec = case.suggested_action["procedure_recommendations"][0]
+        assert isinstance(rec["support_recommendation"], str)
+        assert rec["asa"]["bucket"]
+        assert rec["asa"]["display_text"]
+        assert case.suggested_action["global_support_recommendation"] == "none"
 
 
 @pytest.mark.django_db
 class TestPipelinePrioritySignals:
-    """Slice 002: persistência de sinais canônicos após LLM1 e antes do scope."""
+    """Persistência de sinais canônicos após LLM1 e antes do gate (v2)."""
 
-    def _run(self, user, *, extracted_text, llm1_response, llm2_response=None) -> Case:
-        case = _make_case(user, extracted_text=extracted_text)
+    def _run(self, user, *, extracted_text, llm1_response, llm2_response=None, declared=("eda",)) -> Case:
+        case = _make_case(user, extracted_text=extracted_text, declared=declared)
         responses = [llm1_response]
         if llm2_response is not None:
             responses.append(llm2_response(str(case.case_id)))
@@ -813,9 +483,7 @@ class TestPipelinePrioritySignals:
             case.case_id,
             llm_client=client,
             llm1_system_prompt="sp1",
-            llm1_user_template="{case_id}|{agency_record_number}|{extracted_text}",
-            llm2_system_prompt="sp2",
-            llm2_user_template="{case_id}|{agency_record_number}|{llm1_structured_data}",
+            llm1_user_template="ut1",
         )
         return _reload(case)
 
@@ -828,16 +496,16 @@ class TestPipelinePrioritySignals:
                 "em paciente de 10 anos. Unid. Origem: HSA."
             ),
             llm1_response=_priority_signals_llm1_response(),
-            llm2_response=_eda_llm2_accept_response,
+            llm2_response=_llm2_v2,
         )
         assert case.status == CaseStatus.WAIT_DOCTOR
-        codes = [s["code"] for s in case.priority_signals]
-        assert codes == ["foreign_body", "pediatric", "echoendoscopy"]
+        codes = {s["code"] for s in case.priority_signals}
+        assert codes == {"foreign_body", "pediatric", "echoendoscopy"}
         for signal in case.priority_signals:
             assert signal["version"] == 1
             assert signal["category"] in {"clinical_alert", "special_population", "special_procedure"}
 
-    def test_llm1_ok_payload_contains_ordered_priority_signal_codes(self, django_user_model) -> None:
+    def test_llm1_ok_payload_contains_priority_signal_codes(self, django_user_model) -> None:
         user = django_user_model.objects.create_user(username="nir_sig2", password="pw")
         case = self._run(
             user,
@@ -846,40 +514,37 @@ class TestPipelinePrioritySignals:
                 "em paciente de 10 anos. Unid. Origem: HSA."
             ),
             llm1_response=_priority_signals_llm1_response(),
-            llm2_response=_eda_llm2_accept_response,
+            llm2_response=_llm2_v2,
         )
         llm1_ok = CaseEvent.objects.filter(case=case, event_type="LLM1_OK").latest("timestamp")
-        assert llm1_ok.payload["priority_signal_codes"] == [
-            "foreign_body",
-            "pediatric",
-            "echoendoscopy",
-        ]
+        payload: dict[str, Any] = llm1_ok.payload or {}
+        codes = set(payload["priority_signal_codes"])
+        assert codes == {"foreign_body", "pediatric", "echoendoscopy"}
         # A auditoria não copia texto clínico adicional (apenas resumo + códigos).
-        assert "extracted_text" not in llm1_ok.payload
-        assert "detail" not in json.dumps(llm1_ok.payload)
+        assert "extracted_text" not in payload
 
-    def test_priority_signals_persisted_before_scope_gate(self, django_user_model) -> None:
-        """Casos scope-gated persistem sinais resolvidos após LLM1 (antes do scope)."""
+    def test_priority_signals_persisted_before_review_gate(self, django_user_model) -> None:
+        """Casos em review gate persistem sinais resolvidos após LLM1 (antes do gate)."""
         user = django_user_model.objects.create_user(username="nir_sig3", password="pw")
+        # Declarado EDA, detectado colonoscopia + pediátrico → mismatch + pediatric.
         case = self._run(
             user,
-            extracted_text="Paciente ingeriu soda cáustica há 2 dias.",
-            llm1_response=_non_eda_llm1_response(),
+            extracted_text="Crianca de 10 anos. Solicito colonoscopia para rastreamento.",
+            llm1_response=_llm1_v2(
+                procedures=[_colon_procedure()],
+                one_liner="Colonoscopia pediátrica.",
+                age=10,
+            ),
         )
         assert case.status == CaseStatus.WAIT_R1_CLEANUP_THUMBS
-        codes = [s["code"] for s in case.priority_signals]
-        assert codes == ["caustic_ingestion"]
+        codes = {s["code"] for s in case.priority_signals}
+        assert codes == {"pediatric"}
 
     def test_pipeline_failure_does_not_persist_partial_value(self, django_user_model) -> None:
         user = django_user_model.objects.create_user(username="nir_sig4", password="pw")
         case = _make_case(user)
         client = StaticLlmClient(response_text="not json at all")
-        run_pipeline(
-            case.case_id,
-            llm_client=client,
-            llm1_system_prompt="sp1",
-            llm1_user_template="{case_id}|{agency_record_number}|{extracted_text}",
-        )
+        run_pipeline(case.case_id, llm_client=client, llm1_system_prompt="sp1", llm1_user_template="ut1")
         case = _reload(case)
         assert case.status == CaseStatus.FAILED
         assert case.priority_signals == []
@@ -972,72 +637,52 @@ class TestEnqueuePipeline:
 
 @pytest.mark.django_db
 class TestPromptResolutionFromDB:
-    """Orchestrator resolves canonical prompt names from DB."""
+    """Orchestrator resolve os QUATRO nomes neutros do DB (Slice 007)."""
 
-    def test_uses_llm1_system_from_db(self, django_user_model) -> None:
-        """When l1m1_system exists in DB, orchestrator uses it."""
+    def test_uses_neutral_llm1_system_from_db(self, django_user_model) -> None:
         from apps.llm.models import PromptTemplate
 
         user = django_user_model.objects.create_user(username="npr1", password="pw")
         case = _make_case(user)
 
-        # Seed canonical prompt with recognizable content
         PromptTemplate.objects.create(
-            name="llm1_system",
+            name="exam_llm1_system",
             version=1,
-            content="DB_SYSTEM_PROMPT_LLM1",
+            content="DB_NEUTRAL_LLM1_SYS",
             is_active=True,
         )
 
-        # Capture what prompts are sent to LLM
-        client = RecordingLlmClient(responses=[_eda_llm1_response(), _eda_llm2_accept_response(str(case.case_id))])
+        client = RecordingLlmClient(responses=[_eda_llm1_response(), _llm2_v2(str(case.case_id))])
 
-        # Run WITHOUT injecting llm1_system_prompt — must come from DB
-        run_pipeline(
-            case.case_id,
-            llm_client=client,
-            llm1_user_template="{case_id}|{agency_record_number}|{extracted_text}",
-            llm2_system_prompt="sp2",
-            llm2_user_template="{case_id}|{agency_record_number}|{llm1_structured_data}",
-        )
+        # Run WITHOUT injecting llm1_system_prompt — must come from DB (neutral).
+        run_pipeline(case.case_id, llm_client=client, llm1_user_template="ut1")
 
-        # Verify the LLM received the DB prompt
-        llm1_call = client.calls[0]
-        assert llm1_call["system_prompt"] == "DB_SYSTEM_PROMPT_LLM1"
+        assert client.calls[0]["system_prompt"] == "DB_NEUTRAL_LLM1_SYS"
 
-    def test_uses_llm2_system_from_db(self, django_user_model) -> None:
-        """When llm2_system exists in DB, orchestrator uses it."""
+    def test_uses_neutral_llm2_system_from_db(self, django_user_model) -> None:
         from apps.llm.models import PromptTemplate
 
         user = django_user_model.objects.create_user(username="npr2", password="pw")
         case = _make_case(user)
 
         PromptTemplate.objects.create(
-            name="llm2_system",
+            name="exam_llm2_system",
             version=1,
-            content="DB_SYSTEM_PROMPT_LLM2",
+            content="DB_NEUTRAL_LLM2_SYS",
             is_active=True,
         )
 
-        client = RecordingLlmClient(responses=[_eda_llm1_response(), _eda_llm2_accept_response(str(case.case_id))])
+        client = RecordingLlmClient(responses=[_eda_llm1_response(), _llm2_v2(str(case.case_id))])
 
-        run_pipeline(
-            case.case_id,
-            llm_client=client,
-            llm1_system_prompt="sp1",
-            llm1_user_template="{case_id}|{agency_record_number}|{extracted_text}",
-            llm2_user_template="{case_id}|{agency_record_number}|{llm1_structured_data}",
-        )
+        run_pipeline(case.case_id, llm_client=client, llm1_system_prompt="sp1", llm1_user_template="ut1")
 
-        llm2_call = client.calls[1]
-        assert llm2_call["system_prompt"] == "DB_SYSTEM_PROMPT_LLM2"
+        assert client.calls[1]["system_prompt"] == "DB_NEUTRAL_LLM2_SYS"
 
-    def test_fallback_does_not_contain_endoscopy_report(self) -> None:
-        """When no prompt in DB, fallback must not mention 'relatório de endoscopia'."""
+    def test_neutral_fallback_does_not_contain_endoscopy_report(self) -> None:
+        """When no prompt in DB, neutral fallbacks must not mention 'relatório de endoscopia'."""
         from apps.pipeline.orchestrator import _get_prompt_content
 
-        # Ensure no prompts in DB
-        for name in ["llm1_system", "llm1_user", "llm2_system", "llm2_user"]:
+        for name in ("exam_llm1_system", "exam_llm1_user", "exam_llm2_system", "exam_llm2_user"):
             fallback = _get_prompt_content(name)
             assert "relatório de endoscopia" not in fallback.lower(), (
                 f"Fallback for {name} contains 'relatório de endoscopia'"

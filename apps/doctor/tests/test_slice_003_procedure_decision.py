@@ -399,16 +399,10 @@ class TestProcedureDecisionFormAndSubmit:
         doctor = self._login(client, "doctor")
         token = self._claim_lock(case.case_id, doctor)
 
-        with (
-            mock.patch(
-                "apps.pipeline.orchestrator._run_v2_pipeline",
-                side_effect=AssertionError("LLM rerun não permitido no submit médico"),
-            ) as v2_run,
-            mock.patch(
-                "apps.pipeline.orchestrator._run_llm1_step",
-                side_effect=AssertionError("LLM1 rerun não permitido"),
-            ) as llm1_run,
-        ):
+        with mock.patch(
+            "apps.pipeline.orchestrator._run_v2_pipeline",
+            side_effect=AssertionError("LLM rerun não permitido no submit médico"),
+        ) as v2_run:
             response = self._submit(
                 client,
                 case,
@@ -422,7 +416,9 @@ class TestProcedureDecisionFormAndSubmit:
             )
         assert response.status_code == 302
         v2_run.assert_not_called()
-        llm1_run.assert_not_called()
+        # Slice 007: o branch legado 1.1 (_run_llm1_step) foi removido do
+        # orchestrator; o patch do caminho v2 prova que o submit médico nunca
+        # reenfileira/executa o pipeline.
 
         case = Case.objects.get(pk=case.pk)
         assert case.doctor_decision == "accept"

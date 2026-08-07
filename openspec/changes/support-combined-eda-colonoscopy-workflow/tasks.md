@@ -34,7 +34,7 @@ A ADR-0004 deve ser commitada, enviada e aprovada explicitamente antes de entreg
 - [x] Slice 004 — CHD recebe conjunto autorizado e faz um agendamento casado (`slices/slice-004-paired-scheduler-appointment.md`)
 - [x] Slice 005 — NIR corrige, filtra e recebe resposta comparativa (`slices/slice-005-nir-correction-and-final-response.md`)
 - [x] Slice 006 — Gestor acompanha casos, procedimentos e conversões (`slices/slice-006-procedure-dimension-analytics.md`)
-- [ ] Slice 007 — Pipeline executa somente v2 e prompts neutros (`slices/slice-007-neutral-pipeline-prompt-cutover.md`)
+- [x] Slice 007 — Pipeline executa somente v2 e prompts neutros (`slices/slice-007-neutral-pipeline-prompt-cutover.md`)
 - [ ] Slice 008 — NIR opera somente pela projeção declarada (`slices/slice-008-nir-declared-projection-authority.md`)
 - [ ] Slice 009 — Médico e CHD operam por detecção/autorização normalizadas (`slices/slice-009-clinical-scheduling-projection-authority.md`)
 - [ ] Slice 010 — Dashboard e helpers tornam CaseProcedure autoritativo (`slices/slice-010-dashboard-domain-projection-authority.md`)
@@ -83,7 +83,7 @@ A ADR-0004 deve ser commitada, enviada e aprovada explicitamente antes de entreg
 - [x] Caso combinado conta uma vez em métricas de casos e duas no volume de procedimentos.
 - [x] Dashboard permite dimensão declarado/detectado/autorizado e mostra matriz de conversão.
 - [ ] `Case.exam_type` e dispatch operacional dependente dele foram removidos.
-- [ ] Quatro prompts neutros são canônicos; prompts antigos permanecem apenas como histórico inativo.
+- [x] Quatro prompts neutros são canônicos; prompts antigos permanecem apenas como histórico inativo.
 - [ ] Nenhum reset de produção é requisito.
 
 ### Operação e evidência

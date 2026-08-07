@@ -58,18 +58,10 @@ class UserCreateForm(forms.ModelForm):  # type: ignore[type-arg]
 
 
 PROMPT_NAME_CHOICES = [
-    ("llm1_system", "LLM1 - System Prompt"),
-    ("llm1_user", "LLM1 - User Prompt"),
-    ("llm2_system", "LLM2 - System Prompt"),
-    ("llm2_user", "LLM2 - User Prompt"),
-    ("colonoscopy_llm1_system", "Colonoscopia - LLM1 System Prompt"),
-    ("colonoscopy_llm1_user", "Colonoscopia - LLM1 User Prompt"),
-    ("colonoscopy_llm2_system", "Colonoscopia - LLM2 System Prompt"),
-    ("colonoscopy_llm2_user", "Colonoscopia - LLM2 User Prompt"),
-    ("exam_llm1_system", "Neutro - LLM1 System Prompt"),
-    ("exam_llm1_user", "Neutro - LLM1 User Prompt"),
-    ("exam_llm2_system", "Neutro - LLM2 System Prompt"),
-    ("exam_llm2_user", "Neutro - LLM2 User Prompt"),
+    ("exam_llm1_system", "LLM1 - System Prompt"),
+    ("exam_llm1_user", "LLM1 - User Prompt"),
+    ("exam_llm2_system", "LLM2 - System Prompt"),
+    ("exam_llm2_user", "LLM2 - User Prompt"),
 ]
 
 

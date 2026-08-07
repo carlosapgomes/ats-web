@@ -55,6 +55,76 @@ def _classify(
 # ── RED 1: schema estrito aceita colonoscopy e rejeita valor desconhecido ──
 
 
+def _colonoscopy_llm1_response() -> str:
+    """LLM1 structured data 1.1 para colonoscopia (validação do schema histórico)."""
+    return json.dumps(
+        {
+            "schema_version": "1.1",
+            "language": "pt-BR",
+            "agency_record_number": "12345",
+            "patient": {"name": "Paciente", "age": 35, "sex": "M"},
+            "summary": {
+                "one_liner": "Colonoscopia eletiva indicada.",
+                "bullet_points": ["Ponto 1", "Ponto 2", "Ponto 3"],
+            },
+            "extraction_quality": {"confidence": "alta", "missing_fields": [], "notes": None},
+            "preop_screening": {
+                "exam_type": "colonoscopy",
+                "has_cardiovascular_disease": "no",
+                "has_active_respiratory_symptoms": "no",
+                "has_prior_respiratory_disease": "no",
+                "has_ecg_report": "unknown",
+                "has_chest_xray_report": "unknown",
+                "hb_g_dl": 13.0,
+                "platelets_per_mm3": 200000,
+                "inr": 1.0,
+                "rulebook_signals": {
+                    "eda_subtype": "standard",
+                    "minimum_exam_evidence": {
+                        "hb_numeric_present": "yes",
+                        "platelets_numeric_present": "yes",
+                        "tp_inr_rni_numeric_present": "yes",
+                        "ttpa_present": "yes",
+                        "urea_present": "yes",
+                        "creatinine_present": "yes",
+                    },
+                    "conditional_exam_requirements": {},
+                    "clinical_flags": {},
+                },
+            },
+            "policy_precheck": {
+                "excluded_from_eda_flow": False,
+                "exclusion_reason": None,
+                "labs_required": True,
+                "labs_pass": "yes",
+                "labs_failed_items": [],
+                "ecg_required": False,
+                "ecg_present": "unknown",
+                "pediatric_flag": False,
+                "notes": None,
+            },
+            "eda": {
+                "indication_category": "other",
+                "exclusion_type": "none",
+                "is_pediatric": False,
+                "foreign_body_suspected": False,
+                "requested_procedure": {
+                    "name": "Colonoscopia",
+                    "urgency": "eletivo",
+                    "subtype": "standard",
+                },
+                "labs": {
+                    "hb_g_dl": 13.0,
+                    "platelets_per_mm3": 200000,
+                    "inr": 1.0,
+                    "source_text_hint": None,
+                },
+                "ecg": {"report_present": "unknown", "abnormal_flag": "unknown", "source_text_hint": None},
+            },
+        }
+    )
+
+
 class TestLlm1SchemaColonoscopy:
     def test_preop_screening_accepts_colonoscopy(self) -> None:
         from apps.pipeline.schemas.llm1 import Llm1PreopScreening
@@ -106,55 +176,74 @@ class TestLlm1SchemaColonoscopy:
 
 @pytest.mark.django_db
 class TestColonoscopyPromptsSeedAdmin:
-    COLONOSCOPY_NAMES = [
+    """Slice 007: oito nomes legados não são criados/ativos pelo seed; admin
+    expõe somente os quatro neutros. O conteúdo 1.1 permanece nas constantes."""
+
+    COLONOSCOPY_LEGACY_NAMES = [
         "colonoscopy_llm1_system",
         "colonoscopy_llm1_user",
         "colonoscopy_llm2_system",
         "colonoscopy_llm2_user",
     ]
 
-    def test_seed_creates_colonoscopy_prompts(self) -> None:
+    def test_seed_does_not_create_colonoscopy_legacy_names(self) -> None:
         from apps.llm.models import PromptTemplate
 
         call_command("seed_prompts")
-        for name in self.COLONOSCOPY_NAMES:
-            template = PromptTemplate.get_active(name)
-            assert template is not None, f"Missing colonoscopy prompt: {name}"
-            assert template.content.strip(), f"Empty content for {name}"
+        for name in self.COLONOSCOPY_LEGACY_NAMES:
+            assert PromptTemplate.get_active(name) is None, f"{name} must not be active"
+            assert not PromptTemplate.objects.filter(name=name).exists(), f"{name} must not be created"
 
-    def test_seed_is_idempotent_with_twelve_prompts(self) -> None:
+    def test_seed_deactivates_preexisting_colonoscopy_legacy_prompts(self) -> None:
+        """R4: versões ativas pré-existentes dos nomes antigos são desativadas."""
+        from apps.llm.models import PromptTemplate
+
+        for name in self.COLONOSCOPY_LEGACY_NAMES:
+            PromptTemplate.objects.create(name=name, version=1, content="legacy active", is_active=True)
+
+        call_command("seed_prompts")
+
+        for name in self.COLONOSCOPY_LEGACY_NAMES:
+            assert PromptTemplate.get_active(name) is None, f"{name} still active"
+            assert PromptTemplate.objects.filter(name=name).exists(), f"{name} history deleted"
+
+    def test_seed_is_idempotent_with_four_neutral_prompts(self) -> None:
         from apps.llm.models import PromptTemplate
 
         call_command("seed_prompts")
         count1 = PromptTemplate.objects.count()
         call_command("seed_prompts")
         count2 = PromptTemplate.objects.count()
-        # 4 EDA + 4 Colonoscopia + 4 neutros (Slice 002) = 12; antigos não apagados.
-        assert count1 == count2 == 12
+        # Slice 007: seed cria somente os 4 neutros.
+        assert count1 == count2 == 4
 
-    def test_seed_colonoscopy_llm1_user_requires_medications_and_ptbr(self) -> None:
-        from apps.llm.models import PromptTemplate
+    def test_legacy_colonoscopy_llm1_user_still_requires_medications_and_ptbr(self) -> None:
+        """Conteúdo 1.1 da colonoscopia permanece na constante (rollback)."""
+        from apps.pipeline.llm1_service import COLONOSCOPY_LLM1_DEFAULT_USER_PROMPT
 
-        call_command("seed_prompts")
-        pt = PromptTemplate.get_active("colonoscopy_llm1_user")
-        assert pt is not None
-        assert "medications_described" in pt.content
-        assert "portugues brasileiro" in pt.content.lower() or "pt-BR" in pt.content
+        content = COLONOSCOPY_LLM1_DEFAULT_USER_PROMPT
+        assert "medications_described" in content
+        assert "portugues brasileiro" in content.lower() or "pt-BR" in content
 
-    def test_admin_ui_accepts_eight_prompt_names(self) -> None:
+    def test_admin_ui_exposes_only_four_neutral_prompt_names(self) -> None:
         from apps.admin_ui.forms import PROMPT_NAME_CHOICES
 
         names = {name for name, _ in PROMPT_NAME_CHOICES}
-        for name in self.COLONOSCOPY_NAMES:
-            assert name in names, f"Admin UI missing prompt choice: {name}"
-        for name in ("llm1_system", "llm1_user", "llm2_system", "llm2_user"):
-            assert name in names
+        for neutral in ("exam_llm1_system", "exam_llm1_user", "exam_llm2_system", "exam_llm2_user"):
+            assert neutral in names, f"Admin UI missing neutral prompt choice: {neutral}"
+        for name in self.COLONOSCOPY_LEGACY_NAMES + [
+            "llm1_system",
+            "llm1_user",
+            "llm2_system",
+            "llm2_user",
+        ]:
+            assert name not in names, f"Admin UI must not expose legacy prompt choice: {name}"
 
-    def test_eda_prompts_remain_canonical(self) -> None:
+    def test_neutral_prompts_become_canonical(self) -> None:
         from apps.llm.models import PromptTemplate
 
         call_command("seed_prompts")
-        for name in ("llm1_system", "llm1_user", "llm2_system", "llm2_user"):
+        for name in ("exam_llm1_system", "exam_llm1_user", "exam_llm2_system", "exam_llm2_user"):
             assert PromptTemplate.get_active(name) is not None
 
 
@@ -654,13 +743,13 @@ class TestColonoscopyPrioritySignals:
 # ── Pipeline helpers (RED 13/16 + mixed gate) ───────────────────────────────
 
 
-def _make_case(user, *, extracted_text="Paciente com dispepsia. Solicito EDA.", exam_type="eda") -> Case:
-    case = Case.objects.create(
-        created_by=user,
-        agency_record_number="12345",
-        extracted_text=extracted_text,
-        exam_type=exam_type,
-    )
+def _make_v2_case(user, *, exam_type: str = "colonoscopy", extracted_text: str = "Solicito colonoscopia.") -> Case:
+    """Cria um Case com projeção declarada pronto para o pipeline v2."""
+    from apps.cases.procedures import set_declared_procedures
+
+    case = Case.objects.create(created_by=user, agency_record_number="12345", extracted_text=extracted_text)
+    types = ("eda", "colonoscopy") if exam_type == "eda_colonoscopy" else (exam_type,)
+    set_declared_procedures(case=case, procedure_types=types, actor=user)
     case.start_processing(user=user)
     case.save()
     case.start_extraction(user=user)
@@ -670,29 +759,19 @@ def _make_case(user, *, extracted_text="Paciente com dispepsia. Solicito EDA.", 
     return case
 
 
-def _colonoscopy_llm1_response() -> str:
-    """LLM1 structured data for a supported colonoscopy case (passes strict schema)."""
+def _v2_llm1(procedures: list[dict[str, Any]], *, one_liner: str = "Colonoscopia indicada.") -> str:
+    """LLM1 v2 (procedure-neutral) com os procedimentos informados."""
     return json.dumps(
         {
-            "schema_version": "1.1",
+            "schema_version": "2.0",
             "language": "pt-BR",
             "agency_record_number": "12345",
-            "patient": {"name": "Paciente", "age": 35, "sex": "M"},
-            "summary": {
-                "one_liner": "Colonoscopia eletiva indicada.",
-                "bullet_points": ["Ponto 1", "Ponto 2", "Ponto 3"],
-            },
-            "extraction_quality": {"confidence": "alta", "missing_fields": [], "notes": None},
-            "preop_screening": {
-                "exam_type": "colonoscopy",
-                "has_cardiovascular_disease": "no",
-                "has_active_respiratory_symptoms": "no",
-                "has_prior_respiratory_disease": "no",
-                "has_ecg_report": "unknown",
-                "has_chest_xray_report": "unknown",
-                "hb_g_dl": 13.0,
-                "platelets_per_mm3": 200000,
-                "inr": 1.0,
+            "patient": {"name": "Paciente", "age": 35, "sex": "M", "document_id": None},
+            "common_preop": {
+                "labs": {"hb_g_dl": 13.0, "platelets_per_mm3": 200000, "inr": 1.0, "source_text_hint": None},
+                "ecg": {"report_present": "unknown", "abnormal_flag": "unknown", "source_text_hint": None},
+                "asa": {"bucket": "I-II", "source_text_hint": None},
+                "cardiovascular_risk": {"level": "low", "source_text_hint": None},
                 "rulebook_signals": {
                     "eda_subtype": "standard",
                     "minimum_exam_evidence": {
@@ -706,7 +785,11 @@ def _colonoscopy_llm1_response() -> str:
                     "conditional_exam_requirements": {},
                     "clinical_flags": {},
                 },
+                "comorbidities_described": [],
+                "medications_described": [],
+                "evidence_spans": [],
             },
+            "requested_procedures": procedures,
             "policy_precheck": {
                 "excluded_from_eda_flow": False,
                 "exclusion_reason": None,
@@ -718,50 +801,73 @@ def _colonoscopy_llm1_response() -> str:
                 "pediatric_flag": False,
                 "notes": None,
             },
-            "eda": {
-                "indication_category": "other",
-                "exclusion_type": "none",
-                "is_pediatric": False,
-                "foreign_body_suspected": False,
-                "requested_procedure": {
-                    "name": "Colonoscopia",
-                    "urgency": "eletivo",
-                    "subtype": "standard",
-                },
-                "labs": {
-                    "hb_g_dl": 13.0,
-                    "platelets_per_mm3": 200000,
-                    "inr": 1.0,
-                    "source_text_hint": None,
-                },
-                "ecg": {"report_present": "unknown", "abnormal_flag": "unknown", "source_text_hint": None},
+            "summary": {"one_liner": one_liner, "bullet_points": ["P1", "P2", "P3"]},
+            "extraction_quality": {"confidence": "alta", "missing_fields": [], "notes": None},
+            "origin_context": {
+                "city": None,
+                "hospital": None,
+                "unit": None,
+                "state_uf": None,
+                "source_text_hint": None,
             },
+            "transfusion": {"had_transfusion": "no"},
+            "tracked_exams": [],
         }
     )
 
 
-def _llm2_accept_response(case_id: str) -> str:
+def _colon_procedure() -> dict[str, Any]:
+    return {
+        "procedure_type": "colonoscopy",
+        "name": "Colonoscopia",
+        "urgency": "eletivo",
+        "indication_category": "screening",
+        "subtype": "standard",
+        "evidence_spans": [{"field_path": "p.0", "excerpt": "Solicito colonoscopia"}],
+    }
+
+
+def _eda_procedure() -> dict[str, Any]:
+    return {
+        "procedure_type": "eda",
+        "name": "EDA",
+        "urgency": "eletivo",
+        "indication_category": "dyspepsia",
+        "subtype": "standard",
+        "evidence_spans": [{"field_path": "p.0", "excerpt": "Solicito EDA"}],
+    }
+
+
+def _v2_llm2_single(case_id: str, *, procedure_type: str = "colonoscopy", suggestion: str = "accept") -> str:
+    """LLM2 v2 com uma recomendação para o procedimento detectado."""
     return json.dumps(
         {
-            "schema_version": "1.1",
+            "schema_version": "2.0",
             "language": "pt-BR",
             "case_id": case_id,
             "agency_record_number": "12345",
-            "suggestion": "accept",
-            "support_recommendation": "none",
-            "rationale": {
-                "short_reason": "Criterios atendidos.",
-                "details": ["Sem contraindicacao relevante.", "Exames compativeis."],
-                "missing_info_questions": [],
-            },
-            "policy_alignment": {
-                "excluded_request": False,
-                "labs_ok": "yes",
-                "ecg_ok": "yes",
-                "pediatric_flag": False,
-                "notes": None,
-            },
-            "confidence": "alta",
+            "procedure_recommendations": [
+                {
+                    "procedure_type": procedure_type,
+                    "suggestion": suggestion,
+                    "support_recommendation": "none",
+                    "rationale": {
+                        "short_reason": "Criterios atendidos.",
+                        "details": ["Sem contraindicacao.", "Exames compativeis."],
+                        "missing_info_questions": [],
+                    },
+                    "policy_alignment": {
+                        "excluded_request": False,
+                        "labs_ok": "yes",
+                        "ecg_ok": "yes",
+                        "pediatric_flag": False,
+                        "notes": None,
+                    },
+                    "confidence": "alta",
+                }
+            ],
+            "global_support_recommendation": "none",
+            "summary": None,
         }
     )
 
@@ -771,156 +877,87 @@ def _reload(case: Case) -> Case:
 
 
 class TestColonoscopyPipeline:
-    def test_pipeline_colonoscopy_reaches_wait_doctor_with_colon_prompts(self, django_user_model) -> None:
+    """R5: colonoscopia percorre o pipeline v2 (uma chamada por estágio) e chega
+    ao médico com prompt neutro; mismatch retorna ao NIR sem LLM2."""
+
+    def test_pipeline_colonoscopy_reaches_wait_doctor_with_neutral_prompt(self, django_user_model) -> None:
         from apps.llm.models import PromptTemplate
 
-        PromptTemplate.objects.create(
-            name="colonoscopy_llm1_system",
-            version=1,
-            content="COLON_SYSTEM_LLM1",
-            is_active=True,
-        )
-        PromptTemplate.objects.create(
-            name="colonoscopy_llm2_system",
-            version=1,
-            content="COLON_SYSTEM_LLM2",
-            is_active=True,
-        )
+        for name, content in (
+            ("exam_llm1_system", "NEUTRAL_SYS_1"),
+            ("exam_llm2_system", "NEUTRAL_SYS_2"),
+        ):
+            PromptTemplate.objects.create(name=name, version=1, content=content, is_active=True)
 
         user = django_user_model.objects.create_user(username="nir_colon1", password="pw")
-        case = _make_case(user, extracted_text="Solicito colonoscopia.", exam_type="colonoscopy")
+        case = _make_v2_case(user, exam_type="colonoscopy", extracted_text="Solicito colonoscopia.")
 
-        client = RecordingLlmClient(responses=[_colonoscopy_llm1_response(), _llm2_accept_response(str(case.case_id))])
+        client = RecordingLlmClient(responses=[_v2_llm1([_colon_procedure()]), _v2_llm2_single(str(case.case_id))])
 
-        run_pipeline(
-            case.case_id,
-            llm_client=client,
-            llm1_user_template="{case_id}|{agency_record_number}|{extracted_text}",
-            llm2_user_template="{case_id}|{agency_record_number}|{llm1_structured_data}",
-        )
+        run_pipeline(case.case_id, llm_client=client)
 
         case = _reload(case)
         assert case.status == CaseStatus.WAIT_DOCTOR
         assert len(client.calls) == 2
-        assert client.calls[0]["system_prompt"] == "COLON_SYSTEM_LLM1"
-        assert client.calls[1]["system_prompt"] == "COLON_SYSTEM_LLM2"
+        # Dispatch v2 usa somente os quatro nomes neutros (R3).
+        assert client.calls[0]["system_prompt"] == "NEUTRAL_SYS_1"
+        assert client.calls[1]["system_prompt"] == "NEUTRAL_SYS_2"
         assert case.suggested_action is not None
-        assert case.suggested_action.get("suggestion") == "accept"
+        recs = case.suggested_action["procedure_recommendations"]
+        assert [r["procedure_type"] for r in recs] == ["colonoscopy"]
+        assert recs[0]["suggestion"] == "accept"
 
-    def test_pipeline_mixed_blocks_without_llm2(self, django_user_model) -> None:
+    def test_declared_colonoscopy_detected_eda_blocks_without_llm2(self, django_user_model) -> None:
+        """Mismatch (declarado colonoscopia, detectado EDA) retorna ao NIR sem LLM2."""
+        from apps.cases.models import CaseEvent
+
         user = django_user_model.objects.create_user(username="nir_colon2", password="pw")
-        case = _make_case(user, extracted_text="Solicito EDA e colonoscopia.", exam_type="colonoscopy")
-
-        client = RecordingLlmClient(responses=[_colonoscopy_llm1_response()])
-
-        run_pipeline(
-            case.case_id,
-            llm_client=client,
-            llm1_system_prompt="sp1",
-            llm1_user_template="{case_id}|{agency_record_number}|{extracted_text}",
+        # Texto extraído longo/distinto do excerpt de evidência: o payload de
+        # revisão carrega somente spans curtos limitados, nunca o texto integral.
+        case = _make_v2_case(
+            user,
+            exam_type="colonoscopy",
+            extracted_text=(
+                "Relatorio clinico extenso com historico detalhado do paciente que "
+                "nao deve vazar para o evento de auditoria. Solicito EDA."
+            ),
         )
+
+        client = RecordingLlmClient(responses=[_v2_llm1([_eda_procedure()], one_liner="EDA indicada.")])
+        run_pipeline(case.case_id, llm_client=client, llm1_system_prompt="sp1", llm1_user_template="ut1")
 
         case = _reload(case)
         assert case.status == CaseStatus.WAIT_R1_CLEANUP_THUMBS
-        assert len(client.calls) == 1
+        assert len(client.calls) == 1  # LLM2 nunca roda
         assert case.suggested_action is not None
-        assert case.suggested_action.get("reason_code") == "mixed_exam_request"
+        assert case.suggested_action["reason_code"] == "exam_type_mismatch"
+        assert case.suggested_action["detected_procedures"] == ["eda"]
+
+        event = CaseEvent.objects.filter(case=case, event_type="EDA_SCOPE_GATED_MANUAL_REVIEW").latest("timestamp")
+        payload: dict[str, Any] = event.payload or {}
+        assert payload.get("reason_code") == "exam_type_mismatch"
+        serialized = json.dumps(payload)
+        assert "extracted_text" not in serialized
+        # O texto clínico integral (histórico) não vaza; somente o excerpt curto
+        # de evidência permanece (limitado pelo schema 2.0).
+        assert "Relatorio clinico extenso" not in serialized
+        assert "historico detalhado" not in serialized
 
     def test_flag_off_after_creation_does_not_block_pipeline(self, django_user_model, settings) -> None:
+        """Flag web-only não é consultada pelo pipeline após a criação (D15)."""
         settings.COLONOSCOPY_INTAKE_ENABLED = False
         user = django_user_model.objects.create_user(username="nir_colon3", password="pw")
-        case = _make_case(user, extracted_text="Solicito colonoscopia.", exam_type="colonoscopy")
+        case = _make_v2_case(user, exam_type="colonoscopy", extracted_text="Solicito colonoscopia.")
 
-        client = RecordingLlmClient(responses=[_colonoscopy_llm1_response(), _llm2_accept_response(str(case.case_id))])
-
+        client = RecordingLlmClient(responses=[_v2_llm1([_colon_procedure()]), _v2_llm2_single(str(case.case_id))])
         run_pipeline(
             case.case_id,
             llm_client=client,
             llm1_system_prompt="sp1",
-            llm1_user_template="{case_id}|{agency_record_number}|{extracted_text}",
+            llm1_user_template="ut1",
             llm2_system_prompt="sp2",
-            llm2_user_template="{case_id}|{agency_record_number}|{llm1_structured_data}",
+            llm2_user_template="ut2",
         )
 
         case = _reload(case)
         assert case.status == CaseStatus.WAIT_DOCTOR
-
-    def test_scope_event_payload_includes_types_without_long_text(self, django_user_model) -> None:
-        from apps.cases.models import CaseEvent
-
-        user = django_user_model.objects.create_user(username="nir_colon4", password="pw")
-        case = _make_case(user, extracted_text="Solicito EDA e colonoscopia.", exam_type="colonoscopy")
-
-        client = RecordingLlmClient(responses=[_colonoscopy_llm1_response()])
-        run_pipeline(
-            case.case_id,
-            llm_client=client,
-            llm1_system_prompt="sp1",
-            llm1_user_template="{case_id}|{agency_record_number}|{extracted_text}",
-        )
-
-        event = CaseEvent.objects.filter(case=case, event_type="EDA_SCOPE_GATED_MANUAL_REVIEW").latest("timestamp")
-        payload: dict[str, Any] = event.payload or {}
-        assert payload.get("reason_code") == "mixed_exam_request"
-        assert payload.get("declared_exam_type") == "colonoscopy"
-        assert payload.get("detected_exam_type") == "mixed"
-        serialized = json.dumps(payload)
-        assert "extracted_text" not in serialized
-        assert "Solicito" not in serialized  # sem texto clínico longo
-
-    def test_pipeline_mixed_non_eda_llm1_blocks_without_llm2(self, django_user_model) -> None:
-        """F1 integrado: LLM1 non_eda + duas solicitações atuais → gate sem LLM2."""
-        llm1_data = json.loads(_colonoscopy_llm1_response())
-        llm1_data["preop_screening"]["exam_type"] = "non_eda"
-
-        user = django_user_model.objects.create_user(username="nir_colon5", password="pw")
-        case = _make_case(user, extracted_text="Solicito EDA e colonoscopia.", exam_type="colonoscopy")
-
-        client = RecordingLlmClient(responses=[json.dumps(llm1_data)])
-        run_pipeline(
-            case.case_id,
-            llm_client=client,
-            llm1_system_prompt="sp1",
-            llm1_user_template="{case_id}|{agency_record_number}|{extracted_text}",
-        )
-
-        case = _reload(case)
-        assert case.status == CaseStatus.WAIT_R1_CLEANUP_THUMBS
-        assert len(client.calls) == 1
-        assert case.suggested_action is not None
-        assert case.suggested_action.get("reason_code") == "mixed_exam_request"
-
-    def test_scope_event_bounded_scope_payload_without_long_excerpt(self, django_user_model) -> None:
-        """F4 integrado: evento não copia excerpt clínico longo integral."""
-        from apps.cases.models import CaseEvent
-        from apps.pipeline.scope_detection import MAX_MANUAL_REVIEW_EXCERPT_LENGTH
-
-        long_excerpt = "DADO_CLINICO_" * 1000
-        llm1_data = json.loads(_colonoscopy_llm1_response())
-        llm1_data["preop_screening"]["exam_type"] = "non_eda"
-        llm1_data["preop_screening"]["evidence_spans"] = [
-            {"field_path": "preop_screening.exam_type", "excerpt": long_excerpt}
-        ]
-
-        user = django_user_model.objects.create_user(username="nir_colon6", password="pw")
-        case = _make_case(user, extracted_text="Solicito EDA e colonoscopia.", exam_type="colonoscopy")
-
-        client = RecordingLlmClient(responses=[json.dumps(llm1_data)])
-        run_pipeline(
-            case.case_id,
-            llm_client=client,
-            llm1_system_prompt="sp1",
-            llm1_user_template="{case_id}|{agency_record_number}|{extracted_text}",
-        )
-
-        event = CaseEvent.objects.filter(case=case, event_type="EDA_SCOPE_GATED_MANUAL_REVIEW").latest("timestamp")
-        payload: dict[str, Any] = event.payload or {}
-        assert payload.get("reason_code") == "mixed_exam_request"
-        assert payload.get("declared_exam_type") == "colonoscopy"
-        assert payload.get("detected_exam_type") == "mixed"
-        serialized = json.dumps(payload)
-        assert long_excerpt not in serialized
-        assert len(serialized) < len(long_excerpt)
-        spans = payload.get("evidence_spans")
-        assert isinstance(spans, list) and len(spans) == 1
-        assert len(spans[0]["excerpt"]) <= MAX_MANUAL_REVIEW_EXCERPT_LENGTH
