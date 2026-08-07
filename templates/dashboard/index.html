@@ -23,13 +23,13 @@
       </div>
 
       <div class="metrics-period-options" role="group" aria-label="Período das métricas">
-        <a href="?metrics_period=today{% if search %}&search={{ search|urlencode }}{% endif %}{% if status_filter %}&status={{ status_filter }}{% endif %}{% if date_from %}&date_from={{ date_from }}{% endif %}{% if date_to %}&date_to={{ date_to }}{% endif %}{% if attention_filter %}&attention=1{% endif %}{% if exam_type and exam_type != 'all' %}&exam_type={{ exam_type }}{% endif %}"
+        <a href="?metrics_period=today{% if search %}&search={{ search|urlencode }}{% endif %}{% if status_filter %}&status={{ status_filter }}{% endif %}{% if date_from %}&date_from={{ date_from }}{% endif %}{% if date_to %}&date_to={{ date_to }}{% endif %}{% if attention_filter %}&attention=1{% endif %}{% if exam_type and exam_type != 'all' %}&exam_type={{ exam_type }}{% endif %}{% if procedure_dimension and procedure_dimension != 'declared' %}&procedure_dimension={{ procedure_dimension }}{% endif %}{% if procedure_selection and procedure_selection != 'all' %}&procedure_selection={{ procedure_selection }}{% endif %}"
            class="btn btn-sm metrics-period-option {% if metrics_period == 'today' or metrics_period == '' or not metrics_period %}is-active{% endif %}">Hoje</a>
-        <a href="?metrics_period=7d{% if search %}&search={{ search|urlencode }}{% endif %}{% if status_filter %}&status={{ status_filter }}{% endif %}{% if date_from %}&date_from={{ date_from }}{% endif %}{% if date_to %}&date_to={{ date_to }}{% endif %}{% if attention_filter %}&attention=1{% endif %}{% if exam_type and exam_type != 'all' %}&exam_type={{ exam_type }}{% endif %}"
+        <a href="?metrics_period=7d{% if search %}&search={{ search|urlencode }}{% endif %}{% if status_filter %}&status={{ status_filter }}{% endif %}{% if date_from %}&date_from={{ date_from }}{% endif %}{% if date_to %}&date_to={{ date_to }}{% endif %}{% if attention_filter %}&attention=1{% endif %}{% if exam_type and exam_type != 'all' %}&exam_type={{ exam_type }}{% endif %}{% if procedure_dimension and procedure_dimension != 'declared' %}&procedure_dimension={{ procedure_dimension }}{% endif %}{% if procedure_selection and procedure_selection != 'all' %}&procedure_selection={{ procedure_selection }}{% endif %}"
            class="btn btn-sm metrics-period-option {% if metrics_period == '7d' %}is-active{% endif %}">7 dias</a>
-        <a href="?metrics_period=30d{% if search %}&search={{ search|urlencode }}{% endif %}{% if status_filter %}&status={{ status_filter }}{% endif %}{% if date_from %}&date_from={{ date_from }}{% endif %}{% if date_to %}&date_to={{ date_to }}{% endif %}{% if attention_filter %}&attention=1{% endif %}{% if exam_type and exam_type != 'all' %}&exam_type={{ exam_type }}{% endif %}"
+        <a href="?metrics_period=30d{% if search %}&search={{ search|urlencode }}{% endif %}{% if status_filter %}&status={{ status_filter }}{% endif %}{% if date_from %}&date_from={{ date_from }}{% endif %}{% if date_to %}&date_to={{ date_to }}{% endif %}{% if attention_filter %}&attention=1{% endif %}{% if exam_type and exam_type != 'all' %}&exam_type={{ exam_type }}{% endif %}{% if procedure_dimension and procedure_dimension != 'declared' %}&procedure_dimension={{ procedure_dimension }}{% endif %}{% if procedure_selection and procedure_selection != 'all' %}&procedure_selection={{ procedure_selection }}{% endif %}"
            class="btn btn-sm metrics-period-option {% if metrics_period == '30d' %}is-active{% endif %}">30 dias</a>
-        <a href="?metrics_period=all{% if search %}&search={{ search|urlencode }}{% endif %}{% if status_filter %}&status={{ status_filter }}{% endif %}{% if date_from %}&date_from={{ date_from }}{% endif %}{% if date_to %}&date_to={{ date_to }}{% endif %}{% if attention_filter %}&attention=1{% endif %}{% if exam_type and exam_type != 'all' %}&exam_type={{ exam_type }}{% endif %}"
+        <a href="?metrics_period=all{% if search %}&search={{ search|urlencode }}{% endif %}{% if status_filter %}&status={{ status_filter }}{% endif %}{% if date_from %}&date_from={{ date_from }}{% endif %}{% if date_to %}&date_to={{ date_to }}{% endif %}{% if attention_filter %}&attention=1{% endif %}{% if exam_type and exam_type != 'all' %}&exam_type={{ exam_type }}{% endif %}{% if procedure_dimension and procedure_dimension != 'declared' %}&procedure_dimension={{ procedure_dimension }}{% endif %}{% if procedure_selection and procedure_selection != 'all' %}&procedure_selection={{ procedure_selection }}{% endif %}"
            class="btn btn-sm metrics-period-option {% if metrics_period == 'all' %}is-active{% endif %}">Tudo</a>
 
         <!-- Personalizado: dois mini-forms SSR independentes (data específica / intervalo).
@@ -59,6 +59,8 @@
                            value="{% if metrics_period == 'custom_date' %}{{ metrics_date }}{% endif %}">
                   </div>
                   <input type="hidden" name="metrics_period" value="custom_date">
+                  {% if procedure_dimension and procedure_dimension != 'declared' %}<input type="hidden" name="procedure_dimension" value="{{ procedure_dimension }}">{% endif %}
+                  {% if procedure_selection and procedure_selection != 'all' %}<input type="hidden" name="procedure_selection" value="{{ procedure_selection }}">{% endif %}
                   {% if status_filter %}<input type="hidden" name="status" value="{{ status_filter }}">{% endif %}
                   {% if date_from %}<input type="hidden" name="date_from" value="{{ date_from }}">{% endif %}
                   {% if date_to %}<input type="hidden" name="date_to" value="{{ date_to }}">{% endif %}
@@ -97,6 +99,8 @@
                            value="{% if metrics_period == 'custom_range' %}{{ metrics_end }}{% endif %}">
                   </div>
                   <input type="hidden" name="metrics_period" value="custom_range">
+                  {% if procedure_dimension and procedure_dimension != 'declared' %}<input type="hidden" name="procedure_dimension" value="{{ procedure_dimension }}">{% endif %}
+                  {% if procedure_selection and procedure_selection != 'all' %}<input type="hidden" name="procedure_selection" value="{{ procedure_selection }}">{% endif %}
                   {% if status_filter %}<input type="hidden" name="status" value="{{ status_filter }}">{% endif %}
                   {% if date_from %}<input type="hidden" name="date_from" value="{{ date_from }}">{% endif %}
                   {% if date_to %}<input type="hidden" name="date_to" value="{{ date_to }}">{% endif %}
@@ -205,6 +209,104 @@
   </p>
 </div>
 
+<!-- Procedimentos por dimensão (Slice 006) -->
+<div class="card p-3 mb-4">
+  <div class="d-flex justify-content-between align-items-center flex-wrap gap-2 mb-2">
+    <h6 class="text-muted small mb-0">PROCEDIMENTOS POR DIMENSÃO — {{ metrics_period_label }}</h6>
+    <span class="badge bg-secondary">Casos contam uma vez por categoria · Procedimentos ≠ casos</span>
+  </div>
+
+  <div class="d-flex align-items-center gap-2 mb-3 flex-wrap">
+    <span class="text-muted small">Dimensão:</span>
+    {% for link in procedure_dimension_links %}
+    <a href="{{ link.url }}" class="btn btn-sm metrics-period-option {% if link.active %}is-active{% endif %}" aria-label="Dimensão {{ link.label }}">{{ link.label }}</a>
+    {% endfor %}
+  </div>
+
+  <div class="row g-3">
+    <div class="col-lg-5">
+      <h6 class="text-muted small mb-2">BREAKDOWN POR CATEGORIA — {{ procedure_dimension_label }}</h6>
+      <div class="table-responsive">
+        <table class="table table-sm table-bordered align-middle mb-1">
+          <caption class="visually-hidden">
+            Categorias exclusivas na dimensão {{ procedure_dimension_label }}: cada caso entra em exatamente uma categoria e a soma fecha com o total do período.
+          </caption>
+          <thead class="table-light">
+            <tr>
+              <th scope="col">Categoria</th>
+              <th scope="col" class="text-center">Casos</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for row in procedure_breakdown_rows %}
+            <tr>
+              <th scope="row">{{ row.label }}</th>
+              <td class="text-center">{{ row.count }}</td>
+            </tr>
+            {% endfor %}
+            <tr class="table-light">
+              <th scope="row">Total (casos)</th>
+              <td class="text-center fw-semibold">{{ procedure_total_cases }}</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+      <p class="text-muted small mb-0">Cada caso entra em exatamente uma categoria; a soma fecha com o total do período.</p>
+    </div>
+    <div class="col-lg-3">
+      <h6 class="text-muted small mb-2">VOLUME DE PROCEDIMENTOS — {{ procedure_dimension_label }}</h6>
+      <div class="d-flex justify-content-between mb-1">
+        <span>EDA</span> <strong>{{ procedure_volume.eda }}</strong>
+      </div>
+      <div class="d-flex justify-content-between mb-1">
+        <span>Colonoscopia</span> <strong>{{ procedure_volume.colonoscopy }}</strong>
+      </div>
+      <div class="d-flex justify-content-between mb-1">
+        <span>Combinado (soma dois)</span> <strong>{{ procedure_volume.combined }}</strong>
+      </div>
+      <p class="text-muted small mt-2 mb-0">Componentes ≠ casos: um combinado soma 2 procedimentos em 1 caso e não promete fechar com o total de casos.</p>
+    </div>
+    <div class="col-lg-4">
+      <h6 class="text-muted small mb-2">AGENDAMENTOS CASADOS</h6>
+      <div class="card p-3 text-center mb-2">
+        <div style="font-size:2rem; font-weight:700; color:var(--hospital-primary);">{{ procedure_analytics.paired_confirmed }}</div>
+        <div class="text-muted small">EDA + Colonoscopia autorizadas e confirmadas</div>
+      </div>
+      <p class="text-muted small mb-0">Cada par conta uma única vez.</p>
+    </div>
+  </div>
+
+  <h6 class="text-muted small mb-2 mt-3">MATRIZ DE CONVERSÃO — declarado → detectado → autorizado</h6>
+  <div class="table-responsive">
+    <table class="table table-sm table-bordered align-middle mb-0">
+      <caption class="visually-hidden">
+        Matriz de conversão entre as dimensões: linhas declarado, colunas detectado e células com a distribuição por autorizado no caminho exato.
+      </caption>
+      <thead class="table-light">
+        <tr>
+          <th scope="col">Declarado ↓ / Detectado →</th>
+          {% for key in procedure_matrix_detected_keys %}
+          <th scope="col" class="text-center">{{ procedure_category_labels|lookup:key }}</th>
+          {% endfor %}
+        </tr>
+      </thead>
+      <tbody>
+        {% for row in procedure_matrix_rows %}
+        <tr>
+          <th scope="row">{{ procedure_category_labels|lookup:row.declared_key }}</th>
+          {% for cell in row.cells %}
+          <td class="text-center small">{{ cell.text }}</td>
+          {% endfor %}
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  <p class="text-muted small mb-0 mt-2">
+    Célula = distribuição por <strong>autorizado</strong> no caminho exato (ex.: “EDA → EDA + Colonoscopia → Colonoscopia”).
+  </p>
+</div>
+
 <!-- Sub-metrics -->
 <div class="row g-3 mb-4">
   <div class="col-md-4">
@@ -296,7 +398,7 @@
   <!-- Header: Título + Atenção necessária -->
   <div class="d-flex justify-content-between align-items-center mb-3 flex-wrap gap-2">
     <h5 class="mb-0">Todos os Casos</h5>
-    <a href="{% url 'dashboard:index' %}?attention=1{% if metrics_period %}&metrics_period={{ metrics_period }}{% endif %}{% if metrics_date %}&metrics_date={{ metrics_date }}{% endif %}{% if metrics_start %}&metrics_start={{ metrics_start }}{% endif %}{% if metrics_end %}&metrics_end={{ metrics_end }}{% endif %}{% if search %}&search={{ search|urlencode }}{% endif %}{% if exam_type and exam_type != 'all' %}&exam_type={{ exam_type }}{% endif %}" class="btn btn-sm {% if attention_filter %}btn-warning{% else %}btn-outline-warning{% endif %}">
+    <a href="{% url 'dashboard:index' %}?attention=1{% if metrics_period %}&metrics_period={{ metrics_period }}{% endif %}{% if metrics_date %}&metrics_date={{ metrics_date }}{% endif %}{% if metrics_start %}&metrics_start={{ metrics_start }}{% endif %}{% if metrics_end %}&metrics_end={{ metrics_end }}{% endif %}{% if search %}&search={{ search|urlencode }}{% endif %}{% if exam_type and exam_type != 'all' %}&exam_type={{ exam_type }}{% endif %}{% if procedure_dimension and procedure_dimension != 'declared' %}&procedure_dimension={{ procedure_dimension }}{% endif %}{% if procedure_selection and procedure_selection != 'all' %}&procedure_selection={{ procedure_selection }}{% endif %}" class="btn btn-sm {% if attention_filter %}btn-warning{% else %}btn-outline-warning{% endif %}">
       ⚠ Atenção necessária{% if attention_count is not None %} ({{ attention_count }}){% endif %}
     </a>
   </div>
@@ -315,6 +417,24 @@
         <option value="all" {% if exam_type == 'all' %}selected{% endif %}>Todos os tipos</option>
         <option value="eda" {% if exam_type == 'eda' %}selected{% endif %}>EDA</option>
         <option value="colonoscopy" {% if exam_type == 'colonoscopy' %}selected{% endif %}>Colonoscopia</option>
+      </select>
+    </div>
+    <div class="col-12 col-sm-6 col-lg-3">
+      <label for="procedure-dimension" class="form-label small text-muted mb-1">Dimensão</label>
+      <select name="procedure_dimension" id="procedure-dimension" class="form-select form-select-sm" aria-label="Filtrar por dimensão de procedimento">
+        <option value="declared" {% if procedure_dimension == 'declared' %}selected{% endif %}>Declarado (NIR)</option>
+        <option value="detected" {% if procedure_dimension == 'detected' %}selected{% endif %}>Detectado (análise)</option>
+        <option value="approved" {% if procedure_dimension == 'approved' %}selected{% endif %}>Autorizado (médico)</option>
+      </select>
+    </div>
+    <div class="col-12 col-sm-6 col-lg-3">
+      <label for="procedure-selection" class="form-label small text-muted mb-1">Procedimento</label>
+      <select name="procedure_selection" id="procedure-selection" class="form-select form-select-sm" aria-label="Filtrar por procedimento na dimensão ativa">
+        <option value="all" {% if procedure_selection == 'all' %}selected{% endif %}>Todos</option>
+        <option value="eda" {% if procedure_selection == 'eda' %}selected{% endif %}>EDA</option>
+        <option value="colonoscopy" {% if procedure_selection == 'colonoscopy' %}selected{% endif %}>Colonoscopia</option>
+        <option value="eda_colonoscopy" {% if procedure_selection == 'eda_colonoscopy' %}selected{% endif %}>EDA + Colonoscopia</option>
+        <option value="none" {% if procedure_selection == 'none' %}selected{% endif %}>Nenhum</option>
       </select>
     </div>
     <div class="col-12 col-sm-6 col-lg-3">

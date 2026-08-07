@@ -33,6 +33,18 @@ from apps.cases.services import (
     administratively_close_case,
     local_day_bounds,
 )
+from apps.dashboard.procedure_analytics import (
+    CATEGORY_LABELS,
+    CATEGORY_ORDER,
+    DIMENSION_GETTERS,
+    DIMENSION_LABELS,
+    DIMENSIONS,
+    apply_procedure_selection_filter,
+    category_key,
+    compute_procedure_analytics,
+    resolve_dimension,
+    resolve_selection,
+)
 
 # Reaproveita mapeamentos definidos no intake para consistência visual
 from apps.doctor.reporting import prepare_doctor_case_report
@@ -710,6 +722,13 @@ def _dashboard_case_list_context(request: HttpRequest) -> dict[str, Any]:
     if exam_type != "all":
         cases_qs = cases_qs.filter(exam_type=exam_type)
 
+    # Dimensão + seleção de procedimento (Slice 006): default declared/all;
+    # valores inválidos caem nos defaults seguros. Compõe por AND com busca/
+    # status/datas/atenção/exam_type via Exists sobre CaseProcedure.
+    procedure_dimension = resolve_dimension(request.GET.get("procedure_dimension", ""))
+    procedure_selection = resolve_selection(request.GET.get("procedure_selection", ""))
+    cases_qs = apply_procedure_selection_filter(cases_qs, procedure_dimension, procedure_selection)
+
     # Filtros
     status_filter = request.GET.get("status", "")
     if status_filter:
@@ -729,12 +748,20 @@ def _dashboard_case_list_context(request: HttpRequest) -> dict[str, Any]:
     else:
         attention_count = Case.objects.exclude(status=CaseStatus.CLEANED).filter(_attention_q(now)).count()
 
-    # Paginação
+    # Paginação — prefetch de procedures alimenta o badge de categoria por
+    # dimensão sem N+1 (R6).
+    cases_qs = cases_qs.prefetch_related("procedures")
     paginator = Paginator(cases_qs, 20)
     page_number = request.GET.get("page", 1)
     page_obj = paginator.get_page(page_number)
 
-    enriched_cases = [_enrich_case(c, now=now, attention_filter=attention_filter) for c in page_obj]
+    dimension_getter = DIMENSION_GETTERS[procedure_dimension]
+    enriched_cases = []
+    for case in page_obj:
+        item = _enrich_case(case, now=now, attention_filter=attention_filter)
+        badge_key = category_key(dimension_getter(case))
+        item["procedure_badge_label"] = CATEGORY_LABELS[badge_key]
+        enriched_cases.append(item)
 
     # Período das métricas — preservado nos links de filtro/paginação
     # Aceita presets e períodos personalizados
@@ -762,11 +789,57 @@ def _dashboard_case_list_context(request: HttpRequest) -> dict[str, Any]:
         "attention_filter": attention_filter,
         "attention_count": attention_count,
         "exam_type": exam_type,
+        "procedure_dimension": procedure_dimension,
+        "procedure_selection": procedure_selection,
+        "procedure_dimension_label": DIMENSION_LABELS[procedure_dimension],
         "metrics_period": metrics_period,
         "metrics_date": metrics_date,
         "metrics_start": metrics_start,
         "metrics_end": metrics_end,
     }
+
+
+def _procedure_dimension_links(request: HttpRequest, active: str) -> list[dict[str, Any]]:
+    """Links SSR para trocar a dimensão preservando os demais parâmetros vigentes."""
+    base = request.GET.copy()
+    base.pop("procedure_dimension", None)
+    links: list[dict[str, Any]] = []
+    for key in DIMENSIONS:
+        params = base.copy()
+        params["procedure_dimension"] = key
+        links.append(
+            {
+                "key": key,
+                "label": DIMENSION_LABELS[key],
+                "url": "?" + params.urlencode(),
+                "active": key == active,
+            }
+        )
+    return links
+
+
+def _matrix_display_rows(matrix: dict[tuple[str, str], dict[str, int]]) -> list[dict[str, Any]]:
+    """Linhas de apresentação da matriz declarado→detectado→autorizado.
+
+    Cada célula exibe a distribuição por categoria autorizada (texto compacto);
+    a soma das células fecha com o total de casos do período.
+    """
+    rows: list[dict[str, Any]] = []
+    for declared_key in CATEGORY_ORDER:
+        cells: list[dict[str, Any]] = []
+        for detected_key in CATEGORY_ORDER:
+            cell = matrix.get((declared_key, detected_key), {})
+            if cell:
+                parts = [
+                    f"{CATEGORY_LABELS[key]}: {count}"
+                    for key, count in sorted(cell.items(), key=lambda kv: CATEGORY_ORDER.index(kv[0]))
+                ]
+                text = ", ".join(parts)
+            else:
+                text = "—"
+            cells.append({"detected_key": detected_key, "text": text})
+        rows.append({"declared_key": declared_key, "cells": cells})
+    return rows
 
 
 @login_required
@@ -826,6 +899,22 @@ def dashboard_index(request: HttpRequest) -> HttpResponse:
     avg_times = _compute_average_times(period=metrics_period)
     # Slice 008: breakdown EDA/Colonoscopia reutiliza as fórmulas por tipo
     exam_type_breakdown_rows = _exam_type_breakdown_rows(period=metrics_period)
+
+    # Slice 006: analytics por dimensão usa a mesma janela das métricas
+    # consolidadas (desfechos = período; esperas continuam snapshot).
+    procedure_dimension = resolve_dimension(request.GET.get("procedure_dimension", ""))
+    period_start, period_end = _period_bounds(metrics_period)
+    if period_start is None:
+        analytics_period_cases = Case.objects.all()
+    else:
+        analytics_period_cases = Case.objects.filter(created_at__gte=period_start, created_at__lt=period_end)
+    procedure_analytics = compute_procedure_analytics(analytics_period_cases)
+
+    active_breakdown = procedure_analytics["breakdown"][procedure_dimension]
+    procedure_breakdown_rows = [
+        {"key": key, "label": CATEGORY_LABELS[key], "count": active_breakdown[key]} for key in CATEGORY_ORDER
+    ]
+    procedure_total_cases = sum(active_breakdown.values())
 
     # Labels
     period_labels = {
@@ -894,6 +983,15 @@ def dashboard_index(request: HttpRequest) -> HttpResponse:
             "status_choices": CaseStatus.choices,
             "STATUS_LABELS": STATUS_LABELS,
             "exam_type_breakdown_rows": exam_type_breakdown_rows,
+            "procedure_analytics": procedure_analytics,
+            "procedure_breakdown_rows": procedure_breakdown_rows,
+            "procedure_total_cases": procedure_total_cases,
+            "procedure_volume": procedure_analytics["volume"][procedure_dimension],
+            "procedure_matrix_rows": _matrix_display_rows(procedure_analytics["matrix"]),
+            "procedure_matrix_detected_keys": list(CATEGORY_ORDER),
+            "procedure_dimension_links": _procedure_dimension_links(request, procedure_dimension),
+            "procedure_dimension_label": DIMENSION_LABELS[procedure_dimension],
+            "procedure_category_labels": CATEGORY_LABELS,
             **case_list_context,
         },
     )

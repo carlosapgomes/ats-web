@@ -31,7 +31,7 @@ A ADR-0004 deve ser commitada, enviada e aprovada explicitamente antes de entreg
 - [x] Slice 003 — Médico decide cada procedimento com justificativa e histórico próprio (`slices/slice-003-per-procedure-doctor-decision.md`)
 - [x] Slice 004 — CHD recebe conjunto autorizado e faz um agendamento casado (`slices/slice-004-paired-scheduler-appointment.md`)
 - [x] Slice 005 — NIR corrige, filtra e recebe resposta comparativa (`slices/slice-005-nir-correction-and-final-response.md`)
-- [ ] Slice 006 — Gestor acompanha casos, procedimentos e conversões (`slices/slice-006-procedure-dimension-analytics.md`)
+- [x] Slice 006 — Gestor acompanha casos, procedimentos e conversões (`slices/slice-006-procedure-dimension-analytics.md`)
 - [ ] Slice 007 — Cutover remove fonte única e prompts específicos legados (`slices/slice-007-authoritative-procedure-cutover.md`)
 - [ ] Slice 008 — Operação ativa e reverte o fluxo combinado com segurança (`slices/slice-008-rollout-documentation-and-verification.md`)
 
@@ -74,8 +74,8 @@ A ADR-0004 deve ser commitada, enviada e aprovada explicitamente antes de entreg
 
 ### Analytics e cutover
 
-- [ ] Caso combinado conta uma vez em métricas de casos e duas no volume de procedimentos.
-- [ ] Dashboard permite dimensão declarado/detectado/autorizado e mostra matriz de conversão.
+- [x] Caso combinado conta uma vez em métricas de casos e duas no volume de procedimentos.
+- [x] Dashboard permite dimensão declarado/detectado/autorizado e mostra matriz de conversão.
 - [ ] `Case.exam_type` e dispatch operacional dependente dele foram removidos.
 - [ ] Quatro prompts neutros são canônicos; prompts antigos permanecem apenas como histórico inativo.
 - [ ] Nenhum reset de produção é requisito.

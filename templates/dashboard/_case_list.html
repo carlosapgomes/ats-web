@@ -33,6 +33,9 @@
         <div class="col-12 col-lg-3">
           <div class="d-flex flex-wrap gap-1 dashboard-case-badges">
             <span class="badge exam-type-badge exam-type-{{ item.case.exam_type }}">{{ item.case.get_exam_type_display }}</span>
+            {% if item.procedure_badge_label %}
+            <span class="badge bg-secondary badge-wrap" title="Categoria na dimensão {{ procedure_dimension_label }}">{{ item.procedure_badge_label }}</span>
+            {% endif %}
             <span class="badge {{ item.result_css }} badge-wrap">{{ item.result_label }}</span>
             {% if item.next_step_label %}
             <span class="badge {{ item.next_step_css }} badge-wrap">{{ item.next_step_label }}</span>
@@ -70,7 +73,7 @@
   <ul class="pagination pagination-sm justify-content-center mb-0">
     {% if page_obj.has_previous %}
     <li class="page-item">
-      <a class="page-link" href="?page={{ page_obj.previous_page_number }}{% if status_filter %}&status={{ status_filter }}{% endif %}{% if date_from %}&date_from={{ date_from }}{% endif %}{% if date_to %}&date_to={{ date_to }}{% endif %}{% if attention_filter %}&attention=1{% endif %}{% if metrics_period %}&metrics_period={{ metrics_period }}{% endif %}{% if metrics_date %}&metrics_date={{ metrics_date }}{% endif %}{% if metrics_start %}&metrics_start={{ metrics_start }}{% endif %}{% if metrics_end %}&metrics_end={{ metrics_end }}{% endif %}{% if search %}&search={{ search|urlencode }}{% endif %}{% if exam_type and exam_type != 'all' %}&exam_type={{ exam_type }}{% endif %}">Anterior</a>
+      <a class="page-link" href="?page={{ page_obj.previous_page_number }}{% if status_filter %}&status={{ status_filter }}{% endif %}{% if date_from %}&date_from={{ date_from }}{% endif %}{% if date_to %}&date_to={{ date_to }}{% endif %}{% if attention_filter %}&attention=1{% endif %}{% if metrics_period %}&metrics_period={{ metrics_period }}{% endif %}{% if metrics_date %}&metrics_date={{ metrics_date }}{% endif %}{% if metrics_start %}&metrics_start={{ metrics_start }}{% endif %}{% if metrics_end %}&metrics_end={{ metrics_end }}{% endif %}{% if search %}&search={{ search|urlencode }}{% endif %}{% if exam_type and exam_type != 'all' %}&exam_type={{ exam_type }}{% endif %}{% if procedure_dimension and procedure_dimension != 'declared' %}&procedure_dimension={{ procedure_dimension }}{% endif %}{% if procedure_selection and procedure_selection != 'all' %}&procedure_selection={{ procedure_selection }}{% endif %}">Anterior</a>
     </li>
     {% else %}
     <li class="page-item disabled"><span class="page-link">Anterior</span></li>
@@ -81,14 +84,14 @@
       <li class="page-item active"><span class="page-link">{{ i }}</span></li>
       {% else %}
       <li class="page-item">
-        <a class="page-link" href="?page={{ i }}{% if status_filter %}&status={{ status_filter }}{% endif %}{% if date_from %}&date_from={{ date_from }}{% endif %}{% if date_to %}&date_to={{ date_to }}{% endif %}{% if attention_filter %}&attention=1{% endif %}{% if metrics_period %}&metrics_period={{ metrics_period }}{% endif %}{% if metrics_date %}&metrics_date={{ metrics_date }}{% endif %}{% if metrics_start %}&metrics_start={{ metrics_start }}{% endif %}{% if metrics_end %}&metrics_end={{ metrics_end }}{% endif %}{% if search %}&search={{ search|urlencode }}{% endif %}{% if exam_type and exam_type != 'all' %}&exam_type={{ exam_type }}{% endif %}">{{ i }}</a>
+        <a class="page-link" href="?page={{ i }}{% if status_filter %}&status={{ status_filter }}{% endif %}{% if date_from %}&date_from={{ date_from }}{% endif %}{% if date_to %}&date_to={{ date_to }}{% endif %}{% if attention_filter %}&attention=1{% endif %}{% if metrics_period %}&metrics_period={{ metrics_period }}{% endif %}{% if metrics_date %}&metrics_date={{ metrics_date }}{% endif %}{% if metrics_start %}&metrics_start={{ metrics_start }}{% endif %}{% if metrics_end %}&metrics_end={{ metrics_end }}{% endif %}{% if search %}&search={{ search|urlencode }}{% endif %}{% if exam_type and exam_type != 'all' %}&exam_type={{ exam_type }}{% endif %}{% if procedure_dimension and procedure_dimension != 'declared' %}&procedure_dimension={{ procedure_dimension }}{% endif %}{% if procedure_selection and procedure_selection != 'all' %}&procedure_selection={{ procedure_selection }}{% endif %}">{{ i }}</a>
       </li>
       {% endif %}
     {% endfor %}
 
     {% if page_obj.has_next %}
     <li class="page-item">
-      <a class="page-link" href="?page={{ page_obj.next_page_number }}{% if status_filter %}&status={{ status_filter }}{% endif %}{% if date_from %}&date_from={{ date_from }}{% endif %}{% if date_to %}&date_to={{ date_to }}{% endif %}{% if attention_filter %}&attention=1{% endif %}{% if metrics_period %}&metrics_period={{ metrics_period }}{% endif %}{% if metrics_date %}&metrics_date={{ metrics_date }}{% endif %}{% if metrics_start %}&metrics_start={{ metrics_start }}{% endif %}{% if metrics_end %}&metrics_end={{ metrics_end }}{% endif %}{% if search %}&search={{ search|urlencode }}{% endif %}{% if exam_type and exam_type != 'all' %}&exam_type={{ exam_type }}{% endif %}">Próxima</a>
+      <a class="page-link" href="?page={{ page_obj.next_page_number }}{% if status_filter %}&status={{ status_filter }}{% endif %}{% if date_from %}&date_from={{ date_from }}{% endif %}{% if date_to %}&date_to={{ date_to }}{% endif %}{% if attention_filter %}&attention=1{% endif %}{% if metrics_period %}&metrics_period={{ metrics_period }}{% endif %}{% if metrics_date %}&metrics_date={{ metrics_date }}{% endif %}{% if metrics_start %}&metrics_start={{ metrics_start }}{% endif %}{% if metrics_end %}&metrics_end={{ metrics_end }}{% endif %}{% if search %}&search={{ search|urlencode }}{% endif %}{% if exam_type and exam_type != 'all' %}&exam_type={{ exam_type }}{% endif %}{% if procedure_dimension and procedure_dimension != 'declared' %}&procedure_dimension={{ procedure_dimension }}{% endif %}{% if procedure_selection and procedure_selection != 'all' %}&procedure_selection={{ procedure_selection }}{% endif %}">Próxima</a>
     </li>
     {% else %}
     <li class="page-item disabled"><span class="page-link">Próxima</span></li>

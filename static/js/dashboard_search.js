@@ -38,13 +38,16 @@
 
   /**
    * Retorna os parâmetros atuais do formulário de filtros como URLSearchParams.
-   * Preserva status, exam_type, date_from, date_to, attention, metrics_period e
-   * campos personalizados (metrics_date, metrics_start, metrics_end).
+   * Preserva status, exam_type, procedure_dimension, procedure_selection,
+   * date_from, date_to, attention, metrics_period e campos personalizados
+   * (metrics_date, metrics_start, metrics_end).
    */
   function getFilterParams() {
     var params = new URLSearchParams();
     var statusSelect = document.querySelector('select[name="status"]');
     var examTypeSelect = document.querySelector('select[name="exam_type"]');
+    var dimensionSelect = document.querySelector('select[name="procedure_dimension"]');
+    var selectionSelect = document.querySelector('select[name="procedure_selection"]');
     var dateFromInput = document.querySelector('input[name="date_from"]');
     var dateToInput = document.querySelector('input[name="date_to"]');
     var attentionLink = document.querySelector('a[href*="attention=1"]');
@@ -64,6 +67,14 @@
     // Filtro de tipo de exame (Slice 008): preserva apenas quando != all
     if (examTypeSelect && examTypeSelect.value && examTypeSelect.value !== 'all') {
       params.set('exam_type', examTypeSelect.value);
+    }
+    // Dimensão ativa (Slice 006): preserva apenas quando != default (declared)
+    if (dimensionSelect && dimensionSelect.value && dimensionSelect.value !== 'declared') {
+      params.set('procedure_dimension', dimensionSelect.value);
+    }
+    // Seleção de procedimento (Slice 006): preserva apenas quando != all
+    if (selectionSelect && selectionSelect.value && selectionSelect.value !== 'all') {
+      params.set('procedure_selection', selectionSelect.value);
     }
     if (dateFromInput && dateFromInput.value) {
       params.set('date_from', dateFromInput.value);
