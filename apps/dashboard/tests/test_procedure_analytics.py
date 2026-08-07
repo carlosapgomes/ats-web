@@ -477,6 +477,77 @@ class TestDimensionTableFilter:
 
 
 @pytest.mark.django_db
+class TestBreakdownTableConsistency:
+    """CORREÇÃO pós-revisão — breakdown e tabela concordam na janela de divergência.
+
+    Casos com rows em outra dimensão, mas não na consultada, devem cair no mesmo
+    fallback da ponte tanto no breakdown (Python) quanto no filtro SQL da tabela.
+    """
+
+    def test_fresh_declared_eda_matches_detected_eda_not_none(self, client) -> None:
+        """Caso recém-declarado EDA (detecção pendente): detected[eda]==1 e a tabela
+        detected+eda mostra; detected+none NÃO mostra."""
+        from apps.dashboard.procedure_analytics import compute_procedure_analytics
+
+        user = _login_as(client)
+        Case.objects.all().delete()
+        _make_case(user, "FDE-1", declared=("eda",))  # row declarada, detection PENDING
+
+        analytics = compute_procedure_analytics(Case.objects.all())
+        assert analytics["breakdown"]["detected"]["eda"] == 1
+        assert analytics["breakdown"]["detected"]["none"] == 0
+
+        url_eda = reverse("dashboard:index") + "?procedure_dimension=detected&procedure_selection=eda"
+        content_eda = client.get(url_eda).content.decode()
+        assert "FDE-1" in content_eda, "detected+eda deve mostrar caso recém-declarado EDA (fallback da ponte)"
+
+        url_none = reverse("dashboard:index") + "?procedure_dimension=detected&procedure_selection=none"
+        content_none = client.get(url_none).content.decode()
+        assert "FDE-1" not in content_none, "detected+none NÃO pode mostrar caso classificado como EDA"
+
+    def test_accepted_case_without_dispositions_matches_approved_eda_not_none(self, client) -> None:
+        """Caso aceito globalmente sem rows de disposição: approved[eda]==1 (fallback
+        declarado) e a tabela approved+eda mostra; approved+none NÃO mostra."""
+        from apps.dashboard.procedure_analytics import compute_procedure_analytics
+
+        user = _login_as(client)
+        Case.objects.all().delete()
+        _make_case(user, "AC-1", declared=("eda",), status=CaseStatus.WAIT_APPT, doctor_decision="accept")
+
+        analytics = compute_procedure_analytics(Case.objects.all())
+        assert analytics["breakdown"]["approved"]["eda"] == 1
+        assert analytics["breakdown"]["approved"]["none"] == 0
+
+        url_eda = reverse("dashboard:index") + "?procedure_dimension=approved&procedure_selection=eda"
+        assert "AC-1" in client.get(url_eda).content.decode()
+
+        url_none = reverse("dashboard:index") + "?procedure_dimension=approved&procedure_selection=none"
+        assert "AC-1" not in client.get(url_none).content.decode()
+
+    def test_detected_colonoscopy_does_not_change_declared_category(self, client) -> None:
+        """Caso declarado EDA com detecção Colon (row não declarada): na dimensão
+        declared continua EDA (não vira combinado) na tabela e no breakdown."""
+        from apps.dashboard.procedure_analytics import compute_procedure_analytics
+
+        user = _login_as(client)
+        Case.objects.all().delete()
+        _make_case(user, "DC-1", declared=("eda",), detected=("eda", "colonoscopy"))
+
+        analytics = compute_procedure_analytics(Case.objects.all())
+        assert analytics["breakdown"]["declared"]["eda"] == 1
+        assert analytics["breakdown"]["declared"]["eda_colonoscopy"] == 0
+
+        url_eda = reverse("dashboard:index") + "?procedure_dimension=declared&procedure_selection=eda"
+        assert "DC-1" in client.get(url_eda).content.decode()
+
+        url_combined = reverse("dashboard:index") + "?procedure_dimension=declared&procedure_selection=eda_colonoscopy"
+        assert "DC-1" not in client.get(url_combined).content.decode()
+
+
+# ── R6: Query hygiene ────────────────────────────────────────────────────
+
+
+@pytest.mark.django_db
 class TestQueryHygiene:
     """R6 — analytics com queries limitadas e página sem explosão de queries."""
 

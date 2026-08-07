@@ -81,12 +81,13 @@ def category_key(procedure_types: tuple[str, ...]) -> str:
     return selection_key(procedure_types) or "none"
 
 
-def _admin_closed_case_ids(cases: Any) -> set[Any]:
+def admin_closed_case_ids(cases: Any) -> set[Any]:
     """Ids de casos com evento de encerramento administrativo (auditoria).
 
-    Apenas a exclusão do contador de casados espelha a semântica existente de
-    accepted/denied (que já excluem admin-closed); nenhuma fórmula de
-    desfecho é duplicada aqui (R6).
+    Fonte única da exclusão de admin-closed: consumida por
+    ``compute_procedure_analytics`` (paired_confirmed) e por
+    ``_compute_summary`` (accepted/denied). Nenhuma fórmula de desfecho é
+    duplicada aqui (R6).
     """
     return set(
         CaseEvent.objects.filter(
@@ -116,7 +117,7 @@ def compute_procedure_analytics(period_cases: Any) -> dict[str, Any]:
         }
     """
     prefetched = period_cases.prefetch_related("procedures")
-    admin_closed_ids = _admin_closed_case_ids(period_cases)
+    admin_closed_ids = admin_closed_case_ids(period_cases)
 
     breakdown: dict[str, dict[str, int]] = {dim: {cat: 0 for cat in CATEGORY_ORDER} for dim in DIMENSIONS}
     volume: dict[str, dict[str, int]] = {dim: {"eda": 0, "colonoscopy": 0, "combined": 0} for dim in DIMENSIONS}
@@ -156,7 +157,7 @@ def compute_procedure_analytics(period_cases: Any) -> dict[str, Any]:
 
 
 def _exam_type_selection_q(selection: str) -> Q:
-    """Categoria legada (sem rows) via ponte ``Case.exam_type``."""
+    """Categoria legada (sem rows da dimensão) via ponte ``Case.exam_type``."""
     if selection == "eda":
         return Q(exam_type=ProcedureType.EDA)
     if selection == "colonoscopy":
@@ -164,58 +165,70 @@ def _exam_type_selection_q(selection: str) -> Q:
     return Q(exam_type=EDA_COLONOSCOPY)  # eda_colonoscopy
 
 
+def _legacy_fallback_q(dimension: str, selection: str) -> Q:
+    """Categoria de casos sem rows da dimensão consultada (fallback da ponte).
+
+    Espelha exatamente os helpers de domínio:
+    - declared/detected: sem rows da dimensão → ``Case.exam_type``;
+    - approved: sem rows da dimensão → ``doctor_decision=accept`` → conjunto
+      declarado (via ponte ``exam_type``).
+    """
+    if dimension == "approved":
+        return Q(doctor_decision="accept") & _exam_type_selection_q(selection)
+    return _exam_type_selection_q(selection)
+
+
+def _none_fallback_q(dimension: str) -> Q:
+    """Condição de projeção vazia quando não há rows da dimensão consultada.
+
+    approved: o fallback só devolve conjunto se ``doctor_decision == accept``;
+    caso contrário projeta vazio → ``none``. declared/detected: o fallback da
+    ponte mapeia ``exam_type`` para uma categoria — ``none`` só ocorre com
+    ``exam_type`` fora do universo (não ocorre no modelo atual; mantido por
+    fidelidade ao helper).
+    """
+    if dimension == "approved":
+        return Q(doctor_decision="") | Q(doctor_decision="deny") | Q(doctor_decision__isnull=True)
+    return ~Q(exam_type__in=(ProcedureType.EDA, ProcedureType.COLONOSCOPY, EDA_COLONOSCOPY))
+
+
 def apply_procedure_selection_filter(cases_qs: Any, dimension: str, selection: str) -> Any:
     """Filtra ``cases_qs`` pela categoria ``selection`` na ``dimension``.
 
     ``all`` não filtra. Predicados via ``Exists`` sobre rows ``CaseProcedure``
-    (aproveita os índices dimensionais do Slice 001) + fallback da ponte para
-    casos legados sem rows — exatamente a mesma projeção usada no breakdown
-    (consistência tabela ↔ analytics). Retorna o QuerySet filtrado.
+    (aproveita os índices dimensionais do Slice 001) + fallback da ponte.
+    O fallback é gateado por ``~has_dim_rows`` (ausência de rows da dimensão
+    consultada) — a mesma condição dos helpers ``get_*_procedure_types`` —,
+    garantindo consistência entre breakdown (Python) e tabela (SQL).
     """
     if selection == "all":
         return cases_qs
 
     predicate = DIMENSION_PREDICATES[dimension]
     proc = CaseProcedure.objects.filter(case=OuterRef("pk"))
-    has_rows = Exists(proc)
+    has_dim_rows = Exists(proc.filter(**predicate))
     eda_match = Exists(proc.filter(procedure_type=ProcedureType.EDA, **predicate))
     col_match = Exists(proc.filter(procedure_type=ProcedureType.COLONOSCOPY, **predicate))
 
     if selection == "eda":
-        rows_category = Q(_proc_eda=True) & Q(_proc_col=False)
+        category_q = (Q(_proc_eda=True) & Q(_proc_col=False)) | (
+            Q(_proc_has_dim_rows=False) & _legacy_fallback_q(dimension, "eda")
+        )
     elif selection == "colonoscopy":
-        rows_category = Q(_proc_eda=False) & Q(_proc_col=True)
+        category_q = (Q(_proc_eda=False) & Q(_proc_col=True)) | (
+            Q(_proc_has_dim_rows=False) & _legacy_fallback_q(dimension, "colonoscopy")
+        )
     elif selection == "eda_colonoscopy":
-        rows_category = Q(_proc_eda=True) & Q(_proc_col=True)
+        category_q = (Q(_proc_eda=True) & Q(_proc_col=True)) | (
+            Q(_proc_has_dim_rows=False) & _legacy_fallback_q(dimension, "eda_colonoscopy")
+        )
     else:  # none
-        rows_category = Q(_proc_has_rows=True) & Q(_proc_eda=False) & Q(_proc_col=False)
-
-    if selection == "none":
-        # ``none`` só recebe fallback na dimensão autorizado: casos legados sem
-        # rows sem aceite global (doctor_decision vazio/negado) projetam vazio.
-        if dimension == "approved":
-            legacy = Q(_proc_has_rows=False) & (
-                Q(doctor_decision="") | Q(doctor_decision="deny") | Q(doctor_decision__isnull=True)
-            )
-            return cases_qs.annotate(
-                _proc_has_rows=has_rows,
-                _proc_eda=eda_match,
-                _proc_col=col_match,
-            ).filter(rows_category | legacy)
-        return cases_qs.annotate(
-            _proc_has_rows=has_rows,
-            _proc_eda=eda_match,
-            _proc_col=col_match,
-        ).filter(rows_category)
-
-    # eda/colonoscopy/eda_colonoscopy: fallback da ponte para casos sem rows.
-    if dimension == "approved":
-        legacy = Q(_proc_has_rows=False) & Q(doctor_decision="accept") & _exam_type_selection_q(selection)
-    else:
-        legacy = Q(_proc_has_rows=False) & _exam_type_selection_q(selection)
+        # ``none`` exige ausência de rows da dimensão E fallback vazio: com rows
+        # da dimensão há sempre um match (EDA ou Colonoscopia) → categoria real.
+        category_q = Q(_proc_has_dim_rows=False) & _none_fallback_q(dimension)
 
     return cases_qs.annotate(
-        _proc_has_rows=has_rows,
+        _proc_has_dim_rows=has_dim_rows,
         _proc_eda=eda_match,
         _proc_col=col_match,
-    ).filter(rows_category | legacy)
+    ).filter(category_q)

@@ -39,6 +39,7 @@ from apps.dashboard.procedure_analytics import (
     DIMENSION_GETTERS,
     DIMENSION_LABELS,
     DIMENSIONS,
+    admin_closed_case_ids,
     apply_procedure_selection_filter,
     category_key,
     compute_procedure_analytics,
@@ -166,14 +167,8 @@ def _compute_summary(
     total_today = period_cases.count()
 
     # Casos administrativamente encerrados (via CASE_ADMINISTRATIVELY_CLOSED)
-    admin_closed_ids = set(
-        CaseEvent.objects.filter(
-            event_type="CASE_ADMINISTRATIVELY_CLOSED",
-            case__in=period_cases,
-        )
-        .values_list("case_id", flat=True)
-        .distinct()
-    )
+    # — fonte única compartilhada com o analytics de procedimentos (R6).
+    admin_closed_ids = admin_closed_case_ids(period_cases)
     admin_closed_count = len(admin_closed_ids)
 
     # Excluir admin-closed de accepted e denied
