@@ -57,12 +57,13 @@ _DECLARED_SELECTION_VALUES: frozenset[str] = frozenset({ExamType.EDA, ExamType.C
 
 
 def validate_exam_type(exam_type: str | None) -> str:
-    """Valida e normaliza a seleção declarada no intake.
+    """Valida e normaliza a seleção declarada (intake e correção NIR).
 
     Levanta ``ValueError`` se ausente/inválida. Aceita EDA, Colonoscopia ou a
     combinação ``eda_colonoscopy`` (ponte transitória) — nunca inferência por
-    texto (R1). ``eda_colonoscopy`` é aceito apenas como seleção de NOVO intake;
-    a correção single→single valida separadamente (R3).
+    texto (R1). Desde o Slice 005 a correção NIR aceita as TRÊS seleções, então
+    esta validação é compartilhada por novos intakes/reenvios e pela correção;
+    o gate de flag de intake fica em ``ensure_exam_type_allowed`` (não aqui).
     """
     value = (exam_type or "").strip()
     if value not in _DECLARED_SELECTION_VALUES:
@@ -109,7 +110,7 @@ EXAM_TYPE_CORRECTION_ELIGIBLE_REASON_CODES: frozenset[str] = frozenset(
     {"exam_type_mismatch", "mixed_exam_request", "unknown_exam_type"}
 )
 
-# Motivos de correção selecionáveis pelo NIR (payload de EXAM_TYPE_CORRECTED).
+# Motivos de correção selecionáveis pelo NIR (payload de CASE_PROCEDURE_DECLARATION_CORRECTED).
 EXAM_TYPE_CORRECTION_REASONS: dict[str, str] = {
     "nir_identified_exam": "Tipo identificado na revisão manual do NIR",
     "declared_type_incorrect": "Tipo declarado incorreto no envio original",
@@ -296,8 +297,8 @@ def correct_case_exam_type(
         case.save()
 
         # R2 — transição FSM nomeada; CASE_REPROCESSING_REQUESTED é persistido
-        # no save() seguinte, após EXAM_TYPE_CORRECTED (ordem append-only,
-        # sem sobrescrever _pending_event).
+        # no save() seguinte, após CASE_PROCEDURE_DECLARATION_CORRECTED (ordem
+        # append-only, sem sobrescrever _pending_event).
         case.reprocess_after_exam_type_correction(
             user=user,
             payload={"reason_code": reason_code},
