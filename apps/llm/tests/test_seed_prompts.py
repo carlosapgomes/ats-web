@@ -138,6 +138,63 @@ class TestSeedPromptsDeactivatesLegacy:
         assert PromptTemplate.objects.filter(name="llm1_system").count() == 1
 
 
+@pytest.mark.django_db
+class TestSeedPromptsReactivatesInactiveNeutral:
+    """R3 (ajuste): seed garante exatamente 1 ativo por nome neutro mesmo quando
+    só há versões inativas — reativa via NOVA versão (max+1), nunca reativando
+    uma row antiga via ``update``. Idempotente: não cria versão extra quando já
+    há ativo.
+    """
+
+    def test_inactive_neutral_prompt_is_reactivated_as_new_active_version(self) -> None:
+        """Neutro só inativo → seed cria nova versão ativa (não reativa a v1)."""
+        PromptTemplate.objects.create(name="exam_llm1_system", version=1, content="old inactive", is_active=False)
+
+        call_command("seed_prompts")
+
+        active = PromptTemplate.get_active("exam_llm1_system")
+        assert active is not None
+        assert active.version == 2  # nova versão (max+1), não reativa a v1 inativa
+        assert active.is_active is True
+        assert PromptTemplate.objects.filter(name="exam_llm1_system", is_active=True).count() == 1
+        # Histórico inativo permanece (não apagado).
+        assert PromptTemplate.objects.filter(name="exam_llm1_system", is_active=False).count() == 1
+        assert PromptTemplate.objects.filter(name="exam_llm1_system").count() == 2
+
+    def test_active_neutral_prompt_is_not_duplicated_on_rerun(self) -> None:
+        """Re-run não cria versão extra quando já há ativo."""
+        call_command("seed_prompts")  # cria 4 ativos v1
+        call_command("seed_prompts")  # re-run
+        for name in NEUTRAL_NAMES:
+            assert PromptTemplate.objects.filter(name=name).count() == 1, f"{name} extra version"
+            assert PromptTemplate.objects.filter(name=name, is_active=True).count() == 1
+
+    def test_two_runs_from_inactive_state_produce_single_active(self) -> None:
+        """Partindo de inativo: 1ª run cria versão ativa; 2ª run é no-op."""
+        for name in NEUTRAL_NAMES:
+            PromptTemplate.objects.create(name=name, version=1, content="inactive", is_active=False)
+
+        call_command("seed_prompts")  # cria v2 ativo
+        call_command("seed_prompts")  # no-op (ativo existe)
+
+        for name in NEUTRAL_NAMES:
+            assert PromptTemplate.objects.filter(name=name, is_active=True).count() == 1
+            # v1 (inativa, histórico) + v2 (ativa) = 2 versões, sem v3.
+            assert PromptTemplate.objects.filter(name=name).count() == 2, (
+                f"{name} should have v1(inactive)+v2(active), no extra"
+            )
+            active = PromptTemplate.get_active(name)
+            assert active is not None and active.version == 2
+
+    def test_seed_does_not_reactivate_old_inactive_row_in_place(self) -> None:
+        """A row inativa antiga permanece inativa; a ativa é uma nova row."""
+        old = PromptTemplate.objects.create(name="exam_llm2_user", version=1, content="old inactive", is_active=False)
+        call_command("seed_prompts")
+        old.refresh_from_db()
+        assert old.is_active is False  # a row antiga não foi reativada
+        assert PromptTemplate.get_active("exam_llm2_user") is not None
+
+
 class TestLegacyLlm1UserDefaultContent:
     """Slice 007: conteúdo hardening do prompt LLM1 (1.1) permanece na constante
     legada (fallback de rollback) — não é mais gerenciado pelo seed, mas sua

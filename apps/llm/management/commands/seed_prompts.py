@@ -62,30 +62,27 @@ class Command(BaseCommand):
         created_count = 0
         skipped_count = 0
 
-        # 1. Quatro nomes neutros: cria v1 ativa quando ausente (idempotente).
-        # Garante exatamente uma versão ativa por nome neutro. Reexecutar não
-        # cria versões extras nem sobrescreve versão ativa existente.
+        # 1. Quatro nomes neutros: garante exatamente UMA versão ativa por nome
+        # (idempotente). Se já há ativo → no-op. Se só há versões inativas →
+        # cria nova versão ativa (max+1), sem reativar row antiga via update.
+        # Se nenhuma row existe → cria v1 ativa.
         for name in PROMPT_NAMES:
             if PromptTemplate.get_active(name) is not None:
                 skipped_count += 1
                 self.stdout.write(f"  Skipped (active exists): {name}")
                 continue
-            if PromptTemplate.objects.filter(name=name).exists():
-                # Nome existe, porém sem versão ativa: não sobrescreve estado
-                # operacional (mantém idempotência do cutover).
-                skipped_count += 1
-                self.stdout.write(f"  Skipped (inactive only): {name}")
-                continue
 
+            latest = PromptTemplate.objects.filter(name=name).order_by("-version").first()
+            new_version = (latest.version + 1) if latest is not None else 1
             content = DEFAULT_CONTENTS.get(name, "{case_id}")
             PromptTemplate.objects.create(
                 name=name,
-                version=1,
+                version=new_version,
                 content=content,
                 is_active=True,
             )
             created_count += 1
-            self.stdout.write(self.style.SUCCESS(f"  Created: {name} v1"))
+            self.stdout.write(self.style.SUCCESS(f"  Created: {name} v{new_version}"))
 
         # 2. Desativa toda versão ATIVA dos oito nomes legados (preserva
         # histórico). Idempotente: reexecutar é no-op (não reativa nada).
