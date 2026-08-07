@@ -38,6 +38,7 @@ from apps.cases.models import (
     DoctorDisposition,
     ProcedureType,
 )
+from apps.scheduler.views import _approved_snapshot
 
 User = get_user_model()
 
@@ -218,14 +219,72 @@ class TestSchedulerPairedAppointment:
         assert "Detectado: EDA" in content
         assert "Autorizado: EDA + Colonoscopia" in content
         # Razão médica textual no detalhe de confirmação.
-        from django.contrib.auth import get_user_model
-
-        scheduler_user = get_user_model().objects.get(username__startswith="scheduler@slice004.")
-        token = self._claim_lock(case.case_id, scheduler_user)
+        scheduler_user = User.objects.get(username__startswith="scheduler@slice004.")
+        self._claim_lock(case.case_id, scheduler_user)
         confirm = client.get(f"/scheduler/{case.case_id}/").content.decode()
         assert "EDA + Colonoscopia · Agendamento casado" in confirm
         assert "Suspeita de doença inflamatória na anamnese." in confirm
-        assert token  # lock token presente no GET (consistência do fluxo)
+
+    # ── F2: fallback consistente quando não há aprovados ────────────
+
+    def test_snapshot_fallback_consistent_when_no_approved(self) -> None:
+        """F2: sem aprovados, badge e chave derivam da MESMA fonte (declarado/ponte).
+
+        Caso sem rows aprovadas e sem fallback de accept (doctor_decision != accept)
+        deve exibir label consistente com a chave de seleção — nunca badge EDA com
+        key "none" (invisível nos buckets do JS).
+        """
+        nir = User.objects.create_user(username=f"nir-slice004f2.{uuid.uuid4().hex[:8]}.test")
+        nir.roles.add(_create_role("nir"))
+        # Sem aprovados: fallback = declarado (ponte) → label e key coerentes.
+        case = Case.objects.create(
+            created_by=nir,
+            status=CaseStatus.WAIT_APPT,
+            exam_type="eda",
+            doctor_decision="deny",
+            structured_data={"patient": {"name": "Sem Aprovado", "age": 50, "gender": "F"}},
+        )
+        snap = _approved_snapshot(case)
+        assert snap["approved_label"] == "EDA"
+        assert snap["approved_selection_key"] == "eda"
+        # Sem approved E sem fallback válido: "none" + label vazio.
+        bogus = Case.objects.create(
+            created_by=nir,
+            status=CaseStatus.WAIT_APPT,
+            exam_type="bogus",
+            doctor_decision="deny",
+            structured_data={"patient": {"name": "Bogus", "age": 50, "gender": "F"}},
+        )
+        snap_bogus = _approved_snapshot(bogus)
+        assert snap_bogus["approved_label"] == ""
+        assert snap_bogus["approved_selection_key"] == "none"
+
+    # ── F3: confirm sem aprovados não renderiza card vazio ──────────
+
+    def test_confirm_page_hides_empty_authorized_card(self, client) -> None:
+        """F3: caso sem aprovados não renderiza o card 'Procedimentos Autorizados'."""
+        nir = self._login_as(client, "nir")
+        # Estado defensivo: sem rows e sem fallback válido (exam_type inválido)
+        # → approved_label vazio → card oculto (regressão: combinado continua visível).
+        empty_case = Case.objects.create(
+            created_by=nir,
+            status=CaseStatus.WAIT_APPT,
+            exam_type="bogus",
+            doctor_decision="accept",
+            structured_data={"patient": {"name": "Sem Autorizado", "age": 50, "gender": "F"}},
+        )
+        combined = self._make_case(
+            nir,
+            exam_type="eda_colonoscopy",
+            approved=("eda", "colonoscopy"),
+            detected=("eda", "colonoscopy"),
+        )
+        self._login_as(client, "scheduler")
+        content = client.get(f"/scheduler/{empty_case.case_id}/").content.decode()
+        assert "Procedimentos Autorizados" not in content
+        content = client.get(f"/scheduler/{combined.case_id}/").content.decode()
+        assert "Procedimentos Autorizados" in content
+        assert "EDA + Colonoscopia · Agendamento casado" in content
 
     # ── R2/R3/R4: confirm combinado → 1 appointment/event/transição ──
 
@@ -484,6 +543,41 @@ class TestSchedulerPairedQueueAndHistory:
         # Histórico: filtro combinado (server-side) retorna o caso.
         content = client.get("/scheduler/historical/?exam_type=eda_colonoscopy").content.decode()
         assert "EDA + Colonoscopia" in content
+
+    # ── R5: histórico combinado sem termo, top 50 e ordem ───────────
+
+    def test_historical_combined_legacy_fallback_without_rows(self, client) -> None:
+        """F1: caso legado (exam_type=eda_colonoscopy, SEM rows) aparece em Combinado.
+
+        Queryset histórico já restringe doctor_decision=accept; caso sem rows
+        usa a ponte exam_type como fallback da dimensão autorizada.
+        """
+        nir = self._login_as(client, "nir")
+        Case.objects.create(
+            created_by=nir,
+            status=CaseStatus.CLEANED,
+            exam_type="eda_colonoscopy",
+            doctor_decision="accept",
+            doctor_admission_flow="scheduled",
+            appointment_status="confirmed",
+            agency_record_number="HC-LEG-COMB",
+            structured_data={"patient": {"name": "Legado Combinado", "age": 61, "gender": "M"}},
+        )
+        # Caso combinado com rows NÃO deve ser afetado pelo fallback (regressão).
+        self._make_case(
+            nir,
+            status=CaseStatus.CLEANED,
+            exam_type="eda_colonoscopy",
+            approved=("eda", "colonoscopy"),
+            detected=("eda", "colonoscopy"),
+            appointment_status="confirmed",
+            agency_record_number="HC-ROW-COMB",
+            structured_data={"patient": {"name": "Row Combinado", "age": 62, "gender": "F"}},
+        )
+        self._login_as(client, "scheduler")
+        content = client.get("/scheduler/historical/?exam_type=eda_colonoscopy").content.decode()
+        assert "HC-LEG-COMB" in content
+        assert "HC-ROW-COMB" in content
 
     # ── R5: histórico combinado sem termo, top 50 e ordem ───────────
 

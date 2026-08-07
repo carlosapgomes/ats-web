@@ -68,6 +68,7 @@
       {% endif %}
     </div>
 
+    {% if approved_label %}
     <div class="card p-4 mb-3">
       <h5 class="mb-3">🔬 Procedimentos Autorizados</h5>
       <div class="mb-2">
@@ -90,6 +91,7 @@
       </div>
       {% endif %}
     </div>
+    {% endif %}
 
     {% include "cases/_communication_thread.html" %}
   </div>

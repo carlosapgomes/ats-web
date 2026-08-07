@@ -38,6 +38,7 @@ from apps.cases.priority_signals import build_priority_signal_badges
 from apps.cases.procedures import (
     format_procedure_selection,
     get_approved_procedure_types,
+    get_declared_procedure_types,
     get_detected_procedure_types,
     selection_key,
 )
@@ -144,7 +145,17 @@ def _approved_snapshot(case: Case) -> dict[str, Any]:
     approved_types = get_approved_procedure_types(case)
     detected_types = get_detected_procedure_types(case)
     paired = len(approved_types) == 2
-    approved_label = format_procedure_selection(approved_types) if approved_types else case.get_exam_type_display()
+    if approved_types:
+        approved_label = format_procedure_selection(approved_types)
+        approved_selection_key = selection_key(approved_types)
+    else:
+        # F2: fallback consistente — badge e chave de seleção derivam da MESMA
+        # fonte (declarado via ponte), nunca label EDA com key "none" (card
+        # invisível nos buckets do JS). Sem approved E sem fallback válido,
+        # manter "none" e label vazio.
+        fallback_types = get_declared_procedure_types(case)
+        approved_label = format_procedure_selection(fallback_types) if fallback_types else ""
+        approved_selection_key = selection_key(fallback_types) if fallback_types else "none"
     detected_label = format_procedure_selection(detected_types) if detected_types else "Nenhum"
     transformation = ""
     if approved_types and approved_types != detected_types:
@@ -157,7 +168,7 @@ def _approved_snapshot(case: Case) -> dict[str, Any]:
             if row is not None and row.doctor_reason.strip():
                 reasons.append({"label": ProcedureType(procedure_type).label, "reason": row.doctor_reason})
     return {
-        "approved_selection_key": selection_key(approved_types) or "none",
+        "approved_selection_key": approved_selection_key,
         "approved_label": approved_label,
         "is_paired": paired,
         "paired_label": "Agendamento casado",
@@ -1163,10 +1174,10 @@ def _filter_by_approved_dimension(qs: QuerySet[Case], dimension: str) -> QuerySe
 
     Casos com rows: exige row(s) ``doctor_disposition=approved`` do(s)
     tipo(s) — ``eda``/``colonoscopy`` são EXCLUSIVOS (um caso só pertence a
-    um bucket); combinado exige as duas rows aprovadas (não há fallback:
-    combinação só existe com duas rows). Casos legados sem rows (fixtures/
-    pré-projeção) com ``doctor_decision=accept`` caem na ponte ``exam_type``,
-    refletindo a dimensão autorizada até o cutover.
+    um bucket); combinado exige as duas rows aprovadas. Casos legados sem
+    rows (fixtures/pré-projeção) com ``doctor_decision=accept`` caem na
+    ponte ``exam_type`` (inclusive ``eda_colonoscopy``, F1), refletindo a
+    dimensão autorizada até o cutover.
     """
     other = ProcedureType.COLONOSCOPY if dimension == ProcedureType.EDA else ProcedureType.EDA
     row_matches = qs.filter(
@@ -1177,17 +1188,16 @@ def _filter_by_approved_dimension(qs: QuerySet[Case], dimension: str) -> QuerySe
         procedures__doctor_disposition=DoctorDisposition.APPROVED,
     )
     if dimension == EDA_COLONOSCOPY:
-        return (
-            qs.filter(
-                procedures__procedure_type=ProcedureType.EDA,
-                procedures__doctor_disposition=DoctorDisposition.APPROVED,
-            )
-            .filter(
-                procedures__procedure_type=ProcedureType.COLONOSCOPY,
-                procedures__doctor_disposition=DoctorDisposition.APPROVED,
-            )
-            .distinct()
+        combined = qs.filter(
+            procedures__procedure_type=ProcedureType.EDA,
+            procedures__doctor_disposition=DoctorDisposition.APPROVED,
+        ).filter(
+            procedures__procedure_type=ProcedureType.COLONOSCOPY,
+            procedures__doctor_disposition=DoctorDisposition.APPROVED,
         )
+        # F1: fallback legado — caso combinado sem rows usa a ponte exam_type.
+        legacy = qs.filter(exam_type=EDA_COLONOSCOPY, procedures__isnull=True)
+        return (combined | legacy).distinct()
     legacy = qs.filter(exam_type=dimension, procedures__isnull=True)
     return (row_matches | legacy).distinct()
 
