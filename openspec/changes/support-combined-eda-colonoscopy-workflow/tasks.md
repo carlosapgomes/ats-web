@@ -12,7 +12,7 @@ Branch diferente, árvore suja herdada ou ausência da ADR-0004 aceita antes do 
 
 - [x] **Responsável: planner/humano, antes do Slice 001.** Criada, revisada e aceita `docs/adr/ADR-0004-procedimentos-multiplos-e-contrato-llm-neutro.md` com `.pi/skills/adr-generator/SKILL.md` e `docs/adr/template.md`, marcando as decisões 1, 2, 3, 5, 6, 8 e 9 da ADR-0003 como parcialmente superadas.
 
-A ADR-0004 deve ser commitada, enviada e aprovada explicitamente antes de entregar o prompt do Slice 001 ao implementador. O Slice 008 somente ajusta status/links finais da ADR-0003/ADR-0004; não é responsável por criar ou aceitar a decisão. A pré-condição não autoriza implementação. Cada slice ainda exige confirmação explícita após revisão do relatório anterior.
+A ADR-0004 deve ser commitada, enviada e aprovada explicitamente antes de entregar o prompt do Slice 001 ao implementador. O Slice 012 somente ajusta status/links finais da ADR-0003/ADR-0004; não é responsável por criar ou aceitar a decisão. A pré-condição não autoriza implementação. Cada slice ainda exige confirmação explícita após revisão do relatório anterior.
 
 ## Regra de execução
 
@@ -26,14 +26,20 @@ A ADR-0004 deve ser commitada, enviada e aprovada explicitamente antes de entreg
 
 ## Slices verticais
 
+> **Redimensionamento após gate:** o início do Slice 007 original foi bloqueado corretamente antes de editar: o inventário encontrou footprint potencial superior a 50 arquivos para um cap de 14. O cutover monolítico foi substituído pelos Slices 007–011. Não usar o prompt antigo nem aprovar footprint expandido em um único commit.
+
 - [x] Slice 001 — NIR cria e acompanha um único caso combinado (`slices/slice-001-combined-intake-procedure-projection.md`)
 - [x] Slice 002 — Pipeline neutro analisa um ou dois procedimentos e entrega ao médico (`slices/slice-002-procedure-neutral-pipeline.md`)
 - [x] Slice 003 — Médico decide cada procedimento com justificativa e histórico próprio (`slices/slice-003-per-procedure-doctor-decision.md`)
 - [x] Slice 004 — CHD recebe conjunto autorizado e faz um agendamento casado (`slices/slice-004-paired-scheduler-appointment.md`)
 - [x] Slice 005 — NIR corrige, filtra e recebe resposta comparativa (`slices/slice-005-nir-correction-and-final-response.md`)
 - [x] Slice 006 — Gestor acompanha casos, procedimentos e conversões (`slices/slice-006-procedure-dimension-analytics.md`)
-- [ ] Slice 007 — Cutover remove fonte única e prompts específicos legados (`slices/slice-007-authoritative-procedure-cutover.md`)
-- [ ] Slice 008 — Operação ativa e reverte o fluxo combinado com segurança (`slices/slice-008-rollout-documentation-and-verification.md`)
+- [ ] Slice 007 — Pipeline executa somente v2 e prompts neutros (`slices/slice-007-neutral-pipeline-prompt-cutover.md`)
+- [ ] Slice 008 — NIR opera somente pela projeção declarada (`slices/slice-008-nir-declared-projection-authority.md`)
+- [ ] Slice 009 — Médico e CHD operam por detecção/autorização normalizadas (`slices/slice-009-clinical-scheduling-projection-authority.md`)
+- [ ] Slice 010 — Dashboard e helpers tornam CaseProcedure autoritativo (`slices/slice-010-dashboard-domain-projection-authority.md`)
+- [ ] Slice 011 — Migration remove Case.exam_type e encerra a ponte (`slices/slice-011-authoritative-procedure-schema-cutover.md`)
+- [ ] Slice 012 — Operação ativa e reverte o fluxo combinado com segurança (`slices/slice-012-rollout-documentation-and-verification.md`)
 
 ## Definition of Done do change
 

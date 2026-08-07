@@ -1,8 +1,8 @@
-# Slice 008: Operação ativa e reverte o fluxo combinado com segurança
+# Slice 012: Operação ativa e reverte o fluxo combinado com segurança
 
 ## Handoff com contexto zero
 
-Leia todos os artefatos/ADR/relatórios 001–007, runbook anterior `docs/deploy/introduce-colonoscopy-exam-workflow.md`, Compose/settings/migrations/prompts finais, manual oficial e `PROJECT_CONTEXT.md`.
+Leia todos os artefatos/ADR/relatórios 001–011, runbook anterior `docs/deploy/introduce-colonoscopy-exam-workflow.md`, Compose/settings/migrations/prompts finais, manual oficial e `PROJECT_CONTEXT.md`.
 
 ### Fluxo entregue
 
@@ -32,7 +32,7 @@ Rollback preferencial mantém imagem nova e desliga intake; imagem antiga exige 
 6. Execute/interprete inspeções e um verificador independente temporário.
 7. Rode ruff check, format check, mypy, pytest, OpenSpec strict e diff check; exit 0, zero failures/errors e passed final >= baseline.
 8. Gere relatório factual com comandos/exit codes, snippets antes/depois e Handoff para verificador.
-9. Só então marque Slice 008/DoD verdadeiro, commit normal, push, responda REPORT_PATH e PARE.
+9. Só então marque Slice 012/DoD verdadeiro, commit normal, push, responda REPORT_PATH e PARE.
 
 **Cap: 8 arquivos produto/teste/docs.** Não alterar regras de negócio neste slice.
 
@@ -158,16 +158,16 @@ Protocolo ausente; comando depende de shell anterior; pipeline backup fail-open;
 
 ## Relatório obrigatório
 
-Criar `/tmp/support-combined-eda-colonoscopy-workflow-slice-008-report.md` com Status, matriz requisito→arquivo→teste, branch/BASE_REF/baseline, RED/GREEN/REFACTOR, snippets antes/depois de cada bloco crítico, inspeções interpretadas, parser/verificador independente e comandos de rerun, diff/cap, quality gate completo, comparação pytest e respostas aos gates.
+Criar `/tmp/support-combined-eda-colonoscopy-workflow-slice-012-report.md` com Status, matriz requisito→arquivo→teste, branch/BASE_REF/baseline, RED/GREEN/REFACTOR, snippets antes/depois de cada bloco crítico, inspeções interpretadas, parser/verificador independente e comandos de rerun, diff/cap, quality gate completo, comparação pytest e respostas aos gates.
 
 Incluir **Handoff para verificador** com arquivos alterados, comandos exatos de rerun, riscos/limitações e checklist R1–R9.
 
 ## Prompt pronto
 
 ```text
-Read all artifacts, accepted ADR-0004, approved reports 001-007, final code/schema/prompts and the prior colonoscopy runbook. Implement ONLY Slice 008 documentation/contracts on the required branch. Follow the DeepSeek4-Flash protocol exactly. Any non-executable/human-only assert, unsafe order, missing test, code/infra diff, failing gate or cap violation means INCOMPLETE and no tasks/commit/push.
+Read all artifacts, accepted ADR-0004, approved reports 001-011, final code/schema/prompts and the prior colonoscopy runbook. Implement ONLY Slice 012 documentation/contracts on the required branch. Follow the DeepSeek4-Flash protocol exactly. Any non-executable/human-only assert, unsafe order, missing test, code/infra diff, failing gate or cap violation means INCOMPLETE and no tasks/commit/push.
 
 Produce a CRITICAL fail-closed rollout: verified DB/media backups, machine-readable projection/state/prompt preflight, new-image serialized migration with all writers stopped, flag-false smoke matrix then web-only activation, monitoring, preferred new-image rollback, and an exceptional old-image bridge that refuses combined/ambiguous rows, safely switches prompt activation to legacy mode, and restores neutral-only mode during forward with independent fail-fast binary asserts. Align manual, context and ADR links; add adversarial doc tests and independent verifier. Do not change business code, models, migrations, settings, Compose, pipeline, prompts or dashboard formulas.
 
-Create /tmp/support-combined-eda-colonoscopy-workflow-slice-008-report.md; if complete mark only Slice 008/true DoD items, commit, push, reply REPORT_PATH and STOP.
+Create /tmp/support-combined-eda-colonoscopy-workflow-slice-012-report.md; if complete mark only Slice 012/true DoD items, commit, push, reply REPORT_PATH and STOP.
 ```

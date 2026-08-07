@@ -83,8 +83,9 @@ Remover a coluna no Slice 001 quebraria todos os consumidores e criaria um slice
 2. writes de intake/correção usam serviço único que atualiza projeção e ponte;
 3. combinação pode usar valor transitório explícito `eda_colonoscopy`, somente para compatibilidade durante a branch;
 4. flag de Colonoscopia permanece falsa e a branch não é deployável até o cutover;
-5. Slices 002–006 migram todos os readers para helpers/querysets da projeção;
-6. Slice 007 prova ausência de readers/writers e remove `Case.exam_type`/dispatch dependente.
+5. Slices 002–006 entregam os novos fluxos sobre a projeção, ainda com fallbacks de compatibilidade para manter a branch verde;
+6. Slices 007–010 retiram dispatch e readers residuais por fluxo vertical;
+7. Slice 011 prova ausência de readers/writers e remove fisicamente `Case.exam_type`/dual-write.
 
 Dual-write fora do serviço central é proibido. `CaseProcedure` é a fonte alvo desde o início; a ponte existe apenas para manter cada slice verde.
 
@@ -301,18 +302,17 @@ Novos fatos sugeridos:
 
 Payloads usam códigos/conjuntos ordenados, ids, versões e presença de razão; não copiam texto clínico integral. Eventos legados continuam legíveis.
 
-### D18. Cutover é obrigatório antes do rollout
+### D18. Cutover é obrigatório antes do rollout e ocorre em gates verticais
 
-Slice 007 deve:
+O inventário bloqueado no início do antigo Slice 007 encontrou footprint superior a 50 arquivos potenciais. Executar tudo em um commit violaria o cap e tornaria a revisão insegura. O cutover foi redimensionado sem relaxar a condição final:
 
-1. provar por `rg`/testes que nenhum reader/write operacional usa `Case.exam_type`;
-2. remover coluna, enum combinado transitório e adapters de dual-write;
-3. tornar `CaseProcedure` única fonte operacional;
-4. remover resolução/dispatch residual dos oito nomes antigos, desativá-los após drenagem e provar que novos jobs continuam usando somente os quatro nomes neutros introduzidos no Slice 002;
-5. preservar adapters de leitura schema 1.1;
-6. atualizar fixtures/factories sem defaults silenciosos.
+1. Slice 007 remove o branch executável 1.1, torna pipeline v2 exclusivo e desativa os oito nomes antigos preservando histórico;
+2. Slice 008 remove readers NIR e migra fixtures do fluxo declarado;
+3. Slice 009 remove readers de médico, histórico anterior e CHD, preservando apresentação JSON 1.1;
+4. Slice 010 remove dashboard/fallbacks dos getters, revalida índices e prova que não resta reader operacional;
+5. Slice 011 executa precheck fail-closed, remove `Case.exam_type`, `ExamType` duplicado e dual-write, e prova ausência de schema drift.
 
-Se algum consumidor residual depender do campo, Slice 007 é `INCOMPLETE`; não adiar como dívida.
+`eda_colonoscopy` pode permanecer após o cutover somente como chave derivada de seleção/badge/SSR para o conjunto de duas rows; não é enum de row nem coluna persistida. Adapters de leitura schema 1.1 e payloads históricos são preservados. Se um reader residual ainda depender do campo ao iniciar o Slice 011, o slice é `INCOMPLETE`; não corrigir escondido nem adiar como dívida.
 
 ### D19. Rollout e rollback
 
@@ -326,18 +326,22 @@ A ADR-0004 foi criada, revisada e aceita antes do Slice 001. Ela supera parcialm
 
 ## 4. Dimensionamento dos slices
 
-Foram escolhidos **8 slices**. Menos juntaria intake/model/pipeline/decisão em mudanças impossíveis de revisar; mais criaria slices horizontais de schema, templates ou testes sem fluxo observável.
+O plano inicial tinha 8 slices. O gate obrigatório executado antes de editar o antigo Slice 007 mediu mais de 50 arquivos potenciais (aproximadamente 29 de produto e 27 de teste), muito acima do cap de 14. O bloqueio foi correto: aprovar um cutover monolítico aumentaria risco e dificultaria TDD/revisão. O change passa a ter **12 slices**, dividindo o antigo cutover por fluxo sem remover parcialmente a coluna antes de todos os readers migrarem.
 
 1. **Intake + projeção**: NIR cria e acompanha um caso combinado; ponte mantém sistema verde.
-2. **Pipeline neutro**: história única, detecção/reconciliação, policy/LLM2 e lookup anterior por componente, além da chegada ao médico. É o slice central e possui cap maior explicitamente.
+2. **Pipeline neutro**: história única, detecção/reconciliação, policy/LLM2 e lookup anterior por componente, além da chegada ao médico.
 3. **Decisão médica**: decisão/razão por componente, inclusão sem rerun, apresentação do histórico e filtros médicos.
 4. **CHD**: conjunto aprovado, uma agenda casada e filtros/histórico.
 5. **NIR**: correção/reprocessamento, reenvio, filtros e resposta final.
 6. **Analytics**: dimensões, volumes e conversões.
-7. **Cutover**: remove ponte/fonte antiga e torna schema/prompts novos autoritativos.
-8. **Operação**: manual/contexto/runbook/testes de contrato e rollback verificável.
+7. **Pipeline/prompts canônicos**: remove execução 1.1 de novos jobs, exige rows e deixa somente quatro prompts neutros ativos.
+8. **Autoridade NIR**: remove readers da coluna no fluxo declarado e torna fixtures NIR explícitas.
+9. **Autoridade clínica/CHD**: remove readers médicos, prior-case e scheduler, preservando JSON 1.1.
+10. **Autoridade dashboard/domínio**: remove filtro singular/fallbacks globais e revalida índices.
+11. **Cutover físico**: precheck fail-closed, migration remove coluna/enum/dual-write e encerra fixtures residuais.
+12. **Operação**: manual/contexto/runbook/testes de contrato e rollback verificável.
 
-A branch não é deployável entre Slices 001–006; flag deve permanecer falsa. Cada slice ainda entrega comportamento observável e testável no ambiente de desenvolvimento.
+Os Slices 007–010 são verticais e mantêm a coluna somente como ponte escrita internamente; cada um entrega um fluxo que já não depende dela. O Slice 011 é o gate físico indivisível e só começa após inventário global sem readers. A branch não é deployável entre Slices 001–010; a flag permanece falsa até o rollout do Slice 012.
 
 ## 5. Limites globais
 
@@ -370,4 +374,4 @@ openspec validate support-combined-eda-colonoscopy-workflow --strict
 git diff --check
 ```
 
-O change só pode ser arquivado após Slice 008 aprovado, ADR-0004 aceita, `Case.exam_type` removido, quatro prompts neutros documentados, migration/rollback testáveis e oito relatórios temporários revisados.
+O change só pode ser arquivado após Slice 012 aprovado, ADR-0004 aceita, `Case.exam_type` removido, quatro prompts neutros documentados, migration/rollback testáveis e doze relatórios temporários revisados.

@@ -144,14 +144,14 @@ Sobrescrever um único tipo apagaria a diferença entre o que o NIR declarou, o 
 
 | Risco | Mitigação |
 | --- | --- |
-| Duas fontes divergentes durante transição | Ponte explicitamente temporária, dual-write centralizado, flag desligada e remoção obrigatória no Slice 007 |
+| Duas fontes divergentes durante transição | Ponte explicitamente temporária, dual-write centralizado, flag desligada, readers retirados nos Slices 008–010 e remoção física obrigatória no Slice 011 |
 | LLM duplicar/inventar procedimentos | Schemas estritos, igualdade de conjuntos e uma chamada por estágio |
 | Upgrade por menção histórica | Detecção por ocorrência/proveniência, testes de histórico/negação e evidência forte |
 | Médico alterar sem rastreabilidade | Serviço transacional, lock existente, razão por componente e eventos append-only |
 | Agregado contar combinado incorretamente | Separar casos exclusivos de volume de procedimentos; testes de fechamento |
 | Histórico combinado contaminar lookup | Consultas independentes por `procedure_type` e deduplicação visual consciente |
 | Rollback para imagem antiga após remoção de coluna | Runbook com imagem nova preferencial e bridge de schema fail-fast para exceção |
-| Change transversal grande | Oito slices verticais, caps por slice, inspeções `rg` e revisão independente |
+| Change transversal grande | Doze slices verticais após o gate de footprint do cutover, caps realistas por fluxo, inspeções `rg` e revisão independente |
 
 ## Critérios de sucesso do change
 
@@ -165,4 +165,4 @@ Sobrescrever um único tipo apagaria a diferença entre o que o NIR declarou, o 
 - Dashboard distingue casos, procedimentos e conversões sem dupla contagem indevida.
 - Artefatos legados continuam legíveis; `Case.exam_type` deixa de ser fonte e é removido antes do rollout.
 - Flag desliga Colonoscopia e combinado somente no intake.
-- Todos os oito slices comprovam baseline, RED, GREEN, REFACTOR, inspeções, quality gate e relatório temporário revisável.
+- Todos os doze slices comprovam baseline, RED, GREEN, REFACTOR, inspeções, quality gate e relatório temporário revisável.
