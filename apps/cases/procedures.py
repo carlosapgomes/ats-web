@@ -184,6 +184,23 @@ def set_detected_procedures(
     return locked
 
 
+def reset_detection_and_doctor_statuses(case: Case) -> None:
+    """Zera detecção e disposições médicas para reprocessamento (D12/R2).
+
+    Usado pela correção NIR: como o conjunto declarado muda, a detecção e as
+    decisões médicas (sempre pendentes nesse estágio — correção é bloqueada
+    após qualquer decisão) voltam a ``pending`` e a razão médica é apagada.
+    NÃO altera ``declared_by_nir`` (a projeção da declaração é escrita por
+    ``sync_declared_projection``/``set_declared_procedures``) nem deleta rows
+    — a transformação permanece auditável (D1).
+    """
+    CaseProcedure.objects.filter(case=case).update(
+        detection_status=DetectionStatus.PENDING,
+        doctor_disposition=DoctorDisposition.PENDING,
+        doctor_reason="",
+    )
+
+
 def record_doctor_procedure_decisions(
     *,
     case: Case,

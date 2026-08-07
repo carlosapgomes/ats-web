@@ -143,7 +143,10 @@ class TestCombinedIntake:
         response = client.get(reverse("intake:my_cases"))
         content = response.content.decode()
         assert "exam-type-eda" in content
-        assert "EDA + Colonoscopia" not in content
+        # O badge do card continua simples; "EDA + Colonoscopia" só aparece na
+        # opção do filtro (R5 — filtro NIR por declarado oferece o combinado).
+        assert 'exam-type-eda">EDA</span>' in content
+        assert "exam-type-eda_colonoscopy" not in content
 
     @override_settings(COLONOSCOPY_INTAKE_ENABLED=True)
     def test_absent_or_invalid_selection_creates_nothing(self, client) -> None:

@@ -21,12 +21,24 @@ from apps.cases.admission import (
     is_operational_notice_flow,
     is_scheduled_admission_flow,
 )
-from apps.cases.models import Case, CaseAttachment, CaseStatus, ExamType
+from apps.cases.models import (
+    EDA_COLONOSCOPY,
+    Case,
+    CaseAttachment,
+    CaseProcedure,
+    CaseStatus,
+    DetectionStatus,
+    DoctorDisposition,
+    ExamType,
+    ProcedureType,
+)
 from apps.cases.navigation import resolve_safe_next_url
 from apps.cases.priority_signals import build_priority_signal_badges
 from apps.cases.procedures import (
     format_procedure_selection,
+    get_approved_procedure_types,
     get_declared_procedure_types,
+    get_detected_procedure_types,
     selection_key,
 )
 from apps.cases.services import (
@@ -76,6 +88,127 @@ def _declared_badge(case: Case) -> dict[str, str]:
     return {
         "declared_label": format_procedure_selection(types),
         "declared_type_key": selection_key(types),
+    }
+
+
+# Dimensões aceitas nos filtros NIR (R5/D13): Todos + EDA/Colonoscopia/Combinado,
+# SEMPRE pelo conjunto DECLARADO (nunca detected/approved). ``eda_colonoscopy``
+# é a seleção combinada; o valor inválido cai para all.
+_NIR_DECLARED_DIMENSIONS: frozenset[str] = frozenset({"all", ExamType.EDA, ExamType.COLONOSCOPY, EDA_COLONOSCOPY})
+
+
+def _filter_by_declared_dimension(qs: models.QuerySet[Case], dimension: str) -> models.QuerySet[Case]:
+    """Filtra um queryset pela dimensão DECLARADA (R5/D13).
+
+    Usa subqueries ``Exists`` explícitas para evitar a semântica ambígua de
+    ``exclude`` sobre relação múltipla (que divide condições em dois EXISTS
+    separados). Buckets EXCLUSIVOS: ``eda``/``colonoscopy`` exigem a row
+    declarada do tipo e a AUSÊNCIA da row declarada do outro; combinado exige
+    as duas rows declaradas. Casos legados sem rows caem na ponte
+    ``exam_type`` (inclusive ``eda_colonoscopy``). NUNCA consulta detected/
+    approved (D13).
+    """
+    declared_eda = models.Exists(
+        CaseProcedure.objects.filter(
+            case_id=models.OuterRef("pk"),
+            procedure_type=ProcedureType.EDA,
+            declared_by_nir=True,
+        )
+    )
+    declared_colon = models.Exists(
+        CaseProcedure.objects.filter(
+            case_id=models.OuterRef("pk"),
+            procedure_type=ProcedureType.COLONOSCOPY,
+            declared_by_nir=True,
+        )
+    )
+    has_rows = models.Exists(CaseProcedure.objects.filter(case_id=models.OuterRef("pk")))
+    qs = qs.annotate(
+        _decl_eda=declared_eda,
+        _decl_colon=declared_colon,
+        _has_rows=has_rows,
+    )
+    if dimension == EDA_COLONOSCOPY:
+        return qs.filter(
+            models.Q(_decl_eda=True, _decl_colon=True) | models.Q(_has_rows=False, exam_type=EDA_COLONOSCOPY)
+        )
+    if dimension == ProcedureType.EDA:
+        return qs.filter(
+            models.Q(_decl_eda=True, _decl_colon=False) | models.Q(_has_rows=False, exam_type=ProcedureType.EDA)
+        )
+    return qs.filter(
+        models.Q(_decl_colon=True, _decl_eda=False) | models.Q(_has_rows=False, exam_type=ProcedureType.COLONOSCOPY)
+    )
+
+
+def _procedure_origin_text(*, is_declared: bool, is_detected: bool, is_approved: bool) -> str:
+    """Origem textual de um componente para a resposta comparativa (R6)."""
+    if is_declared and is_detected:
+        return "Declarado e detectado"
+    if is_declared:
+        return "Declarado, não detectado na análise"
+    if is_detected:
+        return "Detectado na análise"
+    if is_approved:
+        return "Incluído pelo médico"
+    return "Não declarado nem detectado"
+
+
+def _procedure_comparison(case: Case) -> dict[str, object]:
+    """Snapshot declarado→detectado→autorizado com razões por componente (R6/D12).
+
+    Projetado na view: o template recebe labels prontos e nunca consulta rows.
+    A declaração original NUNCA é escondida após upgrade automático; a
+    comparação fica visível assim que a detecção existe, inclusive enquanto o
+    caso segue para ``WAIT_DOCTOR``. ``added_by_doctor`` = aprovado sem ter
+    sido detectado (inclusão médica, razão própria exigida — D9).
+    """
+    declared = get_declared_procedure_types(case)
+    detected = get_detected_procedure_types(case)
+    approved = get_approved_procedure_types(case)
+
+    rows_by_type = {p.procedure_type: p for p in case.procedures.all()}
+    per_procedure: list[dict[str, object]] = []
+    for procedure_type in (ProcedureType.EDA, ProcedureType.COLONOSCOPY):
+        row = rows_by_type.get(procedure_type)
+        is_declared = procedure_type in declared
+        is_detected = procedure_type in detected
+        is_approved = procedure_type in approved
+        is_denied = bool(row and row.doctor_disposition == DoctorDisposition.DENIED)
+        if not is_declared and not is_detected and not is_approved and not is_denied:
+            continue
+        per_procedure.append(
+            {
+                "label": ProcedureType(procedure_type).label,
+                "origin": _procedure_origin_text(
+                    is_declared=is_declared,
+                    is_detected=is_detected,
+                    is_approved=is_approved,
+                ),
+                "status": "Aprovado" if is_approved else ("Negado" if is_denied else "Pendente"),
+                "status_css": "text-success fw-semibold"
+                if is_approved
+                else ("text-danger fw-semibold" if is_denied else "text-muted"),
+                "reason": (row.doctor_reason if row else "") or "",
+            }
+        )
+
+    has_detection = bool(detected) or any(p.detection_status != DetectionStatus.PENDING for p in case.procedures.all())
+    has_decision = bool(approved) or any(
+        p.doctor_disposition != DoctorDisposition.PENDING for p in case.procedures.all()
+    )
+    return {
+        "declared_label": format_procedure_selection(declared) if declared else "—",
+        "declared_key": selection_key(declared),
+        "detected_label": format_procedure_selection(detected) if detected else "—",
+        "detected_key": selection_key(detected),
+        "authorized_label": format_procedure_selection(approved) if approved else "",
+        "authorized_key": selection_key(approved),
+        "has_detection": has_detection,
+        "has_decision": has_decision,
+        "per_procedure": per_procedure,
+        "is_paired": len(approved) == 2,
+        "paired_label": "EDA + Colonoscopia · Agendamento casado",
     }
 
 
@@ -203,6 +336,7 @@ EVENT_LABELS: dict[str, str] = {
     "CASE_MARKED_SUPERSEDED": "Caso corrigido por novo envio",
     # ── Correção de tipo e reprocessamento (Slice 006) ────────
     "EXAM_TYPE_CORRECTED": "Tipo de exame corrigido pelo NIR",
+    "CASE_PROCEDURE_DECLARATION_CORRECTED": "Conjunto de procedimentos declarado corrigido pelo NIR",
     "CASE_REPROCESSING_REQUESTED": "Reprocessamento solicitado",
     # ── Comunicação operacional ───────────────────────────────
     "CASE_COMMUNICATION_MESSAGE_POSTED": "Mensagem operacional registrada",
@@ -268,6 +402,7 @@ EVENT_DOT_CSS: dict[str, str] = {
     "CASE_MARKED_SUPERSEDED": "system",
     # ── Correção de tipo e reprocessamento (Slice 006) ────────
     "EXAM_TYPE_CORRECTED": "nir",
+    "CASE_PROCEDURE_DECLARATION_CORRECTED": "nir",
     "CASE_REPROCESSING_REQUESTED": "system",
     # ── Comunicação operacional ───────────────────────────────
     "CASE_COMMUNICATION_MESSAGE_POSTED": "system",
@@ -394,12 +529,13 @@ def _my_cases_context(request: HttpRequest) -> dict[str, object]:
     if search:
         qs = qs.filter(agency_record_number__icontains=search)
 
-    # R1 (Slice 007): filtro server-side por tipo de exame — default Todos;
-    # compõe com status e busca; tipo inválido cai para all.
+    # R5 (Slice 005): filtro server-side por conjunto DECLARADO — default
+    # Todos; compõe com status e busca; valor inválido cai para all. NUNCA usa
+    # detected/approved (D13).
     raw_exam_type = request.GET.get("exam_type", "all")
-    exam_type = raw_exam_type if raw_exam_type in ExamType.values else "all"
+    exam_type = raw_exam_type if raw_exam_type in _NIR_DECLARED_DIMENSIONS else "all"
     if exam_type != "all":
-        qs = qs.filter(exam_type=exam_type)
+        qs = _filter_by_declared_dimension(qs, exam_type)
 
     case_data = [
         {
@@ -660,7 +796,7 @@ def case_detail(request: HttpRequest, case_id: uuid.UUID) -> HttpResponse:
         and case.status in ELIGIBLE_SUPPLEMENTAL_STATUSES
     )
 
-    # ── Correção de tipo (Slice 006): card NIR apenas em manual review elegível ──
+    # ── Correção de conjunto (Slice 005): card NIR apenas em manual review ──
     can_correct_exam_type = False
     correction_form_context = None
     if lock_held and is_exam_type_correction_eligible(case):
@@ -668,7 +804,8 @@ def case_detail(request: HttpRequest, case_id: uuid.UUID) -> HttpResponse:
         suggested = case.suggested_action or {}
         detected = suggested.get("detected_exam_type") or suggested.get("exam_type") or ""
         correction_form_context = {
-            "declared_exam_type_label": case.get_exam_type_display(),
+            # Label declarado projetado da projeção (combinado → "EDA + Colonoscopia").
+            "declared_label": declared_badge["declared_label"],
             "detected_exam_type_label": CORRECTION_DETECTED_TYPE_LABELS.get(detected, detected or "—"),
             "reason_text": suggested.get("reason_text", ""),
             "correction_reason_choices": list(EXAM_TYPE_CORRECTION_REASONS.items()),
@@ -753,6 +890,7 @@ def case_detail(request: HttpRequest, case_id: uuid.UUID) -> HttpResponse:
             "supplemental_lock_blocked_by": supplemental_lock_blocked_by,
             "can_correct_exam_type": can_correct_exam_type,
             "correction_form_context": correction_form_context,
+            "procedures": _procedure_comparison(case),
             "correction_context": correction_context,
             "corrected_by_cases": corrected_by_cases_list,
             # ── Comunicação operacional ───────────────────────────────
@@ -1236,7 +1374,8 @@ def exam_type_correction(request: HttpRequest, case_id: uuid.UUID) -> HttpRespon
 
     messages.success(
         request,
-        f"Tipo de exame corrigido para {case.get_exam_type_display()}. Caso em reprocessamento.",
+        f"Tipo de exame corrigido para {format_procedure_selection(get_declared_procedure_types(case))}. "
+        "Caso em reprocessamento.",
     )
     return redirect("intake:case_detail", case_id=case.case_id)
 
@@ -1325,12 +1464,11 @@ def closed_cases_search(request: HttpRequest) -> HttpResponse:
     )
 
     query = request.GET.get("q", "").strip()
-    # R2 (Slice 007): filtro server-side por tipo — default Todos; tipo
-    # inválido cai para all. Tipo específico sem termo lista os últimos 50
-    # do tipo (comportamento definido no design D13, consistente com o
-    # histórico CHD do Slice 005).
+    # R5 (Slice 005): filtro server-side por conjunto DECLARADO — default
+    # Todos; valor inválido cai para all; dimensão específica sem termo lista
+    # os últimos 50 daquela dimensão (design D13).
     raw_exam_type = request.GET.get("exam_type", "all")
-    exam_type = raw_exam_type if raw_exam_type in ExamType.values else "all"
+    exam_type = raw_exam_type if raw_exam_type in _NIR_DECLARED_DIMENSIONS else "all"
     results: list[dict[str, object]] = []
 
     if query or exam_type != "all":
@@ -1339,7 +1477,7 @@ def closed_cases_search(request: HttpRequest) -> HttpResponse:
             models.Q(status=CaseStatus.CLEANED) | models.Q(post_schedule_issue_status__in=["opened", "responded"])
         )
         if exam_type != "all":
-            qs = qs.filter(exam_type=exam_type)
+            qs = _filter_by_declared_dimension(qs, exam_type)
         qs = qs.filter(
             models.Q(agency_record_number__icontains=query) | models.Q(structured_data__patient__name__icontains=query)
         ).order_by("-created_at")[:50]
@@ -1370,6 +1508,9 @@ def closed_cases_search(request: HttpRequest) -> HttpResponse:
                     "has_active_issue": bool(c.post_schedule_issue_status),
                     "issue_status": c.post_schedule_issue_status or "",
                     "corrected_by_count": corrected_by_count,
+                    # R5: badge por conjunto DECLARADO projetado (combinado
+                    # renderiza "EDA + Colonoscopia", nunca a ponte crua).
+                    **_declared_badge(c),
                 }
             )
 
@@ -1564,6 +1705,8 @@ def closed_case_detail(request: HttpRequest, case_id: uuid.UUID) -> HttpResponse
         "result_info": result_info,
         "patient_name": patient_name,
         "origin_unit": origin_unit,
+        # R6: comparativo declarado→detectado→autorizado (fonte: projeção).
+        "procedures": _procedure_comparison(case),
         # Badges persistidos no histórico (Slice 005) — projeção compartilhada;
         # casos CLEANED antigos sem backfill não exibem container.
         "priority_signal_badges": build_priority_signal_badges(case.priority_signals),

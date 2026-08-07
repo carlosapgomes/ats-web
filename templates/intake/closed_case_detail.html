@@ -82,6 +82,59 @@
   </div>
 </div>
 
+<!-- Procedimentos — resposta comparativa (Slice 005/R6) -->
+{% if procedures %}
+<div class="card p-4 mb-4">
+  <h5 class="mb-3">🩺 Procedimentos</h5>
+  <div class="row g-3 mb-3">
+    <div class="col-md-4">
+      <p class="mb-1 text-muted small">Solicitado pelo NIR</p>
+      <p class="mb-0 fw-medium">{{ procedures.declared_label }}</p>
+    </div>
+    <div class="col-md-4">
+      <p class="mb-1 text-muted small">Detectado na análise</p>
+      {% if procedures.has_detection %}
+      <p class="mb-0 fw-medium">{{ procedures.detected_label }}</p>
+      {% else %}
+      <p class="mb-0 text-muted">Análise ainda não disponível</p>
+      {% endif %}
+    </div>
+    <div class="col-md-4">
+      <p class="mb-1 text-muted small">Decisão médica</p>
+      {% if procedures.has_decision %}
+      <p class="mb-0 fw-medium">{{ procedures.authorized_label }}</p>
+      {% else %}
+      <p class="mb-0 text-muted">Aguardando decisão médica</p>
+      {% endif %}
+    </div>
+  </div>
+  {% if procedures.is_paired %}
+  <div class="mb-3">
+    <span class="badge bg-primary fs-6">📅 {{ procedures.paired_label }}</span>
+  </div>
+  {% endif %}
+  {% if procedures.per_procedure %}
+  <div class="table-responsive">
+    <table class="table table-sm align-middle mb-0">
+      <thead>
+        <tr><th>Procedimento</th><th>Origem</th><th>Status</th><th>Razão</th></tr>
+      </thead>
+      <tbody>
+        {% for p in procedures.per_procedure %}
+        <tr>
+          <td class="fw-medium">{{ p.label }}</td>
+          <td>{{ p.origin }}</td>
+          <td class="{{ p.status_css }}">{{ p.status }}</td>
+          <td>{{ p.reason|default:"—" }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% endif %}
+</div>
+{% endif %}
+
 <!-- Resultado Final -->
 {% if result_info %}
 <div class="card p-4 mb-4">

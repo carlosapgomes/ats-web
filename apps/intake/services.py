@@ -26,7 +26,12 @@ from apps.cases.models import (
     CaseStatus,
     ExamType,
 )
-from apps.cases.procedures import set_declared_procedures, sync_declared_projection
+from apps.cases.procedures import (
+    get_declared_procedure_types,
+    reset_detection_and_doctor_statuses,
+    set_declared_procedures,
+    sync_declared_projection,
+)
 
 if TYPE_CHECKING:
     from apps.accounts.models import User as AccountsUser
@@ -243,8 +248,6 @@ def correct_case_exam_type(
         EnqueueAfterCommitError: enqueue pós-commit falhou (correção commitada).
     """
     validated_exam_type = validate_exam_type(new_exam_type)
-    if validated_exam_type not in (ExamType.EDA, ExamType.COLONOSCOPY):
-        raise ValueError("A correção de tipo aceita apenas EDA ou Colonoscopia isolados neste fluxo.")
     if reason_code not in EXAM_TYPE_CORRECTION_REASONS:
         raise ValueError("Motivo da correção inválido.")
     if lock_token is None:
@@ -259,6 +262,8 @@ def correct_case_exam_type(
         _assert_receipt_lease(case=case, user=user, token=lock_token)
 
         old_exam_type = case.exam_type
+        old_procedures = list(get_declared_procedure_types(case))
+        new_procedures = list(_procedure_types_for_selection(validated_exam_type))
 
         # R3 — invalida artefatos derivados do perfil anterior; fontes ficam.
         case.structured_data = None
@@ -266,20 +271,28 @@ def correct_case_exam_type(
         case.suggested_action = None
         case.priority_signals = []
 
-        # R5 — evento de correção com old/new/reason_code (actor = user).
+        # R2 — detecção e disposições médicas voltam a pending (correção só é
+        # permitida antes de qualquer decisão; nunca deixa projeção residual).
+        reset_detection_and_doctor_statuses(case)
+
+        # R7 — evento enxuto de correção com conjuntos anterior/novo e motivo
+        # codificado (sem texto/PDF); a ponte old/new permanece para auditoria
+        # legível. Slice 005: substitui EXAM_TYPE_CORRECTED (valor singular).
         case._record_event(
-            "EXAM_TYPE_CORRECTED",
+            "CASE_PROCEDURE_DECLARATION_CORRECTED",
             user=user,
             payload={
+                "old_procedures": old_procedures,
+                "new_procedures": new_procedures,
+                "reason_code": reason_code,
                 "old_exam_type": old_exam_type,
                 "new_exam_type": validated_exam_type,
-                "reason_code": reason_code,
             },
         )
         # R3 (Slice 001) — reroteamento pelo serviço único de declaração:
         # projeção CaseProcedure.declared_by_nir e ponte Case.exam_type sob a
         # MESMA transação/lock; falha reverte tudo (incl. derivados/eventos/FSM).
-        sync_declared_projection(case, [validated_exam_type])
+        sync_declared_projection(case, new_procedures)
         case.save()
 
         # R2 — transição FSM nomeada; CASE_REPROCESSING_REQUESTED é persistido

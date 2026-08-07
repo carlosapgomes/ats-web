@@ -216,7 +216,7 @@ class TestCorrectionService:
             case.reprocess_after_exam_type_correction(user=user)
 
     def test_events_recorded_with_old_new_and_ordered(self, django_user_model) -> None:
-        """EXAM_TYPE_CORRECTED (old/new/reason_code/actor) antes de reprocessar."""
+        """CASE_PROCEDURE_DECLARATION_CORRECTED (sets/reason/actor) antes de reprocessar."""
         user = _nir_user(django_user_model, "nir-events@test.com")
         case = _eligible_case(user=user)
         token = _claim_receipt_lease(case, user)
@@ -232,15 +232,17 @@ class TestCorrectionService:
 
         events = list(CaseEvent.objects.filter(case=case).order_by("id"))
         types = [e.event_type for e in events]
-        assert "EXAM_TYPE_CORRECTED" in types
+        assert "CASE_PROCEDURE_DECLARATION_CORRECTED" in types
         assert "CASE_REPROCESSING_REQUESTED" in types
-        assert types.index("EXAM_TYPE_CORRECTED") < types.index("CASE_REPROCESSING_REQUESTED")
+        assert types.index("CASE_PROCEDURE_DECLARATION_CORRECTED") < types.index("CASE_REPROCESSING_REQUESTED")
 
-        corrected = next(e for e in events if e.event_type == "EXAM_TYPE_CORRECTED")
+        corrected = next(e for e in events if e.event_type == "CASE_PROCEDURE_DECLARATION_CORRECTED")
         assert corrected.payload == {
+            "old_procedures": [ExamType.EDA],
+            "new_procedures": [ExamType.COLONOSCOPY],
+            "reason_code": "nir_identified_exam",
             "old_exam_type": ExamType.EDA,
             "new_exam_type": ExamType.COLONOSCOPY,
-            "reason_code": "nir_identified_exam",
         }
         assert corrected.actor_id == user.pk
         # payload não carrega texto clínico integral
@@ -502,7 +504,7 @@ class TestCorrectionService:
         assert reloaded.status == CaseStatus.WAIT_R1_CLEANUP_THUMBS
         assert reloaded.exam_type == ExamType.EDA
         assert reloaded.structured_data is not None
-        assert not CaseEvent.objects.filter(case=case, event_type="EXAM_TYPE_CORRECTED").exists()
+        assert not CaseEvent.objects.filter(case=case, event_type="CASE_PROCEDURE_DECLARATION_CORRECTED").exists()
         assert enqueue_calls == []
 
     def test_service_rejects_wrong_active_role_multi_role_user(self, django_user_model, monkeypatch) -> None:
@@ -529,7 +531,7 @@ class TestCorrectionService:
         reloaded = Case.objects.get(pk=case.pk)
         assert reloaded.status == CaseStatus.WAIT_R1_CLEANUP_THUMBS
         assert reloaded.exam_type == ExamType.EDA
-        assert not CaseEvent.objects.filter(case=case, event_type="EXAM_TYPE_CORRECTED").exists()
+        assert not CaseEvent.objects.filter(case=case, event_type="CASE_PROCEDURE_DECLARATION_CORRECTED").exists()
         assert enqueue_calls == []
 
     # ── C3: reserva completa sob o lock ───────────────────────────────────
@@ -996,7 +998,7 @@ class TestConfirmReceiptService:
         reloaded = Case.objects.get(pk=case.case_id)
         assert reloaded.status == CaseStatus.CLEANED
         assert reloaded.exam_type == ExamType.EDA
-        assert not CaseEvent.objects.filter(case=case, event_type="EXAM_TYPE_CORRECTED").exists()
+        assert not CaseEvent.objects.filter(case=case, event_type="CASE_PROCEDURE_DECLARATION_CORRECTED").exists()
         assert enqueue_calls == []
 
     def test_confirm_ack_flow_responded_issue(self, django_user_model, case_factory, advance_to) -> None:
@@ -1190,7 +1192,7 @@ class TestCorrectionConfirmSerialization:
         reloaded = Case.objects.get(pk=case.case_id)
         assert reloaded.status == CaseStatus.CLEANED
         assert reloaded.exam_type == ExamType.EDA
-        assert not CaseEvent.objects.filter(case=case, event_type="EXAM_TYPE_CORRECTED").exists()
+        assert not CaseEvent.objects.filter(case=case, event_type="CASE_PROCEDURE_DECLARATION_CORRECTED").exists()
         assert pipeline_calls == []  # correção perdedora não enfileira
 
 
@@ -1606,26 +1608,28 @@ class TestTimelineLabels:
     def test_event_maps_contain_new_events(self) -> None:
         from apps.intake import views
 
-        assert "EXAM_TYPE_CORRECTED" in views.EVENT_LABELS
+        assert "CASE_PROCEDURE_DECLARATION_CORRECTED" in views.EVENT_LABELS
         assert "CASE_REPROCESSING_REQUESTED" in views.EVENT_LABELS
-        assert views.EVENT_LABELS["EXAM_TYPE_CORRECTED"].strip()
+        assert views.EVENT_LABELS["CASE_PROCEDURE_DECLARATION_CORRECTED"].strip()
         assert views.EVENT_LABELS["CASE_REPROCESSING_REQUESTED"].strip()
-        assert "EXAM_TYPE_CORRECTED" in views.EVENT_DOT_CSS
+        assert "CASE_PROCEDURE_DECLARATION_CORRECTED" in views.EVENT_DOT_CSS
         assert "CASE_REPROCESSING_REQUESTED" in views.EVENT_DOT_CSS
 
     def test_detail_renders_new_event_labels(self, client) -> None:
         """Timeline do detalhe NIR renderiza labels dos eventos de correção."""
         client, user = _nir_client(client)
         case = _eligible_case(user=user)
-        # Mesma ordem de eventos do serviço: EXAM_TYPE_CORRECTED antes do
-        # CASE_REPROCESSING_REQUESTED (append-only).
+        # Mesma ordem de eventos do serviço: CASE_PROCEDURE_DECLARATION_CORRECTED
+        # antes do CASE_REPROCESSING_REQUESTED (append-only).
         case._record_event(
-            "EXAM_TYPE_CORRECTED",
+            "CASE_PROCEDURE_DECLARATION_CORRECTED",
             user=user,
             payload={
+                "old_procedures": [ExamType.EDA],
+                "new_procedures": [ExamType.COLONOSCOPY],
+                "reason_code": "other",
                 "old_exam_type": ExamType.EDA,
                 "new_exam_type": ExamType.COLONOSCOPY,
-                "reason_code": "other",
             },
         )
         case.save()
@@ -1635,5 +1639,5 @@ class TestTimelineLabels:
         response = client.get(reverse("intake:case_detail", args=[case.case_id]))
         assert response.status_code == 200
         content = response.content.decode()
-        assert "Tipo de exame corrigido pelo NIR" in content
+        assert "Conjunto de procedimentos declarado corrigido pelo NIR" in content
         assert "Reprocessamento solicitado" in content

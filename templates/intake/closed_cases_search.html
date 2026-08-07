@@ -37,6 +37,7 @@
         <option value="all" {% if exam_type == 'all' %}selected{% endif %}>Todos os tipos</option>
         <option value="eda" {% if exam_type == 'eda' %}selected{% endif %}>EDA</option>
         <option value="colonoscopy" {% if exam_type == 'colonoscopy' %}selected{% endif %}>Colonoscopia</option>
+        <option value="eda_colonoscopy" {% if exam_type == 'eda_colonoscopy' %}selected{% endif %}>EDA + Colonoscopia</option>
       </select>
     </div>
     <div class="col-md-4 d-flex gap-2">
@@ -63,7 +64,7 @@
               <div class="col-md-5">
                 <div class="patient-name">
                   {{ item.patient_name }}
-                  <span class="badge exam-type-badge exam-type-{{ item.case.exam_type }}">{{ item.case.get_exam_type_display }}</span>
+                  <span class="badge exam-type-badge exam-type-{{ item.declared_type_key }}">{{ item.declared_label }}</span>
                 </div>
                 <div class="case-meta">
                   {% if item.case.agency_record_number %}Reg. {{ item.case.agency_record_number }}{% endif %}

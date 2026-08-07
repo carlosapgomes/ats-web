@@ -15,7 +15,7 @@ from unittest import mock
 import pytest
 from django.contrib.auth import get_user_model
 
-from apps.cases.models import Case, CaseEvent, CaseProcedure, CaseStatus, ExamType
+from apps.cases.models import EDA_COLONOSCOPY, Case, CaseEvent, CaseProcedure, CaseStatus, ExamType
 from apps.cases.services import claim_case_lock
 from apps.intake.services import correct_case_exam_type
 
@@ -122,7 +122,7 @@ class TestCorrectionReroutedThroughProjection:
         assert colon.declared_by_nir is False
 
     def test_correction_keeps_existing_audit_events(self, django_user_model) -> None:
-        """EXAM_TYPE_CORRECTED antes de CASE_REPROCESSING_REQUESTED (regressão)."""
+        """CASE_PROCEDURE_DECLARATION_CORRECTED antes de CASE_REPROCESSING_REQUESTED."""
         user = _nir_user(django_user_model, "nir-proj-ev@test.com")
         case = _eligible_case(user=user, exam_type=ExamType.EDA)
         token = _claim_receipt_lease(case, user)
@@ -137,27 +137,29 @@ class TestCorrectionReroutedThroughProjection:
         )
 
         types = [e.event_type for e in CaseEvent.objects.filter(case=case).order_by("id")]
-        assert types.index("EXAM_TYPE_CORRECTED") < types.index("CASE_REPROCESSING_REQUESTED")
+        assert types.index("CASE_PROCEDURE_DECLARATION_CORRECTED") < types.index("CASE_REPROCESSING_REQUESTED")
 
-    def test_combined_rejected_in_correction_single_to_single(self, django_user_model) -> None:
-        """Slice 001 não amplia correção para combinado (R3)."""
+    def test_combined_correction_single_to_combined(self, django_user_model) -> None:
+        """Slice 005: correção aceita combinado — single→combined cria duas rows."""
         user = _nir_user(django_user_model, "nir-proj-cmb@test.com")
         case = _eligible_case(user=user, exam_type=ExamType.EDA)
         token = _claim_receipt_lease(case, user)
 
-        with pytest.raises(ValueError):
-            correct_case_exam_type(
-                case_id=case.case_id,
-                new_exam_type="eda_colonoscopy",
-                user=user,
-                active_role="nir",
-                lock_token=token,
-                reason_code="nir_identified_exam",
-            )
+        correct_case_exam_type(
+            case_id=case.case_id,
+            new_exam_type=EDA_COLONOSCOPY,
+            user=user,
+            active_role="nir",
+            lock_token=token,
+            reason_code="nir_identified_exam",
+        )
 
         reloaded = Case.objects.get(pk=case.pk)
-        assert reloaded.exam_type == ExamType.EDA
-        assert reloaded.status == CaseStatus.WAIT_R1_CLEANUP_THUMBS
+        assert reloaded.exam_type == EDA_COLONOSCOPY
+        declared = {p.procedure_type for p in CaseProcedure.objects.filter(case=reloaded, declared_by_nir=True)}
+        assert declared == {ExamType.EDA, ExamType.COLONOSCOPY}
+        # Auditoria: novo evento canônico registrado; legado singular não é emitido.
+        assert CaseEvent.objects.filter(case=case, event_type="CASE_PROCEDURE_DECLARATION_CORRECTED").exists()
         assert not CaseEvent.objects.filter(case=case, event_type="EXAM_TYPE_CORRECTED").exists()
 
     def test_projection_failure_rolls_back_bridge_derived_events_and_fsm(self, django_user_model) -> None:
@@ -190,7 +192,7 @@ class TestCorrectionReroutedThroughProjection:
         # nenhum evento de correção/reprocessamento
         assert not CaseEvent.objects.filter(
             case=case,
-            event_type__in=["EXAM_TYPE_CORRECTED", "CASE_REPROCESSING_REQUESTED"],
+            event_type__in=["CASE_PROCEDURE_DECLARATION_CORRECTED", "CASE_REPROCESSING_REQUESTED"],
         ).exists()
         # projeção declarada inalterada (row pré-existente preservada; nada novo)
         assert CaseProcedure.objects.filter(case=reloaded).count() == 1
