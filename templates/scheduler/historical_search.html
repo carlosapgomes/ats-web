@@ -28,6 +28,7 @@
         <option value="all" {% if exam_type == 'all' %}selected{% endif %}>Todos</option>
         <option value="eda" {% if exam_type == 'eda' %}selected{% endif %}>EDA</option>
         <option value="colonoscopy" {% if exam_type == 'colonoscopy' %}selected{% endif %}>Colonoscopia</option>
+        <option value="eda_colonoscopy" {% if exam_type == 'eda_colonoscopy' %}selected{% endif %}>Combinado</option>
       </select>
     </div>
     <div class="col-md-3 d-flex gap-2">
@@ -52,7 +53,9 @@
             <div class="row align-items-center">
               <div class="col-md-5">
                 <div class="patient-name">{{ item.patient_name|default:"Paciente" }}
-                  {% if item.exam_type_label %}<span class="badge exam-type-badge bg-secondary ms-1">{{ item.exam_type_label }}</span>{% endif %}
+                  {% if item.is_paired %}<span class="badge exam-type-badge bg-primary ms-1">{{ item.approved_label }} · {{ item.paired_label }}</span>
+                  {% elif item.approved_label %}<span class="badge exam-type-badge bg-secondary ms-1">{{ item.approved_label|default:item.exam_type_label }}</span>{% endif %}
+                  {% if item.transformation_approved %}<span class="badge bg-info ms-1">{{ item.transformation_approved }}</span>{% endif %}
                 </div>
                 <div class="case-meta">
                   {% if item.agency_record_number %}Reg. {{ item.agency_record_number }}{% endif %}

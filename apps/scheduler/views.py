@@ -25,9 +25,22 @@ from apps.cases.admission import (
     SUPPORT_FLAG_MAP,
     get_admission_flow_notice_copy,
 )
-from apps.cases.models import Case, CaseEvent, CaseStatus, ExamType
+from apps.cases.models import (
+    EDA_COLONOSCOPY,
+    Case,
+    CaseEvent,
+    CaseStatus,
+    DoctorDisposition,
+    ProcedureType,
+)
 from apps.cases.navigation import resolve_safe_next_url
 from apps.cases.priority_signals import build_priority_signal_badges
+from apps.cases.procedures import (
+    format_procedure_selection,
+    get_approved_procedure_types,
+    get_detected_procedure_types,
+    selection_key,
+)
 from apps.cases.services import (
     CASE_COMMUNICATION_MAX_LENGTH,
     CaseCommunicationError,
@@ -118,6 +131,56 @@ def _get_admission_flow_display(case: Case) -> str:
 # ── Card builder ─────────────────────────────────────────────────────────
 
 
+def _approved_snapshot(case: Case) -> dict[str, Any]:
+    """Snapshot da dimensão autorizada para o CHD (R1/D11, Slice 004).
+
+    Fonte exclusiva: rows ``CaseProcedure`` com ``doctor_disposition=approved``
+    (fallback da ponte para casos legados via ``get_approved_procedure_types``).
+    Inclui a chave de seleção (filtro JS), o label textual, o badge
+    ``EDA + Colonoscopia · Agendamento casado`` quando ambos aprovados, a
+    comparação detectado → autorizado e as razões médicas por componente
+    (apenas presença/razão — sem texto clínico integral no evento).
+    """
+    approved_types = get_approved_procedure_types(case)
+    detected_types = get_detected_procedure_types(case)
+    paired = len(approved_types) == 2
+    approved_label = format_procedure_selection(approved_types) if approved_types else case.get_exam_type_display()
+    detected_label = format_procedure_selection(detected_types) if detected_types else "Nenhum"
+    transformation = ""
+    if approved_types and approved_types != detected_types:
+        transformation = f"Detectado: {detected_label} · Autorizado: {approved_label}"
+    reasons: list[dict[str, str]] = []
+    if approved_types:
+        rows = {row.procedure_type: row for row in case.procedures.all()}
+        for procedure_type in approved_types:
+            row = rows.get(procedure_type)
+            if row is not None and row.doctor_reason.strip():
+                reasons.append({"label": ProcedureType(procedure_type).label, "reason": row.doctor_reason})
+    return {
+        "approved_selection_key": selection_key(approved_types) or "none",
+        "approved_label": approved_label,
+        "is_paired": paired,
+        "paired_label": "Agendamento casado",
+        "transformation_approved": transformation,
+        "procedure_reasons": reasons,
+    }
+
+
+def _enrich_pending_event_payload(case: Case, **fields: Any) -> None:
+    """Injeta campos no payload do evento pendente antes do save (R4).
+
+    ``Case._record_event`` apenas armazena ``_pending_event``; o signal
+    ``post_save`` cria o ``CaseEvent`` com esse payload. Enriquecer o dict
+    pendente antes do ``save()`` registra o snapshot no MESMO evento
+    (APPT_CONFIRMED/APPT_DENIED) — sem evento extra, sem duplicar transição
+    e sem tocar em models/FSM. Payload sem texto clínico integral.
+    """
+    pending = getattr(case, "_pending_event", None)
+    if isinstance(pending, dict):
+        payload = pending.get("payload") or {}
+        pending["payload"] = {**payload, **fields}
+
+
 def _build_case_card(case: Case, wait_minutes: int, user: Any = None) -> dict[str, Any]:
     """Build a dict with all display data for a scheduler case card.
 
@@ -125,6 +188,7 @@ def _build_case_card(case: Case, wait_minutes: int, user: Any = None) -> dict[st
     """
     has_psi = case.post_schedule_issue_status == "opened"
     notice_copy = get_admission_flow_notice_copy(case.doctor_admission_flow)
+    approved = _approved_snapshot(case)
     return {
         "case_id": str(case.case_id),
         "patient_name": _get_patient_name(case),
@@ -146,6 +210,10 @@ def _build_case_card(case: Case, wait_minutes: int, user: Any = None) -> dict[st
         # exclusivamente o valor persistido, nunca inferido de texto/JSON.
         "exam_type": case.exam_type,
         "exam_type_label": case.get_exam_type_display(),
+        # Dimensão autorizada (R1/D11): badge/filtro principal do CHD usam
+        # exclusivamente o conjunto aprovado; a ponte data-exam-type
+        # permanece apenas para compatibilidade legada com o JS.
+        **approved,
         # Badges projetados exclusivamente do valor persistido (Slice 004) —
         # a view nunca redetecta sinais a partir de texto bruto.
         "priority_signal_badges": build_priority_signal_badges(case.priority_signals),
@@ -181,6 +249,7 @@ def _scheduler_queue_context(user: Any = None, tab: str = "pending") -> dict[str
     pending_cases: QuerySet[Case] = (
         Case.objects.filter(status=CaseStatus.WAIT_APPT)
         .select_related("doctor", "locked_by")
+        .prefetch_related("procedures")
         .order_by(F("regulation_days_on_screen").desc(nulls_last=True), "created_at")
     )
 
@@ -196,7 +265,10 @@ def _scheduler_queue_context(user: Any = None, tab: str = "pending") -> dict[str
     start, end = local_day_bounds()
 
     immediate_notice_qs: QuerySet[Case] = (
-        unacknowledged_operational_notice_qs().select_related("doctor").order_by("-doctor_decided_at", "-created_at")
+        unacknowledged_operational_notice_qs()
+        .select_related("doctor")
+        .prefetch_related("procedures")
+        .order_by("-doctor_decided_at", "-created_at")
     )
 
     immediate_notice_cards: list[dict[str, Any]] = []
@@ -213,6 +285,7 @@ def _scheduler_queue_context(user: Any = None, tab: str = "pending") -> dict[str
     operational_issue_qs: QuerySet[Case] = (
         unacknowledged_operational_issue_qs()
         .select_related("doctor", "post_schedule_issue_opened_by")
+        .prefetch_related("procedures")
         .order_by("-post_schedule_issue_opened_at")
     )
 
@@ -259,6 +332,7 @@ def _scheduler_queue_context(user: Any = None, tab: str = "pending") -> dict[str
             appointment_decided_at__lt=end,
         )
         .select_related("doctor")
+        .prefetch_related("procedures")
         .order_by("-appointment_decided_at")
     )
 
@@ -268,13 +342,17 @@ def _scheduler_queue_context(user: Any = None, tab: str = "pending") -> dict[str
 
     processed_today_count = len(processed_today)
 
-    # ── Contagens por tipo (Slice 005) ────────────────────────────────
+    # ── Contagens por dimensão autorizada (R5/D13, Slice 004) ────────
     # Pendentes soma os MESMOS três grupos do badge primário
     # (WAIT_APPT + notices iniciais + issues operacionais); Processados Hoje
-    # soma apenas os cards processados do dia. Nenhum contador inclui
-    # Histórico/ciências reconhecidas.
-    pending_exam_type_counts = _sum_exam_type_counts([pending_cards, immediate_notice_cards, operational_issue_cards])
-    processed_exam_type_counts = _sum_exam_type_counts([processed_today])
+    # soma apenas os cards processados do dia. Cada card pertence a EXATAMENTE
+    # um bucket (eda | colonoscopy | eda_colonoscopy) pela dimensão autorizada;
+    # combinado conta uma vez. Nenhum contador inclui Histórico/ciências
+    # reconhecidas.
+    pending_selection_counts = _sum_approved_selection_counts(
+        [pending_cards, immediate_notice_cards, operational_issue_cards]
+    )
+    processed_selection_counts = _sum_approved_selection_counts([processed_today])
 
     context: dict[str, Any] = {
         "active_tab": tab,
@@ -291,31 +369,34 @@ def _scheduler_queue_context(user: Any = None, tab: str = "pending") -> dict[str
         "total_notice_count": pending_count + immediate_notice_count + operational_issue_count,
         "exam_type_counts": {
             "all": pending_count + immediate_notice_count + operational_issue_count,
-            **pending_exam_type_counts,
+            **pending_selection_counts,
         },
-        "processed_exam_type_counts": {"all": processed_today_count, **processed_exam_type_counts},
+        "processed_exam_type_counts": {"all": processed_today_count, **processed_selection_counts},
     }
 
     return context
 
 
-def _sum_exam_type_counts(card_groups: list[list[dict[str, Any]]]) -> dict[str, int]:
-    """Soma contagens EDA/colonoscopia sobre grupos de cards já construídos.
+def _sum_approved_selection_counts(card_groups: list[list[dict[str, Any]]]) -> dict[str, int]:
+    """Soma contagens da dimensão autorizada sobre grupos de cards prontos.
 
-    Conta exclusivamente o valor persistido ``exam_type`` presente em cada
-    card; tipos desconhecidos são ignorados (nunca inventados).
+    Cada card contribui para exatamente um bucket (``eda``, ``colonoscopy`` ou
+    ``eda_colonoscopy``) pela chave projetada ``approved_selection_key`` —
+    combinado conta uma vez (R5). Chaves desconhecidas são ignoradas (nunca
+    inventadas).
     """
-    counts: dict[str, int] = {"eda": 0, "colonoscopy": 0}
+    counts: dict[str, int] = {"eda": 0, "colonoscopy": 0, "eda_colonoscopy": 0}
     for cards in card_groups:
         for card in cards:
-            exam_type = card.get("exam_type")
-            if exam_type in counts:
-                counts[exam_type] += 1
+            selection_key_value = card.get("approved_selection_key")
+            if selection_key_value in counts:
+                counts[selection_key_value] += 1
     return counts
 
 
 def _build_processed_card(case: Case) -> dict[str, Any]:
     """Build a dict with display data for a processed case card."""
+    approved = _approved_snapshot(case)
     return {
         "case_id": str(case.case_id),
         "patient_name": _get_patient_name(case),
@@ -335,6 +416,8 @@ def _build_processed_card(case: Case) -> dict[str, Any]:
         # Tipo de exame declarado no intake (Slice 005).
         "exam_type": case.exam_type,
         "exam_type_label": case.get_exam_type_display(),
+        # Dimensão autorizada (R1/R5): Processados Hoje filtra pelo aprovado.
+        **approved,
         # Badges projetados exclusivamente do valor persistido (Slice 004).
         "priority_signal_badges": build_priority_signal_badges(case.priority_signals),
     }
@@ -761,6 +844,10 @@ def _build_confirm_context(
         "support_flag_display": _get_support_flag_display(case),
         "admission_flow_display": _get_admission_flow_display(case),
         "origin_unit": case.get_origin_unit_display(compact=False),
+        # Dimensão autorizada (R1/D11): detalhe de confirmação mostra o
+        # conjunto aprovado (badge casado), comparação detectado→autorizado
+        # e razões médicas textuais por componente.
+        **_approved_snapshot(case),
         # Badges projetados exclusivamente do valor persistido (Slice 004).
         "priority_signal_badges": build_priority_signal_badges(case.priority_signals),
         # Communication thread context
@@ -944,6 +1031,13 @@ def scheduler_submit(request: HttpRequest, case_id: uuid.UUID) -> HttpResponse:
 
         decision = form.cleaned_data["decision"]
 
+        # Snapshot da dimensão autorizada (R4/D11): o evento de
+        # confirmação/negativa carrega o conjunto aprovado ordenado + flag
+        # de agenda casada — no MESMO evento, sem duplicar transição.
+        approved_types = get_approved_procedure_types(case)
+        paired = len(approved_types) == 2
+        snapshot: dict[str, Any] = {"approved_procedures": list(approved_types), "paired": paired}
+
         # Persist scheduler decision fields
         case.scheduler = request.user  # type: ignore[assignment]  # guaranteed by @login_required
         case.appointment_decided_at = timezone.now()
@@ -964,6 +1058,11 @@ def scheduler_submit(request: HttpRequest, case_id: uuid.UUID) -> HttpResponse:
 
             # FSM transition: WAIT_APPT → APPT_DENIED
             case.scheduler_decide(appointment_status="denied", user=request.user)
+
+        # Enriquecer o payload do evento pendente antes do save: o signal
+        # post_save cria APPT_* a partir de ``_pending_event``; injetar aqui
+        # registra o snapshot no próprio evento de decisão (sem evento extra).
+        _enrich_pending_event_payload(case, **snapshot)
 
         # Post final reply → WAIT_R1_CLEANUP_THUMBS (both confirm and deny)
         case.save()  # persiste decisão do scheduler e seu evento
@@ -1053,24 +1152,64 @@ def scheduler_lock_release(request: HttpRequest, case_id: uuid.UUID) -> HttpResp
 
 # ── Historical search ───────────────────────────────────────────────────────
 
+# Opções da dimensão autorizada no histórico (R5/D13): além dos tipos
+# simples, ``eda_colonoscopy`` (Combinado) — valor da ponte fora de
+# ``ExamType.values``, validado explicitamente aqui.
+_HISTORICAL_DIMENSION_CHOICES: tuple[str, ...] = ("all", "eda", "colonoscopy", EDA_COLONOSCOPY)
+
+
+def _filter_by_approved_dimension(qs: QuerySet[Case], dimension: str) -> QuerySet[Case]:
+    """Filtra um queryset pela dimensão autorizada (R5/D13).
+
+    Casos com rows: exige row(s) ``doctor_disposition=approved`` do(s)
+    tipo(s) — ``eda``/``colonoscopy`` são EXCLUSIVOS (um caso só pertence a
+    um bucket); combinado exige as duas rows aprovadas (não há fallback:
+    combinação só existe com duas rows). Casos legados sem rows (fixtures/
+    pré-projeção) com ``doctor_decision=accept`` caem na ponte ``exam_type``,
+    refletindo a dimensão autorizada até o cutover.
+    """
+    other = ProcedureType.COLONOSCOPY if dimension == ProcedureType.EDA else ProcedureType.EDA
+    row_matches = qs.filter(
+        procedures__procedure_type=dimension,
+        procedures__doctor_disposition=DoctorDisposition.APPROVED,
+    ).exclude(
+        procedures__procedure_type=other,
+        procedures__doctor_disposition=DoctorDisposition.APPROVED,
+    )
+    if dimension == EDA_COLONOSCOPY:
+        return (
+            qs.filter(
+                procedures__procedure_type=ProcedureType.EDA,
+                procedures__doctor_disposition=DoctorDisposition.APPROVED,
+            )
+            .filter(
+                procedures__procedure_type=ProcedureType.COLONOSCOPY,
+                procedures__doctor_disposition=DoctorDisposition.APPROVED,
+            )
+            .distinct()
+        )
+    legacy = qs.filter(exam_type=dimension, procedures__isnull=True)
+    return (row_matches | legacy).distinct()
+
 
 @login_required
 @role_required("scheduler")
 def scheduler_historical_search(request: HttpRequest) -> HttpResponse:
     """Busca histórica Scheduler: casos aceitos/agendados/processados.
 
-    Combina termo (ocorrência ou nome do paciente) com tipo de exame
-    (exam_type=all|eda|colonoscopy). Tipo inválido cai para all. Tipo
-    específico sem termo lista os últimos 50 casos daquele tipo; com termo,
-    ambos são compostos com AND. Sem critério nenhum, mantém o estado vazio.
+    Combina termo (ocorrência ou nome do paciente) com a dimensão autorizada
+    (exam_type=all|eda|colonoscopy|eda_colonoscopy). Valor inválido cai para
+    all. Dimensão específica sem termo lista os últimos 50 casos daquela
+    dimensão; com termo, ambos são compostos com AND. Sem critério nenhum,
+    mantém o estado vazio.
     """
     query = request.GET.get("q", "").strip()
     raw_exam_type = request.GET.get("exam_type", "all")
-    exam_type = raw_exam_type if raw_exam_type in ExamType.values else "all"
+    exam_type = raw_exam_type if raw_exam_type in _HISTORICAL_DIMENSION_CHOICES else "all"
 
     qs = _scheduler_historical_queryset()
     if exam_type != "all":
-        qs = qs.filter(exam_type=exam_type)
+        qs = _filter_by_approved_dimension(qs, exam_type)
     if query:
         qs = qs.filter(
             models.Q(agency_record_number__icontains=query) | models.Q(structured_data__patient__name__icontains=query)
@@ -1078,7 +1217,8 @@ def scheduler_historical_search(request: HttpRequest) -> HttpResponse:
 
     results: list[dict[str, Any]] = []
     if query or exam_type != "all":
-        for case in qs.order_by("-created_at")[:50]:
+        for case in qs.prefetch_related("procedures").order_by("-created_at")[:50]:
+            approved = _approved_snapshot(case)
             results.append(
                 {
                     "case": case,
@@ -1097,6 +1237,8 @@ def scheduler_historical_search(request: HttpRequest) -> HttpResponse:
                     # Tipo de exame declarado no intake (Slice 005).
                     "exam_type": case.exam_type,
                     "exam_type_label": case.get_exam_type_display(),
+                    # Dimensão autorizada (R5): badge/histórico por aprovado.
+                    **approved,
                 }
             )
 

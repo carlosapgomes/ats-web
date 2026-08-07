@@ -68,6 +68,29 @@
       {% endif %}
     </div>
 
+    <div class="card p-4 mb-3">
+      <h5 class="mb-3">🔬 Procedimentos Autorizados</h5>
+      <div class="mb-2">
+        {% if is_paired %}
+        <span class="badge exam-type-badge bg-primary fs-6">{{ approved_label }} · {{ paired_label }}</span>
+        {% elif approved_label %}
+        <span class="badge exam-type-badge bg-secondary fs-6">{{ approved_label }}</span>
+        {% endif %}
+      </div>
+      {% if transformation_approved %}
+      <div class="alert alert-info py-2 px-3 mb-2 small">
+        <strong>Comparação detectado → autorizado:</strong> {{ transformation_approved }}
+      </div>
+      {% endif %}
+      {% if procedure_reasons %}
+      <div class="small">
+        {% for item in procedure_reasons %}
+        <div class="mb-1"><strong>{{ item.label }}:</strong> {{ item.reason }}</div>
+        {% endfor %}
+      </div>
+      {% endif %}
+    </div>
+
     {% include "cases/_communication_thread.html" %}
   </div>
 

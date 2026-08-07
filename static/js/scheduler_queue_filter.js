@@ -1,13 +1,15 @@
-/* scheduler_queue_filter.js — Client-side exam type filter for scheduler queues.
+/* scheduler_queue_filter.js — Client-side approved-dimension filter for scheduler queues.
  *
  * Pendentes tab: filters cards of ALL three groups that feed the primary
  * pending counter (WAIT_APPT + operational notices + operational issues).
- * Processados Hoje tab: simple type filter over processed cards.
+ * Processados Hoje tab: simple dimension filter over processed cards.
  *
- * The selected type lives in radio buttons ([data-scheduler-exam-filter]) and
- * every filterable card exposes the persisted Case.exam_type via
- * data-exam-type. HTMX polling re-applies the filter on htmx:afterSwap
- * because the controls live outside #scheduler-queue-content.
+ * Slice 004: the scheduler queue filters by the AUTHORIZED procedure set
+ * (R5/D13). Every filterable card exposes the projected selection via
+ * data-approved-selection (eda | colonoscopy | eda_colonoscopy); the legacy
+ * bridge data-exam-type remains as fallback until cutover. HTMX polling
+ * re-applies the filter on htmx:afterSwap because the controls live outside
+ * #scheduler-queue-content.
  *
  * No dependencies, no persistence (no URL, storage, cookie or session).
  * No action depends on this filter — ACK forms and schedule links stay intact.
@@ -51,6 +53,7 @@
   function scopeLabel(type) {
     if (type === "eda") return "EDA";
     if (type === "colonoscopy") return "Colonoscopia";
+    if (type === "eda_colonoscopy") return "EDA + Colonoscopia";
     return "Todos";
   }
 
@@ -59,15 +62,26 @@
     return n !== 1 ? "casos" : "caso";
   }
 
+  /**
+   * Return the approved dimension projected on the card (R5/D13): the
+   * scheduler queue filters by the AUTHORIZED set (data-approved-selection),
+   * falling back to the legacy bridge data-exam-type until cutover.
+   */
+  function cardSelection(card) {
+    var selection = card.getAttribute("data-approved-selection");
+    if (!selection) selection = card.getAttribute("data-exam-type") || "";
+    return selection;
+  }
+
   // ── Counters ──────────────────────────────────────────────────────
 
-  /** Recompute per-type counters from the persisted card attribute. */
+  /** Recompute per-type counters from the projected card attribute. */
   function updateCounts() {
     var cards = getCards();
-    var counts = { all: cards.length, eda: 0, colonoscopy: 0 };
+    var counts = { all: cards.length, eda: 0, colonoscopy: 0, eda_colonoscopy: 0 };
     Array.prototype.forEach.call(cards, function (card) {
-      var type = card.getAttribute("data-exam-type") || "";
-      if (counts[type] !== undefined) counts[type]++;
+      var selection = cardSelection(card);
+      if (counts[selection] !== undefined) counts[selection]++;
     });
     Array.prototype.forEach.call(
       document.querySelectorAll("[data-exam-type-count]"),
@@ -90,8 +104,7 @@
     var total = cards.length;
     var visibleCount = 0;
     Array.prototype.forEach.call(cards, function (card) {
-      var visible =
-        type === "all" || (card.getAttribute("data-exam-type") || "") === type;
+      var visible = type === "all" || cardSelection(card) === type;
       card.hidden = !visible;
       if (visible) visibleCount++;
     });

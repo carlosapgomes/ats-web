@@ -1,0 +1,571 @@
+"""Slice 004 — CHD recebe conjunto autorizado e faz um agendamento casado.
+
+Prova R1–R6:
+
+- R1: cards/detalhe usam exclusivamente o conjunto aprovado (badge
+  ``EDA + Colonoscopia · Agendamento casado``); transformação detectado→
+  autorizado e razões médicas textuais visíveis quando divergem.
+- R2: submit combinado reutiliza ``SchedulerDecisionForm`` e persiste
+  exatamente um ``appointment_at``, uma decisão e uma transição.
+- R3: POST manipulado não altera ``CaseProcedure`` (nenhum controle write).
+- R4: o MESMO evento de confirmação/negativa (APPT_*) carrega o snapshot
+  do conjunto aprovado ordenado + flag ``paired`` — sem evento extra,
+  sem duplicar transição, sem texto clínico.
+- R5: Pendentes (WAIT_APPT + notices + issues), Processados Hoje e
+  Histórico usam a dimensão autorizada; opções Todos/EDA/Colonoscopia/
+  Combinado; combinado conta uma vez; histórico sem termo limita 50 e
+  preserva ordem.
+- R6: locks/ownership inválidos bloqueiam; notices/issues/ACKs regressam
+  sem duplicação pelos dois componentes.
+"""
+
+from __future__ import annotations
+
+import uuid
+from datetime import timedelta
+from pathlib import Path
+from typing import Any
+
+import pytest
+from django.contrib.auth import get_user_model
+from django.utils import timezone
+
+from apps.cases.models import (
+    Case,
+    CaseEvent,
+    CaseProcedure,
+    CaseStatus,
+    DoctorDisposition,
+    ProcedureType,
+)
+
+User = get_user_model()
+
+REPO_ROOT = Path(__file__).resolve().parents[3]
+QUEUE_HTML = REPO_ROOT / "templates" / "scheduler" / "queue.html"
+QUEUE_CONTENT_HTML = REPO_ROOT / "templates" / "scheduler" / "_queue_content.html"
+CONFIRM_HTML = REPO_ROOT / "templates" / "scheduler" / "confirm.html"
+HISTORICAL_HTML = REPO_ROOT / "templates" / "scheduler" / "historical_search.html"
+QUEUE_FILTER_JS = REPO_ROOT / "static" / "js" / "scheduler_queue_filter.js"
+
+
+def _create_role(name: str) -> Any:
+    from apps.accounts.models import Role
+
+    role, _ = Role.objects.get_or_create(name=name)
+    return role
+
+
+@pytest.mark.django_db
+class TestSchedulerPairedAppointment:
+    """Fluxo principal: badge casado, snapshot e invariante de um horário."""
+
+    # ── Helpers ─────────────────────────────────────────────────────
+
+    def _login_as(self, client, role_name: str) -> Any:
+        username = f"{role_name}@slice004.{uuid.uuid4().hex[:8]}.test"
+        user = User.objects.create_user(username=username, password="testpass123")
+        user.roles.add(_create_role(role_name))
+        client.force_login(user)
+        session = client.session
+        session["active_role"] = role_name
+        session.save()
+        return user
+
+    def _make_case(
+        self,
+        nir: Any,
+        *,
+        status: str = CaseStatus.WAIT_APPT,
+        exam_type: str = "eda",
+        approved: tuple[str, ...] = (),
+        detected: tuple[str, ...] = (),
+        reasons: dict[str, str] | None = None,
+        **kw: Any,
+    ) -> Case:
+        reasons = reasons or {}
+        kw.setdefault(
+            "structured_data",
+            {"patient": {"name": f"Paciente {exam_type}", "age": 55, "gender": "F"}},
+        )
+        case = Case.objects.create(
+            created_by=nir,
+            status=status,
+            exam_type=exam_type,
+            doctor_decision="accept",
+            doctor_admission_flow="scheduled",
+            **kw,
+        )
+        proc_types: tuple[str, ...] = ("eda", "colonoscopy") if exam_type == "eda_colonoscopy" else (exam_type,)
+        for pt in proc_types:
+            row = CaseProcedure.objects.create(case=case, procedure_type=pt, declared_by_nir=True)
+            fields: list[str] = []
+            if pt in detected:
+                row.detection_status = "detected"
+                fields.append("detection_status")
+            if pt in approved:
+                row.doctor_disposition = DoctorDisposition.APPROVED
+                row.doctor_reason = reasons.get(pt, "")
+                fields += ["doctor_disposition", "doctor_reason"]
+            if fields:
+                row.save(update_fields=fields)
+        return case
+
+    def _make_notice(self, nir: Any, *, exam_type: str, approved: tuple[str, ...]) -> Case:
+        case = Case.objects.create(
+            created_by=nir,
+            status=CaseStatus.WAIT_R1_CLEANUP_THUMBS,
+            exam_type=exam_type,
+            doctor_decision="accept",
+            doctor_admission_flow="immediate",
+            structured_data={"patient": {"name": f"Notice {exam_type}", "age": 60, "gender": "F"}},
+        )
+        CaseEvent.objects.create(
+            case=case,
+            actor_type="human",
+            actor=nir,
+            event_type="IMMEDIATE_ADMISSION_OPERATIONAL_NOTICE",
+            timestamp=timezone.now(),
+        )
+        for pt in ("eda", "colonoscopy") if exam_type == "eda_colonoscopy" else (exam_type,):
+            CaseProcedure.objects.create(
+                case=case,
+                procedure_type=pt,
+                declared_by_nir=True,
+                doctor_disposition=DoctorDisposition.APPROVED if pt in approved else "pending",
+            )
+        return case
+
+    def _make_issue(self, nir: Any, *, exam_type: str, approved: tuple[str, ...]) -> Case:
+        case = Case.objects.create(
+            created_by=nir,
+            status=CaseStatus.WAIT_R1_CLEANUP_THUMBS,
+            exam_type=exam_type,
+            doctor_decision="accept",
+            doctor_admission_flow="scheduled",
+            post_schedule_issue_status="opened",
+            post_acceptance_issue_context="operational_notice",
+            structured_data={"patient": {"name": f"Issue {exam_type}", "age": 50, "gender": "M"}},
+        )
+        for pt in ("eda", "colonoscopy") if exam_type == "eda_colonoscopy" else (exam_type,):
+            CaseProcedure.objects.create(
+                case=case,
+                procedure_type=pt,
+                declared_by_nir=True,
+                doctor_disposition=DoctorDisposition.APPROVED if pt in approved else "pending",
+            )
+        return case
+
+    def _claim_lock(self, case_id, scheduler: Any) -> str:
+        from apps.cases.services import claim_case_lock
+
+        result = claim_case_lock(
+            case_id=case_id,
+            user=scheduler,
+            expected_status=CaseStatus.WAIT_APPT,
+            context="scheduler_confirm",
+            role="scheduler",
+        )
+        assert result.acquired is True
+        return str(result.token)
+
+    def _submit_payload(self, *, token: str, decision: str = "confirm", **extra: Any) -> dict[str, Any]:
+        payload: dict[str, Any] = {
+            "decision": decision,
+            "appointment_date": "2026-06-01",
+            "appointment_time": "09:00",
+            "appointment_location": "Hospital Central - Sala 1",
+            "notes": "Trazer jejum de 8h.",
+            "reason": "Sem vaga na agenda." if decision == "deny" else "",
+            "lock_token": token,
+        }
+        payload.update(extra)
+        return payload
+
+    # ── R1: badge casado no card pendente ───────────────────────────
+
+    def test_combined_pending_card_shows_paired_badge(self, client) -> None:
+        nir = self._login_as(client, "nir")
+        self._make_case(
+            nir,
+            exam_type="eda_colonoscopy",
+            approved=("eda", "colonoscopy"),
+            detected=("eda", "colonoscopy"),
+        )
+        self._login_as(client, "scheduler")
+        content = client.get("/scheduler/").content.decode()
+        # R1: badge textual "EDA + Colonoscopia · Agendamento casado".
+        assert "EDA + Colonoscopia · Agendamento casado" in content
+        # Filtro/JS: dimensão autorizada projetada no card.
+        assert 'data-approved-selection="eda_colonoscopy"' in content
+        # Ponte legada preservada (regressão test_exam_type_filters).
+        assert 'data-exam-type="eda_colonoscopy"' in content
+
+    # ── R1: transformação detectado→autorizado + razões no detalhe ──
+
+    def test_transformation_and_reasons_visible(self, client) -> None:
+        nir = self._login_as(client, "nir")
+        case = self._make_case(
+            nir,
+            exam_type="eda_colonoscopy",
+            detected=("eda",),  # apenas EDA detectada
+            approved=("eda", "colonoscopy"),  # Colonoscopia incluída pelo médico
+            reasons={"colonoscopy": "Suspeita de doença inflamatória na anamnese."},
+        )
+        self._login_as(client, "scheduler")
+        # Comparação no card da fila.
+        content = client.get("/scheduler/").content.decode()
+        assert "Detectado: EDA" in content
+        assert "Autorizado: EDA + Colonoscopia" in content
+        # Razão médica textual no detalhe de confirmação.
+        from django.contrib.auth import get_user_model
+
+        scheduler_user = get_user_model().objects.get(username__startswith="scheduler@slice004.")
+        token = self._claim_lock(case.case_id, scheduler_user)
+        confirm = client.get(f"/scheduler/{case.case_id}/").content.decode()
+        assert "EDA + Colonoscopia · Agendamento casado" in confirm
+        assert "Suspeita de doença inflamatória na anamnese." in confirm
+        assert token  # lock token presente no GET (consistência do fluxo)
+
+    # ── R2/R3/R4: confirm combinado → 1 appointment/event/transição ──
+
+    def test_combined_confirm_single_appointment_event_transition(self, client) -> None:
+        nir = self._login_as(client, "nir")
+        case = self._make_case(
+            nir,
+            exam_type="eda_colonoscopy",
+            approved=("eda", "colonoscopy"),
+            detected=("eda", "colonoscopy"),
+        )
+        scheduler = self._login_as(client, "scheduler")
+        token = self._claim_lock(case.case_id, scheduler)
+
+        response = client.post(
+            f"/scheduler/{case.case_id}/submit/",
+            self._submit_payload(
+                token=token,
+                # R3: campos manipulados não criam segunda agenda/row.
+                procedure_eda="approved",
+                procedure_colonoscopy="approved",
+                appointment_date2="2026-07-01",
+            ),
+        )
+        assert response.status_code == 302
+
+        case = Case.objects.get(pk=case.case_id)
+        # R2: uma transição, um horário, uma decisão.
+        assert case.status == CaseStatus.WAIT_R1_CLEANUP_THUMBS
+        assert case.appointment_status == "confirmed"
+        assert case.appointment_at is not None
+        assert case.appointment_instructions == "Trazer jejum de 8h."
+        # R2: um único evento operacional (sem duplicar por componente).
+        assert CaseEvent.objects.filter(case=case, event_type="APPT_CONFIRMED").count() == 1
+        assert CaseEvent.objects.filter(case=case, event_type="FINAL_REPLY_POSTED").count() == 1
+        # R3: nenhuma row criada/alterada por POST manipulado.
+        rows = CaseProcedure.objects.filter(case=case).order_by("procedure_type")
+        assert list(rows.values_list("procedure_type", "doctor_disposition")) == [
+            (ProcedureType.COLONOSCOPY, DoctorDisposition.APPROVED),
+            (ProcedureType.EDA, DoctorDisposition.APPROVED),
+        ]
+
+    # ── R4: snapshot no MESMO evento de confirmação ─────────────────
+
+    def test_combined_confirm_snapshot_payload(self, client) -> None:
+        nir = self._login_as(client, "nir")
+        case = self._make_case(
+            nir,
+            exam_type="eda_colonoscopy",
+            approved=("eda", "colonoscopy"),
+            detected=("eda", "colonoscopy"),
+        )
+        scheduler = self._login_as(client, "scheduler")
+        token = self._claim_lock(case.case_id, scheduler)
+        client.post(f"/scheduler/{case.case_id}/submit/", self._submit_payload(token=token))
+
+        payload = CaseEvent.objects.get(case=case, event_type="APPT_CONFIRMED").payload
+        assert payload["approved_procedures"] == ["eda", "colonoscopy"]
+        assert payload["paired"] is True
+        # Payload sem texto clínico integral.
+        assert not any(isinstance(v, str) and len(v) > 40 for v in payload.values())
+
+    # ── R2/R4: negativa preserva motivo e snapshot no mesmo evento ──
+
+    def test_deny_snapshot_includes_approved_set(self, client) -> None:
+        nir = self._login_as(client, "nir")
+        case = self._make_case(
+            nir,
+            exam_type="eda_colonoscopy",
+            approved=("eda", "colonoscopy"),
+            detected=("eda", "colonoscopy"),
+        )
+        scheduler = self._login_as(client, "scheduler")
+        token = self._claim_lock(case.case_id, scheduler)
+
+        response = client.post(
+            f"/scheduler/{case.case_id}/submit/",
+            self._submit_payload(token=token, decision="deny"),
+        )
+        assert response.status_code == 302
+
+        case = Case.objects.get(pk=case.case_id)
+        assert case.status == CaseStatus.WAIT_R1_CLEANUP_THUMBS
+        assert case.appointment_status == "denied"
+        assert case.appointment_reason == "Sem vaga na agenda."
+        payload = CaseEvent.objects.get(case=case, event_type="APPT_DENIED").payload
+        assert payload["approved_procedures"] == ["eda", "colonoscopy"]
+        assert payload["paired"] is True
+
+    # ── R6: locks inválidos bloqueiam sem escrever nada ─────────────
+
+    def test_invalid_lock_blocks_submit(self, client) -> None:
+        nir = self._login_as(client, "nir")
+        case = self._make_case(
+            nir,
+            exam_type="eda_colonoscopy",
+            approved=("eda", "colonoscopy"),
+            detected=("eda", "colonoscopy"),
+        )
+        scheduler = self._login_as(client, "scheduler")
+        self._claim_lock(case.case_id, scheduler)
+
+        # Sem token: re-renderiza com erro e não transiciona.
+        response = client.post(
+            f"/scheduler/{case.case_id}/submit/",
+            self._submit_payload(token=""),
+        )
+        assert response.status_code == 200
+        assert "Sua reserva para este caso expirou" in response.content.decode()
+        assert Case.objects.get(pk=case.case_id).status == CaseStatus.WAIT_APPT
+
+        # Token inválido (uuid diferente do lock detido): bloqueia.
+        response = client.post(
+            f"/scheduler/{case.case_id}/submit/",
+            self._submit_payload(token=str(uuid.uuid4())),
+        )
+        assert response.status_code == 200
+        assert "Token de lock inválido." in response.content.decode()
+        assert Case.objects.get(pk=case.case_id).status == CaseStatus.WAIT_APPT
+        assert CaseProcedure.objects.filter(case=case, doctor_disposition=DoctorDisposition.APPROVED).count() == 2
+
+
+@pytest.mark.django_db
+class TestSchedulerPairedQueueAndHistory:
+    """Filtros/contadores por autorizado (R5) e regressões de grupos (R6)."""
+
+    def _login_as(self, client, role_name: str) -> Any:
+        username = f"{role_name}@slice004q.{uuid.uuid4().hex[:8]}.test"
+        user = User.objects.create_user(username=username, password="testpass123")
+        user.roles.add(_create_role(role_name))
+        client.force_login(user)
+        session = client.session
+        session["active_role"] = role_name
+        session.save()
+        return user
+
+    def _make_case(self, nir: Any, **kw: Any) -> Case:
+        from apps.cases.models import DetectionStatus
+
+        kw.setdefault("status", CaseStatus.WAIT_APPT)
+        kw.setdefault("doctor_admission_flow", "scheduled")
+        kw.setdefault(
+            "structured_data",
+            {"patient": {"name": f"Paciente {kw.get('exam_type', 'eda')}", "age": 55, "gender": "F"}},
+        )
+        approved = tuple(kw.pop("approved", ()))
+        detected = tuple(kw.pop("detected", ()))
+        reasons = kw.pop("reasons", {})
+        case = Case.objects.create(created_by=nir, doctor_decision="accept", **kw)
+        proc_types: tuple[str, ...] = (
+            ("eda", "colonoscopy") if case.exam_type == "eda_colonoscopy" else (case.exam_type,)
+        )
+        for pt in proc_types:
+            row = CaseProcedure.objects.create(case=case, procedure_type=pt, declared_by_nir=True)
+            fields: list[str] = []
+            if pt in detected:
+                row.detection_status = DetectionStatus.DETECTED
+                fields.append("detection_status")
+            if pt in approved:
+                row.doctor_disposition = DoctorDisposition.APPROVED
+                row.doctor_reason = reasons.get(pt, "")
+                fields += ["doctor_disposition", "doctor_reason"]
+            if fields:
+                row.save(update_fields=fields)
+        return case
+
+    # ── R5: contagens pendentes por combinado, uma vez por grupo ────
+
+    def test_pending_counts_combined_once_across_three_groups(self, client) -> None:
+        nir = self._login_as(client, "nir")
+        # WAIT_APPT combinado + notice combinado + issue combinado + EDA simples.
+        self._make_case(nir, exam_type="eda_colonoscopy", approved=("eda", "colonoscopy"))
+        notice = self._make_notice(nir, exam_type="eda_colonoscopy", approved=("eda", "colonoscopy"))
+        self._make_issue(nir, exam_type="eda_colonoscopy", approved=("eda", "colonoscopy"))
+        self._make_case(nir, exam_type="eda", approved=("eda",))
+        self._login_as(client, "scheduler")
+
+        content = client.get("/scheduler/").content.decode()
+        # 4 cards no escopo; combinado conta UMA vez por grupo (3 grupos).
+        assert content.count("data-scheduler-queue-card") == 4
+        assert 'data-exam-type-count="all">4<' in content
+        assert 'data-exam-type-count="eda_colonoscopy">3<' in content
+        assert 'data-exam-type-count="eda">1<' in content
+        assert 'data-exam-type-count="colonoscopy">0<' in content
+        # Badge casado presente em cada grupo.
+        assert content.count("Agendamento casado") == 3
+        # ACK de notice combinado continua operacional (R6).
+        assert f"/scheduler/{notice.case_id}/immediate-ack/" in content
+
+    def _make_notice(self, nir: Any, *, exam_type: str, approved: tuple[str, ...]) -> Case:
+        case = Case.objects.create(
+            created_by=nir,
+            status=CaseStatus.WAIT_R1_CLEANUP_THUMBS,
+            exam_type=exam_type,
+            doctor_decision="accept",
+            doctor_admission_flow="immediate",
+            structured_data={"patient": {"name": f"Notice {exam_type}", "age": 60, "gender": "F"}},
+        )
+        CaseEvent.objects.create(
+            case=case,
+            actor_type="human",
+            actor=nir,
+            event_type="IMMEDIATE_ADMISSION_OPERATIONAL_NOTICE",
+            timestamp=timezone.now(),
+        )
+        for pt in ("eda", "colonoscopy") if exam_type == "eda_colonoscopy" else (exam_type,):
+            CaseProcedure.objects.create(
+                case=case,
+                procedure_type=pt,
+                declared_by_nir=True,
+                doctor_disposition=DoctorDisposition.APPROVED if pt in approved else "pending",
+            )
+        return case
+
+    def _make_issue(self, nir: Any, *, exam_type: str, approved: tuple[str, ...]) -> Case:
+        case = Case.objects.create(
+            created_by=nir,
+            status=CaseStatus.WAIT_R1_CLEANUP_THUMBS,
+            exam_type=exam_type,
+            doctor_decision="accept",
+            doctor_admission_flow="scheduled",
+            post_schedule_issue_status="opened",
+            post_acceptance_issue_context="operational_notice",
+            structured_data={"patient": {"name": f"Issue {exam_type}", "age": 50, "gender": "M"}},
+        )
+        for pt in ("eda", "colonoscopy") if exam_type == "eda_colonoscopy" else (exam_type,):
+            CaseProcedure.objects.create(
+                case=case,
+                procedure_type=pt,
+                declared_by_nir=True,
+                doctor_disposition=DoctorDisposition.APPROVED if pt in approved else "pending",
+            )
+        return case
+
+    # ── R5: Processados Hoje e Histórico por combinado ──────────────
+
+    def test_processed_and_historical_show_combined(self, client) -> None:
+        scheduler = self._login_as(client, "scheduler")
+        nir = User.objects.create_user(username=f"nir-slice004p.{uuid.uuid4().hex[:8]}.test")
+        nir.roles.add(_create_role("nir"))
+        self._make_case(
+            nir,
+            status=CaseStatus.WAIT_R1_CLEANUP_THUMBS,
+            exam_type="eda_colonoscopy",
+            approved=("eda", "colonoscopy"),
+            detected=("eda", "colonoscopy"),
+            scheduler=scheduler,
+            appointment_status="confirmed",
+            appointment_decided_at=timezone.now(),
+        )
+        # Processados Hoje: badge casado + dimensão autorizada no card.
+        content = client.get("/scheduler/?tab=processed").content.decode()
+        assert "EDA + Colonoscopia · Agendamento casado" in content
+        assert 'data-approved-selection="eda_colonoscopy"' in content
+        assert 'data-exam-type-count="eda_colonoscopy">1<' in content
+        # Histórico: filtro combinado (server-side) retorna o caso.
+        content = client.get("/scheduler/historical/?exam_type=eda_colonoscopy").content.decode()
+        assert "EDA + Colonoscopia" in content
+
+    # ── R5: histórico combinado sem termo, top 50 e ordem ───────────
+
+    def test_historical_combined_without_term_limits_50(self, client) -> None:
+        nir = self._login_as(client, "nir")
+        cases: list[Case] = []
+        now = timezone.now()
+        for i in range(55):
+            cases.append(
+                self._make_case(
+                    nir,
+                    status=CaseStatus.CLEANED,
+                    exam_type="eda_colonoscopy",
+                    approved=("eda", "colonoscopy"),
+                    detected=("eda", "colonoscopy"),
+                    appointment_status="confirmed",
+                    agency_record_number=f"HC-{i:03d}",
+                    structured_data={"patient": {"name": f"Paciente {i:03d}", "age": 50, "gender": "F"}},
+                )
+            )
+        # created_at explícito para ordem determinística (auto_now_add).
+        for i, case in enumerate(cases):
+            Case.objects.filter(pk=case.pk).update(created_at=now - timedelta(minutes=55 - i))
+        self._login_as(client, "scheduler")
+
+        content = client.get("/scheduler/historical/?exam_type=eda_colonoscopy").content.decode()
+        assert "50 casos" in content
+        assert "HC-054" in content  # mais recente incluído
+        assert "HC-004" not in content  # mais antigo além do top 50
+
+    # ── R6: notice combinado não duplica e ACK persiste ─────────────
+
+    def test_notice_ack_no_duplication_for_combined(self, client) -> None:
+        nir = self._login_as(client, "nir")
+        case = self._make_notice(nir, exam_type="eda_colonoscopy", approved=("eda", "colonoscopy"))
+        self._login_as(client, "scheduler")
+
+        # Combinado aparece UMA vez na fila (dois componentes não duplicam).
+        content = client.get("/scheduler/").content.decode()
+        assert content.count("data-scheduler-queue-card") == 1
+        # ACK continua operando e remove o card.
+        response = client.post(f"/scheduler/{case.case_id}/immediate-ack/")
+        assert response.status_code == 302
+        content = client.get("/scheduler/").content.decode()
+        assert "data-scheduler-queue-card" not in content
+        # Ciência registrada UMA vez no histórico de hoje.
+        content = client.get("/scheduler/?tab=processed").content.decode()
+        assert content.count("Ciência confirmada") == 1
+
+
+class TestSchedulerPairedStatic:
+    """Inspeção estática do filtro/opções Combinado (R5) — sem runner JS."""
+
+    def _read(self, path: Path) -> str:
+        return path.read_text(encoding="utf-8")
+
+    def test_queue_html_offers_combined_option(self) -> None:
+        html = self._read(QUEUE_HTML)
+        assert 'value="eda_colonoscopy"' in html
+        assert "Combinado" in html
+
+    def test_queue_cards_expose_approved_selection(self) -> None:
+        html = self._read(QUEUE_CONTENT_HTML)
+        assert 'data-approved-selection="{{ c.approved_selection_key }}"' in html
+        # Badge casado textual renderizado via approved_label + paired_label.
+        assert "paired_label" in html
+        assert "transformation_approved" in html
+
+    def test_historical_html_offers_combined_and_keeps_legacy_label(self) -> None:
+        html = self._read(HISTORICAL_HTML)
+        assert 'value="eda_colonoscopy"' in html
+        # Regressão: teste estático existente exige a string exam_type_label.
+        assert "exam_type_label" in html
+
+    def test_confirm_html_shows_approved_and_reasons(self) -> None:
+        html = self._read(CONFIRM_HTML)
+        assert "paired_label" in html
+        assert "approved_label" in html
+        assert "procedure_reasons" in html
+
+    def test_js_handles_combined_selection(self) -> None:
+        js = self._read(QUEUE_FILTER_JS)
+        assert "eda_colonoscopy" in js
+        assert "data-approved-selection" in js
+        assert "EDA + Colonoscopia" in js

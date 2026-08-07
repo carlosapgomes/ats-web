@@ -29,7 +29,7 @@ A ADR-0004 deve ser commitada, enviada e aprovada explicitamente antes de entreg
 - [x] Slice 001 — NIR cria e acompanha um único caso combinado (`slices/slice-001-combined-intake-procedure-projection.md`)
 - [x] Slice 002 — Pipeline neutro analisa um ou dois procedimentos e entrega ao médico (`slices/slice-002-procedure-neutral-pipeline.md`)
 - [x] Slice 003 — Médico decide cada procedimento com justificativa e histórico próprio (`slices/slice-003-per-procedure-doctor-decision.md`)
-- [ ] Slice 004 — CHD recebe conjunto autorizado e faz um agendamento casado (`slices/slice-004-paired-scheduler-appointment.md`)
+- [x] Slice 004 — CHD recebe conjunto autorizado e faz um agendamento casado (`slices/slice-004-paired-scheduler-appointment.md`)
 - [ ] Slice 005 — NIR corrige, filtra e recebe resposta comparativa (`slices/slice-005-nir-correction-and-final-response.md`)
 - [ ] Slice 006 — Gestor acompanha casos, procedimentos e conversões (`slices/slice-006-procedure-dimension-analytics.md`)
 - [ ] Slice 007 — Cutover remove fonte única e prompts específicos legados (`slices/slice-007-authoritative-procedure-cutover.md`)
@@ -66,8 +66,8 @@ A ADR-0004 deve ser commitada, enviada e aprovada explicitamente antes de entreg
 
 ### CHD e NIR
 
-- [ ] CHD vê apenas conjunto autorizado e alterações explícitas.
-- [ ] Combinado usa um único `appointment_at`; split é impossível no fluxo normal.
+- [x] CHD vê apenas conjunto autorizado e alterações explícitas.
+- [x] Combinado usa um único `appointment_at`; split é impossível no fluxo normal.
 - [ ] Filtros CHD usam autorizado; filtros médicos usam detectado; filtros NIR usam declarado.
 - [ ] Correção NIR reprocessa o mesmo caso sem reextrair PDF e sem race.
 - [ ] Resposta final mostra solicitado, detectado, autorizado e razões.
