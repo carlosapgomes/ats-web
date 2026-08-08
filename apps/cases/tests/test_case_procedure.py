@@ -306,3 +306,32 @@ class TestDeclaredProjectionService:
         assert format_procedure_selection(["eda"]) == "EDA"
         assert format_procedure_selection(["colonoscopy"]) == "Colonoscopia"
         assert format_procedure_selection(["colonoscopy", "eda"]) == "EDA + Colonoscopia"
+
+    def test_strict_mode_disables_bridge_fallback_for_unmigrated_callers(self, user, case_factory) -> None:
+        """Contrato do modo estrito (Slice 008 review fix F1).
+
+        O fallback da ponte permanece o DEFAULT (consumidores ainda não
+        migrados até os Slices 009–010 continuam verdes). O modo estrito
+        (``fallback_to_bridge=False``) devolve conjunto vazio para caso sem
+        rows e NÃO chega à ponte — nem direto, nem via getter declarado no
+        aprovado.
+        """
+        from apps.cases.procedures import (
+            get_approved_procedure_types,
+            get_declared_procedure_types,
+            get_detected_procedure_types,
+        )
+
+        case = case_factory(user)  # exam_type=EDA, sem rows
+        # DEFAULT: fallback da ponte preservado (compatibilidade).
+        assert get_declared_procedure_types(case) == ("eda",)
+        assert get_detected_procedure_types(case) == ("eda",)
+        # Estrito: sem rows ⇒ conjunto vazio, sem ler a ponte.
+        assert get_declared_procedure_types(case, fallback_to_bridge=False) == ()
+        assert get_detected_procedure_types(case, fallback_to_bridge=False) == ()
+        assert get_approved_procedure_types(case, fallback_to_bridge=False) == ()
+        # Aprovado estrito tampouco chega à ponte via indireção do declarado,
+        # mesmo com doctor_decision=accept.
+        case.doctor_decision = "accept"
+        case.save(update_fields=["doctor_decision"])
+        assert get_approved_procedure_types(case, fallback_to_bridge=False) == ()

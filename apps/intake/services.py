@@ -262,7 +262,7 @@ def correct_case_exam_type(
         # nunca a ponte Case.exam_type. Conjuntos iguais (mesmo com a coluna
         # divergente das rows) não produzem correção.
         new_procedures = list(_procedure_types_for_selection(validated_exam_type))
-        old_procedures = list(get_declared_procedure_types(case))
+        old_procedures = list(get_declared_procedure_types(case, fallback_to_bridge=False))
         if set(new_procedures) == set(old_procedures):
             raise ValueError("O novo conjunto de procedimentos deve ser diferente do declarado.")
         _assert_receipt_lease(case=case, user=user, token=lock_token)

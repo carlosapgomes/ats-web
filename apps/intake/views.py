@@ -84,11 +84,16 @@ def _declared_badge(case: Case) -> dict[str, str]:
     Templates NUNCA consultam rows ou o campo legado: recebem o label
     textual (R6) e a chave de CSS derivados do conjunto declarado.
     """
-    types = get_declared_procedure_types(case)
-    return {
-        "declared_label": format_procedure_selection(types),
-        "declared_type_key": selection_key(types),
-    }
+    types = get_declared_procedure_types(case, fallback_to_bridge=False)
+    if types:
+        return {
+            "declared_label": format_procedure_selection(types),
+            "declared_type_key": selection_key(types),
+        }
+    # Apresentação fail-closed (Slice 008 review fix F3): caso sem rows
+    # declaradas recebe label neutro/chave vazia — nunca default EDA/
+    # Colonoscopia/combinado da ponte.
+    return {"declared_label": "—", "declared_type_key": ""}
 
 
 # Dimensões aceitas nos filtros NIR (R5/D13): Todos + EDA/Colonoscopia/Combinado,
@@ -156,9 +161,9 @@ def _procedure_comparison(case: Case) -> dict[str, object]:
     caso segue para ``WAIT_DOCTOR``. ``added_by_doctor`` = aprovado sem ter
     sido detectado (inclusão médica, razão própria exigida — D9).
     """
-    declared = get_declared_procedure_types(case)
-    detected = get_detected_procedure_types(case)
-    approved = get_approved_procedure_types(case)
+    declared = get_declared_procedure_types(case, fallback_to_bridge=False)
+    detected = get_detected_procedure_types(case, fallback_to_bridge=False)
+    approved = get_approved_procedure_types(case, fallback_to_bridge=False)
 
     rows_by_type = {p.procedure_type: p for p in case.procedures.all()}
     per_procedure: list[dict[str, object]] = []
@@ -1367,7 +1372,7 @@ def exam_type_correction(request: HttpRequest, case_id: uuid.UUID) -> HttpRespon
 
     messages.success(
         request,
-        f"Tipo de exame corrigido para {format_procedure_selection(get_declared_procedure_types(case))}. "
+        f"Tipo de exame corrigido para {format_procedure_selection(get_declared_procedure_types(case, fallback_to_bridge=False))}. "
         "Caso em reprocessamento.",
     )
     return redirect("intake:case_detail", case_id=case.case_id)

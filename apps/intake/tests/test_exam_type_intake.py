@@ -251,11 +251,17 @@ class TestAuditViaUpload:
 @pytest.mark.django_db
 class TestBadges:
     def _make_case(self, user, exam_type: str, record: str) -> Case:
-        return Case.objects.create(
+        # Slice 008 review fix F4: fixture NIR explícita — rows declaradas
+        # autorizam o badge (intake em modo estrito, sem fallback da ponte).
+        case = Case.objects.create(
             created_by=user,
             exam_type=exam_type,
             agency_record_number=record,
         )
+        for procedure_type in (ExamType.EDA, ExamType.COLONOSCOPY):
+            if exam_type == procedure_type or exam_type == "eda_colonoscopy":
+                CaseProcedure.objects.create(case=case, procedure_type=procedure_type, declared_by_nir=True)
+        return case
 
     def test_badge_on_intake_home_recent_cases(self, client) -> None:
         client, nir_user = _nir_client(client)

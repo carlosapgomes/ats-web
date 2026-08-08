@@ -261,13 +261,18 @@ def record_doctor_procedure_decisions(
 # ── Leitura para consumo (templates NIR recebem label projetado na view) ──
 
 
-def get_declared_procedure_types(case: Case) -> tuple[str, ...]:
+def get_declared_procedure_types(case: Case, *, fallback_to_bridge: bool = True) -> tuple[str, ...]:
     """Conjunto declarado ordenado a partir da projeção.
 
     Fallback explícito da ponte transitória: casos criados antes da projeção
     (fixtures/legado) ou combinados históricos sem rows refletem
     ``Case.exam_type`` — mantém cada slice verde até o cutover. A UI NUNCA
     consulta a ponte diretamente: a view projeta este resultado no contexto.
+
+    ``fallback_to_bridge=False`` (modo estrito, Slice 008) desabilita o
+    fallback: um caso sem rows declaradas devolve ``()``. Consumidores já
+    migrados (fluxo NIR) devem passá-lo explicitamente; os demais preservam
+    o default até os Slices 009–010.
     """
     declared = sorted(
         (p.procedure_type for p in case.procedures.all() if p.declared_by_nir),
@@ -275,6 +280,8 @@ def get_declared_procedure_types(case: Case) -> tuple[str, ...]:
     )
     if declared:
         return tuple(declared)
+    if not fallback_to_bridge:
+        return ()
     if case.exam_type == EDA_COLONOSCOPY:
         return (ProcedureType.EDA, ProcedureType.COLONOSCOPY)
     if case.exam_type in _DECLARED_SINGLE_TYPES:
@@ -282,11 +289,13 @@ def get_declared_procedure_types(case: Case) -> tuple[str, ...]:
     return ()
 
 
-def get_detected_procedure_types(case: Case) -> tuple[str, ...]:
+def get_detected_procedure_types(case: Case, *, fallback_to_bridge: bool = True) -> tuple[str, ...]:
     """Conjunto detectado ordenado (dimensão da fila médica Pendentes).
 
     Fallback explícito da ponte transitória: casos sem rows (legado/fixtures)
     refletem ``Case.exam_type`` — mantém a fila médica verde até o cutover.
+    ``fallback_to_bridge=False`` (modo estrito, Slice 008) devolve ``()`` para
+    caso sem rows detectadas.
     """
     detected = sorted(
         (p.procedure_type for p in case.procedures.all() if p.detection_status == DetectionStatus.DETECTED),
@@ -294,6 +303,8 @@ def get_detected_procedure_types(case: Case) -> tuple[str, ...]:
     )
     if detected:
         return tuple(detected)
+    if not fallback_to_bridge:
+        return ()
     if case.exam_type == EDA_COLONOSCOPY:
         return (ProcedureType.EDA, ProcedureType.COLONOSCOPY)
     if case.exam_type in _DECLARED_SINGLE_TYPES:
@@ -301,12 +312,14 @@ def get_detected_procedure_types(case: Case) -> tuple[str, ...]:
     return ()
 
 
-def get_approved_procedure_types(case: Case) -> tuple[str, ...]:
+def get_approved_procedure_types(case: Case, *, fallback_to_bridge: bool = True) -> tuple[str, ...]:
     """Conjunto autorizado pelo médico, ordenado (dimensão do CHD/Decididos Hoje).
 
     Fonte autoritativa é a row ``CaseProcedure.doctor_disposition=approved``;
     fallback da ponte para casos legados aceitos sem rows
-    (``doctor_decision=accept``) preserva a fila até o cutover.
+    (``doctor_decision=accept``) preserva a fila até o cutover. Em modo estrito
+    (``fallback_to_bridge=False``, Slice 008) NÃO chega à ponte — nem direto,
+    nem via ``get_declared_procedure_types``.
     """
     approved = sorted(
         (p.procedure_type for p in case.procedures.all() if p.doctor_disposition == DoctorDisposition.APPROVED),
@@ -314,6 +327,8 @@ def get_approved_procedure_types(case: Case) -> tuple[str, ...]:
     )
     if approved:
         return tuple(approved)
+    if not fallback_to_bridge:
+        return ()
     if case.doctor_decision == "accept":
         return get_declared_procedure_types(case)
     return ()

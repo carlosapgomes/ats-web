@@ -267,3 +267,94 @@ class TestDeclaredFilterIsRowAuthoritative:
 
         response = client.get(reverse("intake:my_cases") + "?exam_type=eda")
         assert str(eda_only.case_id) in response.content.decode()
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# Correção pós-revisão — modo estrito: intake não lê a ponte transitivamente
+# ═══════════════════════════════════════════════════════════════════════════
+
+
+class TestStrictModeNoTransitiveBridge:
+    """Os getters compartilhados têm fallback da ponte por padrão (Slices 009–010
+    ainda não migraram). O fluxo NIR (correção, badge, comparação) deve solicitar
+    explicitamente o modo SEM fallback — caso contrário um caso sem rows ainda
+    recebe default EDA/Colonoscopia/combinado da ponte (review fix F1–F3)."""
+
+    def test_correction_without_rows_creates_row_not_rejects_as_equal(self, django_user_model, monkeypatch) -> None:
+        """F2: caso elegível SEM rows + ponte eda + seleção EDA → conjunto antigo
+        real é vazio; a correção CRIA a row (não rejeita como 'conjunto igual').
+
+        Antes do fix, ``get_declared_procedure_types`` com fallback devolvia
+        ``(eda,)`` da ponte e a igualdade ``{eda} == {eda}`` rejeitava a correção.
+        """
+        pipeline_calls: list[object] = []
+        monkeypatch.setattr(
+            "apps.pipeline.tasks.enqueue_pipeline",
+            lambda case_id: pipeline_calls.append(case_id),
+        )
+        user = _nir_user(django_user_model, "nir-corr-norow@test.com")
+        case = _make_eligible_case(user=user, exam_type=ExamType.EDA)  # sem rows
+        original_id = case.case_id
+
+        result = _correct(case=case, user=user, new_exam_type=ExamType.EDA)
+
+        assert result.case_id == original_id
+        assert result.status == CaseStatus.LLM_STRUCT
+        # Row declarada criada a partir do conjunto vazio.
+        assert CaseProcedure.objects.filter(
+            case=result, procedure_type=ProcedureType.EDA, declared_by_nir=True
+        ).exists()
+        event = CaseEvent.objects.get(case=case, event_type="CASE_PROCEDURE_DECLARATION_CORRECTED")
+        assert event.payload["old_procedures"] == []
+        assert event.payload["new_procedures"] == [ProcedureType.EDA]
+        assert "old_exam_type" not in event.payload
+        assert "new_exam_type" not in event.payload
+        assert pipeline_calls == [case.case_id]
+
+    def test_declared_badge_neutral_without_rows(self, django_user_model) -> None:
+        """F3: badge declarado de caso sem rows é neutro (label '—', chave vazia).
+
+        Antes do fix, o fallback da ponte devolvia ``EDA`` mesmo sem rows.
+        """
+        from apps.intake.views import _declared_badge
+
+        user = _nir_user(django_user_model, "nir-badge-unit@test.com")
+        case = Case.objects.create(created_by=user, exam_type=ExamType.EDA, status=CaseStatus.NEW)
+        assert _declared_badge(case) == {"declared_label": "—", "declared_type_key": ""}
+
+    def test_procedure_comparison_neutral_without_rows_no_approved_fallback(self, django_user_model) -> None:
+        """F3: comparação NIR de caso sem rows não inventa declarado/detectado/
+        autorizado da ponte, mesmo quando ``doctor_decision=accept`` sugeriria
+        aceite legado (fallback proibido no modo estrito)."""
+        from apps.intake.views import _procedure_comparison
+
+        user = _nir_user(django_user_model, "nir-cmp-unit@test.com")
+        case = Case.objects.create(
+            created_by=user,
+            exam_type=ExamType.EDA,
+            status=CaseStatus.WAIT_R1_CLEANUP_THUMBS,
+            doctor_decision="accept",  # legado: sugeriria approved via ponte
+        )
+        comparison = _procedure_comparison(case)
+        assert comparison["declared_label"] == "—"
+        assert comparison["detected_label"] == "—"
+        assert comparison["authorized_label"] == ""
+        assert comparison["has_detection"] is False
+        assert comparison["has_decision"] is False
+        assert comparison["per_procedure"] == []
+
+    def test_my_cases_badge_neutral_for_case_without_rows(self, client) -> None:
+        """F3: caso sem rows na listagem 'all' é visível mas sem badge EDA da ponte."""
+        client, user = _nir_client(client, "nir-badge-list-fc@test.com")
+        case = Case.objects.create(
+            created_by=user,
+            exam_type=ExamType.EDA,
+            status=CaseStatus.NEW,
+            agency_record_number="NO-ROW-LIST",
+        )
+        response = client.get(reverse("intake:my_cases"))
+        content = response.content.decode()
+        assert str(case.case_id) in content  # visível em "Todos"
+        # "exam-type-eda" só aparece como classe CSS do badge; o <select> usa
+        # value="eda". fail-closed: sem default EDA da ponte.
+        assert "exam-type-eda" not in content
