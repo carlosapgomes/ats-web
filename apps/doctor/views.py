@@ -216,15 +216,16 @@ def _build_case_card(
 ) -> dict[str, Any]:
     """Build a dict with all display data for a case card.
 
-    Slice 009 (R1): nenhuma leitura da ponte ``Case.exam_type``. As dimensões
-    vêm exclusivamente das rows (modo estrito). O campo ``exam_type`` do card
-    recebe a ``selection_key`` projetada da dimensão principal do card
-    (Pendentes = detectado; Decididos = autorizado) — semântica documentada; o
-    JS prioriza ``data-proc-selection`` e usa este campo só como compat.
+    Slice 009-A (R1): nenhuma leitura da ponte ``Case.exam_type``. As três
+    dimensões vêm exclusivamente das rows em modo estrito
+    (``fallback_to_bridge=False``). O campo ``exam_type`` do card recebe a
+    ``selection_key`` projetada da dimensão principal do card (Pendentes =
+    detectado; Decididos = autorizado) — semântica documentada; o JS prioriza
+    ``data-proc-selection`` e usa este campo só como compat legada.
     """
-    detected_types = get_detected_procedure_types(case)
-    approved_types = get_approved_procedure_types(case)
-    declared_types = get_declared_procedure_types(case)
+    detected_types = get_detected_procedure_types(case, fallback_to_bridge=False)
+    approved_types = get_approved_procedure_types(case, fallback_to_bridge=False)
+    declared_types = get_declared_procedure_types(case, fallback_to_bridge=False)
     if primary_types is None:
         primary_types = detected_types
     primary_label = format_procedure_selection(primary_types) if primary_types else ""
@@ -248,7 +249,8 @@ def _build_case_card(
         "is_urgent": wait_minutes <= 15,
         "regulation_days_on_screen": case.regulation_days_on_screen,
         # Dimensão principal projetada (R1): ``exam_type``/``exam_type_label``
-        # recebem a selection_key/label da dimensão do card — nunca a ponte direta.
+        # recebem a selection_key/label da dimensão do card (strict) — nunca a
+        # ponte direta. Caso sem rows ⇒ ``""``/``"none"``.
         "exam_type": selection_key(primary_types),
         "exam_type_label": primary_label,
         # Dimensões projetadas (R7): Pendentes filtra pelo detectado;
@@ -317,7 +319,7 @@ def _doctor_queue_context(request: HttpRequest) -> dict[str, Any]:
                 case,
                 wait_minutes,
                 user=doctor_user,
-                primary_types=get_detected_procedure_types(case),
+                primary_types=get_detected_procedure_types(case, fallback_to_bridge=False),
             )
         )
 
@@ -344,7 +346,7 @@ def _doctor_queue_context(request: HttpRequest) -> dict[str, Any]:
             _build_case_card(
                 case,
                 0,
-                primary_types=get_approved_procedure_types(case),
+                primary_types=get_approved_procedure_types(case, fallback_to_bridge=False),
             )
         )
 
@@ -605,6 +607,12 @@ def _build_decision_context(case: Case, form: DoctorDecisionForm, request: HttpR
         if str(prior_context.prior_case.prior_case_id) == str(correction_context["original_case_id"]):
             hide_prior_case_card = True
 
+    # ── Slice 009-A (R2): tipo projetado da dimensão detectada (strict). ──
+    # ``exam_type``/``exam_type_label`` recebem a chave/label projetadas a
+    # partir das rows detectadas — nunca a ponte ``Case.exam_type``. Ausência
+    # de rows é neutra (classe segura ``none``), nunca default EDA/Colonoscopia.
+    detected_types = get_detected_procedure_types(case, fallback_to_bridge=False)
+
     return {
         "case": case,
         "form": form,
@@ -632,6 +640,9 @@ def _build_decision_context(case: Case, form: DoctorDecisionForm, request: HttpR
         "communication_post_url": reverse("intake:post_case_communication", args=[case.case_id]),
         "communication_next_url": ((request.get_full_path() + "#case-communication") if request is not None else "#"),
         "communication_max_length": CASE_COMMUNICATION_MAX_LENGTH,
+        # ── Slice 009-A (R2): badge projetado da dimensão detectada (strict).
+        "exam_type": selection_key(detected_types),
+        "exam_type_label": format_procedure_selection(detected_types) if detected_types else "Não identificado",
     }
 
 

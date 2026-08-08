@@ -12,9 +12,11 @@ REDs 12–16 do slice:
 
 from __future__ import annotations
 
+import copy
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
+from unittest.mock import patch
 
 import pytest
 from django.contrib.auth import get_user_model
@@ -518,12 +520,13 @@ class TestLegacyReportDerivesTypeFromPayload:
             created_by=user,
             agency_record_number="AR-R2A",
             status=CaseStatus.WAIT_DOCTOR,
-            exam_type="colonoscopy",
+            # Ponte oposta ao payload: o tipo 1.1 deve vir do preop_screening.
+            exam_type="eda",
             structured_data=self._legacy_structured(exam_type="colonoscopy"),
         )
         prepared = prepare_doctor_case_report(current)
         report = prepared.presenter.build_report()
-        # Tipo derivado do payload, não default EDA.
+        # Tipo derivado do payload, vencendo a ponte oposta — nunca default EDA.
         assert report["context"]["procedure"] == "procedimento solicitado: Colonoscopia"
 
     def test_single_declared_row_derives_type_when_payload_absent(self, django_user_model) -> None:
@@ -532,7 +535,8 @@ class TestLegacyReportDerivesTypeFromPayload:
             created_by=user,
             agency_record_number="AR-R2B",
             status=CaseStatus.WAIT_DOCTOR,
-            exam_type="colonoscopy",
+            # Ponte oposta à row declarada: o tipo 1.1 deve vir da row única.
+            exam_type="eda",
             structured_data=self._legacy_structured(exam_type=None),
         )
         CaseProcedure.objects.create(
@@ -561,8 +565,30 @@ class TestLegacyReportDerivesTypeFromPayload:
         assert "EDA" not in procedure_line
         assert "Colonoscopia" not in procedure_line
 
+    def test_two_declared_rows_without_payload_is_neutral(self, django_user_model) -> None:
+        """Duas rows declaradas (ambíguo) sem payload válido → neutro, nunca EDA."""
+        user = _make_user("nir_r2c2")
+        current = Case.objects.create(
+            created_by=user,
+            agency_record_number="AR-R2C2",
+            status=CaseStatus.WAIT_DOCTOR,
+            exam_type="eda",
+            structured_data=self._legacy_structured(exam_type=None),
+        )
+        for procedure_type in ("eda", "colonoscopy"):
+            CaseProcedure.objects.create(
+                case=current,
+                procedure_type=procedure_type,
+                declared_by_nir=True,
+            )
+        prepared = prepare_doctor_case_report(current)
+        report = prepared.presenter.build_report()
+        procedure_line = report["context"]["procedure"]
+        assert "EDA" not in procedure_line
+        assert "Colonoscopia" not in procedure_line
+
     def test_ambiguous_legacy_does_not_run_prior_lookup(self, django_user_model) -> None:
-        """Tipo ambíguo → nenhum lookup anterior (fail-closed), mesmo com ARN."""
+        """Tipo ambíguo → nenhum lookup anterior (spy fail-closed), mesmo com ARN."""
         user = _make_user("nir_r2d")
         # Caso anterior negado do mesmo ARN (com row EDA negada).
         prior = Case.objects.create(
@@ -585,9 +611,30 @@ class TestLegacyReportDerivesTypeFromPayload:
             exam_type="eda",
             structured_data=self._legacy_structured(exam_type=None),
         )
-        prepared = prepare_doctor_case_report(current)
+        # Spy obrigatório (R3): o lookup anterior NÃO pode ser chamado para ambíguo.
+        with patch("apps.doctor.reporting.lookup_prior_case_context") as spy_lookup:
+            prepared = prepare_doctor_case_report(current)
+            spy_lookup.assert_not_called()
         assert prepared.prior_sections == []
         assert prepared.prior_context is None
+
+    def test_legacy_payload_is_not_rewritten(self, django_user_model) -> None:
+        """Nenhum JSON 1.1 é reescrito: o structured_data permanece idêntico."""
+        user = _make_user("nir_r2f")
+        payload = self._legacy_structured(exam_type="colonoscopy")
+        payload_snapshot = copy.deepcopy(payload)
+        current = Case.objects.create(
+            created_by=user,
+            agency_record_number="AR-R2F",
+            status=CaseStatus.WAIT_DOCTOR,
+            exam_type="colonoscopy",
+            structured_data=copy.deepcopy(payload),
+        )
+        CaseProcedure.objects.create(case=current, procedure_type="colonoscopy", declared_by_nir=True)
+        prepare_doctor_case_report(current)
+        # Rebusca por query (refresh_from_db colide com o campo FSM protegido).
+        reloaded = Case.objects.get(pk=current.pk)
+        assert reloaded.structured_data == payload_snapshot
 
     def test_legacy_case_keeps_single_prior_context_via_payload(self, django_user_model) -> None:
         """Caso 1.1 com tipo derivável mantém o prior context legado (single)."""

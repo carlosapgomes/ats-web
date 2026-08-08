@@ -293,7 +293,11 @@ class TestBadges:
         assert "exam-type-eda" in content
 
     def test_badge_on_doctor_decision(self, client, user, advance_to) -> None:
-        """Badge mínimo no topo/identificação da decisão médica (R4)."""
+        """Badge mínimo no topo/identificação da decisão médica (R4).
+
+        Slice 009-A: o badge médico agora é projetado da dimensão detectada
+        (strict), então a fixture declara a row detectada explicitamente.
+        """
         client, _ = _doctor_client(client)
         case = Case.objects.create(
             created_by=user,
@@ -302,6 +306,12 @@ class TestBadges:
         )
         case = advance_to(case, CaseStatus.WAIT_DOCTOR)
         assert case.status == CaseStatus.WAIT_DOCTOR
+        CaseProcedure.objects.create(
+            case=case,
+            procedure_type=ExamType.COLONOSCOPY,
+            declared_by_nir=True,
+            detection_status="detected",
+        )
 
         response = client.get(reverse("doctor:decision", args=[case.case_id]))
         assert response.status_code == 200

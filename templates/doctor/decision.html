@@ -23,7 +23,7 @@
           <tr><td class="text-muted">Registro</td><td>{{ case.agency_record_number|default:case.case_id|truncatechars:20 }}</td></tr>
           <tr>
             <td class="text-muted">Tipo de exame</td>
-            <td><span class="badge exam-type-badge exam-type-{{ case.exam_type }}">{{ case.get_exam_type_display }}</span></td>
+            <td><span class="badge exam-type-badge exam-type-{{ exam_type|default:"none" }}">{{ exam_type_label }}</span></td>
           </tr>
           <tr><td class="text-muted">Idade</td><td>{% if patient_age %}{{ patient_age }} anos{% else %}—{% endif %}</td></tr>
           <tr><td class="text-muted">Sexo</td><td>{{ patient_gender|default:"—" }}</td></tr>

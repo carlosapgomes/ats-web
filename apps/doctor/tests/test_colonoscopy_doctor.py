@@ -129,6 +129,16 @@ class TestColonoscopyDoctorDecision:
             summary_text="Colonoscopia eletiva.",
             suggested_action={"suggestion": "accept", "support_recommendation": "none"},
         )
+        # Slice 009-A (R4): row detectada explícita autoriza o badge do card
+        # médico em modo estrito (sem fallback da ponte ``Case.exam_type``).
+        from apps.cases.models import CaseProcedure
+
+        CaseProcedure.objects.create(
+            case=case,
+            procedure_type="colonoscopy",
+            declared_by_nir=True,
+            detection_status="detected",
+        )
         case.start_processing(user=user)
         case.save()
         case.start_extraction(user=user)

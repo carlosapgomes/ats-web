@@ -27,7 +27,7 @@ import pytest
 from django.contrib.auth import get_user_model
 from django.utils import timezone
 
-from apps.cases.models import Case, CaseStatus
+from apps.cases.models import Case, CaseProcedure, CaseStatus
 
 User = get_user_model()
 
@@ -35,6 +35,7 @@ REPO_ROOT = Path(__file__).resolve().parents[3]
 QUEUE_HTML = REPO_ROOT / "templates" / "doctor" / "queue.html"
 QUEUE_CONTENT_HTML = REPO_ROOT / "templates" / "doctor" / "_queue_content.html"
 QUEUE_FILTER_JS = REPO_ROOT / "static" / "js" / "doctor_queue_filter.js"
+DECISION_HTML = REPO_ROOT / "templates" / "doctor" / "decision.html"
 
 
 @pytest.mark.django_db
@@ -57,16 +58,29 @@ class TestDoctorQueueExamTypeFilters:
         return user
 
     def _make_pending(self, nir: Any, *, exam_type: str, name: str, record: str) -> Case:
-        return Case.objects.create(
+        # Slice 009-A (R4): rows detectadas explícitas autorizam o badge do
+        # card médico (modo estrito, sem fallback da ponte).
+        case = Case.objects.create(
             created_by=nir,
             status=CaseStatus.WAIT_DOCTOR,
             exam_type=exam_type,
             agency_record_number=record,
             structured_data={"patient": {"name": name, "age": 50, "gender": "F"}},
         )
+        for procedure_type in ("eda", "colonoscopy"):
+            if exam_type == procedure_type or exam_type == "eda_colonoscopy":
+                CaseProcedure.objects.create(
+                    case=case,
+                    procedure_type=procedure_type,
+                    declared_by_nir=True,
+                    detection_status="detected",
+                )
+        return case
 
     def _make_decided(self, doctor: Any, nir: Any, *, exam_type: str, name: str) -> Case:
-        return Case.objects.create(
+        # Slice 009-A (R4): rows aprovadas explícitas autorizam o badge do
+        # card Decididos Hoje (modo estrito, sem fallback da ponte).
+        case = Case.objects.create(
             created_by=nir,
             status=CaseStatus.DOCTOR_ACCEPTED,
             doctor=doctor,
@@ -75,6 +89,16 @@ class TestDoctorQueueExamTypeFilters:
             exam_type=exam_type,
             structured_data={"patient": {"name": name, "age": 60, "gender": "F"}},
         )
+        for procedure_type in ("eda", "colonoscopy"):
+            if exam_type == procedure_type or exam_type == "eda_colonoscopy":
+                CaseProcedure.objects.create(
+                    case=case,
+                    procedure_type=procedure_type,
+                    declared_by_nir=True,
+                    detection_status="detected",
+                    doctor_disposition="approved",
+                )
+        return case
 
     # ── R1 ───────────────────────────────────────────────────────────
 
@@ -211,3 +235,178 @@ class TestDoctorQueueFilterStatic:
         assert "Nenhum caso encontrado para os filtros selecionados." in html
         content_html = self._read(QUEUE_CONTENT_HTML)
         assert 'data-exam-type="{{ c.exam_type }}"' in content_html
+
+
+# ── Slice 009-A (R1): autoridade da projeção nos cards médicos ────────────
+
+
+@pytest.mark.django_db
+class TestDoctorQueueProcedureAuthority:
+    """R1: os cards médicos usam getters estritos (``fallback_to_bridge=False``).
+
+    Um caso sem rows nunca herda EDA/Colonoscopia da ponte ``Case.exam_type``;
+    rows detectadas vencem uma ponte oposta. A ponte permanece escrita
+    internamente, mas não participa do fluxo médico (Pendentes=detected,
+    Decididos=autorizado).
+    """
+
+    def _create_role(self, name: str):
+        from apps.accounts.models import Role
+
+        role, _ = Role.objects.get_or_create(name=name)
+        return role
+
+    def _login_as(self, client, role_name: str) -> Any:
+        user = User.objects.create_user(username=f"{role_name}@auth9a.test", password="testpass123")
+        user.roles.add(self._create_role(role_name))
+        client.force_login(user)
+        session = client.session
+        session["active_role"] = role_name
+        session.save()
+        return user
+
+    def test_pending_without_rows_is_never_colonoscopy(self, client) -> None:
+        """WAIT_DOCTOR sem rows + ponte colonoscopia → projeção none/neutra."""
+        nir = self._login_as(client, "nir")
+        # Caso inválido: ponte diz colonoscopia, mas NENHUMA row existe.
+        Case.objects.create(
+            created_by=nir,
+            status=CaseStatus.WAIT_DOCTOR,
+            exam_type="colonoscopy",
+            agency_record_number="NO-ROWS-PEND",
+            structured_data={"patient": {"name": "Sem Rows Pend", "age": 50, "gender": "F"}},
+        )
+        self._login_as(client, "doctor")
+        response = client.get("/doctor/")
+        assert response.status_code == 200
+        content = response.content.decode()
+        # Projeção detectada vazia/none; a ponte NÃO participa do card.
+        assert 'data-proc-selection="none"' in content
+        assert 'data-exam-type="colonoscopy"' not in content
+        assert ">Colonoscopia</span>" not in content
+
+    def test_decided_without_approved_rows_is_never_eda(self, client) -> None:
+        """Decididos Hoje sem approved rows + ponte eda → none/Nenhum autorizado."""
+        doctor = self._login_as(client, "doctor")
+        nir = User.objects.create_user(username="nir-dec9a@auth9a.test", password="testpass123")
+        nir.roles.add(self._create_role("nir"))
+        # Caso aceito sem rows aprovadas; ponte diz eda.
+        Case.objects.create(
+            created_by=nir,
+            status=CaseStatus.DOCTOR_ACCEPTED,
+            doctor=doctor,
+            doctor_decision="accept",
+            doctor_decided_at=timezone.now(),
+            exam_type="eda",
+            agency_record_number="NO-APPR-DEC",
+            structured_data={"patient": {"name": "Sem Approved", "age": 60, "gender": "F"}},
+        )
+        response = client.get("/doctor/?tab=decided")
+        assert response.status_code == 200
+        content = response.content.decode()
+        assert 'data-proc-selection="none"' in content
+        assert 'data-exam-type="eda"' not in content
+        assert "Nenhum autorizado" in content
+
+    def test_pending_detected_rows_ignore_opposite_bridge(self, client) -> None:
+        """Rows detectadas vencem a ponte oposta no card médico."""
+        nir = self._login_as(client, "nir")
+        case = Case.objects.create(
+            created_by=nir,
+            status=CaseStatus.WAIT_DOCTOR,
+            exam_type="colonoscopy",  # ponte oposta ao detectado
+            agency_record_number="ROWS-OPP-PEND",
+            structured_data={"patient": {"name": "Rows Opp", "age": 50, "gender": "F"}},
+        )
+        CaseProcedure.objects.create(
+            case=case,
+            procedure_type="eda",
+            declared_by_nir=True,
+            detection_status="detected",
+        )
+        self._login_as(client, "doctor")
+        response = client.get("/doctor/")
+        assert response.status_code == 200
+        content = response.content.decode()
+        # Card mostra o detectado (EDA); a ponte colonoscopia é ignorada.
+        assert 'data-proc-selection="eda"' in content
+        assert 'data-exam-type="colonoscopy"' not in content
+        assert ">EDA</span>" in content
+
+
+# ── Slice 009-A (R2): a tela de decisão não lê a coluna ───────────────────
+
+
+class TestDoctorDecisionTemplateNoColumnReader:
+    """R2: ``decision.html`` não acessa ``case.exam_type``/``get_exam_type_display``;
+    o badge consome contexto projetado da dimensão detectada (strict)."""
+
+    def test_decision_html_has_no_case_exam_type_access(self) -> None:
+        html = DECISION_HTML.read_text(encoding="utf-8")
+        assert "case.exam_type" not in html
+        assert "case.get_exam_type_display" not in html
+        # O badge usa as variáveis de contexto projetadas pela view.
+        assert "exam-type-{{ exam_type" in html
+        assert "{{ exam_type_label }}" in html
+
+
+@pytest.mark.django_db
+class TestDoctorDecisionProjectionAuthority:
+    """R2: a view projeta a dimensão detectada em modo estrito; ausência/ambiguidade
+    renderiza label neutro e classe segura, nunca default EDA/Colonoscopia da ponte."""
+
+    def _create_role(self, name: str):
+        from apps.accounts.models import Role
+
+        role, _ = Role.objects.get_or_create(name=name)
+        return role
+
+    def _login_as(self, client, role_name: str) -> Any:
+        user = User.objects.create_user(username=f"{role_name}@dec9a.test", password="testpass123")
+        user.roles.add(self._create_role(role_name))
+        client.force_login(user)
+        session = client.session
+        session["active_role"] = role_name
+        session.save()
+        return user
+
+    def test_decision_page_without_rows_is_neutral_not_bridge(self, client) -> None:
+        """Decisão sem rows + ponte colonoscopia → badge neutro, nunca colonoscopia."""
+        nir = self._login_as(client, "nir")
+        case = Case.objects.create(
+            created_by=nir,
+            status=CaseStatus.WAIT_DOCTOR,
+            exam_type="colonoscopy",  # ponte — não deve participar da decisão
+            agency_record_number="NO-ROWS-DEC",
+            structured_data={"patient": {"name": "Sem Rows Decisão", "age": 50, "gender": "F"}},
+        )
+        self._login_as(client, "doctor")
+        response = client.get(f"/doctor/{case.case_id}/")
+        assert response.status_code == 200
+        content = response.content.decode()
+        # Badge projetado neutro; a ponte colonoscopia nunca aparece.
+        assert "exam-type-colonoscopy" not in content
+        assert "Não identificado" in content
+
+    def test_decision_page_detected_rows_ignore_opposite_bridge(self, client) -> None:
+        """Rows detectadas vencem a ponte oposta na tela de decisão."""
+        nir = self._login_as(client, "nir")
+        case = Case.objects.create(
+            created_by=nir,
+            status=CaseStatus.WAIT_DOCTOR,
+            exam_type="colonoscopy",  # ponte oposta
+            agency_record_number="ROWS-OPP-DEC",
+            structured_data={"patient": {"name": "Rows Opp Dec", "age": 50, "gender": "F"}},
+        )
+        CaseProcedure.objects.create(
+            case=case,
+            procedure_type="eda",
+            declared_by_nir=True,
+            detection_status="detected",
+        )
+        self._login_as(client, "doctor")
+        response = client.get(f"/doctor/{case.case_id}/")
+        assert response.status_code == 200
+        content = response.content.decode()
+        assert "exam-type-eda" in content
+        assert "exam-type-colonoscopy" not in content
