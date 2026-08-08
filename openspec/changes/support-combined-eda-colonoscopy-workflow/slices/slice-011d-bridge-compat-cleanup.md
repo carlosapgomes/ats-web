@@ -1,18 +1,27 @@
-# Slice 011-D: Remoção do compat `fallback_to_bridge` e comentários mortos da ponte
+# Slice 011-D (revisado): Remoção do kwarg `fallback_to_bridge` de todos os call sites
+
+> **REVISÃO após bloqueio legítimo do 011-C original:** o 011-D antigo listava 7 arquivos,
+> mas o inventário real de `fallback_to_bridge` tem **11** arquivos de código
+> (definição em `procedures.py` + 10 call sites — incluindo 4 testes de intake que o
+> desenho antigo omitia). Remover o parâmetro da definição com call sites ainda passando
+> o kwarg quebraria a suite num único passo acima do cap. Este slice revisado remove
+> apenas o **kwarg dos call sites** (10 arquivos) enquanto o parâmetro permanece aceito
+> como no-op — comportamento idêntico, suite verde. O Slice 011-E remove o parâmetro da
+> definição junto com a classe `ExamType`.
 
 ## Handoff com contexto zero
 
-Leia artefatos, ADR-0004 e relatório aprovado do Slice 011-C. Se 011-C não estiver aprovado (coluna `Case.exam_type` ainda existir), PARE como BLOQUEADO.
+Leia artefatos, ADR-0004 e o relatório aprovado do Slice 011-C revisado. Se 011-C não estiver aprovado (coluna `Case.exam_type` ainda existir), PARE como BLOQUEADO.
 
 ### Contexto e fluxo entregue
 
-O Slice 010 rebaixou `fallback_to_bridge` a parâmetro no-op (`del fallback_to_bridge`) para não explodir o cap; o 011-C removeu a coluna, o enum e o dual-write, mas manteve o parâmetro por compatibilidade de call sites. Este slice encerra a última pendência mecânica da ponte: remove o parâmetro dos 3 getters e de todos os call sites (produto e testes), e limpa comentários/docstrings que ainda descrevem a ponte morta.
+O Slice 010 rebaixou `fallback_to_bridge` a parâmetro no-op (`del fallback_to_bridge`) para não explodir o cap; o 011-C removeu a coluna e o dual-write, mas manteve o parâmetro por compatibilidade de call sites. Este slice remove o kwarg morto de todos os call sites (produto e testes) e atualiza comentários que o citam nos arquivos tocados. O parâmetro na definição permanece (aceito, sem efeito) até o 011-E.
 
 ```text
-getters ficam com assinatura limpa: get_*_procedure_types(case)
-→ call sites (NIR/médico/CHD) perdem o kwarg morto
-→ comentários de ponte atualizados nos arquivos tocados
-→ suite verde sem nenhuma referência a fallback_to_bridge
+call sites (NIR/médico/CHD/testes) perdem o kwarg morto
+→ chamadas ficam get_*_procedure_types(case)
+→ comentários/docstrings que citam o kwarg são reescritos nos arquivos tocados
+→ suite verde; única referência restante é a definição em procedures.py (sai no 011-E)
 ```
 
 Slice mecânico, sem mudança de comportamento (o parâmetro já era no-op).
@@ -21,58 +30,61 @@ Slice mecânico, sem mudança de comportamento (o parâmetro já era no-op).
 
 Siga literalmente; qualquer falha = INCOMPLETO (não marque tasks.md, não faça commit, responda com bloqueio + evidência).
 
-1. **Plano antes de editar**: lista de call sites por arquivo (comece pelo inventário do relatório do 011-C).
+1. **Plano antes de editar**: lista de call sites por arquivo (comece pelo inventário do relatório do 011-C revisado; re rode o `rg` abaixo e confira que os call sites são exatamente os 10 arquivos listados).
 2. **Baseline**: registre `BASE_REF=$(git rev-parse HEAD)` e rode `uv run pytest`. Cole exit code e resumo. `failed/error` no baseline = PARE.
-3. **Evidência substitutiva de RED** (slice sem mudança de comportamento): inspeção `rg "fallback_to_bridge"` ANTES (call sites) e DEPOIS (zero ocorrências).
-4. **Edição mínima**: remover parâmetro/kwarg e atualizar comentários de ponte nos arquivos tocados. Nenhuma outra mudança.
+3. **Evidência substitutiva de RED** (slice sem mudança de comportamento): inspeção `rg -n "fallback_to_bridge" apps` ANTES (call sites + definição) e DEPOIS (somente a definição em `apps/cases/procedures.py`).
+4. **Edição mínima**: remover o kwarg `fallback_to_bridge=False` de cada chamada e reescrever comentários/docstrings que o citam **nos arquivos tocados**. Nenhuma outra mudança.
 5. **Inspeções obrigatórias** ao final.
 6. **Quality gate completo**: final exit code 0, zero failures/errors e `passed_final == passed_baseline` (nenhum teste é removido neste slice).
 7. **Relatório** em `/tmp/support-combined-eda-colonoscopy-workflow-slice-011d-report.md`, checkbox somente 011-D, commit/push e PARE.
 
-**Cap: exatamente os 7 arquivos listados.** Qualquer arquivo extra = PARE antes de editar.
+**Cap: exatamente os 10 arquivos listados.** Qualquer arquivo extra (incluindo `apps/cases/procedures.py`) = PARE antes de editar.
 
 ## Requisitos
 
-### R1. Assinatura limpa nos getters
+### R1. Call sites de produto atualizados
 
-Em `apps/cases/procedures.py`: remover o parâmetro `fallback_to_bridge` (e os `del`) de `get_declared_procedure_types`, `get_detected_procedure_types` e `get_approved_procedure_types`. Docstrings finais sem menção à ponte.
+Remover `fallback_to_bridge=False` de todas as chamadas em `apps/doctor/views.py`, `apps/scheduler/views.py`, `apps/intake/views.py` e `apps/intake/services.py`. Docstrings/comentários desses arquivos que citam o kwarg (ex.: `doctor/views.py` L221, `scheduler/views.py` L158) são reescritos para o contrato vigente (rows como fonte única; ausência ⇒ `()`).
 
-### R2. Call sites atualizados
+### R2. Call sites de teste atualizados
 
-Remover `fallback_to_bridge=False` de todos os call sites: `apps/doctor/views.py`, `apps/scheduler/views.py`, `apps/intake/services.py`, `apps/intake/views.py` e testes `apps/cases/tests/test_case_procedure.py` e `apps/doctor/tests/test_queue_exam_type_filters.py`. Comportamento idêntico (o parâmetro era no-op).
+Remover o kwarg das chamadas em `apps/cases/tests/test_case_procedure.py`, `apps/doctor/tests/test_queue_exam_type_filters.py`, `apps/intake/tests/test_exam_type_correction.py`, `apps/intake/tests/test_exam_type_intake.py`, `apps/intake/tests/test_slice_001_correction_projection.py` e `apps/intake/tests/test_slice_005_nir_correction_and_response.py`. Nenhum assert muda de sentido: `get_*_procedure_types(case)` já devolve exatamente o que `fallback_to_bridge=False` devolvia (o parâmetro era no-op).
 
-### R3. Comentários mortos da ponte
+### R3. Definição intacta até o 011-E
 
-Nos 7 arquivos tocados, comentários/docstrings que descrevem a ponte (`Case.exam_type`, dual-write, "modo estrito", Slice 008/010 como exceção) são removidos ou reescritos para o contrato vigente (rows como fonte única). Comentários históricos em arquivos **não** tocados permanecem (classificar no relatório).
+`apps/cases/procedures.py` **não é editado** neste slice: o parâmetro continua aceito como no-op (`del fallback_to_bridge`) para manter a compatibilidade enquanto os call sites migram em commit único. O Slice 011-E remove o parâmetro.
 
 ### R4. Suite e gates idênticos
 
-`passed_final == passed_baseline`, zero failures/errors; ruff/format/mypy verdes; inspeção global sem `fallback_to_bridge`.
+`passed_final == passed_baseline`, zero failures/errors; ruff/format/mypy verdes; inspeção global mostra `fallback_to_bridge` somente na definição (`apps/cases/procedures.py`).
 
-## Arquivos esperados (7)
+## Arquivos esperados (10)
 
-- `apps/cases/procedures.py`
 - `apps/doctor/views.py`
 - `apps/scheduler/views.py`
-- `apps/intake/services.py`
 - `apps/intake/views.py`
+- `apps/intake/services.py`
 - `apps/cases/tests/test_case_procedure.py`
 - `apps/doctor/tests/test_queue_exam_type_filters.py`
+- `apps/intake/tests/test_exam_type_correction.py`
+- `apps/intake/tests/test_exam_type_intake.py`
+- `apps/intake/tests/test_slice_001_correction_projection.py`
+- `apps/intake/tests/test_slice_005_nir_correction_and_response.py`
 
-Proibido: qualquer outro arquivo; mudança de comportamento; novos helpers/parâmetros.
+Proibido: `apps/cases/procedures.py` (definição — 011-E); `apps/cases/models.py` e classe `ExamType` (011-E); qualquer outro arquivo; mudança de comportamento; novos helpers/parâmetros.
 
 ## TDD obrigatório (adaptado — justificativa explícita)
 
-Remoção de parâmetro no-op não altera comportamento: RED clássico não se aplica. Evidência obrigatória:
+Remoção de kwarg no-op não altera comportamento: RED clássico não se aplica. Evidência obrigatória:
 
-1. `rg -n "fallback_to_bridge" apps` ANTES (call sites) e DEPOIS (zero).
+1. `rg -n "fallback_to_bridge" apps` ANTES (call sites nos 10 arquivos + definição) e DEPOIS (somente `apps/cases/procedures.py`).
 2. Baseline/final completos com contagem de `passed` idêntica.
 
 ## Inspeções obrigatórias
 
 ```bash
 rg -n "fallback_to_bridge" apps config templates static
-rg -n "ponte transitória|dual-write|bridge_exam_type" apps/cases/procedures.py apps/doctor/views.py apps/scheduler/views.py apps/intake/services.py apps/intake/views.py
+rg -n "get_(declared|detected|approved)_procedure_types\(" apps --glob '!**/migrations/**' | rg "fallback"   # esperado: vazio
 
 uv run ruff check .
 uv run ruff format --check .
@@ -84,25 +96,25 @@ git diff --name-only "$BASE_REF"
 
 ## Critérios/gates
 
-- [ ] Zero ocorrências de `fallback_to_bridge` no repositório (inspeção colada).
-- [ ] Getters com assinatura limpa e docstrings sem ponte.
+- [ ] Nenhuma chamada passa `fallback_to_bridge` (inspeção colada); única ocorrência restante é a definição em `procedures.py`.
+- [ ] Comentários/docstrings que citavam o kwarg reescritos nos arquivos tocados.
 - [ ] `passed_final == passed_baseline`, zero failures/errors; gates verdes.
-- [ ] `git diff --name-only` = só os 7 arquivos.
+- [ ] `git diff --name-only` = só os 10 arquivos.
 
 ### Condições automáticas de INCOMPLETO
 
-Qualquer edição fora dos 7 arquivos; `fallback_to_bridge` remanescente; mudança de comportamento (contagem de testes diferente ou teste alterado além de remover o kwarg); gate falho; relatório ausente.
+Qualquer edição fora dos 10 arquivos (incl. `procedures.py`); kwarg remanescente em call site; mudança de comportamento (contagem de testes diferente ou assert alterado além de remover o kwarg); gate falho; relatório ausente.
 
 ## Relatório obrigatório
 
-Criar `/tmp/support-combined-eda-colonoscopy-workflow-slice-011d-report.md` com lista de call sites removidos por arquivo, inspeções antes/depois, baseline/final e handoff final do encerramento da ponte para o Slice 012.
+Criar `/tmp/support-combined-eda-colonoscopy-workflow-slice-011d-report.md` com lista de call sites removidos por arquivo (contagem antes/depois), inspeções antes/depois, baseline/final e handoff para o 011-E (definição restante em `procedures.py` + inventário `ExamType`).
 
 ## Prompt pronto
 
 ```text
-Read all artifacts, ADR-0004 and the approved Slice 011-C report. If Slice 011-C is not approved (Case.exam_type still exists), STOP BLOCKED. Implement ONLY Slice 011-D.
+Read all artifacts, ADR-0004 and the approved revised Slice 011-C report. If revised Slice 011-C is not approved (Case.exam_type still exists), STOP BLOCKED. Implement ONLY revised Slice 011-D.
 
-Remove the no-op fallback_to_bridge parameter from get_declared_procedure_types/get_detected_procedure_types/get_approved_procedure_types in apps/cases/procedures.py and drop the kwarg from every call site in apps/doctor/views.py, apps/scheduler/views.py, apps/intake/services.py, apps/intake/views.py, apps/cases/tests/test_case_procedure.py and apps/doctor/tests/test_queue_exam_type_filters.py. Update bridge comments/docstrings in those 7 files only. This is behavior-neutral: passed_final must equal passed_baseline with zero failures/errors.
+Drop the dead fallback_to_bridge=False kwarg from every call site in apps/doctor/views.py, apps/scheduler/views.py, apps/intake/views.py, apps/intake/services.py, apps/cases/tests/test_case_procedure.py, apps/doctor/tests/test_queue_exam_type_filters.py, apps/intake/tests/test_exam_type_correction.py, apps/intake/tests/test_exam_type_intake.py, apps/intake/tests/test_slice_001_correction_projection.py and apps/intake/tests/test_slice_005_nir_correction_and_response.py, and rewrite the comments/docstrings mentioning the kwarg in those files only. Do NOT edit apps/cases/procedures.py (the parameter definition stays until Slice 011-E) and do not touch the ExamType class. This is behavior-neutral: passed_final must equal passed_baseline with zero failures/errors.
 
 Run the rg before/after evidence, full quality gate, create /tmp/support-combined-eda-colonoscopy-workflow-slice-011d-report.md; if complete mark only Slice 011-D, commit, push, reply REPORT_PATH and STOP.
 ```

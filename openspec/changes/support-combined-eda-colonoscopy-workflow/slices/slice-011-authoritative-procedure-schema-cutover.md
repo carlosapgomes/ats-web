@@ -13,9 +13,17 @@
 > - `slices/slice-011c-authoritative-procedure-schema-cutover.md` (cutover físico)
 > - `slices/slice-011d-bridge-compat-cleanup.md`
 >
+> **Segundo bloqueio legítimo (011-C original, BASE_REF `fbb6772`, relatório
+> `/tmp/support-combined-eda-colonoscopy-workflow-slice-011c-report.md`):** remover também a
+> classe `ExamType` exigia 13 arquivos (4 testes de intake a importam como fonte de
+> valores), acima do cap 10. O 011-C foi revisado para cutover físico somente (9 arquivos,
+> classe preservada) e a limpeza simbólica foi redistribuída: o 011-D revisado remove o
+> kwarg `fallback_to_bridge` dos 10 call sites e o novo
+> `slices/slice-011e-bridge-symbol-cleanup.md` remove a classe e o parâmetro (9 arquivos).
+>
 > Este arquivo permanece como evidência histórica do desenho original (R1–R7 foram
-> herdados pelo Slice 011-C com as decisões de contrato registradas lá). Seu prompt pronto
-> não deve ser executado.
+> herdados pelo Slice 011-C revisado com as decisões de contrato registradas lá). Seu
+> prompt pronto não deve ser executado.
 
 ## Handoff com contexto zero
 

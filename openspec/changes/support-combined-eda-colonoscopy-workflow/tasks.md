@@ -42,11 +42,14 @@ A ADR-0004 deve ser commitada, enviada e aprovada explicitamente antes de entreg
 
 > `slices/slice-009-clinical-scheduling-projection-authority.md` e os relatórios dos commits `9caf210`/`4423fe7` permanecem como evidência histórica `INCOMPLETE`; não possuem checkbox de conclusão e seu prompt não deve ser executado.
 
-> **Slice 011 desmembrado após bloqueio correto antes de editar:** a pré-verificação (relatório BLOQUEADO `/tmp/support-combined-eda-colonoscopy-workflow-slice-011-report.md`, BASE_REF `33ed972`) encontrou footprint de 26 arquivos contra cap 10 (18 arquivos de teste ainda gravam a coluna) e 2 readers operacionais residuais (`apps/cases/signals.py` no payload `CASE_CREATED` e `templates/intake/case_detail.html` nos radios de correção, este omitido do desenho original). O cutover monolítico foi substituído por quatro gates com suite verde a cada passo: fixtures sem ponte (A/B), cutover físico (C) e limpeza do compat (D). O arquivo original permanece como evidência histórica e seu prompt não deve ser executado.
+> **Slice 011 desmembrado após bloqueio correto antes de editar:** a pré-verificação (relatório BLOQUEADO `/tmp/support-combined-eda-colonoscopy-workflow-slice-011-report.md`, BASE_REF `33ed972`) encontrou footprint de 26 arquivos contra cap 10 (18 arquivos de teste ainda gravam a coluna) e 2 readers operacionais residuais (`apps/cases/signals.py` no payload `CASE_CREATED` e `templates/intake/case_detail.html` nos radios de correção, este omitido do desenho original). O cutover monolítico foi substituído por gates com suite verde a cada passo: fixtures sem ponte (A/B), cutover físico (C revisado), kwarg removal (D revisado) e encerramento simbólico (E).
+> **Segundo bloqueio legítimo (011-C original, relatório `/tmp/support-combined-eda-colonoscopy-workflow-slice-011c-report.md`, BASE_REF `fbb6772`):** remover também a classe `ExamType` exigia 13 arquivos (4 testes de intake a importam como fonte de valores), acima do cap 10. A atomicidade real é apenas RemoveField ↔ acessos ORM; o 011-C foi revisado para cutover físico somente (9 arquivos, classe preservada) e a limpeza de símbolos foi redistribuída: 011-D remove o kwarg `fallback_to_bridge` dos 10 call sites, 011-E remove a classe e o parâmetro (9 arquivos).
+> O arquivo original do Slice 011 permanece como evidência histórica e seu prompt não deve ser executado.
 - [x] Slice 011-A — Fixtures sem ponte: cases/dashboard/doctor/pipeline (`slices/slice-011a-fixture-bridge-independence-cases-dashboard-doctor-pipeline.md`)
 - [x] Slice 011-B — Fixtures sem ponte: intake/scheduler (`slices/slice-011b-fixture-bridge-independence-intake-scheduler.md`)
-- [ ] Slice 011-C — Cutover físico: migration remove Case.exam_type e encerra a ponte (`slices/slice-011c-authoritative-procedure-schema-cutover.md`)
-- [ ] Slice 011-D — Remoção do compat fallback_to_bridge e comentários mortos (`slices/slice-011d-bridge-compat-cleanup.md`)
+- [ ] Slice 011-C (revisado) — Cutover físico: migration remove Case.exam_type; classe ExamType preservada (`slices/slice-011c-authoritative-procedure-schema-cutover.md`)
+- [ ] Slice 011-D (revisado) — Remoção do kwarg fallback_to_bridge de todos os call sites (`slices/slice-011d-bridge-compat-cleanup.md`)
+- [ ] Slice 011-E — Encerramento simbólico: classe ExamType e parâmetro fallback_to_bridge (`slices/slice-011e-bridge-symbol-cleanup.md`)
 - [ ] Slice 012 — Operação ativa e reverte o fluxo combinado com segurança (`slices/slice-012-rollout-documentation-and-verification.md`)
 
 ## Definition of Done do change
