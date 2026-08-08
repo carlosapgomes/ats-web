@@ -182,8 +182,10 @@ def _approved_snapshot(case: Case) -> dict[str, Any]:
         approved_label = format_procedure_selection(approved_types)
         approved_selection_key = selection_key(approved_types)
     else:
-        # R4: sem approved projetado → fail-closed (não cai na ponte); o caso
-        # permanece na fila (filtro por status), mas não entra em bucket de tipo.
+        # R4: sem approved projetado → fail-closed (não cai na ponte). Após o
+        # Slice 009-B o caso sem row aprovada é EXCLUÍDO de todos os universos
+        # CHD pelo predicado `_with_approved_projection`; este ramo é uma
+        # defesa adicional (label vazio/chave "none"), não "permanece na fila".
         approved_label = ""
         approved_selection_key = "none"
     detected_label = format_procedure_selection(detected_types) if detected_types else "Nenhum"
@@ -247,8 +249,9 @@ def _build_case_card(case: Case, wait_minutes: int, user: Any = None) -> dict[st
         "has_doctor_observation": case.has_doctor_observation,
         "doctor_observation": case.doctor_observation,
         "wait_minutes": wait_minutes,
-        # Tipo de exame declarado no intake (Slice 005) — cards/badges usam
-        # exclusivamente o valor persistido, nunca inferido de texto/JSON.
+        # Dimensão autorizada projetada (R1/D11, Slice 009-B): a chave/label
+        # do card derivam exclusivamente do conjunto aprovado (rows), nunca da
+        # ponte ``Case.exam_type`` nem de texto/JSON.
         "exam_type": approved["approved_selection_key"],
         "exam_type_label": approved["approved_label"],
         # Dimensão autorizada (R1/D11): badge/filtro principal do CHD usam
@@ -457,7 +460,8 @@ def _build_processed_card(case: Case) -> dict[str, Any]:
         "appointment_decided_at": case.appointment_decided_at,
         "appointment_at": case.appointment_at,
         "appointment_reason": case.appointment_reason or "",
-        # Tipo de exame declarado no intake (Slice 005).
+        # Dimensão autorizada projetada (R1/R5, Slice 009-B): chave/label do
+        # card derivam exclusivamente do conjunto aprovado (rows).
         "exam_type": approved["approved_selection_key"],
         "exam_type_label": approved["approved_label"],
         # Dimensão autorizada (R1/R5): Processados Hoje filtra pelo aprovado.
@@ -938,11 +942,12 @@ def scheduler_confirm(request: HttpRequest, case_id: uuid.UUID) -> HttpResponse:
     # Detecta se é intercorrência ativa
     has_psi = case.post_schedule_issue_status == "opened"
 
-    # R2 (Slice 009-B): caso NORMAL de agendamento (sem intercorrência ativa)
-    # sem projeção aprovada é recusado fail-closed ANTES de adquirir lock —
-    # nunca chega ao formulário/CTA. Intercorrência legítima (caso que já
-    # possui projeção aprovada preservada) segue normalmente.
-    if not has_psi and not _has_approved_projection(case):
+    # R2 (Slice 009-B/corretivo): TODO caso de agendamento (fluxo normal OU
+    # intercorrência pós-agendamento) sem projeção aprovada é recusado
+    # fail-closed ANTES de adquirir lock — nunca chega ao formulário/CTA,
+    # direto ou não. Intercorrência legítima (com projeção aprovada
+    # preservada) segue normalmente.
+    if not _has_approved_projection(case):
         raise Http404("Caso sem procedimento autorizado para agendamento.")
 
     # Attempt to claim the lock
@@ -1032,6 +1037,26 @@ def scheduler_submit(request: HttpRequest, case_id: uuid.UUID) -> HttpResponse:
         template = "scheduler/confirm_post_schedule_issue.html" if has_psi else "scheduler/confirm.html"
         return render(request, template, ctx)
 
+    # R2 (Slice 009-B/corretivo): revalidar a projeção aprovada na instância
+    # protegida pelo lock, ANTES de escolher entre o ramo PSI e o fluxo normal
+    # — cobre race/remoção entre GET e POST para AMBOS os caminhos. Sem
+    # aprovação ⇒ fail-closed: libera o lock e redireciona sem efeitos
+    # (nenhuma transição FSM, appointment, resposta de intercorrência ou
+    # evento com ``approved_procedures=[]``).
+    approved_types = get_approved_procedure_types(case, fallback_to_bridge=False)
+    if not approved_types:
+        release_lock_service(
+            case_id=case.case_id,
+            user=request.user,
+            token=token,
+            context="scheduler_confirm",
+        )
+        messages.warning(
+            request,
+            "Este caso não possui procedimento autorizado para agendamento.",
+        )
+        return redirect("scheduler:queue")
+
     if has_psi:
         # ── Fluxo de intercorrência pós-agendamento ──────────────────
         form = PostScheduleIssueForm(request.POST)
@@ -1073,25 +1098,6 @@ def scheduler_submit(request: HttpRequest, case_id: uuid.UUID) -> HttpResponse:
             return render(request, "scheduler/confirm_post_schedule_issue.html", ctx)
     else:
         # ── Fluxo normal de agendamento ──────────────────────────────
-        # R2 (Slice 009-B): revalidar a projeção aprovada na instância
-        # protegida pelo lock, cobrindo remoção/race entre GET e POST. Sem
-        # aprovação ⇒ fail-closed: libera o lock e redireciona sem efeitos
-        # (nenhuma transição FSM, ``appointment_at``, status/timestamp novo
-        # ou evento com ``approved_procedures=[]``).
-        approved_types = get_approved_procedure_types(case, fallback_to_bridge=False)
-        if not approved_types:
-            release_lock_service(
-                case_id=case.case_id,
-                user=request.user,
-                token=token,
-                context="scheduler_confirm",
-            )
-            messages.warning(
-                request,
-                "Este caso não possui procedimento autorizado para agendamento.",
-            )
-            return redirect("scheduler:queue")
-
         form = SchedulerDecisionForm(request.POST)
 
         if not form.is_valid():

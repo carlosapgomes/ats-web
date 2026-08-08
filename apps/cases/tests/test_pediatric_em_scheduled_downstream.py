@@ -19,7 +19,7 @@ from django.urls import reverse
 from django.utils import timezone
 
 from apps.cases.models import Case, CaseEvent, CaseStatus
-from tests.shared_case_fixtures import attach_approved_procedures
+from tests.shared_case_fixtures import attach_procedure_projection
 
 pytestmark = pytest.mark.django_db
 
@@ -234,7 +234,7 @@ class TestSchedulerHistoryIncludesPediatricAppt:
         session["active_role"] = "scheduler"
         session.save()
 
-        attach_approved_procedures(
+        attach_procedure_projection(
             Case.objects.create(
                 created_by=user,
                 status=CaseStatus.CLEANED,
@@ -244,6 +244,8 @@ class TestSchedulerHistoryIncludesPediatricAppt:
                 agency_record_number="HIST-PED-APPT",
                 structured_data={"patient": {"name": "Criança Agendada"}},
             ),
+            declared=("eda",),
+            detected=("eda",),
             approved=("eda",),
         )
 

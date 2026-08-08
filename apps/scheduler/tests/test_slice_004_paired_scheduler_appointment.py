@@ -39,6 +39,7 @@ from apps.cases.models import (
     ProcedureType,
 )
 from apps.scheduler.views import _approved_snapshot
+from tests.shared_case_fixtures import attach_procedure_projection
 
 User = get_user_model()
 
@@ -689,19 +690,14 @@ class TestSchedulerExcludesAndBlocksUnauthorized:
 
     # ── Helpers de fixtures (conjuntos explícitos; sem ler case.exam_type) ──
     def _attach_approved(self, case: Case, approved: tuple[str, ...]) -> Case:
-        """Cria rows aprovadas explícitas no call site.
+        """Delega ao helper compartilhado declarando as três dimensões.
 
-        Helper explícito: recebe o conjunto aprovado; não lê ``case.exam_type``,
-        não infere por status e não usa signal/autouse (R5).
+        Para os cenários de autoridade do CHD o conjunto aprovado coincide com
+        o declarado/detectado (EDA ou combinado), então repassa o mesmo conjunto
+        nas três dimensões de forma explícita — sem ler ``case.exam_type``, sem
+        inferir por status/decisão global (R5/Slice 009-B).
         """
-        for pt in approved:
-            CaseProcedure.objects.create(
-                case=case,
-                procedure_type=pt,
-                declared_by_nir=True,
-                doctor_disposition=DoctorDisposition.APPROVED,
-            )
-        return case
+        return attach_procedure_projection(case, declared=approved, detected=approved, approved=approved)
 
     def _make_wait_appt(self, nir: Any, *, name: str, approved: tuple[str, ...] = (), exam_type: str = "eda") -> Case:
         case = Case.objects.create(
@@ -927,3 +923,73 @@ class TestSchedulerExcludesAndBlocksUnauthorized:
         assert "Combinado Autorizado" in content
         assert "Combinado Sem Aprovado" not in content
         assert 'data-exam-type-count="eda_colonoscopy">1<' in content
+
+    # ── R2 (correção 009-B): intercorrência direta também é fail-closed ──
+    def _make_psi_case(self, nir: Any, *, name: str, approved: tuple[str, ...] = ()) -> Case:
+        """Cria WAIT_APPT com intercorrência scheduled (PSI) aberta.
+
+        Quando ``approved`` é vazio, é uma fixture INVÁLIDA intencional: caso
+        excluído dos universos CHD que ainda assim não pode ser aberto por URL
+        direta (bypass PSI que a correção fecha).
+        """
+        case = Case.objects.create(
+            created_by=nir,
+            status=CaseStatus.WAIT_APPT,
+            exam_type="eda",
+            doctor_decision="accept",
+            doctor_admission_flow="scheduled",
+            appointment_status="confirmed",
+            appointment_at=timezone.now(),
+            post_schedule_issue_status="opened",
+            post_schedule_issue_reason="reschedule_request",
+            post_acceptance_issue_context="scheduled",
+            post_acceptance_issue_cycle_id=uuid.uuid4(),
+            structured_data={"patient": {"name": name, "age": 50, "gender": "F"}},
+        )
+        return self._attach_approved(case, approved)
+
+    def test_psi_confirm_rejects_unauthorized_without_lock(self, client) -> None:
+        """GET de intercorrência sem approved retorna 404 e não adquire lock."""
+        nir = self._login_as(client, "nir")
+        # INVÁLIDA intencional: PSI aberta e ZERO rows aprovadas.
+        case = self._make_psi_case(nir, name="PSI Sem Aprovado", approved=())
+        self._login_as(client, "scheduler")
+        response = client.get(f"/scheduler/{case.case_id}/")
+        assert response.status_code == 404
+        refreshed = Case.objects.get(pk=case.case_id)
+        # Lock NÃO adquirido (fail-closed antes do lock).
+        assert refreshed.locked_by_id is None
+
+    def test_psi_submit_fail_closed_when_approval_removed(self, client) -> None:
+        """POST de intercorrência com aprovação removida falha sem efeitos e libera lock."""
+        nir = self._login_as(client, "nir")
+        case = self._make_psi_case(nir, name="PSI Race", approved=("eda",))
+        original_appt_at = case.appointment_at
+        scheduler = self._login_as(client, "scheduler")
+        token = self._claim_lock(case.case_id, scheduler)
+        # Race: aprovação removida entre GET/claim e POST.
+        CaseProcedure.objects.filter(case=case, doctor_disposition=DoctorDisposition.APPROVED).delete()
+        # Conta somente eventos de domínio (exclui ciclo de vida do lock, que
+        # pode registrar WORK_LOCK_RELEASED ao liberar a reserva).
+        lock_lifecycle = {"WORK_LOCK_CLAIMED", "WORK_LOCK_RELEASED", "WORK_LOCK_RENEWED", "WORK_LOCK_EXPIRED"}
+        domain_before = CaseEvent.objects.filter(case=case).exclude(event_type__in=lock_lifecycle).count()
+
+        response = client.post(
+            f"/scheduler/{case.case_id}/submit/",
+            {"psi_action": "maintain", "psi_response_message": "Mantido.", "lock_token": token},
+        )
+        assert response.status_code == 302  # redirect seguro p/ fila
+
+        refreshed = Case.objects.get(pk=case.case_id)
+        # Nenhuma transição FSM.
+        assert refreshed.status == CaseStatus.WAIT_APPT
+        # Estado da intercorrência inalterado (continua "opened", sem resposta).
+        assert refreshed.post_schedule_issue_status == "opened"
+        assert refreshed.post_schedule_issue_response_action in (None, "")
+        # Appointment inalterado.
+        assert refreshed.appointment_at == original_appt_at
+        # Nenhum evento novo de domínio (resposta/FSM/agenda) é criado.
+        domain_after = CaseEvent.objects.filter(case=case).exclude(event_type__in=lock_lifecycle).count()
+        assert domain_after == domain_before
+        # Lock liberado (não abandonado).
+        assert refreshed.locked_by_id is None

@@ -6,7 +6,7 @@ from django.utils import timezone
 
 from apps.cases.models import Case, CaseEvent, CaseStatus
 from apps.cases.services import claim_case_lock
-from tests.shared_case_fixtures import attach_approved_procedures
+from tests.shared_case_fixtures import attach_procedure_projection
 
 User = get_user_model()
 
@@ -42,11 +42,6 @@ class TestOperationalAdmissionFlows:
         }
         defaults.update(attrs)
         case = Case.objects.create(**defaults)
-        # Projeção aprovada explícita (Slice 009-B): casos CHD-operáveis
-        # (doctor_decision="accept") exigem row aprovada para aparecer no
-        # universo do agendador. Casos médicos (WAIT_DOCTOR) não a recebem.
-        if defaults.get("doctor_decision") == "accept":
-            attach_approved_procedures(case, approved=("eda",))
         return case
 
     def _claim_doctor_lock(self, case: Case, doctor) -> str:
@@ -118,6 +113,7 @@ class TestOperationalAdmissionFlows:
             doctor_support_flag="anesthesist",
             doctor_admission_flow="pre_icu",
         )
+        attach_procedure_projection(case, declared=("eda",), detected=("eda",), approved=("eda",))
         CaseEvent.objects.create(
             case=case,
             actor_type="human",
@@ -156,6 +152,7 @@ class TestOperationalAdmissionFlows:
             doctor_support_flag="none",
             doctor_admission_flow="pediatric_em",
         )
+        attach_procedure_projection(case, declared=("eda",), detected=("eda",), approved=("eda",))
         self._login_as(client, "nir", "nir-pediatric-em@test.com")
 
         response = client.get(f"/cases/{case.case_id}/")

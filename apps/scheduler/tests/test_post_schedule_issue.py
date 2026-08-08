@@ -11,10 +11,7 @@ from django.contrib.auth import get_user_model
 from django.utils import timezone
 
 from apps.cases.models import Case, CaseEvent, CaseStatus
-from tests.shared_case_fixtures import (
-    approved_set_for_exam_type,
-    attach_approved_procedures,
-)
+from tests.shared_case_fixtures import attach_procedure_projection
 
 User = get_user_model()
 
@@ -64,7 +61,7 @@ def _create_waited_case(user, **overrides) -> Case:
     case = Case.objects.create(**defaults)
     # Projeção aprovada explícita (Slice 009-B): caso CHD-operável exige
     # row aprovada para aparecer no universo do agendador.
-    attach_approved_procedures(case, approved=approved_set_for_exam_type(defaults.get("exam_type", "eda")))
+    attach_procedure_projection(case, declared=("eda",), detected=("eda",), approved=("eda",))
     case.save()
     return Case.objects.get(pk=case.pk)
 
@@ -101,7 +98,7 @@ def _create_case_with_opened_issue(case_factory, advance_to, user) -> Case:
     case = Case.objects.get(pk=case.pk)
     # Projeção aprovada explícita (Slice 009-B): intercorrência operacional
     # aparece no universo CHD e exige row aprovada.
-    attach_approved_procedures(case, approved=("eda",))
+    attach_procedure_projection(case, declared=("eda",), detected=("eda",), approved=("eda",))
     case = open_post_schedule_issue(
         case=case,
         user=nir_user,
@@ -146,7 +143,7 @@ def _create_case_with_opened_issue_reason(case_factory, advance_to, reason: str,
     case = Case.objects.get(pk=case.pk)
     # Projeção aprovada explícita (Slice 009-B): intercorrência operacional
     # aparece no universo CHD e exige row aprovada.
-    attach_approved_procedures(case, approved=("eda",))
+    attach_procedure_projection(case, declared=("eda",), detected=("eda",), approved=("eda",))
     case = open_post_schedule_issue(
         case=case,
         user=nir_user,
@@ -259,7 +256,7 @@ class TestQueuePostScheduleIssue:
         case = advance_to(case_factory(nir_user), CaseStatus.WAIT_APPT)
         # Projeção aprovada explícita (Slice 009-B): advance_to avança o
         # FSM mas não inventa projeção; o teste a prepara explicitamente.
-        attach_approved_procedures(case, approved=("eda",))
+        attach_procedure_projection(case, declared=("eda",), detected=("eda",), approved=("eda",))
         case.doctor_decision = "accept"
         case.doctor_admission_flow = "scheduled"
         case.agency_record_number = "NORMAL-001"
@@ -336,7 +333,7 @@ class TestConfirmPostScheduleIssue:
         case = advance_to(case_factory(nir_user), CaseStatus.WAIT_APPT)
         # Projeção aprovada explícita (Slice 009-B): advance_to avança o
         # FSM mas não inventa projeção; o teste a prepara explicitamente.
-        attach_approved_procedures(case, approved=("eda",))
+        attach_procedure_projection(case, declared=("eda",), detected=("eda",), approved=("eda",))
         case.doctor_decision = "accept"
         case.doctor_admission_flow = "scheduled"
         case.structured_data = {"patient": {"name": "Normal Form", "age": 30, "sex": "M"}}
@@ -607,7 +604,7 @@ class TestSubmitPostScheduleIssue:
         case = advance_to(case_factory(nir_user), CaseStatus.WAIT_APPT)
         # Projeção aprovada explícita (Slice 009-B): advance_to avança o
         # FSM mas não inventa projeção; o teste a prepara explicitamente.
-        attach_approved_procedures(case, approved=("eda",))
+        attach_procedure_projection(case, declared=("eda",), detected=("eda",), approved=("eda",))
         case.doctor_decision = "accept"
         case.doctor_admission_flow = "scheduled"
         case.structured_data = {"patient": {"name": "Normal Flow", "age": 30, "sex": "M"}}

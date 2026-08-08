@@ -13,51 +13,94 @@ from typing import Any
 import pytest
 from django.contrib.auth import get_user_model
 
-from apps.cases.models import Case, CaseProcedure, CaseStatus, DoctorDisposition
+from apps.cases.models import (
+    Case,
+    CaseProcedure,
+    CaseStatus,
+    DetectionStatus,
+    DoctorDisposition,
+)
 
 User = get_user_model()
 
 
-# ── Helpers explícitos de projeção (Slice 009-B/R5) ──────────────────────
-# Helpers de função (não fixtures) para criar rows CaseProcedure explícitas
-# em call sites de teste. NÃO leem ``case.exam_type``, NÃO inferem por status
-# e NÃO usam signal/autouse: o conjunto é fornecido pelo teste no call site.
-# Necessário porque universos/ações CHD exigem ao menos uma row aprovada.
+# ── Helper explícito de projeção (Slice 009-B/R5) ────────────────────────
+# Helper de função (não fixture) para criar rows CaseProcedure a partir de
+# conjuntos EXPLÍCITOS no call site. NÃO lê ``case.exam_type``, NÃO recebe
+# ``bridge_exam_type``/``exam_type``, NÃO infere por ``Case.status``,
+# ``doctor_decision``, admission flow ou appointment status, e NÃO usa
+# signal/autouse/criação implícita global. Valor ausente/inválido nunca
+# inventa EDA — o teste declara as três dimensões.
+
+_VALID_PROCEDURE_TYPES: tuple[str, ...] = ("eda", "colonoscopy")
+_PROCEDURE_ORDER: dict[str, int] = {"eda": 0, "colonoscopy": 1}
 
 
-def approved_set_for_exam_type(exam_type: object) -> tuple[str, ...]:
-    """Mapeia a intenção declarada de exam_type num conjunto aprovado.
+def attach_procedure_projection(
+    case: Case,
+    *,
+    declared: tuple[str, ...],
+    detected: tuple[str, ...],
+    approved: tuple[str, ...],
+    denied: tuple[str, ...] = (),
+    reasons: dict[str, str] | None = None,
+) -> Case:
+    """Cria rows ``CaseProcedure`` a partir das três dimensões explícitas.
 
-    Usada pelo FACTORY (não pelo helper de rows) para derivar o conjunto
-    explícito a partir do seu próprio parâmetro local — nunca lendo
-    ``case.exam_type``. ``eda_colonoscopy`` ⇒ ambos; singulares ⇒ o próprio;
-    valor ausente/não-str ⇒ ``("eda",)`` (default fail-closed), acomodando o
-    ``dict.get()`` de factories com valores heterogêneos.
+    Contrato (R5/Slice 009-B):
+    - rows vêm somente da união dos conjuntos explícitos;
+    - ``declared_by_nir`` deriva somente de ``declared``;
+    - ``detection_status='detected'`` deriva somente de ``detected`` (demais
+      ficam ``pending``);
+    - ``doctor_disposition`` deriva somente de ``approved``/``denied``;
+    - ``approved`` e ``denied`` não podem se sobrepor;
+    - tipos inválidos ou combinações incoerentes falham claramente;
+    - aprovação de procedimento NÃO detectado exige razão explícita em
+      ``reasons`` (inclusão médica justificada);
+    - toda negação exige razão explícita em ``reasons`` (contrato de domínio).
     """
-    if not isinstance(exam_type, str):
-        return ("eda",)
-    if exam_type == "eda_colonoscopy":
-        return ("eda", "colonoscopy")
-    if exam_type in {"eda", "colonoscopy"}:
-        return (exam_type,)
-    return ("eda",)
+    declared_set = set(declared)
+    detected_set = set(detected)
+    approved_set = set(approved)
+    denied_set = set(denied)
 
+    for label, subset in (
+        ("declared", declared_set),
+        ("detected", detected_set),
+        ("approved", approved_set),
+        ("denied", denied_set),
+    ):
+        invalid = subset - set(_VALID_PROCEDURE_TYPES)
+        if invalid:
+            raise ValueError(f"procedure_type inválido em {label}: {sorted(invalid)}")
 
-def attach_approved_procedures(case: Case, *, approved: tuple[str, ...]) -> Case:
-    """Cria rows ``CaseProcedure`` aprovadas explícitas no call site.
+    if approved_set & denied_set:
+        raise ValueError("approved e denied não podem se sobrepor")
 
-    Helper explícito: recebe o conjunto aprovado e cria uma row aprovada por
-    tipo (declarada pelo NIR). NÃO lê ``case.exam_type``, NÃO infere por
-    status e NÃO usa signal/autouse (Slice 009-B/R5). Casos em estados CHD
-    (WAIT_APPT/notices/issues/processados/histórico) precisam de ao menos
-    uma row aprovada para aparecer no universo operacional do agendador.
-    """
-    for procedure_type in approved:
+    reasons = reasons or {}
+    for procedure_type in sorted(approved_set - detected_set, key=lambda t: _PROCEDURE_ORDER[t]):
+        if not reasons.get(procedure_type, "").strip():
+            raise ValueError(f"aprovação de '{procedure_type}' sem detecção exige razão de inclusão explícita")
+    for procedure_type in sorted(denied_set, key=lambda t: _PROCEDURE_ORDER[t]):
+        if not reasons.get(procedure_type, "").strip():
+            raise ValueError(f"negação de '{procedure_type}' exige razão explícita")
+
+    for procedure_type in sorted(
+        declared_set | detected_set | approved_set | denied_set, key=lambda t: _PROCEDURE_ORDER[t]
+    ):
         CaseProcedure.objects.create(
             case=case,
             procedure_type=procedure_type,
-            declared_by_nir=True,
-            doctor_disposition=DoctorDisposition.APPROVED,
+            declared_by_nir=procedure_type in declared_set,
+            detection_status=(DetectionStatus.DETECTED if procedure_type in detected_set else DetectionStatus.PENDING),
+            doctor_disposition=(
+                DoctorDisposition.APPROVED
+                if procedure_type in approved_set
+                else DoctorDisposition.DENIED
+                if procedure_type in denied_set
+                else DoctorDisposition.PENDING
+            ),
+            doctor_reason=reasons.get(procedure_type, ""),
         )
     return case
 
