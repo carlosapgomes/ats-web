@@ -41,7 +41,12 @@ A ADR-0004 deve ser commitada, enviada e aprovada explicitamente antes de entreg
 - [x] Slice 010 — Dashboard e helpers tornam CaseProcedure autoritativo (`slices/slice-010-dashboard-domain-projection-authority.md`)
 
 > `slices/slice-009-clinical-scheduling-projection-authority.md` e os relatórios dos commits `9caf210`/`4423fe7` permanecem como evidência histórica `INCOMPLETE`; não possuem checkbox de conclusão e seu prompt não deve ser executado.
-- [ ] Slice 011 — Migration remove Case.exam_type e encerra a ponte (`slices/slice-011-authoritative-procedure-schema-cutover.md`)
+
+> **Slice 011 desmembrado após bloqueio correto antes de editar:** a pré-verificação (relatório BLOQUEADO `/tmp/support-combined-eda-colonoscopy-workflow-slice-011-report.md`, BASE_REF `33ed972`) encontrou footprint de 26 arquivos contra cap 10 (18 arquivos de teste ainda gravam a coluna) e 2 readers operacionais residuais (`apps/cases/signals.py` no payload `CASE_CREATED` e `templates/intake/case_detail.html` nos radios de correção, este omitido do desenho original). O cutover monolítico foi substituído por quatro gates com suite verde a cada passo: fixtures sem ponte (A/B), cutover físico (C) e limpeza do compat (D). O arquivo original permanece como evidência histórica e seu prompt não deve ser executado.
+- [ ] Slice 011-A — Fixtures sem ponte: cases/dashboard/doctor/pipeline (`slices/slice-011a-fixture-bridge-independence-cases-dashboard-doctor-pipeline.md`)
+- [ ] Slice 011-B — Fixtures sem ponte: intake/scheduler (`slices/slice-011b-fixture-bridge-independence-intake-scheduler.md`)
+- [ ] Slice 011-C — Cutover físico: migration remove Case.exam_type e encerra a ponte (`slices/slice-011c-authoritative-procedure-schema-cutover.md`)
+- [ ] Slice 011-D — Remoção do compat fallback_to_bridge e comentários mortos (`slices/slice-011d-bridge-compat-cleanup.md`)
 - [ ] Slice 012 — Operação ativa e reverte o fluxo combinado com segurança (`slices/slice-012-rollout-documentation-and-verification.md`)
 
 ## Definition of Done do change

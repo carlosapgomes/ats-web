@@ -1,5 +1,22 @@
 # Slice 011: Migration remove Case.exam_type e encerra a ponte
 
+> **DESMEMBRADO — não executar este prompt.** A pré-verificação (relatório BLOQUEADO
+> `/tmp/support-combined-eda-colonoscopy-workflow-slice-011-report.md`, BASE_REF `33ed972`)
+> comprovou footprint de 26 arquivos contra cap 10 — incluindo 1 reader operacional residual
+> omitido do desenho original (`templates/intake/case_detail.html` lê `case.exam_type` nos
+> radios de correção, além de `apps/cases/signals.py` no payload `CASE_CREATED`) — e 18
+> arquivos de teste que ainda gravam a coluna. Seguindo a regra do change ("não aprovar
+> footprint expandido em um único commit"), o cutover foi substituído por:
+>
+> - `slices/slice-011a-fixture-bridge-independence-cases-dashboard-doctor-pipeline.md`
+> - `slices/slice-011b-fixture-bridge-independence-intake-scheduler.md`
+> - `slices/slice-011c-authoritative-procedure-schema-cutover.md` (cutover físico)
+> - `slices/slice-011d-bridge-compat-cleanup.md`
+>
+> Este arquivo permanece como evidência histórica do desenho original (R1–R7 foram
+> herdados pelo Slice 011-C com as decisões de contrato registradas lá). Seu prompt pronto
+> não deve ser executado.
+
 ## Handoff com contexto zero
 
 Leia artefatos, ADR-0004, migrations 0014+, relatórios aprovados 001–008, 009-A, 009-B e 010, além da evidência `INCOMPLETE` do 009 original e do inventário final do Slice 010. Confirme que pipeline, NIR, médico, CHD e dashboard já não leem a coluna. Se 009-A, 009-B ou 010 não estiver aprovado, PARE como BLOQUEADO. Inspecione model, serviço de procedimentos, writers de criação e fixtures residuais.
