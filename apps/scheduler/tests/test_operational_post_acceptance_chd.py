@@ -18,6 +18,7 @@ from django.utils import timezone
 from apps.accounts.context_processors import queue_counts
 from apps.accounts.models import Role
 from apps.cases.models import Case, CaseEvent, CaseStatus
+from tests.shared_case_fixtures import attach_approved_procedures
 
 pytestmark = pytest.mark.django_db
 
@@ -69,6 +70,9 @@ def _create_case_with_operational_issue(nir_user, flow="immediate", reason="pati
         doctor_admission_flow=flow,
         agency_record_number="REG-CHD-001",
     )
+    # Projeção aprovada explícita (Slice 009-B): caso de intercorrência
+    # operacional aparece no universo CHD e exige row aprovada.
+    attach_approved_procedures(case, approved=("eda",))
     case = Case.objects.get(pk=case.pk)
     return open_post_acceptance_issue(
         case=case, user=nir_user, reason=reason, message=message, context="operational_notice"
@@ -93,6 +97,9 @@ def _create_sentinel_case(nir_user):
             },
         },
     )
+    # Projeção aprovada explícita (Slice 009-B): caso sentinela de
+    # intercorrência operacional aparece no universo CHD e exige row aprovada.
+    attach_approved_procedures(case, approved=("eda",))
     case = Case.objects.get(pk=case.pk)
     return open_post_acceptance_issue(
         case=case,
@@ -391,7 +398,10 @@ class TestBadgeVsQueueContext:
         """T4: WAIT_APPT + issue operacional →
         pending=1, issue=1, total=2, queue_count=2."""
         _create_case_with_operational_issue(nir_user, flow="immediate")
-        Case.objects.create(created_by=nir_user, status=CaseStatus.WAIT_APPT)
+        attach_approved_procedures(
+            Case.objects.create(created_by=nir_user, status=CaseStatus.WAIT_APPT),
+            approved=("eda",),
+        )
         qc, ctx = _queue_context(scheduler_user)
 
         assert qc["queue_count"] == 2

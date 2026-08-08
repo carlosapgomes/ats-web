@@ -11,6 +11,10 @@ from django.contrib.auth import get_user_model
 from django.urls import reverse
 
 from apps.cases.models import Case, CaseStatus
+from tests.shared_case_fixtures import (
+    approved_set_for_exam_type,
+    attach_approved_procedures,
+)
 
 User = get_user_model()
 
@@ -67,6 +71,9 @@ class TestSchedulerCommunicationVisibility:
         }
         defaults.update(overrides)
         case = Case.objects.create(**defaults)
+        # Projeção aprovada explícita (Slice 009-B): caso CHD-operável exige
+        # row aprovada para aparecer no universo do agendador.
+        attach_approved_procedures(case, approved=approved_set_for_exam_type(defaults.get("exam_type", "eda")))
         case.save()
         return case
 

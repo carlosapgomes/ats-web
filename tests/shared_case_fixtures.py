@@ -13,9 +13,53 @@ from typing import Any
 import pytest
 from django.contrib.auth import get_user_model
 
-from apps.cases.models import Case, CaseStatus
+from apps.cases.models import Case, CaseProcedure, CaseStatus, DoctorDisposition
 
 User = get_user_model()
+
+
+# ── Helpers explícitos de projeção (Slice 009-B/R5) ──────────────────────
+# Helpers de função (não fixtures) para criar rows CaseProcedure explícitas
+# em call sites de teste. NÃO leem ``case.exam_type``, NÃO inferem por status
+# e NÃO usam signal/autouse: o conjunto é fornecido pelo teste no call site.
+# Necessário porque universos/ações CHD exigem ao menos uma row aprovada.
+
+
+def approved_set_for_exam_type(exam_type: object) -> tuple[str, ...]:
+    """Mapeia a intenção declarada de exam_type num conjunto aprovado.
+
+    Usada pelo FACTORY (não pelo helper de rows) para derivar o conjunto
+    explícito a partir do seu próprio parâmetro local — nunca lendo
+    ``case.exam_type``. ``eda_colonoscopy`` ⇒ ambos; singulares ⇒ o próprio;
+    valor ausente/não-str ⇒ ``("eda",)`` (default fail-closed), acomodando o
+    ``dict.get()`` de factories com valores heterogêneos.
+    """
+    if not isinstance(exam_type, str):
+        return ("eda",)
+    if exam_type == "eda_colonoscopy":
+        return ("eda", "colonoscopy")
+    if exam_type in {"eda", "colonoscopy"}:
+        return (exam_type,)
+    return ("eda",)
+
+
+def attach_approved_procedures(case: Case, *, approved: tuple[str, ...]) -> Case:
+    """Cria rows ``CaseProcedure`` aprovadas explícitas no call site.
+
+    Helper explícito: recebe o conjunto aprovado e cria uma row aprovada por
+    tipo (declarada pelo NIR). NÃO lê ``case.exam_type``, NÃO infere por
+    status e NÃO usa signal/autouse (Slice 009-B/R5). Casos em estados CHD
+    (WAIT_APPT/notices/issues/processados/histórico) precisam de ao menos
+    uma row aprovada para aparecer no universo operacional do agendador.
+    """
+    for procedure_type in approved:
+        CaseProcedure.objects.create(
+            case=case,
+            procedure_type=procedure_type,
+            declared_by_nir=True,
+            doctor_disposition=DoctorDisposition.APPROVED,
+        )
+    return case
 
 
 @pytest.fixture

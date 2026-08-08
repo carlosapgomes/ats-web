@@ -663,3 +663,267 @@ class TestSchedulerPairedStatic:
         assert "eda_colonoscopy" in js
         assert "data-approved-selection" in js
         assert "EDA + Colonoscopia" in js
+
+
+@pytest.mark.django_db
+class TestSchedulerExcludesAndBlocksUnauthorized:
+    """Slice 009-B — todos os universos/ações CHD exigem aprovação projetada.
+
+    Caso sem row ``CaseProcedure.doctor_disposition=approved`` não aparece em
+    nenhum universo/contador CHD, não recebe CTA de agendamento;
+    ``scheduler_confirm`` recusa antes de adquirir lock e ``scheduler_submit``
+    revalida sob lock e falha fail-closed (sem transição FSM, sem
+    ``appointment_at``, sem evento com ``approved_procedures=[]`` e sem lock
+    abandonado). Combinado exige as duas aprovações e conta uma vez.
+    """
+
+    def _login_as(self, client, role_name: str) -> Any:
+        username = f"{role_name}@slice009b.{uuid.uuid4().hex[:8]}.test"
+        user = User.objects.create_user(username=username, password="testpass123")
+        user.roles.add(_create_role(role_name))
+        client.force_login(user)
+        session = client.session
+        session["active_role"] = role_name
+        session.save()
+        return user
+
+    # ── Helpers de fixtures (conjuntos explícitos; sem ler case.exam_type) ──
+    def _attach_approved(self, case: Case, approved: tuple[str, ...]) -> Case:
+        """Cria rows aprovadas explícitas no call site.
+
+        Helper explícito: recebe o conjunto aprovado; não lê ``case.exam_type``,
+        não infere por status e não usa signal/autouse (R5).
+        """
+        for pt in approved:
+            CaseProcedure.objects.create(
+                case=case,
+                procedure_type=pt,
+                declared_by_nir=True,
+                doctor_disposition=DoctorDisposition.APPROVED,
+            )
+        return case
+
+    def _make_wait_appt(self, nir: Any, *, name: str, approved: tuple[str, ...] = (), exam_type: str = "eda") -> Case:
+        case = Case.objects.create(
+            created_by=nir,
+            status=CaseStatus.WAIT_APPT,
+            exam_type=exam_type,
+            doctor_decision="accept",
+            doctor_admission_flow="scheduled",
+            structured_data={"patient": {"name": name, "age": 50, "gender": "F"}},
+        )
+        return self._attach_approved(case, approved)
+
+    def _make_notice(self, nir: Any, *, name: str, approved: tuple[str, ...] = ()) -> Case:
+        case = Case.objects.create(
+            created_by=nir,
+            status=CaseStatus.WAIT_R1_CLEANUP_THUMBS,
+            exam_type="eda",
+            doctor_decision="accept",
+            doctor_admission_flow="immediate",
+            structured_data={"patient": {"name": name, "age": 60, "gender": "F"}},
+        )
+        CaseEvent.objects.create(
+            case=case,
+            actor_type="human",
+            actor=nir,
+            event_type="IMMEDIATE_ADMISSION_OPERATIONAL_NOTICE",
+            timestamp=timezone.now(),
+        )
+        return self._attach_approved(case, approved)
+
+    def _make_issue(self, nir: Any, *, name: str, approved: tuple[str, ...] = ()) -> Case:
+        case = Case.objects.create(
+            created_by=nir,
+            status=CaseStatus.WAIT_R1_CLEANUP_THUMBS,
+            exam_type="eda",
+            doctor_decision="accept",
+            doctor_admission_flow="scheduled",
+            post_schedule_issue_status="opened",
+            post_acceptance_issue_context="operational_notice",
+            structured_data={"patient": {"name": name, "age": 50, "gender": "M"}},
+        )
+        return self._attach_approved(case, approved)
+
+    def _make_processed(self, scheduler: Any, *, name: str, approved: tuple[str, ...] = ()) -> Case:
+        case = Case.objects.create(
+            created_by=scheduler,
+            status=CaseStatus.WAIT_R1_CLEANUP_THUMBS,
+            exam_type="eda",
+            doctor_decision="accept",
+            doctor_admission_flow="scheduled",
+            scheduler=scheduler,
+            appointment_status="confirmed",
+            appointment_decided_at=timezone.now(),
+            structured_data={"patient": {"name": name, "age": 55, "gender": "F"}},
+        )
+        return self._attach_approved(case, approved)
+
+    def _make_historical(self, nir: Any, *, agency: str, name: str, approved: tuple[str, ...] = ()) -> Case:
+        case = Case.objects.create(
+            created_by=nir,
+            status=CaseStatus.CLEANED,
+            exam_type="eda",
+            doctor_decision="accept",
+            doctor_admission_flow="scheduled",
+            appointment_status="confirmed",
+            agency_record_number=agency,
+            structured_data={"patient": {"name": name, "age": 61, "gender": "M"}},
+        )
+        return self._attach_approved(case, approved)
+
+    def _claim_lock(self, case_id, scheduler: Any) -> str:
+        from apps.cases.services import claim_case_lock
+
+        result = claim_case_lock(
+            case_id=case_id,
+            user=scheduler,
+            expected_status=CaseStatus.WAIT_APPT,
+            context="scheduler_confirm",
+            role="scheduler",
+        )
+        assert result.acquired is True
+        return str(result.token)
+
+    def _submit_payload(self, *, token: str, decision: str = "confirm", **extra: Any) -> dict[str, Any]:
+        payload: dict[str, Any] = {
+            "decision": decision,
+            "appointment_date": "2026-06-01",
+            "appointment_time": "09:00",
+            "appointment_location": "Hospital Central - Sala 1",
+            "notes": "Trazer jejum de 8h.",
+            "reason": "Sem vaga na agenda." if decision == "deny" else "",
+            "lock_token": token,
+        }
+        payload.update(extra)
+        return payload
+
+    # ── R1: WAIT_APPT sem aprovado excluído da fila/contador/CTA ──────
+    def test_unauthorized_wait_appt_excluded_from_pending(self, client) -> None:
+        nir = self._login_as(client, "nir")
+        self._make_wait_appt(nir, name="Autorizado Pendente", approved=("eda",))
+        # INVÁLIDA intencional: WAIT_APPT sem rows aprovadas.
+        unauthorized = self._make_wait_appt(nir, name="Sem Aprovado Pendente", approved=())
+        self._login_as(client, "scheduler")
+        content = client.get("/scheduler/").content.decode()
+        assert "Autorizado Pendente" in content
+        assert "Sem Aprovado Pendente" not in content
+        # "Todos" conta somente o autorizado (1, não 2).
+        assert 'data-exam-type-count="all">1<' in content
+        assert 'data-exam-type-count="all">2<' not in content
+        # Sem CTA de agendamento para o caso não autorizado.
+        assert f"/scheduler/{unauthorized.case_id}/" not in content
+
+    # ── R1: notice operacional sem aprovado excluída ─────────────────
+    def test_unauthorized_notice_excluded(self, client) -> None:
+        nir = self._login_as(client, "nir")
+        self._make_notice(nir, name="Notice Autorizada", approved=("eda",))
+        self._make_notice(nir, name="Notice Sem Aprovado", approved=())
+        self._login_as(client, "scheduler")
+        content = client.get("/scheduler/").content.decode()
+        assert "Notice Autorizada" in content
+        assert "Notice Sem Aprovado" not in content
+
+    # ── R1: issue operacional sem aprovado excluída ──────────────────
+    def test_unauthorized_issue_excluded(self, client) -> None:
+        nir = self._login_as(client, "nir")
+        self._make_issue(nir, name="Issue Autorizada", approved=("eda",))
+        self._make_issue(nir, name="Issue Sem Aprovado", approved=())
+        self._login_as(client, "scheduler")
+        content = client.get("/scheduler/").content.decode()
+        assert "Issue Autorizada" in content
+        assert "Issue Sem Aprovado" not in content
+
+    # ── R1: processado hoje sem aprovado excluído ────────────────────
+    def test_unauthorized_processed_excluded(self, client) -> None:
+        scheduler = self._login_as(client, "scheduler")
+        self._make_processed(scheduler, name="Proc Autorizado", approved=("eda",))
+        self._make_processed(scheduler, name="Proc Sem Aprovado", approved=())
+        content = client.get("/scheduler/?tab=processed").content.decode()
+        assert "Proc Autorizado" in content
+        assert "Proc Sem Aprovado" not in content
+
+    # ── R1: ciência reconhecida de caso sem aprovado excluída ────────
+    def test_unauthorized_acknowledged_notice_excluded(self, client) -> None:
+        nir = self._login_as(client, "nir")
+        authorized = self._make_notice(nir, name="Ack Autorizada", approved=("eda",))
+        unauthorized = self._make_notice(nir, name="Ack Sem Aprovado", approved=())
+        self._login_as(client, "scheduler")
+        # Ambos recebem ACK (o ACK não depende de aprovação).
+        assert client.post(f"/scheduler/{authorized.case_id}/immediate-ack/").status_code == 302
+        assert client.post(f"/scheduler/{unauthorized.case_id}/immediate-ack/").status_code == 302
+        content = client.get("/scheduler/?tab=processed").content.decode()
+        assert "Ack Autorizada" in content
+        assert "Ack Sem Aprovado" not in content
+
+    # ── R1: histórico exam_type=all e busca por termo excluem sem aprovado
+    def test_unauthorized_historical_excluded_from_all_and_term(self, client) -> None:
+        nir = self._login_as(client, "nir")
+        self._make_historical(nir, agency="HIST-AUTH", name="Hist Autorizado", approved=("eda",))
+        self._make_historical(nir, agency="HIST-NOAP", name="Hist Sem Aprovado", approved=())
+        self._login_as(client, "scheduler")
+        # "all" + termo: o predicado de aprovação é aplicado à base; o caso
+        # sem aprovado não aparece (estado vazio puro é preservado por R6).
+        all_content = client.get("/scheduler/historical/?exam_type=all&q=Hist").content.decode()
+        assert "HIST-AUTH" in all_content
+        assert "HIST-NOAP" not in all_content
+        # Busca apenas por termo também aplica o predicado.
+        term_content = client.get("/scheduler/historical/?q=Hist").content.decode()
+        assert "HIST-AUTH" in term_content
+        assert "HIST-NOAP" not in term_content
+
+    # ── R2: confirm recusa sem aprovado antes de adquirir lock ───────
+    def test_confirm_rejects_unauthorized_without_lock(self, client) -> None:
+        nir = self._login_as(client, "nir")
+        unauthorized = self._make_wait_appt(nir, name="Confirm Sem Aprovado", approved=())
+        self._login_as(client, "scheduler")
+        response = client.get(f"/scheduler/{unauthorized.case_id}/")
+        assert response.status_code == 404
+        refreshed = Case.objects.get(pk=unauthorized.case_id)
+        # Lock NÃO adquirido (fail-closed antes do lock).
+        assert refreshed.locked_by_id is None
+
+    # ── R2: submit revalida sob lock e falha sem efeitos/lock abandonado ──
+    def test_submit_fail_closed_when_approval_removed(self, client) -> None:
+        nir = self._login_as(client, "nir")
+        case = self._make_wait_appt(nir, name="Race Sem Aprovado", approved=("eda",))
+        scheduler = self._login_as(client, "scheduler")
+        token = self._claim_lock(case.case_id, scheduler)
+        # Race: aprovação removida entre GET e POST.
+        CaseProcedure.objects.filter(case=case, doctor_disposition=DoctorDisposition.APPROVED).delete()
+        response = client.post(
+            f"/scheduler/{case.case_id}/submit/",
+            self._submit_payload(token=token),
+        )
+        assert response.status_code == 302  # redirect seguro p/ fila
+        refreshed = Case.objects.get(pk=case.case_id)
+        # Nenhuma transição FSM.
+        assert refreshed.status == CaseStatus.WAIT_APPT
+        # Nenhum campo de agendamento novo.
+        assert refreshed.appointment_at is None
+        assert refreshed.appointment_status not in {"confirmed", "denied"}
+        assert refreshed.appointment_decided_at is None
+        assert refreshed.scheduler_id is None
+        # Nenhum evento APPT_* (logo, nenhum com approved_procedures=[]).
+        assert not CaseEvent.objects.filter(case=case, event_type__in=["APPT_CONFIRMED", "APPT_DENIED"]).exists()
+        # Lock liberado (não abandonado).
+        assert refreshed.locked_by_id is None
+
+    # ── R4: combinado exige as duas aprovações e conta uma vez ───────
+    def test_combined_requires_both_approved(self, client) -> None:
+        nir = self._login_as(client, "nir")
+        # INVÁLIDA intencional: combinado sem nenhuma aprovação.
+        self._make_wait_appt(nir, name="Combinado Sem Aprovado", approved=(), exam_type="eda_colonoscopy")
+        # Combinado com ambas aprovadas — aparece uma vez.
+        self._make_wait_appt(
+            nir,
+            name="Combinado Autorizado",
+            approved=("eda", "colonoscopy"),
+            exam_type="eda_colonoscopy",
+        )
+        self._login_as(client, "scheduler")
+        content = client.get("/scheduler/").content.decode()
+        assert content.count("data-scheduler-queue-card") == 1
+        assert "Combinado Autorizado" in content
+        assert "Combinado Sem Aprovado" not in content
+        assert 'data-exam-type-count="eda_colonoscopy">1<' in content

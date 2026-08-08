@@ -12,6 +12,10 @@ from django.utils import timezone
 
 from apps.accounts.models import Role
 from apps.cases.models import Case, CaseCommunicationMessage, CaseEvent, CaseStatus
+from tests.shared_case_fixtures import (
+    approved_set_for_exam_type,
+    attach_approved_procedures,
+)
 
 User = get_user_model()
 
@@ -72,23 +76,29 @@ class TestSchedulerQueueView:
         nir_user = User.objects.create_user(username="nir_obs_pending@test.com", password="testpass123")
         nir_user.roles.add(self._create_role("nir"))
 
-        Case.objects.create(
-            created_by=nir_user,
-            status=CaseStatus.WAIT_APPT,
-            agency_record_number="OBS-001",
-            doctor_decision="accept",
-            doctor_admission_flow="scheduled",
-            doctor_observation="Preparar sala com suporte X",
-            structured_data={"patient": {"name": "Paciente Com Obs", "age": 61, "gender": "Feminino"}},
+        attach_approved_procedures(
+            Case.objects.create(
+                created_by=nir_user,
+                status=CaseStatus.WAIT_APPT,
+                agency_record_number="OBS-001",
+                doctor_decision="accept",
+                doctor_admission_flow="scheduled",
+                doctor_observation="Preparar sala com suporte X",
+                structured_data={"patient": {"name": "Paciente Com Obs", "age": 61, "gender": "Feminino"}},
+            ),
+            approved=("eda",),
         )
-        Case.objects.create(
-            created_by=nir_user,
-            status=CaseStatus.WAIT_APPT,
-            agency_record_number="OBS-002",
-            doctor_decision="accept",
-            doctor_admission_flow="scheduled",
-            doctor_observation="   ",
-            structured_data={"patient": {"name": "Paciente Sem Obs", "age": 62, "gender": "Masculino"}},
+        attach_approved_procedures(
+            Case.objects.create(
+                created_by=nir_user,
+                status=CaseStatus.WAIT_APPT,
+                agency_record_number="OBS-002",
+                doctor_decision="accept",
+                doctor_admission_flow="scheduled",
+                doctor_observation="   ",
+                structured_data={"patient": {"name": "Paciente Sem Obs", "age": 62, "gender": "Masculino"}},
+            ),
+            approved=("eda",),
         )
 
         self._login_as(client, "scheduler")
@@ -120,6 +130,7 @@ class TestSchedulerQueueView:
                 },
             },
         )
+        attach_approved_procedures(case, approved=("eda",))
         case.save()
 
         self._login_as(client, "scheduler")
@@ -144,6 +155,7 @@ class TestSchedulerQueueView:
                 "patient": {"name": "João Teste", "age": 50, "gender": "Masculino"},
             },
         )
+        attach_approved_procedures(case, approved=("eda",))
         case.save()
 
         self._login_as(client, "scheduler")
@@ -169,6 +181,7 @@ class TestSchedulerQueueView:
             doctor_observation=observation,
             structured_data={"patient": {"name": "Imediata Com Obs", "age": 70, "gender": "Masculino"}},
         )
+        attach_approved_procedures(case, approved=("eda",))
         CaseEvent.objects.create(
             case=case,
             actor_type="human",
@@ -199,6 +212,7 @@ class TestSchedulerQueueView:
             doctor_admission_flow="immediate",
             structured_data={"patient": {"name": "Vinda Imediata", "age": 70, "gender": "Masculino"}},
         )
+        attach_approved_procedures(case, approved=("eda",))
         CaseEvent.objects.create(
             case=case,
             actor_type="human",
@@ -230,6 +244,7 @@ class TestSchedulerQueueView:
             doctor_admission_flow="immediate",
             structured_data={"patient": {"name": "Ack Imediata", "age": 70, "gender": "Masculino"}},
         )
+        attach_approved_procedures(case, approved=("eda",))
         CaseEvent.objects.create(
             case=case,
             actor_type="human",
@@ -259,6 +274,7 @@ class TestSchedulerQueueView:
             doctor_admission_flow="immediate",
             structured_data={"patient": {"name": "Hidden Imediata", "age": 70, "gender": "Masculino"}},
         )
+        attach_approved_procedures(case, approved=("eda",))
         CaseEvent.objects.create(
             case=case,
             actor_type="human",
@@ -294,6 +310,7 @@ class TestSchedulerQueueView:
                 "patient": {"name": "Teste Tempo", "age": 40, "gender": "Feminino"},
             },
         )
+        attach_approved_procedures(case, approved=("eda",))
         case.created_at = timezone.now() - timedelta(minutes=30)
         case.save()
 
@@ -344,6 +361,7 @@ class TestSchedulerQueueView:
             doctor_admission_flow="immediate",
             structured_data={"patient": {"name": "Ack Block", "age": 50, "gender": "M"}},
         )
+        attach_approved_procedures(case, approved=("eda",))
         CaseEvent.objects.create(
             case=case,
             actor_type="human",
@@ -368,6 +386,7 @@ class TestSchedulerQueueView:
             doctor_decision="accept",
             structured_data={"patient": {"name": "Pendente Scheduler", "age": 30, "gender": "Masculino"}},
         )
+        attach_approved_procedures(pending, approved=("eda",))
         pending.save()
 
         # WAIT_DOCTOR → should NOT appear
@@ -403,6 +422,7 @@ class TestSchedulerQueueView:
             doctor_admission_flow="immediate",
             structured_data={"patient": {"name": "Paciente Ontem", "age": 45, "gender": "Masculino"}},
         )
+        attach_approved_procedures(case, approved=("eda",))
         event = CaseEvent.objects.create(
             case=case,
             actor_type="human",
@@ -530,6 +550,9 @@ class TestSchedulerConfirmView:
         }
         defaults.update(overrides)
         case = Case.objects.create(**defaults)
+        # Projeção aprovada explícita (Slice 009-B): caso CHD-operável
+        # exige row aprovada para aparecer no universo do agendador.
+        attach_approved_procedures(case, approved=approved_set_for_exam_type(defaults.get("exam_type", "eda")))
         case.save()
         return case
 
@@ -702,6 +725,7 @@ class TestSchedulerQueueDoctorDisplay:
             doctor_admission_flow="scheduled",
             structured_data={"patient": {"name": "Paciente Teste", "age": 50, "gender": "M"}},
         )
+        attach_approved_procedures(case, approved=("eda",))
         case.save()
 
         self._login_as(client, "scheduler")
@@ -724,6 +748,7 @@ class TestSchedulerQueueDoctorDisplay:
             doctor_admission_flow="immediate",
             structured_data={"patient": {"name": "Paciente Imediata", "age": 60, "gender": "F"}},
         )
+        attach_approved_procedures(case, approved=("eda",))
         CaseEvent.objects.create(
             case=case,
             actor_type="human",
@@ -752,6 +777,7 @@ class TestSchedulerQueueDoctorDisplay:
             doctor_admission_flow="scheduled",
             structured_data={"patient": {"name": "Paciente Nocrm", "age": 45, "gender": "M"}},
         )
+        attach_approved_procedures(case, approved=("eda",))
         case.save()
 
         self._login_as(client, "scheduler")
@@ -863,6 +889,9 @@ class TestSchedulerSubmitView:
         }
         defaults.update(overrides)
         case = Case.objects.create(**defaults)
+        # Projeção aprovada explícita (Slice 009-B): caso CHD-operável
+        # exige row aprovada para aparecer no universo do agendador.
+        attach_approved_procedures(case, approved=approved_set_for_exam_type(defaults.get("exam_type", "eda")))
         case.save()
         return case
 
@@ -1157,6 +1186,9 @@ class TestSchedulerConfirmLock:
         }
         defaults.update(overrides)
         case = Case.objects.create(**defaults)
+        # Projeção aprovada explícita (Slice 009-B): caso CHD-operável
+        # exige row aprovada para aparecer no universo do agendador.
+        attach_approved_procedures(case, approved=approved_set_for_exam_type(defaults.get("exam_type", "eda")))
         case.save()
         return case
 
@@ -1387,6 +1419,9 @@ class TestSchedulerLockEndpoints:
         }
         defaults.update(overrides)
         case = Case.objects.create(**defaults)
+        # Projeção aprovada explícita (Slice 009-B): caso CHD-operável
+        # exige row aprovada para aparecer no universo do agendador.
+        attach_approved_procedures(case, approved=approved_set_for_exam_type(defaults.get("exam_type", "eda")))
         case.save()
         return case
 
@@ -1575,6 +1610,9 @@ class TestSchedulerQueueLockDisplay:
         }
         defaults.update(overrides)
         case = Case.objects.create(**defaults)
+        # Projeção aprovada explícita (Slice 009-B): caso CHD-operável
+        # exige row aprovada para aparecer no universo do agendador.
+        attach_approved_procedures(case, approved=approved_set_for_exam_type(defaults.get("exam_type", "eda")))
         case.save()
         return case
 
@@ -1669,6 +1707,7 @@ class TestImmediateAckIdempotent:
             doctor_admission_flow="immediate",
             structured_data={"patient": {"name": "Imm Ack", "age": 50, "gender": "M"}},
         )
+        attach_approved_procedures(case, approved=("eda",))
         CaseEvent.objects.create(
             case=case,
             actor_type="human",
@@ -1694,6 +1733,7 @@ class TestImmediateAckIdempotent:
             doctor_admission_flow="immediate",
             structured_data={"patient": {"name": "Dup Imm", "age": 50, "gender": "M"}},
         )
+        attach_approved_procedures(case, approved=("eda",))
         CaseEvent.objects.create(
             case=case,
             actor_type="human",
@@ -1721,6 +1761,7 @@ class TestImmediateAckIdempotent:
             doctor_admission_flow="immediate",
             structured_data={"patient": {"name": "Remove Imm", "age": 50, "gender": "M"}},
         )
+        attach_approved_procedures(case, approved=("eda",))
         CaseEvent.objects.create(
             case=case,
             actor_type="human",
@@ -1777,6 +1818,7 @@ class TestSchedulerExpiredLockInQueue:
                 },
             },
         )
+        attach_approved_procedures(case, approved=("eda",))
         case.save()
 
         sched_a = User.objects.create_user(username="sched_expired@test.com", password="testpass123")
@@ -1851,6 +1893,9 @@ class TestSchedulerLockReleaseOnSubmit:
         }
         defaults.update(overrides)
         case = Case.objects.create(**defaults)
+        # Projeção aprovada explícita (Slice 009-B): caso CHD-operável
+        # exige row aprovada para aparecer no universo do agendador.
+        attach_approved_procedures(case, approved=approved_set_for_exam_type(defaults.get("exam_type", "eda")))
         case.save()
         return case
 
@@ -2083,6 +2128,9 @@ class TestSchedulerProcessedTodayTab:
         }
         defaults.update(overrides)
         case = Case.objects.create(**defaults)
+        # Projeção aprovada explícita (Slice 009-B): caso CHD-operável
+        # exige row aprovada para aparecer no universo do agendador.
+        attach_approved_procedures(case, approved=approved_set_for_exam_type(defaults.get("exam_type", "eda")))
         case.save()
         return case
 
@@ -2458,6 +2506,7 @@ class TestSchedulerProcessedTodayTab:
             scheduler=scheduler_user,
             structured_data={"patient": {"name": "Contexto Sem PDF", "age": 50, "gender": "M"}},
         )
+        attach_approved_procedures(case, approved=("eda",))
         case.save()
 
         # Criar notificação para scheduler acessar via contexto
@@ -2606,6 +2655,7 @@ class TestSchedulerQueueRegulationDays:
             doctor_admission_flow="scheduled",
             structured_data={"patient": {"name": "Case A (2 days)", "age": 40, "gender": "M"}},
         )
+        attach_approved_procedures(case_a, approved=("eda",))
         Case.objects.filter(case_id=case_a.case_id).update(created_at=now - timedelta(hours=3))
 
         case_b = Case.objects.create(
@@ -2616,6 +2666,7 @@ class TestSchedulerQueueRegulationDays:
             doctor_admission_flow="scheduled",
             structured_data={"patient": {"name": "Case B (10 days)", "age": 50, "gender": "F"}},
         )
+        attach_approved_procedures(case_b, approved=("eda",))
         Case.objects.filter(case_id=case_b.case_id).update(created_at=now - timedelta(hours=2))
 
         case_c = Case.objects.create(
@@ -2626,6 +2677,7 @@ class TestSchedulerQueueRegulationDays:
             doctor_admission_flow="scheduled",
             structured_data={"patient": {"name": "Case C (null)", "age": 30, "gender": "M"}},
         )
+        attach_approved_procedures(case_c, approved=("eda",))
         Case.objects.filter(case_id=case_c.case_id).update(created_at=now - timedelta(hours=1))
 
         self._login_as(client, "scheduler")
@@ -2647,13 +2699,16 @@ class TestSchedulerQueueRegulationDays:
         nir_user = User.objects.create_user(username="nir_regbadge@test.com", password="testpass123")
         nir_user.roles.add(self._create_role("nir"))
 
-        Case.objects.create(
-            created_by=nir_user,
-            status=CaseStatus.WAIT_APPT,
-            regulation_days_on_screen=10,
-            doctor_decision="accept",
-            doctor_admission_flow="scheduled",
-            structured_data={"patient": {"name": "Badge Test", "age": 45, "gender": "M"}},
+        attach_approved_procedures(
+            Case.objects.create(
+                created_by=nir_user,
+                status=CaseStatus.WAIT_APPT,
+                regulation_days_on_screen=10,
+                doctor_decision="accept",
+                doctor_admission_flow="scheduled",
+                structured_data={"patient": {"name": "Badge Test", "age": 45, "gender": "M"}},
+            ),
+            approved=("eda",),
         )
 
         self._login_as(client, "scheduler")
@@ -2667,13 +2722,16 @@ class TestSchedulerQueueRegulationDays:
         nir_user = User.objects.create_user(username="nir_noreg@test.com", password="testpass123")
         nir_user.roles.add(self._create_role("nir"))
 
-        Case.objects.create(
-            created_by=nir_user,
-            status=CaseStatus.WAIT_APPT,
-            regulation_days_on_screen=None,
-            doctor_decision="accept",
-            doctor_admission_flow="scheduled",
-            structured_data={"patient": {"name": "No Badge", "age": 35, "gender": "F"}},
+        attach_approved_procedures(
+            Case.objects.create(
+                created_by=nir_user,
+                status=CaseStatus.WAIT_APPT,
+                regulation_days_on_screen=None,
+                doctor_decision="accept",
+                doctor_admission_flow="scheduled",
+                structured_data={"patient": {"name": "No Badge", "age": 35, "gender": "F"}},
+            ),
+            approved=("eda",),
         )
 
         self._login_as(client, "scheduler")
@@ -2699,6 +2757,7 @@ class TestSchedulerQueueRegulationDays:
             doctor_admission_flow="scheduled",
             structured_data={"patient": {"name": "Old (created first)", "age": 40, "gender": "M"}},
         )
+        attach_approved_procedures(old_case, approved=("eda",))
         Case.objects.filter(case_id=old_case.case_id).update(created_at=now - timedelta(hours=5))
 
         new_case = Case.objects.create(
@@ -2709,6 +2768,7 @@ class TestSchedulerQueueRegulationDays:
             doctor_admission_flow="scheduled",
             structured_data={"patient": {"name": "New (created later)", "age": 50, "gender": "F"}},
         )
+        attach_approved_procedures(new_case, approved=("eda",))
         Case.objects.filter(case_id=new_case.case_id).update(created_at=now - timedelta(hours=1))
 
         self._login_as(client, "scheduler")
@@ -2776,6 +2836,7 @@ class TestSchedulerQueueRegulationDays:
                 },
             },
         )
+        attach_approved_procedures(case, approved=("eda",))
         case.save()
 
         response = client.get("/scheduler/")
@@ -2807,6 +2868,7 @@ class TestSchedulerQueueRegulationDays:
             doctor_support_flag="anesthesist",
             structured_data={"patient": {"name": "Vinda Imediata Topo", "age": 60, "gender": "F"}},
         )
+        attach_approved_procedures(imm_case, approved=("eda",))
         CaseEvent.objects.create(
             case=imm_case,
             actor_type="human",
@@ -2816,13 +2878,16 @@ class TestSchedulerQueueRegulationDays:
         )
 
         # WAIT_APPT case with very high regulation_days_on_screen
-        Case.objects.create(
-            created_by=nir_user,
-            status=CaseStatus.WAIT_APPT,
-            regulation_days_on_screen=999,
-            doctor_decision="accept",
-            doctor_admission_flow="scheduled",
-            structured_data={"patient": {"name": "WAIT_APPT Alto Score", "age": 50, "gender": "M"}},
+        attach_approved_procedures(
+            Case.objects.create(
+                created_by=nir_user,
+                status=CaseStatus.WAIT_APPT,
+                regulation_days_on_screen=999,
+                doctor_decision="accept",
+                doctor_admission_flow="scheduled",
+                structured_data={"patient": {"name": "WAIT_APPT Alto Score", "age": 50, "gender": "M"}},
+            ),
+            approved=("eda",),
         )
 
         self._login_as(client, "scheduler")
@@ -2982,6 +3047,7 @@ class TestSchedulerContextDetail:
             doctor_admission_flow="scheduled",
             structured_data={"patient": {"name": "João", "age": 50, "gender": "M"}},
         )
+        attach_approved_procedures(case, approved=("eda",))
         self._create_notification(self._get_last_user(), case)
         response = client.get(f"/scheduler/context/{case.case_id}/")
         assert response.status_code == 200
@@ -3158,6 +3224,7 @@ class TestSchedulerContextDetail:
             doctor_admission_flow="scheduled",
             structured_data={"patient": {"name": "Generic Reply", "age": 40, "gender": "M"}},
         )
+        attach_approved_procedures(case, approved=("eda",))
 
         # Create notification so context_detail is accessible
         msg = CaseCommunicationMessage.objects.create(
@@ -3217,6 +3284,7 @@ class TestSchedulerHistoricalSearch:
                 "patient": {"name": patient_name, "age": 60, "gender": "F"},
             },
         )
+        attach_approved_procedures(case, approved=("eda",))
         return case
 
     # ── Authentication ─────────────────────────────────────────────────
@@ -3269,12 +3337,15 @@ class TestSchedulerHistoricalSearch:
         self._make_historical_case(nir_user, agency_record_number="IN-SCOPE", patient_name="In Scope")
 
         # Out of scope: immediate admission
-        Case.objects.create(
-            created_by=nir_user,
-            status=CaseStatus.WAIT_R1_CLEANUP_THUMBS,
-            doctor_decision="accept",
-            doctor_admission_flow="immediate",
-            structured_data={"patient": {"name": "Immediate Out"}},
+        attach_approved_procedures(
+            Case.objects.create(
+                created_by=nir_user,
+                status=CaseStatus.WAIT_R1_CLEANUP_THUMBS,
+                doctor_decision="accept",
+                doctor_admission_flow="immediate",
+                structured_data={"patient": {"name": "Immediate Out"}},
+            ),
+            approved=("eda",),
         )
 
         # Out of scope: doctor denied
@@ -3310,6 +3381,7 @@ class TestSchedulerHistoricalSearch:
             scheduler=other_scheduler,
             structured_data={"patient": {"name": "Old Patient", "age": 80, "gender": "M"}},
         )
+        attach_approved_procedures(_, approved=("eda",))
 
         response = client.get("/scheduler/historical/?q=OLD-HIST-999")
         assert response.status_code == 200
@@ -3397,6 +3469,7 @@ class TestSchedulerHistoricalContextDetail:
             structured_data={"patient": {"name": "Hist Patient", "age": 55, "gender": "M"}},
             **kwargs,
         )
+        attach_approved_procedures(case, approved=("eda",))
         return case
 
     def test_scheduler_context_detail_allows_historical_case_without_notification(self, client):
@@ -3475,6 +3548,7 @@ class TestSchedulerHistoricalMessageNir:
             structured_data={"patient": {"name": "Msg Patient", "age": 55, "gender": "M"}},
             **kwargs,
         )
+        attach_approved_procedures(case, approved=("eda",))
         return case
 
     def test_scheduler_historical_message_requires_post(self, client):
@@ -3749,6 +3823,9 @@ class TestSchedulerPrioritySignalBadges:
         }
         defaults.update(overrides)
         case = Case.objects.create(**defaults)
+        # Projeção aprovada explícita (Slice 009-B): caso CHD-operável
+        # exige row aprovada para aparecer no universo do agendador.
+        attach_approved_procedures(case, approved=approved_set_for_exam_type(defaults.get("exam_type", "eda")))
         case.save()
         return case
 
@@ -3833,6 +3910,7 @@ class TestSchedulerPrioritySignalBadges:
             priority_signals=[self._signal("pediatric", "8 anos")],
             structured_data={"patient": {"name": "Vinda Imediata Sinal", "age": 8, "gender": "M"}},
         )
+        attach_approved_procedures(case, approved=("eda",))
         CaseEvent.objects.create(
             case=case,
             actor_type="human",
@@ -3849,15 +3927,18 @@ class TestSchedulerPrioritySignalBadges:
     def test_operational_issue_card_shows_badges(self, client) -> None:
         """Card de intercorrência pós-aceitação mostra badges."""
         self._make_nir("nir_issue_prio@test.com")
-        Case.objects.create(
-            created_by=self._make_nir("nir_issue_prio2@test.com"),
-            status=CaseStatus.WAIT_APPT,
-            doctor_decision="accept",
-            doctor_admission_flow="scheduled",
-            priority_signals=[self._signal("foreign_body")],
-            post_schedule_issue_status="opened",
-            post_acceptance_issue_context="operational_notice",
-            structured_data={"patient": {"name": "Intercorrência Sinal", "age": 55, "gender": "F"}},
+        attach_approved_procedures(
+            Case.objects.create(
+                created_by=self._make_nir("nir_issue_prio2@test.com"),
+                status=CaseStatus.WAIT_APPT,
+                doctor_decision="accept",
+                doctor_admission_flow="scheduled",
+                priority_signals=[self._signal("foreign_body")],
+                post_schedule_issue_status="opened",
+                post_acceptance_issue_context="operational_notice",
+                structured_data={"patient": {"name": "Intercorrência Sinal", "age": 55, "gender": "F"}},
+            ),
+            approved=("eda",),
         )
         self._login_as(client, "scheduler")
         content = client.get("/scheduler/").content.decode()
@@ -3876,6 +3957,7 @@ class TestSchedulerPrioritySignalBadges:
             priority_signals=[self._signal("caustic_ingestion")],
             structured_data={"patient": {"name": "Ciência Confirmada Sinal", "age": 60, "gender": "F"}},
         )
+        attach_approved_procedures(case, approved=("eda",))
         CaseEvent.objects.create(
             case=case,
             actor_type="human",
@@ -3893,16 +3975,19 @@ class TestSchedulerPrioritySignalBadges:
         """Card processado hoje preserva badges persistidos."""
         scheduler_user = self._login_as(client, "scheduler")
         nir = self._make_nir("nir_proc_prio@test.com")
-        Case.objects.create(
-            created_by=nir,
-            status=CaseStatus.WAIT_R1_CLEANUP_THUMBS,
-            doctor_decision="accept",
-            doctor_admission_flow="scheduled",
-            scheduler=scheduler_user,
-            appointment_status="confirmed",
-            appointment_decided_at=timezone.now(),
-            priority_signals=[self._signal("gastrostomy")],
-            structured_data={"patient": {"name": "Processado Sinal", "age": 70, "gender": "M"}},
+        attach_approved_procedures(
+            Case.objects.create(
+                created_by=nir,
+                status=CaseStatus.WAIT_R1_CLEANUP_THUMBS,
+                doctor_decision="accept",
+                doctor_admission_flow="scheduled",
+                scheduler=scheduler_user,
+                appointment_status="confirmed",
+                appointment_decided_at=timezone.now(),
+                priority_signals=[self._signal("gastrostomy")],
+                structured_data={"patient": {"name": "Processado Sinal", "age": 70, "gender": "M"}},
+            ),
+            approved=("eda",),
         )
         content = client.get("/scheduler/?tab=processed").content.decode()
         assert "Processado Sinal" in content
@@ -3913,16 +3998,19 @@ class TestSchedulerPrioritySignalBadges:
         """Card processado sem sinais não renderiza container."""
         scheduler_user = self._login_as(client, "scheduler")
         nir = self._make_nir("nir_proc_nosig@test.com")
-        Case.objects.create(
-            created_by=nir,
-            status=CaseStatus.WAIT_R1_CLEANUP_THUMBS,
-            doctor_decision="accept",
-            doctor_admission_flow="scheduled",
-            scheduler=scheduler_user,
-            appointment_status="confirmed",
-            appointment_decided_at=timezone.now(),
-            priority_signals=[],
-            structured_data={"patient": {"name": "Processado Sem Sinal", "age": 70, "gender": "M"}},
+        attach_approved_procedures(
+            Case.objects.create(
+                created_by=nir,
+                status=CaseStatus.WAIT_R1_CLEANUP_THUMBS,
+                doctor_decision="accept",
+                doctor_admission_flow="scheduled",
+                scheduler=scheduler_user,
+                appointment_status="confirmed",
+                appointment_decided_at=timezone.now(),
+                priority_signals=[],
+                structured_data={"patient": {"name": "Processado Sem Sinal", "age": 70, "gender": "M"}},
+            ),
+            approved=("eda",),
         )
         content = client.get("/scheduler/?tab=processed").content.decode()
         assert "Processado Sem Sinal" in content
@@ -3988,6 +4076,7 @@ class TestSchedulerPrioritySignalBadges:
             priority_signals=[self._signal("foreign_body"), self._signal("gastrostomy")],
             structured_data={"patient": {"name": "Detalhe Processado Sinal", "age": 65, "gender": "F"}},
         )
+        attach_approved_procedures(case, approved=("eda",))
         case.summary_text = "Diagnóstico alvo do detalhe processado"
         case.save()
         response = client.get(f"/scheduler/processed/{case.case_id}/")
@@ -4015,6 +4104,7 @@ class TestSchedulerPrioritySignalBadges:
             priority_signals=[self._signal("esophageal_dilation")],
             structured_data={"patient": {"name": "Contexto Sinal", "age": 50, "gender": "M"}},
         )
+        attach_approved_procedures(case, approved=("eda",))
         UserNotification.objects.create(
             recipient=scheduler_user,
             case=case,
@@ -4040,6 +4130,7 @@ class TestSchedulerPrioritySignalBadges:
             priority_signals=[self._signal("caustic_ingestion")],
             structured_data={"patient": {"name": "Histórico Sinal", "age": 44, "gender": "F"}},
         )
+        attach_approved_procedures(case, approved=("eda",))
         response = client.get(f"/scheduler/context/{case.case_id}/")
         assert response.status_code == 200
         content = response.content.decode()
@@ -4061,6 +4152,7 @@ class TestSchedulerPrioritySignalBadges:
             priority_signals=[],
             structured_data={"patient": {"name": "Detalhe Sem Sinal", "age": 65, "gender": "F"}},
         )
+        attach_approved_procedures(case, approved=("eda",))
         response = client.get(f"/scheduler/processed/{case.case_id}/")
         assert response.status_code == 200
         content = response.content.decode()
@@ -4091,6 +4183,7 @@ class TestSchedulerPrioritySignalBadges:
             ],
             structured_data={"patient": {"name": "XSS Detail", "age": 30, "gender": "M"}},
         )
+        attach_approved_procedures(case, approved=("eda",))
         response = client.get(f"/scheduler/processed/{case.case_id}/")
         assert response.status_code == 200
         content = response.content.decode()
@@ -4141,6 +4234,7 @@ class TestSchedulerPrioritySignalBadges:
             priority_signals=[self._signal("foreign_body")],
             structured_data={"patient": {"name": "Count A Sinal", "age": 40, "gender": "M"}},
         )
+        attach_approved_procedures(case_a, approved=("eda",))
         Case.objects.filter(case_id=case_a.case_id).update(created_at=now - timedelta(hours=2))
         case_b = Case.objects.create(
             created_by=nir,
@@ -4151,6 +4245,7 @@ class TestSchedulerPrioritySignalBadges:
             priority_signals=[self._signal("pediatric", "9 anos")],
             structured_data={"patient": {"name": "Count B Sinal", "age": 9, "gender": "F"}},
         )
+        attach_approved_procedures(case_b, approved=("eda",))
         Case.objects.filter(case_id=case_b.case_id).update(created_at=now - timedelta(hours=1))
         self._login_as(client, "scheduler")
         content = client.get("/scheduler/").content.decode()

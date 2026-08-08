@@ -8,7 +8,7 @@ from typing import Any
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
 from django.db import models
-from django.db.models import F, QuerySet
+from django.db.models import Exists, F, OuterRef, QuerySet
 from django.http import FileResponse, Http404, HttpRequest, HttpResponse, HttpResponseBase, JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
@@ -29,6 +29,7 @@ from apps.cases.models import (
     EDA_COLONOSCOPY,
     Case,
     CaseEvent,
+    CaseProcedure,
     CaseStatus,
     DoctorDisposition,
     ProcedureType,
@@ -126,6 +127,37 @@ def _get_support_flag_display(case: Case) -> str:
 def _get_admission_flow_display(case: Case) -> str:
     """Map doctor_admission_flow to Portuguese label."""
     return ADMISSION_FLOW_MAP.get(case.doctor_admission_flow, case.doctor_admission_flow)
+
+
+# ── Elegibilidade CHD (Slice 009-B) ───────────────────────────────────────
+
+
+def _with_approved_projection(qs: QuerySet[Case]) -> QuerySet[Case]:
+    """Restringe um universo CHD a casos com projeção aprovada (R1).
+
+    Predicado ÚNICO de elegibilidade operacional do CHD: exige ao menos uma
+    row ``CaseProcedure`` com ``doctor_disposition=approved`` via subquery
+    correlacionada. Sem fallback da ponte (``Case.exam_type`` ou
+    ``doctor_decision=accept``) — caso sem row aprovada não aparece em nenhum
+    universo/contador CHD (inclusive "Todos").
+
+    Mantido SEPARADO do snapshot de apresentação (``_approved_snapshot``):
+    este predicado filtra querysets de fila; aquele monta o card exibido.
+    """
+    approved_exists = CaseProcedure.objects.filter(
+        case=OuterRef("pk"),
+        doctor_disposition=DoctorDisposition.APPROVED,
+    )
+    return qs.annotate(_has_approved_projection=Exists(approved_exists)).filter(_has_approved_projection=True)
+
+
+def _has_approved_projection(case: Case) -> bool:
+    """Checagem fail-closed em nível de instância para ações diretas (R2).
+
+    Usada por ``scheduler_confirm`` antes de adquirir lock. Fonte estrita
+    (``fallback_to_bridge=False``): sem rows aprovadas ⇒ ``False``.
+    """
+    return bool(get_approved_procedure_types(case, fallback_to_bridge=False))
 
 
 # ── Card builder ─────────────────────────────────────────────────────────
@@ -255,7 +287,7 @@ def _scheduler_queue_context(user: Any = None, tab: str = "pending") -> dict[str
     now = timezone.now()
 
     # ── Pending cases (always computed for badges) ──────────────────────
-    pending_cases: QuerySet[Case] = (
+    pending_cases: QuerySet[Case] = _with_approved_projection(
         Case.objects.filter(status=CaseStatus.WAIT_APPT)
         .select_related("doctor", "locked_by")
         .prefetch_related("procedures")
@@ -273,7 +305,7 @@ def _scheduler_queue_context(user: Any = None, tab: str = "pending") -> dict[str
     # ── Operational notices (always computed for badges) ────────────────
     start, end = local_day_bounds()
 
-    immediate_notice_qs: QuerySet[Case] = (
+    immediate_notice_qs: QuerySet[Case] = _with_approved_projection(
         unacknowledged_operational_notice_qs()
         .select_related("doctor")
         .prefetch_related("procedures")
@@ -291,7 +323,7 @@ def _scheduler_queue_context(user: Any = None, tab: str = "pending") -> dict[str
     # ── Operational post-acceptance issues (Slice 003) ────────────────
     from apps.cases.services import unacknowledged_operational_issue_qs
 
-    operational_issue_qs: QuerySet[Case] = (
+    operational_issue_qs: QuerySet[Case] = _with_approved_projection(
         unacknowledged_operational_issue_qs()
         .select_related("doctor", "post_schedule_issue_opened_by")
         .prefetch_related("procedures")
@@ -320,6 +352,9 @@ def _scheduler_queue_context(user: Any = None, tab: str = "pending") -> dict[str
             timestamp__gte=start,
             timestamp__lt=end,
             case__doctor_admission_flow__in=OPERATIONAL_NOTICE_FLOWS,
+            # R1 (Slice 009-B): ciência reconhecida só compõe card CHD quando
+            # o caso possui projeção aprovada (predicado único reutilizado).
+            case__in=_with_approved_projection(Case.objects.all()),
         )
         .select_related("actor", "case", "case__doctor")
         .order_by("-timestamp")
@@ -333,7 +368,7 @@ def _scheduler_queue_context(user: Any = None, tab: str = "pending") -> dict[str
         acknowledged_notice_cards.append(card)
 
     # ── Processados hoje ────────────────────────────────────────────────
-    processed_qs: QuerySet[Case] = (
+    processed_qs: QuerySet[Case] = _with_approved_projection(
         Case.objects.filter(
             scheduler=user,
             appointment_status__in=["confirmed", "denied"],
@@ -903,6 +938,13 @@ def scheduler_confirm(request: HttpRequest, case_id: uuid.UUID) -> HttpResponse:
     # Detecta se é intercorrência ativa
     has_psi = case.post_schedule_issue_status == "opened"
 
+    # R2 (Slice 009-B): caso NORMAL de agendamento (sem intercorrência ativa)
+    # sem projeção aprovada é recusado fail-closed ANTES de adquirir lock —
+    # nunca chega ao formulário/CTA. Intercorrência legítima (caso que já
+    # possui projeção aprovada preservada) segue normalmente.
+    if not has_psi and not _has_approved_projection(case):
+        raise Http404("Caso sem procedimento autorizado para agendamento.")
+
     # Attempt to claim the lock
     result = claim_case_lock(
         case_id=case.case_id,
@@ -1031,6 +1073,25 @@ def scheduler_submit(request: HttpRequest, case_id: uuid.UUID) -> HttpResponse:
             return render(request, "scheduler/confirm_post_schedule_issue.html", ctx)
     else:
         # ── Fluxo normal de agendamento ──────────────────────────────
+        # R2 (Slice 009-B): revalidar a projeção aprovada na instância
+        # protegida pelo lock, cobrindo remoção/race entre GET e POST. Sem
+        # aprovação ⇒ fail-closed: libera o lock e redireciona sem efeitos
+        # (nenhuma transição FSM, ``appointment_at``, status/timestamp novo
+        # ou evento com ``approved_procedures=[]``).
+        approved_types = get_approved_procedure_types(case, fallback_to_bridge=False)
+        if not approved_types:
+            release_lock_service(
+                case_id=case.case_id,
+                user=request.user,
+                token=token,
+                context="scheduler_confirm",
+            )
+            messages.warning(
+                request,
+                "Este caso não possui procedimento autorizado para agendamento.",
+            )
+            return redirect("scheduler:queue")
+
         form = SchedulerDecisionForm(request.POST)
 
         if not form.is_valid():
@@ -1043,7 +1104,6 @@ def scheduler_submit(request: HttpRequest, case_id: uuid.UUID) -> HttpResponse:
         # Snapshot da dimensão autorizada (R4/D11): o evento de
         # confirmação/negativa carrega o conjunto aprovado ordenado + flag
         # de agenda casada — no MESMO evento, sem duplicar transição.
-        approved_types = get_approved_procedure_types(case, fallback_to_bridge=False)
         paired = len(approved_types) == 2
         snapshot: dict[str, Any] = {"approved_procedures": list(approved_types), "paired": paired}
 
@@ -1211,7 +1271,7 @@ def scheduler_historical_search(request: HttpRequest) -> HttpResponse:
     raw_exam_type = request.GET.get("exam_type", "all")
     exam_type = raw_exam_type if raw_exam_type in _HISTORICAL_DIMENSION_CHOICES else "all"
 
-    qs = _scheduler_historical_queryset()
+    qs = _with_approved_projection(_scheduler_historical_queryset())
     if exam_type != "all":
         qs = _filter_by_approved_dimension(qs, exam_type)
     if query:

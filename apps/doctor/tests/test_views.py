@@ -9,6 +9,7 @@ from django.contrib.auth import get_user_model
 from django.utils import timezone
 
 from apps.cases.models import Case, CaseEvent, CaseStatus
+from tests.shared_case_fixtures import attach_approved_procedures
 
 User = get_user_model()
 
@@ -3074,6 +3075,12 @@ class TestDoctorLockReleaseOnSubmit:
         case = Case.objects.get(pk=case.case_id)
         assert case.status == CaseStatus.WAIT_APPT
         assert case.locked_by is None  # lock was released by doctor submit
+
+        # Projeção aprovada explícita (Slice 009-B): na produção o pipeline
+        # v2 cria rows detectadas e o médico decide por procedimento (rows
+        # aprovadas); este teste de handoff burla o pipeline, então prepara a
+        # projeção explicitamente antes de o CHD abrir a confirmação.
+        attach_approved_procedures(case, approved=("eda",))
 
         response = client.get(f"/scheduler/{case.case_id}/")
         assert response.status_code == 200  # can access immediately

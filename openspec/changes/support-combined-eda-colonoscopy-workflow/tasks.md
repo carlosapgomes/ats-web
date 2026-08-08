@@ -37,7 +37,7 @@ A ADR-0004 deve ser commitada, enviada e aprovada explicitamente antes de entreg
 - [x] Slice 007 — Pipeline executa somente v2 e prompts neutros (`slices/slice-007-neutral-pipeline-prompt-cutover.md`)
 - [x] Slice 008 — NIR opera somente pela projeção declarada (`slices/slice-008-nir-declared-projection-authority.md`)
 - [x] Slice 009-A — Médico opera somente por detecção/autorização projetadas (`slices/slice-009a-doctor-projection-authority.md`)
-- [ ] Slice 009-B — CHD lista e agenda somente autorização projetada (`slices/slice-009b-scheduler-projection-authority.md`)
+- [x] Slice 009-B — CHD lista e agenda somente autorização projetada (`slices/slice-009b-scheduler-projection-authority.md`)
 - [ ] Slice 010 — Dashboard e helpers tornam CaseProcedure autoritativo (`slices/slice-010-dashboard-domain-projection-authority.md`)
 
 > `slices/slice-009-clinical-scheduling-projection-authority.md` e os relatórios dos commits `9caf210`/`4423fe7` permanecem como evidência histórica `INCOMPLETE`; não possuem checkbox de conclusão e seu prompt não deve ser executado.
@@ -75,9 +75,9 @@ A ADR-0004 deve ser commitada, enviada e aprovada explicitamente antes de entreg
 
 ### CHD e NIR
 
-- [ ] CHD vê apenas conjunto autorizado e alterações explícitas.
+- [x] CHD vê apenas conjunto autorizado e alterações explícitas.
 - [x] Combinado usa um único `appointment_at`; split é impossível no fluxo normal.
-- [ ] Filtros CHD usam autorizado; filtros médicos usam detectado; filtros NIR usam declarado.
+- [x] Filtros CHD usam autorizado; filtros médicos usam detectado; filtros NIR usam declarado.
 - [x] Correção NIR reprocessa o mesmo caso sem reextrair PDF e sem race.
 - [x] Resposta final mostra solicitado, detectado, autorizado e razões.
 
