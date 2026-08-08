@@ -2,7 +2,7 @@
 
 ## Handoff com contexto zero
 
-Leia todos os artefatos/ADR/relatórios 001–011, runbook anterior `docs/deploy/introduce-colonoscopy-exam-workflow.md`, Compose/settings/migrations/prompts finais, manual oficial e `PROJECT_CONTEXT.md`.
+Leia todos os artefatos/ADR, relatórios aprovados 001–008, 009-A, 009-B e 010–011, a evidência `INCOMPLETE` do 009 original, runbook anterior `docs/deploy/introduce-colonoscopy-exam-workflow.md`, Compose/settings/migrations/prompts finais, manual oficial e `PROJECT_CONTEXT.md`.
 
 ### Fluxo entregue
 
@@ -165,7 +165,7 @@ Incluir **Handoff para verificador** com arquivos alterados, comandos exatos de 
 ## Prompt pronto
 
 ```text
-Read all artifacts, accepted ADR-0004, approved reports 001-011, final code/schema/prompts and the prior colonoscopy runbook. Implement ONLY Slice 012 documentation/contracts on the required branch. Follow the DeepSeek4-Flash protocol exactly. Any non-executable/human-only assert, unsafe order, missing test, code/infra diff, failing gate or cap violation means INCOMPLETE and no tasks/commit/push.
+Read all artifacts, accepted ADR-0004, approved reports 001-008 plus 009-A, 009-B and 010-011, the original 009 INCOMPLETE evidence, final code/schema/prompts and the prior colonoscopy runbook. Implement ONLY Slice 012 documentation/contracts on the required branch. Follow the DeepSeek4-Flash protocol exactly. Any non-executable/human-only assert, unsafe order, missing test, code/infra diff, failing gate or cap violation means INCOMPLETE and no tasks/commit/push.
 
 Produce a CRITICAL fail-closed rollout: verified DB/media backups, machine-readable projection/state/prompt preflight, new-image serialized migration with all writers stopped, flag-false smoke matrix then web-only activation, monitoring, preferred new-image rollback, and an exceptional old-image bridge that refuses combined/ambiguous rows, safely switches prompt activation to legacy mode, and restores neutral-only mode during forward with independent fail-fast binary asserts. Align manual, context and ADR links; add adversarial doc tests and independent verifier. Do not change business code, models, migrations, settings, Compose, pipeline, prompts or dashboard formulas.
 

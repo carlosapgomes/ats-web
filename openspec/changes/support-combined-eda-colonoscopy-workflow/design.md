@@ -308,9 +308,11 @@ O inventário bloqueado no início do antigo Slice 007 encontrou footprint super
 
 1. Slice 007 remove o branch executável 1.1, torna pipeline v2 exclusivo e desativa os oito nomes antigos preservando histórico;
 2. Slice 008 remove readers NIR e migra fixtures do fluxo declarado;
-3. Slice 009 remove readers de médico, histórico anterior e CHD, preservando apresentação JSON 1.1;
-4. Slice 010 remove dashboard/fallbacks dos getters, revalida índices e prova que não resta reader operacional;
-5. Slice 011 executa precheck fail-closed, remove `Case.exam_type`, `ExamType` duplicado e dual-write, e prova ausência de schema drift.
+3. o Slice 009 original preserva JSON 1.1 e torna o prior-case dimensional, mas sua tentativa de concluir médico+CHD foi reprovada; os gates verticais corretivos 009-A e 009-B substituem essa parte executável sem apagar a evidência do commit incompleto;
+4. Slice 009-A torna cards/tela médica estritos por rows e migra somente fixtures do fluxo médico;
+5. Slice 009-B torna todos os universos e ações CHD estritos por aprovação, preservando agenda casada, e migra somente fixtures que atravessam o CHD;
+6. Slice 010 remove dashboard/fallbacks globais dos getters, revalida índices e prova que não resta reader operacional;
+7. Slice 011 executa precheck fail-closed, remove `Case.exam_type`, `ExamType` duplicado e dual-write, e prova ausência de schema drift.
 
 `eda_colonoscopy` pode permanecer após o cutover somente como chave derivada de seleção/badge/SSR para o conjunto de duas rows; não é enum de row nem coluna persistida. Adapters de leitura schema 1.1 e payloads históricos são preservados. Se um reader residual ainda depender do campo ao iniciar o Slice 011, o slice é `INCOMPLETE`; não corrigir escondido nem adiar como dívida.
 
@@ -326,7 +328,9 @@ A ADR-0004 foi criada, revisada e aceita antes do Slice 001. Ela supera parcialm
 
 ## 4. Dimensionamento dos slices
 
-O plano inicial tinha 8 slices. O gate obrigatório executado antes de editar o antigo Slice 007 mediu mais de 50 arquivos potenciais (aproximadamente 29 de produto e 27 de teste), muito acima do cap de 14. O bloqueio foi correto: aprovar um cutover monolítico aumentaria risco e dificultaria TDD/revisão. O change passa a ter **12 slices**, dividindo o antigo cutover por fluxo sem remover parcialmente a coluna antes de todos os readers migrarem.
+O plano inicial tinha 8 slices. O gate obrigatório executado antes de editar o antigo Slice 007 mediu mais de 50 arquivos potenciais (aproximadamente 29 de produto e 27 de teste), muito acima do cap de 14. O bloqueio foi correto: aprovar um cutover monolítico aumentaria risco e dificultaria TDD/revisão. O change mantém **12 etapas numeradas**, mas a etapa 009 passa a ter dois gates corretivos verticais obrigatórios (`009-A` e `009-B`). O arquivo/commit do Slice 009 original permanece somente como evidência `INCOMPLETE`, não como gate aprovado.
+
+A revisão pós-`9caf210` encontrou cerca de 105 falhas de fixtures quando doctor e CHD se tornam estritos. Um slice horizontal só para testes não entrega valor operacional; um único commit com aproximadamente 24 arquivos acumulados também não é revisável. Por isso, cada gate corretivo combina produto + fixtures do mesmo ator. Este redimensionamento documental toca nove artefatos OpenSpec (proposal, design, tasks, slice 009 histórico, os dois novos slices e os Slices 010–012 dependentes) porque todos precisam declarar a mesma ordem/evidência; não amplia produto.
 
 1. **Intake + projeção**: NIR cria e acompanha um caso combinado; ponte mantém sistema verde.
 2. **Pipeline neutro**: história única, detecção/reconciliação, policy/LLM2 e lookup anterior por componente, além da chegada ao médico.
@@ -336,12 +340,14 @@ O plano inicial tinha 8 slices. O gate obrigatório executado antes de editar o 
 6. **Analytics**: dimensões, volumes e conversões.
 7. **Pipeline/prompts canônicos**: remove execução 1.1 de novos jobs, exige rows e deixa somente quatro prompts neutros ativos.
 8. **Autoridade NIR**: remove readers da coluna no fluxo declarado e torna fixtures NIR explícitas.
-9. **Autoridade clínica/CHD**: remove readers médicos, prior-case e scheduler, preservando JSON 1.1.
+9. **Autoridade clínica/CHD (etapa composta)**:
+   - **009-A — Médico**: remove readers diretos/transitivos de cards e decisão, mantém JSON 1.1 neutro e migra fixtures médicas explícitas;
+   - **009-B — CHD**: exclui casos sem aprovação de todos os universos, bloqueia ações diretas sem aprovação e migra fixtures CHD explícitas.
 10. **Autoridade dashboard/domínio**: remove filtro singular/fallbacks globais e revalida índices.
 11. **Cutover físico**: precheck fail-closed, migration remove coluna/enum/dual-write e encerra fixtures residuais.
 12. **Operação**: manual/contexto/runbook/testes de contrato e rollback verificável.
 
-Os Slices 007–010 são verticais e mantêm a coluna somente como ponte escrita internamente; cada um entrega um fluxo que já não depende dela. O Slice 011 é o gate físico indivisível e só começa após inventário global sem readers. A branch não é deployável entre Slices 001–010; a flag permanece falsa até o rollout do Slice 012.
+Os gates 007, 008, 009-A, 009-B e 010 são verticais e mantêm a coluna somente como ponte escrita internamente; cada gate aprovado entrega um fluxo que já não depende dela. A ordem é obrigatória: 009-A antes de 009-B e ambos antes de 010. O Slice 011 é o gate físico indivisível e só começa após inventário global sem readers. A branch não é deployável entre Slices 001–010; a flag permanece falsa até o rollout do Slice 012.
 
 ## 5. Limites globais
 
@@ -374,4 +380,4 @@ openspec validate support-combined-eda-colonoscopy-workflow --strict
 git diff --check
 ```
 
-O change só pode ser arquivado após Slice 012 aprovado, ADR-0004 aceita, `Case.exam_type` removido, quatro prompts neutros documentados, migration/rollback testáveis e doze relatórios temporários revisados.
+O change só pode ser arquivado após Slice 012 aprovado, ADR-0004 aceita, `Case.exam_type` removido, quatro prompts neutros documentados, migration/rollback testáveis, relatórios aprovados de todos os gates (incluindo 009-A e 009-B) e preservação auditável dos relatórios `INCOMPLETE` do Slice 009 original.

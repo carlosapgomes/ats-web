@@ -2,7 +2,7 @@
 
 ## Handoff com contexto zero
 
-Leia artefatos, ADR-0004, migrations 0014+, relatórios 001–010 e o inventário final do Slice 010. Confirme que pipeline, NIR, médico, CHD e dashboard já não leem a coluna. Inspecione model, serviço de procedimentos, writers de criação e fixtures residuais.
+Leia artefatos, ADR-0004, migrations 0014+, relatórios aprovados 001–008, 009-A, 009-B e 010, além da evidência `INCOMPLETE` do 009 original e do inventário final do Slice 010. Confirme que pipeline, NIR, médico, CHD e dashboard já não leem a coluna. Se 009-A, 009-B ou 010 não estiver aprovado, PARE como BLOQUEADO. Inspecione model, serviço de procedimentos, writers de criação e fixtures residuais.
 
 ### Fluxo entregue
 
@@ -135,7 +135,7 @@ Criar `/tmp/support-combined-eda-colonoscopy-workflow-slice-011-report.md` com m
 ## Prompt pronto
 
 ```text
-Read all artifacts, ADR-0004 and approved reports 001-010. Implement ONLY resized Slice 011. Follow the DeepSeek protocol and stop before editing if any operational reader remains or cap exceeds 10.
+Read all artifacts, ADR-0004, approved reports 001-008 plus 009-A, 009-B and 010, and the original 009 INCOMPLETE evidence. If 009-A, 009-B or 010 is not approved, STOP BLOCKED. Implement ONLY resized Slice 011. Follow the DeepSeek protocol and stop before editing if any operational reader remains or cap exceeds 10.
 
 Add a fail-closed migration precheck requiring 1-2 valid CaseProcedure rows with a declaration for every Case, then remove Case.exam_type without inventing data or damaging events/JSON/PDF/decisions/appointments. Remove ExamType duplication, dual-write helpers/assignments/defaults and final Case creation kwargs. Keep eda_colonoscopy only as a derived SSR/selection key. Make residual fixtures explicit and classify historical JSON/event/parameter names. Run migration tests, makemigrations check, full gates and global inspections. Do not touch consumers/prompts/docs or mask residual readers.
 

@@ -26,7 +26,7 @@ A ADR-0004 deve ser commitada, enviada e aprovada explicitamente antes de entreg
 
 ## Slices verticais
 
-> **Redimensionamento após gate:** o início do Slice 007 original foi bloqueado corretamente antes de editar: o inventário encontrou footprint potencial superior a 50 arquivos para um cap de 14. O cutover monolítico foi substituído pelos Slices 007–011. Não usar o prompt antigo nem aprovar footprint expandido em um único commit.
+> **Redimensionamentos após gates:** o início do Slice 007 original foi bloqueado corretamente antes de editar: o inventário encontrou footprint potencial superior a 50 arquivos para um cap de 14. O cutover monolítico foi substituído pelos Slices 007–011. Depois, a implementação `9caf210` do Slice 009 foi reprovada e a correção monolítica revelou cerca de 105 fixtures inválidas. O restante da etapa 009 foi substituído pelos gates verticais 009-A (médico) e 009-B (CHD). Não usar os prompts antigos nem aprovar footprint expandido em um único commit.
 
 - [x] Slice 001 — NIR cria e acompanha um único caso combinado (`slices/slice-001-combined-intake-procedure-projection.md`)
 - [x] Slice 002 — Pipeline neutro analisa um ou dois procedimentos e entrega ao médico (`slices/slice-002-procedure-neutral-pipeline.md`)
@@ -36,8 +36,11 @@ A ADR-0004 deve ser commitada, enviada e aprovada explicitamente antes de entreg
 - [x] Slice 006 — Gestor acompanha casos, procedimentos e conversões (`slices/slice-006-procedure-dimension-analytics.md`)
 - [x] Slice 007 — Pipeline executa somente v2 e prompts neutros (`slices/slice-007-neutral-pipeline-prompt-cutover.md`)
 - [x] Slice 008 — NIR opera somente pela projeção declarada (`slices/slice-008-nir-declared-projection-authority.md`)
-- [ ] Slice 009 — Médico e CHD operam por detecção/autorização normalizadas (`slices/slice-009-clinical-scheduling-projection-authority.md`)
+- [ ] Slice 009-A — Médico opera somente por detecção/autorização projetadas (`slices/slice-009a-doctor-projection-authority.md`)
+- [ ] Slice 009-B — CHD lista e agenda somente autorização projetada (`slices/slice-009b-scheduler-projection-authority.md`)
 - [ ] Slice 010 — Dashboard e helpers tornam CaseProcedure autoritativo (`slices/slice-010-dashboard-domain-projection-authority.md`)
+
+> `slices/slice-009-clinical-scheduling-projection-authority.md` e os relatórios dos commits `9caf210`/`4423fe7` permanecem como evidência histórica `INCOMPLETE`; não possuem checkbox de conclusão e seu prompt não deve ser executado.
 - [ ] Slice 011 — Migration remove Case.exam_type e encerra a ponte (`slices/slice-011-authoritative-procedure-schema-cutover.md`)
 - [ ] Slice 012 — Operação ativa e reverte o fluxo combinado com segurança (`slices/slice-012-rollout-documentation-and-verification.md`)
 
@@ -72,9 +75,9 @@ A ADR-0004 deve ser commitada, enviada e aprovada explicitamente antes de entreg
 
 ### CHD e NIR
 
-- [x] CHD vê apenas conjunto autorizado e alterações explícitas.
+- [ ] CHD vê apenas conjunto autorizado e alterações explícitas.
 - [x] Combinado usa um único `appointment_at`; split é impossível no fluxo normal.
-- [x] Filtros CHD usam autorizado; filtros médicos usam detectado; filtros NIR usam declarado.
+- [ ] Filtros CHD usam autorizado; filtros médicos usam detectado; filtros NIR usam declarado.
 - [x] Correção NIR reprocessa o mesmo caso sem reextrair PDF e sem race.
 - [x] Resposta final mostra solicitado, detectado, autorizado e razões.
 

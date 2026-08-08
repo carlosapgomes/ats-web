@@ -151,7 +151,7 @@ Sobrescrever um único tipo apagaria a diferença entre o que o NIR declarou, o 
 | Agregado contar combinado incorretamente | Separar casos exclusivos de volume de procedimentos; testes de fechamento |
 | Histórico combinado contaminar lookup | Consultas independentes por `procedure_type` e deduplicação visual consciente |
 | Rollback para imagem antiga após remoção de coluna | Runbook com imagem nova preferencial e bridge de schema fail-fast para exceção |
-| Change transversal grande | Doze slices verticais após o gate de footprint do cutover, caps realistas por fluxo, inspeções `rg` e revisão independente |
+| Change transversal grande | Doze etapas numeradas após o gate de footprint; a etapa corretiva 009 possui dois gates verticais obrigatórios (009-A médico e 009-B CHD), caps realistas por fluxo, inspeções `rg` e revisão independente |
 
 ## Critérios de sucesso do change
 
@@ -165,4 +165,4 @@ Sobrescrever um único tipo apagaria a diferença entre o que o NIR declarou, o 
 - Dashboard distingue casos, procedimentos e conversões sem dupla contagem indevida.
 - Artefatos legados continuam legíveis; `Case.exam_type` deixa de ser fonte e é removido antes do rollout.
 - Flag desliga Colonoscopia e combinado somente no intake.
-- Todos os doze slices comprovam baseline, RED, GREEN, REFACTOR, inspeções, quality gate e relatório temporário revisável.
+- Todas as doze etapas numeradas — incluindo os dois gates aprovados 009-A/009-B e preservando a evidência `INCOMPLETE` do 009 original — comprovam baseline, RED, GREEN, REFACTOR, inspeções, quality gate e relatório temporário revisável.

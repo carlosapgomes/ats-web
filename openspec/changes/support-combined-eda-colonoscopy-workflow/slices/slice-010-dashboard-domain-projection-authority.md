@@ -2,7 +2,7 @@
 
 ## Handoff com contexto zero
 
-Leia artefatos, ADR-0004 e relatórios 001–009. Inspecione `apps/dashboard/views.py`, `apps/dashboard/procedure_analytics.py`, templates/testes do dashboard e getters em `apps/cases/procedures.py`.
+Leia artefatos, ADR-0004, relatórios aprovados 001–008, 009-A e 009-B, além dos relatórios `INCOMPLETE` do 009 original para não repetir seus erros. Inspecione `apps/dashboard/views.py`, `apps/dashboard/procedure_analytics.py`, templates/testes do dashboard e getters em `apps/cases/procedures.py`. Se 009-A ou 009-B não estiver aprovado, PARE como BLOQUEADO.
 
 ### Fluxo entregue
 
@@ -105,7 +105,7 @@ Criar `/tmp/support-combined-eda-colonoscopy-workflow-slice-010-report.md` com m
 ## Prompt pronto
 
 ```text
-Read all artifacts, ADR-0004 and approved reports 001-009. Implement ONLY resized Slice 010 using TDD and its DeepSeek protocol.
+Read all artifacts, ADR-0004, approved reports 001-008 plus 009-A and 009-B, and the original 009 INCOMPLETE evidence. If either 009-A or 009-B is not approved, STOP as BLOCKED. Implement ONLY resized Slice 010 using TDD and its DeepSeek protocol.
 
 Retire the dashboard's old singular exam_type breakdown/filter/UI, keep only procedure_dimension/procedure_selection, remove all column fallbacks from procedure analytics and the three domain getters, make missing rows fail closed, migrate affected dashboard/cases fixtures explicitly, and revalidate the Slice 001 indexes with an actual query plan. Perform a global reader inventory; only temporary schema/writers for Slice 011 and historical payload/parameter names may remain. Do not remove the field/migration/dual-write yet or touch completed apps/docs. Above 11 files or any gate failure = INCOMPLETE.
 

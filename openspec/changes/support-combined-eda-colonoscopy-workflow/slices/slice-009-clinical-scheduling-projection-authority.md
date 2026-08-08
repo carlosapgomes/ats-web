@@ -1,4 +1,4 @@
-# Slice 009: Médico e CHD operam por detecção/autorização normalizadas
+# Slice 009: Médico e CHD operam por detecção/autorização normalizadas — INCOMPLETE/SUPERSEDED
 
 ## Handoff com contexto zero
 
@@ -139,7 +139,16 @@ rows coerentes (declaradas/detectadas/aprovadas) antes de reexecutar C1+C2, ou
 C4 (derivação 1.1 fail-closed + spy) já está correto no commit `9caf210` e não
 requer mudança de produto.
 
-## Prompt pronto
+## Redimensionamento vinculante após revisão
+
+Este arquivo é evidência histórica da tentativa reprovada e **não deve ser executado novamente**. O trabalho restante foi substituído, nesta ordem, por:
+
+1. `slice-009a-doctor-projection-authority.md`;
+2. `slice-009b-scheduler-projection-authority.md`.
+
+Somente após ambos terem relatório aprovado o Slice 010 pode começar. Não marcar um checkbox para este arquivo histórico e não usar o prompt abaixo.
+
+## Prompt obsoleto — NÃO EXECUTAR
 
 ```text
 Read all artifacts, ADR-0004 and approved reports 001-008. Implement ONLY resized Slice 009 with TDD and the mandatory protocol.
