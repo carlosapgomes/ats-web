@@ -4819,17 +4819,13 @@ class TestDashboardDoctorReportAudit:
 
 @pytest.mark.django_db
 class TestDashboardExamTypeBreakdownAndFilter:
-    """Slice 008 — métricas consolidadas, breakdown EDA/Colonoscopia e filtro de tabela.
+    """Slice 010 — métricas consolidadas + labels visíveis (UI singular removida).
 
-    R1: consolidado preserva contagem única por caso no período.
-    R2: breakdown reutiliza as fórmulas existentes parametrizando por tipo;
-        esperas por etapa são snapshot (estado atual), desfechos são período.
-    R3: template expõe headers/labels acessíveis e período ativo.
-    R4: filtro exam_type=all|eda|colonoscopy compõe (AND) com busca/status/
-        datas/atenção e preserva paginação/partial.
+    A tabela "BREAKDOWN POR TIPO DE EXAME" e o filtro singular ``exam_type`` foram
+    removidos em favor do analytics por dimensão (Slice 006). Permanecem aqui os
+    testes de métricas consolidadas (case-level) e de rótulos acessíveis que
+    continuam presentes na página.
     """
-
-    # ── R1: Consolidado preservado ────────────────────────────────────
 
     def test_consolidated_counts_both_types_once(self, client) -> None:
         """Cards consolidados contam EDA + colonoscopia uma única vez no período."""
@@ -4860,363 +4856,8 @@ class TestDashboardExamTypeBreakdownAndFilter:
         assert result["in_progress"] == 0
         assert result["administratively_closed"] == 0
 
-    # ── R2: Breakdown type-aware ───────────────────────────────────────
-
-    def test_breakdown_rows_and_sums_match_consolidated(self, client) -> None:
-        """Breakdown retorna linhas EDA e Colonoscopia; soma fecha com consolidado."""
-        from apps.dashboard.views import _compute_exam_type_breakdown, _compute_summary
-
-        user = _login_as(client, "manager")
-        Case.objects.all().delete()
-        # EDA: 1 aceito confirmado + 1 negado pelo médico
-        _create_case(
-            created_by=user,
-            status=CaseStatus.CLEANED,
-            doctor_decision="accept",
-            appointment_status="confirmed",
-            exam_type="eda",
-            agency_record_number="BR-EDA-ACC",
-        )
-        _create_case(
-            created_by=user,
-            status=CaseStatus.CLEANED,
-            doctor_decision="deny",
-            exam_type="eda",
-            agency_record_number="BR-EDA-DEN",
-        )
-        # Colonoscopia: 1 aceito confirmado + 1 em andamento (WAIT_DOCTOR)
-        _create_case(
-            created_by=user,
-            status=CaseStatus.CLEANED,
-            doctor_decision="accept",
-            appointment_status="confirmed",
-            exam_type="colonoscopy",
-            agency_record_number="BR-COL-ACC",
-        )
-        _create_case(
-            created_by=user,
-            status=CaseStatus.WAIT_DOCTOR,
-            exam_type="colonoscopy",
-            agency_record_number="BR-COL-PROG",
-        )
-
-        summary = _compute_summary(period="all")
-        breakdown = _compute_exam_type_breakdown(period="all")
-
-        assert set(breakdown) == {"eda", "colonoscopy"}
-        eda = breakdown["eda"]
-        col = breakdown["colonoscopy"]
-        assert eda["total"] == 2
-        assert col["total"] == 2
-        assert eda["accepted"] == 1
-        assert eda["denied"] == 1
-        assert col["accepted"] == 1
-        assert col["denied"] == 0
-        assert col["in_progress"] == 1
-
-        # Soma fecha com o consolidado no universo de dois tipos
-        assert eda["total"] + col["total"] == summary["total_today"]
-        assert eda["accepted"] + col["accepted"] == summary["accepted"]
-        assert eda["denied"] + col["denied"] == summary["denied"]
-        assert eda["in_progress"] + col["in_progress"] == summary["in_progress"], (
-            "Soma de em andamento do breakdown deve fechar com o consolidado"
-        )
-        assert eda["administratively_closed"] + col["administratively_closed"] == summary["administratively_closed"]
-
-    def test_breakdown_admin_closed_excluded_from_accepted_denied(self, client) -> None:
-        """Caso encerrado administrativamente não entra em accepted/denied do breakdown."""
-        from apps.cases.services import administratively_close_case
-        from apps.dashboard.views import _compute_exam_type_breakdown
-
-        user = _login_as(client, "manager")
-        Case.objects.all().delete()
-        case = _create_case(
-            created_by=user,
-            status=CaseStatus.WAIT_DOCTOR,
-            doctor_decision="accept",
-            appointment_status="confirmed",
-            exam_type="eda",
-            agency_record_number="BR-ADM-1",
-        )
-        administratively_close_case(
-            case=case,
-            user=user,
-            reason_code="system_bug",
-            reason_text="Encerrado no teste",
-            active_role="manager",
-        )
-
-        breakdown = _compute_exam_type_breakdown(period="all")
-        eda = breakdown["eda"]
-        assert eda["total"] == 1
-        assert eda["administratively_closed"] == 1, (
-            f"admin-closed deve contar 1, obtido {eda['administratively_closed']}"
-        )
-        assert eda["accepted"] == 0, "admin-closed não pode ser aceito"
-        assert eda["denied"] == 0, "admin-closed não pode ser negado"
-        assert eda["in_progress"] == 0, "admin-closed não compõe em andamento"
-
-    def test_breakdown_waiting_is_snapshot_not_period(self, client) -> None:
-        """Esperas por etapa no breakdown refletem o estado atual (snapshot), por tipo."""
-        from apps.dashboard.views import _compute_exam_type_breakdown
-
-        user = _login_as(client, "manager")
-        Case.objects.all().delete()
-        _create_case(
-            created_by=user,
-            status=CaseStatus.WAIT_DOCTOR,
-            exam_type="eda",
-            agency_record_number="W-EDA-DOC",
-        )
-        _create_case(
-            created_by=user,
-            status=CaseStatus.WAIT_APPT,
-            exam_type="colonoscopy",
-            agency_record_number="W-COL-APPT",
-        )
-        _create_case(
-            created_by=user,
-            status=CaseStatus.WAIT_R1_CLEANUP_THUMBS,
-            exam_type="colonoscopy",
-            agency_record_number="W-COL-CLEAN",
-        )
-
-        breakdown = _compute_exam_type_breakdown(period="all")
-        assert breakdown["eda"]["waiting_doctor"] == 1
-        assert breakdown["eda"]["waiting_appt"] == 0
-        assert breakdown["eda"]["waiting_confirm"] == 0
-        assert breakdown["colonoscopy"]["waiting_doctor"] == 0
-        assert breakdown["colonoscopy"]["waiting_appt"] == 1
-        assert breakdown["colonoscopy"]["waiting_confirm"] == 1
-
-    def test_breakdown_waiting_sum_matches_stage_waiting(self, client) -> None:
-        """Soma das esperas do breakdown por tipo fecha com o card Aguardando por etapa."""
-        from apps.dashboard.views import _compute_exam_type_breakdown, _compute_stage_waiting
-
-        user = _login_as(client, "manager")
-        Case.objects.all().delete()
-        _create_case(created_by=user, status=CaseStatus.WAIT_DOCTOR, exam_type="eda", agency_record_number="S-EDA-1")
-        _create_case(
-            created_by=user, status=CaseStatus.WAIT_DOCTOR, exam_type="colonoscopy", agency_record_number="S-COL-1"
-        )
-        _create_case(
-            created_by=user, status=CaseStatus.WAIT_APPT, exam_type="colonoscopy", agency_record_number="S-COL-2"
-        )
-
-        stage = _compute_stage_waiting()
-        breakdown = _compute_exam_type_breakdown(period="all")
-        assert (
-            breakdown["eda"]["waiting_doctor"] + breakdown["colonoscopy"]["waiting_doctor"] == stage["waiting_doctor"]
-        )
-        assert breakdown["eda"]["waiting_appt"] + breakdown["colonoscopy"]["waiting_appt"] == stage["waiting_appt"]
-        assert (
-            breakdown["eda"]["waiting_confirm"] + breakdown["colonoscopy"]["waiting_confirm"]
-            == stage["waiting_confirm"]
-        )
-
-    def test_breakdown_respects_period(self, client) -> None:
-        """Breakdown respeita o período ativo (caso de ontem não entra no período 'today')."""
-        from apps.dashboard.views import _compute_exam_type_breakdown
-
-        user = _login_as(client, "manager")
-        Case.objects.all().delete()
-        today = timezone.localdate()
-        yesterday = today - timedelta(days=1)
-        now_local = timezone.make_aware(
-            datetime.combine(today, time(10, 0)),
-            timezone.get_current_timezone(),
-        )
-        yesterday_local = timezone.make_aware(
-            datetime.combine(yesterday, time(10, 0)),
-            timezone.get_current_timezone(),
-        )
-
-        today_case = _create_case(
-            created_by=user,
-            status=CaseStatus.WAIT_DOCTOR,
-            exam_type="colonoscopy",
-            agency_record_number="P-TODAY-1",
-        )
-        Case.objects.filter(pk=today_case.pk).update(created_at=now_local)
-        old_case = _create_case(
-            created_by=user,
-            status=CaseStatus.WAIT_DOCTOR,
-            exam_type="colonoscopy",
-            agency_record_number="P-YEST-1",
-        )
-        Case.objects.filter(pk=old_case.pk).update(created_at=yesterday_local)
-
-        today_breakdown = _compute_exam_type_breakdown(period="today")
-        all_breakdown = _compute_exam_type_breakdown(period="all")
-        # Período 'today': total conta apenas o caso de hoje
-        assert today_breakdown["colonoscopy"]["total"] == 1
-        # 'all': conta ambos
-        assert all_breakdown["colonoscopy"]["total"] == 2
-        # Esperas continuam snapshot: ambos aguardando médico hoje
-        assert today_breakdown["colonoscopy"]["waiting_doctor"] == 2
-
-    # ── R4: Filtro da tabela ──────────────────────────────────────────
-
-    def test_exam_type_filter_all_eda_colon(self, client) -> None:
-        """?exam_type=eda filtra só EDA; colonoscopy só colonoscopia; all/inválido mostra ambos."""
-        user = _login_as(client, "manager")
-        Case.objects.all().delete()
-        _create_case(created_by=user, status=CaseStatus.NEW, exam_type="eda", agency_record_number="FLT-EDA-1")
-        _create_case(created_by=user, status=CaseStatus.NEW, exam_type="colonoscopy", agency_record_number="FLT-COL-1")
-
-        response = client.get(reverse("dashboard:index"))
-        content = response.content.decode()
-        assert "FLT-EDA-1" in content and "FLT-COL-1" in content
-
-        response = client.get(reverse("dashboard:index") + "?exam_type=eda")
-        content = response.content.decode()
-        assert "FLT-EDA-1" in content
-        assert "FLT-COL-1" not in content
-
-        response = client.get(reverse("dashboard:index") + "?exam_type=colonoscopy")
-        content = response.content.decode()
-        assert "FLT-COL-1" in content
-        assert "FLT-EDA-1" not in content
-
-        # Inválido cai para all (mostra ambos)
-        response = client.get(reverse("dashboard:index") + "?exam_type=invalid")
-        content = response.content.decode()
-        assert "FLT-EDA-1" in content and "FLT-COL-1" in content
-
-    def test_exam_type_filter_composes_with_search_status(self, client) -> None:
-        """exam_type compõe por AND com busca e status."""
-        user = _login_as(client, "manager")
-        Case.objects.all().delete()
-        _create_case(
-            created_by=user,
-            status=CaseStatus.WAIT_DOCTOR,
-            exam_type="colonoscopy",
-            agency_record_number="AND-COL-1",
-            structured_data={"patient": {"name": "Ana Colon"}},
-        )
-        _create_case(
-            created_by=user,
-            status=CaseStatus.WAIT_DOCTOR,
-            exam_type="eda",
-            agency_record_number="AND-EDA-1",
-            structured_data={"patient": {"name": "Ana EDA"}},
-        )
-        _create_case(
-            created_by=user,
-            status=CaseStatus.NEW,
-            exam_type="colonoscopy",
-            agency_record_number="AND-COL-2",
-            structured_data={"patient": {"name": "Ana Outra"}},
-        )
-
-        url = reverse("dashboard:index") + "?exam_type=colonoscopy&search=ana&status=" + CaseStatus.WAIT_DOCTOR
-        response = client.get(url)
-        content = response.content.decode()
-        assert "AND-COL-1" in content, "Tipo+busca+status devem casar AND-COL-1"
-        assert "AND-EDA-1" not in content, "EDA não pode aparecer com exam_type=colonoscopy"
-        assert "AND-COL-2" not in content, "Status NEW não pode casar com status=WAIT_DOCTOR"
-
-    def test_exam_type_filter_composes_with_dates(self, client) -> None:
-        """exam_type compõe com datas (date_from/date_to) na listagem."""
-        user = _login_as(client, "manager")
-        Case.objects.all().delete()
-        today = timezone.localdate()
-        now_local = timezone.make_aware(
-            datetime.combine(today, time(9, 0)),
-            timezone.get_current_timezone(),
-        )
-        c = _create_case(
-            created_by=user,
-            status=CaseStatus.NEW,
-            exam_type="colonoscopy",
-            agency_record_number="DT-COL-1",
-        )
-        Case.objects.filter(pk=c.pk).update(created_at=now_local)
-
-        url = reverse("dashboard:index") + f"?exam_type=colonoscopy&date_from={today}&date_to={today}"
-        response = client.get(url)
-        content = response.content.decode()
-        assert "DT-COL-1" in content
-
-        # EDA filtrada junto à data → vazio
-        url2 = reverse("dashboard:index") + f"?exam_type=eda&date_from={today}&date_to={today}"
-        response2 = client.get(url2)
-        content2 = response2.content.decode()
-        assert "DT-COL-1" not in content2
-
-    def test_exam_type_filter_composes_with_attention(self, client) -> None:
-        """exam_type compõe com o filtro Atenção necessária."""
-        user = _login_as(client, "manager")
-        Case.objects.all().delete()
-        _create_case(
-            created_by=user, status=CaseStatus.FAILED, exam_type="colonoscopy", agency_record_number="AT-COL-FAIL"
-        )
-        _create_case(
-            created_by=user,
-            status=CaseStatus.CLEANED,
-            exam_type="colonoscopy",
-            agency_record_number="AT-COL-CLEAN",
-        )
-        _create_case(created_by=user, status=CaseStatus.FAILED, exam_type="eda", agency_record_number="AT-EDA-FAIL")
-
-        url = reverse("dashboard:index") + "?exam_type=colonoscopy&attention=1"
-        response = client.get(url)
-        content = response.content.decode()
-        assert "AT-COL-FAIL" in content, "Colonoscopia falha deve aparecer com atenção"
-        assert "AT-COL-CLEAN" not in content, "CLEANED não pode aparecer no filtro de atenção"
-        assert "AT-EDA-FAIL" not in content, "EDA não pode aparecer com exam_type=colonoscopy"
-
-    # ── R4: Partial / paginação / JS ──────────────────────────────────
-
-    def test_partial_filters_by_exam_type(self, client) -> None:
-        """Partial (X-ATS-Partial) filtra por exam_type."""
-        user = _login_as(client, "manager")
-        Case.objects.all().delete()
-        _create_case(created_by=user, status=CaseStatus.NEW, exam_type="eda", agency_record_number="P-EDA-1")
-        _create_case(created_by=user, status=CaseStatus.NEW, exam_type="colonoscopy", agency_record_number="P-COL-1")
-        response = client.get(
-            reverse("dashboard:index") + "?exam_type=colonoscopy",
-            headers={"X-ATS-Partial": "case-list"},
-        )
-        content = response.content.decode()
-        assert "P-COL-1" in content
-        assert "P-EDA-1" not in content
-
-    def test_partial_pagination_preserves_exam_type(self, client) -> None:
-        """Links de paginação do partial preservam exam_type."""
-        user = _login_as(client, "manager")
-        Case.objects.all().delete()
-        for i in range(25):
-            _create_case(
-                created_by=user,
-                status=CaseStatus.NEW,
-                exam_type="colonoscopy",
-                agency_record_number=f"PT-COL-{i:03d}",
-            )
-        response = client.get(
-            reverse("dashboard:index") + "?exam_type=colonoscopy",
-            headers={"X-ATS-Partial": "case-list"},
-        )
-        content = response.content.decode()
-        assert "exam_type=colonoscopy" in content, "Paginação deve preservar exam_type=colonoscopy"
-
-    def test_search_js_preserves_exam_type_param(self, client) -> None:
-        """dashboard_search.js lê e preserva o filtro exam_type."""
-        import os
-        from pathlib import Path
-
-        base_dir = Path(__file__).resolve().parent.parent.parent.parent
-        js_path = os.path.join(base_dir, "static", "js", "dashboard_search.js")
-        assert os.path.exists(js_path)
-        with open(js_path) as f:
-            js_content = f.read()
-        assert 'name="exam_type"' in js_content or "exam_type" in js_content
-        assert "params.set('exam_type'" in js_content or "exam_type'" in js_content
-
-    # ── R3/R8: Template ───────────────────────────────────────────────
-
     def test_breakdown_table_headers_and_labels(self, client) -> None:
-        """Template do breakdown expõe headers, labels EDA/Colonoscopia e período ativo."""
+        """Template expõe labels EDA/Colonoscopia e headers de desfecho/espera."""
         _login_as(client, "manager")
         response = client.get(reverse("dashboard:index"))
         assert response.status_code == 200
@@ -5236,31 +4877,68 @@ class TestDashboardExamTypeBreakdownAndFilter:
         assert "Confirmação Recepção" in content
 
     def test_breakdown_period_active_visible(self, client) -> None:
-        """Período ativo do breakdown é visível (rotula semântica período vs atual)."""
+        """Período ativo das métricas é visível (rotula semântica período vs atual)."""
         _login_as(client, "manager")
         response = client.get(reverse("dashboard:index"))
         content = response.content.decode()
-        # O rótulo do período ativo está presente no card de breakdown
+        # O rótulo do período ativo está presente no card de métricas
         assert "Métricas de hoje" in content or "Métricas de" in content
 
-    def test_exam_type_select_in_filter_form(self, client) -> None:
-        """Form da lista contém select name=exam_type com valores all/eda/colonoscopy."""
-        _login_as(client, "manager")
-        response = client.get(reverse("dashboard:index"))
-        content = response.content.decode()
-        assert 'name="exam_type"' in content
-        assert 'value="all"' in content
-        assert 'value="eda"' in content
-        assert 'value="colonoscopy"' in content
 
-    def test_case_card_exam_type_badge(self, client) -> None:
-        """Cada card da tabela exibe badge textual de tipo de exame."""
+@pytest.mark.django_db
+class TestDashboardProcedureDimensionAuthority:
+    """Slice 010 (R1) — a UI singular do dashboard foi removida.
+
+    O filtro singular ``exam_type`` e a tabela "BREAKDOWN POR TIPO DE EXAME"
+    desaparecem; ``procedure_dimension`` + ``procedure_selection`` são a fonte
+    única de filtro. O card não lê mais ``Case.exam_type``.
+    """
+
+    def test_singular_exam_type_filter_select_removed(self, client) -> None:
+        """O select ``name=exam_type`` não existe mais no formulário de filtros."""
+        _login_as(client, "manager")
+        content = client.get(reverse("dashboard:index")).content.decode()
+        assert 'name="exam_type"' not in content, "Filtro singular exam_type foi removido"
+        # A fonte única de filtro dimensional permanece
+        assert 'name="procedure_dimension"' in content
+        assert 'name="procedure_selection"' in content
+
+    def test_singular_exam_type_breakdown_section_removed(self, client) -> None:
+        """A tabela "BREAKDOWN POR TIPO DE EXAME" (singular) foi removida."""
+        _login_as(client, "manager")
+        content = client.get(reverse("dashboard:index")).content.decode()
+        assert "BREAKDOWN POR TIPO DE EXAME" not in content
+        # A breakdown por dimensão (Slice 006) permanece como fonte única
+        assert "PROCEDIMENTOS POR DIMENSÃO" in content
+
+    def test_singular_exam_type_query_param_is_ignored(self, client) -> None:
+        """``?exam_type=eda`` não filtra mais (param ignorado; casos seguem visíveis)."""
         user = _login_as(client, "manager")
         Case.objects.all().delete()
-        _create_case(created_by=user, status=CaseStatus.NEW, exam_type="colonoscopy", agency_record_number="B-COL-1")
-        _create_case(created_by=user, status=CaseStatus.NEW, exam_type="eda", agency_record_number="B-EDA-1")
-        response = client.get(reverse("dashboard:index"))
-        content = response.content.decode()
-        assert "exam-type-badge" in content, "Card deve exibir badge de tipo de exame"
-        assert "Colonoscopia" in content
-        assert "EDA" in content
+        _create_case(created_by=user, status=CaseStatus.NEW, exam_type="eda", agency_record_number="IGN-EDA")
+        _create_case(created_by=user, status=CaseStatus.NEW, exam_type="colonoscopy", agency_record_number="IGN-COL")
+        # Sem rows, ambos caem em 'none' na dimensão declared (default=all ⇒ todos visíveis)
+        content = client.get(reverse("dashboard:index") + "?exam_type=eda").content.decode()
+        assert "IGN-EDA" in content, "exam_type=eda não deve mais filtrar a lista"
+        assert "IGN-COL" in content, "exam_type=eda não deve excluir colonoscopia"
+
+    def test_case_list_badge_not_read_from_column(self, client) -> None:
+        """O card do dashboard não lê ``item.case.exam_type`` diretamente da coluna."""
+        from apps.cases.procedures import set_declared_procedures
+
+        user = _login_as(client, "manager")
+        Case.objects.all().delete()
+        # Caso com row declarada EDA: o badge projetado (dimensão declared) mostra EDA
+        case = _create_case(
+            created_by=user, status=CaseStatus.NEW, exam_type="colonoscopy", agency_record_number="CARD-1"
+        )
+        # Declara EDA nas rows, MAS a ponte fica 'colonoscopy' (set_declared sobrescreve a ponte p/ eda;
+        # para isolar, forçamos ponte colonoscopy depois de declarar eda)
+        set_declared_procedures(case=case, procedure_types=["eda"], actor=user)
+        # Força a ponte para um valor diferente da projeção (prova que o badge NÃO lê a ponte)
+        Case.objects.filter(pk=case.pk).update(exam_type="colonoscopy")
+        content = client.get(reverse("dashboard:index")).content.decode()
+        # O badge singular exam-type-{{ exam_type }} sumiu; resta o badge dimensional
+        assert "exam-type-colonoscopy" not in content, "Card não deve ler case.exam_type (ponte)"
+        # A projeção declared=EDA continua disponível via badge dimensional
+        assert "CARD-1" in content

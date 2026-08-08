@@ -16,7 +16,7 @@ from typing import Any
 
 from django.db.models import Exists, OuterRef, Q
 
-from apps.cases.models import EDA_COLONOSCOPY, CaseEvent, CaseProcedure, ProcedureType
+from apps.cases.models import CaseEvent, CaseProcedure, ProcedureType
 from apps.cases.procedures import (
     get_approved_procedure_types,
     get_declared_procedure_types,
@@ -56,9 +56,9 @@ DIMENSION_PREDICATES: dict[str, dict[str, Any]] = {
     "approved": {"doctor_disposition": "approved"},
 }
 
-# Helper de domínio que projeta o conjunto ordenado de cada dimensão. Os
-# fallbacks da ponte transitória (``Case.exam_type`` / ``doctor_decision``)
-# ficam centralizados neles — mesma regra das filas NIR/médico/CHD.
+# Helper de domínio que projeta o conjunto ordenado de cada dimensão. Slice 010
+# (R3): os getters retornam apenas rows normalizadas — sem fallback da ponte
+# ``Case.exam_type`` nem de ``doctor_decision=accept``.
 DIMENSION_GETTERS: dict[str, Any] = {
     "declared": get_declared_procedure_types,
     "detected": get_detected_procedure_types,
@@ -156,79 +156,30 @@ def compute_procedure_analytics(period_cases: Any) -> dict[str, Any]:
     }
 
 
-def _exam_type_selection_q(selection: str) -> Q:
-    """Categoria legada (sem rows da dimensão) via ponte ``Case.exam_type``."""
-    if selection == "eda":
-        return Q(exam_type=ProcedureType.EDA)
-    if selection == "colonoscopy":
-        return Q(exam_type=ProcedureType.COLONOSCOPY)
-    return Q(exam_type=EDA_COLONOSCOPY)  # eda_colonoscopy
-
-
-def _legacy_fallback_q(dimension: str, selection: str) -> Q:
-    """Categoria de casos sem rows da dimensão consultada (fallback da ponte).
-
-    Espelha exatamente os helpers de domínio:
-    - declared/detected: sem rows da dimensão → ``Case.exam_type``;
-    - approved: sem rows da dimensão → ``doctor_decision=accept`` → conjunto
-      declarado (via ponte ``exam_type``).
-    """
-    if dimension == "approved":
-        return Q(doctor_decision="accept") & _exam_type_selection_q(selection)
-    return _exam_type_selection_q(selection)
-
-
-def _none_fallback_q(dimension: str) -> Q:
-    """Condição de projeção vazia quando não há rows da dimensão consultada.
-
-    approved: o fallback só devolve conjunto se ``doctor_decision == accept``;
-    caso contrário projeta vazio → ``none``. declared/detected: o fallback da
-    ponte mapeia ``exam_type`` para uma categoria — ``none`` só ocorre com
-    ``exam_type`` fora do universo (não ocorre no modelo atual; mantido por
-    fidelidade ao helper).
-    """
-    if dimension == "approved":
-        return Q(doctor_decision="") | Q(doctor_decision="deny") | Q(doctor_decision__isnull=True)
-    return ~Q(exam_type__in=(ProcedureType.EDA, ProcedureType.COLONOSCOPY, EDA_COLONOSCOPY))
-
-
 def apply_procedure_selection_filter(cases_qs: Any, dimension: str, selection: str) -> Any:
     """Filtra ``cases_qs`` pela categoria ``selection`` na ``dimension``.
 
     ``all`` não filtra. Predicados via ``Exists`` sobre rows ``CaseProcedure``
-    (aproveita os índices dimensionais do Slice 001) + fallback da ponte.
-    O fallback é gateado por ``~has_dim_rows`` (ausência de rows da dimensão
-    consultada) — a mesma condição dos helpers ``get_*_procedure_types`` —,
-    garantindo consistência entre breakdown (Python) e tabela (SQL).
+    (aproveita os índices dimensionais do Slice 001) — sem fallback da ponte
+    ``Case.exam_type`` nem de ``doctor_decision`` (Slice 010, R2). ``none``
+    significa ausência de rows na dimensão consultada (conjunto vazio),
+    consistente com o breakdown Python e os helpers de domínio.
     """
     if selection == "all":
         return cases_qs
 
     predicate = DIMENSION_PREDICATES[dimension]
     proc = CaseProcedure.objects.filter(case=OuterRef("pk"))
-    has_dim_rows = Exists(proc.filter(**predicate))
     eda_match = Exists(proc.filter(procedure_type=ProcedureType.EDA, **predicate))
     col_match = Exists(proc.filter(procedure_type=ProcedureType.COLONOSCOPY, **predicate))
 
     if selection == "eda":
-        category_q = (Q(_proc_eda=True) & Q(_proc_col=False)) | (
-            Q(_proc_has_dim_rows=False) & _legacy_fallback_q(dimension, "eda")
-        )
+        category_q = Q(_proc_eda=True) & Q(_proc_col=False)
     elif selection == "colonoscopy":
-        category_q = (Q(_proc_eda=False) & Q(_proc_col=True)) | (
-            Q(_proc_has_dim_rows=False) & _legacy_fallback_q(dimension, "colonoscopy")
-        )
+        category_q = Q(_proc_eda=False) & Q(_proc_col=True)
     elif selection == "eda_colonoscopy":
-        category_q = (Q(_proc_eda=True) & Q(_proc_col=True)) | (
-            Q(_proc_has_dim_rows=False) & _legacy_fallback_q(dimension, "eda_colonoscopy")
-        )
-    else:  # none
-        # ``none`` exige ausência de rows da dimensão E fallback vazio: com rows
-        # da dimensão há sempre um match (EDA ou Colonoscopia) → categoria real.
-        category_q = Q(_proc_has_dim_rows=False) & _none_fallback_q(dimension)
+        category_q = Q(_proc_eda=True) & Q(_proc_col=True)
+    else:  # none — ausência de rows da dimensão consultada
+        category_q = Q(_proc_eda=False) & Q(_proc_col=False)
 
-    return cases_qs.annotate(
-        _proc_has_dim_rows=has_dim_rows,
-        _proc_eda=eda_match,
-        _proc_col=col_match,
-    ).filter(category_q)
+    return cases_qs.annotate(_proc_eda=eda_match, _proc_col=col_match).filter(category_q)

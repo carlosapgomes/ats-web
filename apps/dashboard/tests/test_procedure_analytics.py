@@ -396,7 +396,11 @@ class TestDimensionTableFilter:
         assert "AND-3" not in content, "EDA único não pode casar com seleção combinado"
 
     def test_selection_filters_legacy_cases_without_rows(self, client) -> None:
-        """Casos legados sem rows seguem o fallback da ponte (consistência com breakdown)."""
+        """Slice 010 — casos legados sem rows caem em ``none`` em todas as dimensões.
+
+        Sem fallback da ponte: nem ``exam_type=eda`` nem ``doctor_decision=accept``
+        transformam ausência de rows em EDA/Colonoscopia.
+        """
         user = _login_as(client)
         Case.objects.all().delete()
         Case.objects.create(
@@ -414,15 +418,23 @@ class TestDimensionTableFilter:
             agency_record_number="LEG-NONE",
         )
 
-        url = reverse("dashboard:index") + "?procedure_dimension=declared&procedure_selection=eda"
-        content = client.get(url).content.decode()
-        assert "LEG-EDA" in content, "Caso legado EDA sem rows deve casar seleção EDA"
-        assert "LEG-NONE" not in content
+        # Sem rows, ambos caem em ``none`` na dimensão declared.
+        url_none = reverse("dashboard:index") + "?procedure_dimension=declared&procedure_selection=none"
+        content_none = client.get(url_none).content.decode()
+        assert "LEG-EDA" in content_none, "Legado EDA sem rows deve cair em none (declared)"
+        assert "LEG-NONE" in content_none, "Legado Colon sem rows deve cair em none (declared)"
 
-        url = reverse("dashboard:index") + "?procedure_dimension=approved&procedure_selection=none"
-        content = client.get(url).content.decode()
-        assert "LEG-NONE" in content, "Caso legado sem aceite global deve cair em Nenhum na dimensão autorizado"
-        assert "LEG-EDA" not in content, "Legado aceito não pode ser Nenhum em autorizado"
+        # declared+eda NÃO mostra nenhum dos legados sem rows.
+        url_eda = reverse("dashboard:index") + "?procedure_dimension=declared&procedure_selection=eda"
+        content_eda = client.get(url_eda).content.decode()
+        assert "LEG-EDA" not in content_eda, "Legado EDA sem rows não pode casar declared+eda"
+        assert "LEG-NONE" not in content_eda
+
+        # approved+none também mostra ambos (sem rows aprovadas).
+        url_none = reverse("dashboard:index") + "?procedure_dimension=approved&procedure_selection=none"
+        content_none = client.get(url_none).content.decode()
+        assert "LEG-EDA" in content_none, "Legado accept sem rows aprovadas deve cair em none (approved)"
+        assert "LEG-NONE" in content_none
 
     def test_invalid_dimension_and_selection_fall_back_to_defaults(self, client) -> None:
         user = _login_as(client)
@@ -478,15 +490,16 @@ class TestDimensionTableFilter:
 
 @pytest.mark.django_db
 class TestBreakdownTableConsistency:
-    """CORREÇÃO pós-revisão — breakdown e tabela concordam na janela de divergência.
+    """Slice 010 — breakdown e tabela concordam no contrato fail-closed.
 
-    Casos com rows em outra dimensão, mas não na consultada, devem cair no mesmo
-    fallback da ponte tanto no breakdown (Python) quanto no filtro SQL da tabela.
+    Casos com rows em outra dimensão, mas não na consultada, caem em ``none`` —
+    tanto no breakdown (Python) quanto no filtro SQL da tabela. Sem fallback
+    da ponte ``Case.exam_type`` nem de ``doctor_decision`` (R2/R3).
     """
 
-    def test_fresh_declared_eda_matches_detected_eda_not_none(self, client) -> None:
-        """Caso recém-declarado EDA (detecção pendente): detected[eda]==1 e a tabela
-        detected+eda mostra; detected+none NÃO mostra."""
+    def test_fresh_declared_eda_matches_detected_none_not_eda(self, client) -> None:
+        """Caso recém-declarado EDA (detecção pendente): detected[none]==1 e a tabela
+        detected+none mostra; detected+eda NÃO mostra (ausência não vira EDA)."""
         from apps.dashboard.procedure_analytics import compute_procedure_analytics
 
         user = _login_as(client)
@@ -494,20 +507,20 @@ class TestBreakdownTableConsistency:
         _make_case(user, "FDE-1", declared=("eda",))  # row declarada, detection PENDING
 
         analytics = compute_procedure_analytics(Case.objects.all())
-        assert analytics["breakdown"]["detected"]["eda"] == 1
-        assert analytics["breakdown"]["detected"]["none"] == 0
-
-        url_eda = reverse("dashboard:index") + "?procedure_dimension=detected&procedure_selection=eda"
-        content_eda = client.get(url_eda).content.decode()
-        assert "FDE-1" in content_eda, "detected+eda deve mostrar caso recém-declarado EDA (fallback da ponte)"
+        assert analytics["breakdown"]["detected"]["none"] == 1
+        assert analytics["breakdown"]["detected"]["eda"] == 0
 
         url_none = reverse("dashboard:index") + "?procedure_dimension=detected&procedure_selection=none"
         content_none = client.get(url_none).content.decode()
-        assert "FDE-1" not in content_none, "detected+none NÃO pode mostrar caso classificado como EDA"
+        assert "FDE-1" in content_none, "detected+none deve mostrar caso sem rows detectadas"
 
-    def test_accepted_case_without_dispositions_matches_approved_eda_not_none(self, client) -> None:
-        """Caso aceito globalmente sem rows de disposição: approved[eda]==1 (fallback
-        declarado) e a tabela approved+eda mostra; approved+none NÃO mostra."""
+        url_eda = reverse("dashboard:index") + "?procedure_dimension=detected&procedure_selection=eda"
+        content_eda = client.get(url_eda).content.decode()
+        assert "FDE-1" not in content_eda, "detected+eda NÃO pode mostrar caso sem rows detectadas"
+
+    def test_accepted_case_without_dispositions_matches_approved_none_not_eda(self, client) -> None:
+        """Caso aceito globalmente sem rows de disposição: approved[none]==1 e a
+        tabela approved+none mostra; approved+eda NÃO mostra (sem fallback de accept)."""
         from apps.dashboard.procedure_analytics import compute_procedure_analytics
 
         user = _login_as(client)
@@ -515,14 +528,14 @@ class TestBreakdownTableConsistency:
         _make_case(user, "AC-1", declared=("eda",), status=CaseStatus.WAIT_APPT, doctor_decision="accept")
 
         analytics = compute_procedure_analytics(Case.objects.all())
-        assert analytics["breakdown"]["approved"]["eda"] == 1
-        assert analytics["breakdown"]["approved"]["none"] == 0
-
-        url_eda = reverse("dashboard:index") + "?procedure_dimension=approved&procedure_selection=eda"
-        assert "AC-1" in client.get(url_eda).content.decode()
+        assert analytics["breakdown"]["approved"]["none"] == 1
+        assert analytics["breakdown"]["approved"]["eda"] == 0
 
         url_none = reverse("dashboard:index") + "?procedure_dimension=approved&procedure_selection=none"
-        assert "AC-1" not in client.get(url_none).content.decode()
+        assert "AC-1" in client.get(url_none).content.decode()
+
+        url_eda = reverse("dashboard:index") + "?procedure_dimension=approved&procedure_selection=eda"
+        assert "AC-1" not in client.get(url_eda).content.decode()
 
     def test_detected_colonoscopy_does_not_change_declared_category(self, client) -> None:
         """Caso declarado EDA com detecção Colon (row não declarada): na dimensão
@@ -580,3 +593,134 @@ class TestQueryHygiene:
             f"Página deve permanecer limitada (baseline 57 + analytics 3 + prefetch 1), obteve "
             f"{len(cap.captured_queries)}"
         )
+
+
+# ── Slice 010: authority — CaseProcedure é a fonte única (R2/R3/R4) ──────
+
+
+@pytest.mark.django_db
+class TestProcedureDimensionAuthority:
+    """Slice 010 — analytics/getters/filtro dependem somente de CaseProcedure.
+
+    R2: ``apply_procedure_selection_filter`` usa só Exists/predicados de rows;
+        sem fallback da ponte ``Case.exam_type`` nem de ``doctor_decision``.
+    R3/R4: ausência de rows na dimensão consultada ⇒ categoria ``none``;
+        nunca vira EDA/Colonoscopia por inferência.
+    """
+
+    def test_case_without_detected_rows_is_none_not_eda(self, client) -> None:
+        """Caso declarado EDA sem rows detectadas: detected dimension = none (não eda)."""
+        from apps.dashboard.procedure_analytics import compute_procedure_analytics
+
+        user = _login_as(client)
+        Case.objects.all().delete()
+        _make_case(user, "FC-1", declared=("eda",))  # detection PENDING
+
+        analytics = compute_procedure_analytics(Case.objects.all())
+        assert analytics["breakdown"]["detected"]["none"] == 1
+        assert analytics["breakdown"]["detected"]["eda"] == 0
+
+    def test_case_without_approved_rows_is_none_not_eda(self, client) -> None:
+        """Caso aceito globalmente sem rows aprovadas: approved dimension = none."""
+        from apps.dashboard.procedure_analytics import compute_procedure_analytics
+
+        user = _login_as(client)
+        Case.objects.all().delete()
+        _make_case(
+            user,
+            "AP-1",
+            declared=("eda",),
+            status=CaseStatus.WAIT_APPT,
+            doctor_decision="accept",
+        )
+
+        analytics = compute_procedure_analytics(Case.objects.all())
+        assert analytics["breakdown"]["approved"]["none"] == 1
+        assert analytics["breakdown"]["approved"]["eda"] == 0
+
+    def test_legacy_case_without_rows_is_none_in_declared(self, client) -> None:
+        """Caso legado (exam_type=eda) sem rows: declared dimension = none (nunca eda)."""
+        from apps.dashboard.procedure_analytics import compute_procedure_analytics
+
+        user = _login_as(client)
+        Case.objects.all().delete()
+        Case.objects.create(
+            created_by=user,
+            status=CaseStatus.NEW,
+            exam_type="eda",
+            agency_record_number="LEG-EDA",
+        )
+
+        analytics = compute_procedure_analytics(Case.objects.all())
+        assert analytics["breakdown"]["declared"]["none"] == 1
+        assert analytics["breakdown"]["declared"]["eda"] == 0
+
+    def test_selection_filter_detected_none_includes_case_without_detected_rows(self, client) -> None:
+        """R2 — detected+none mostra caso sem rows detectadas; detected+eda não."""
+        user = _login_as(client)
+        Case.objects.all().delete()
+        _make_case(user, "SF-1", declared=("eda",))  # sem rows detectadas
+
+        none_url = reverse("dashboard:index") + "?procedure_dimension=detected&procedure_selection=none"
+        assert "SF-1" in client.get(none_url).content.decode()
+
+        eda_url = reverse("dashboard:index") + "?procedure_dimension=detected&procedure_selection=eda"
+        assert "SF-1" not in client.get(eda_url).content.decode()
+
+    def test_selection_filter_approved_none_includes_case_without_approved_rows(self, client) -> None:
+        """R2 — approved+none mostra caso sem rows aprovadas (mesmo com accept global)."""
+        user = _login_as(client)
+        Case.objects.all().delete()
+        _make_case(
+            user,
+            "SA-1",
+            declared=("eda",),
+            status=CaseStatus.WAIT_APPT,
+            doctor_decision="accept",
+        )
+
+        none_url = reverse("dashboard:index") + "?procedure_dimension=approved&procedure_selection=none"
+        assert "SA-1" in client.get(none_url).content.decode()
+
+        eda_url = reverse("dashboard:index") + "?procedure_dimension=approved&procedure_selection=eda"
+        assert "SA-1" not in client.get(eda_url).content.decode()
+
+    def test_selection_filter_legacy_exam_type_is_ignored(self, client) -> None:
+        """R2 — caso legado (exam_type=eda) sem rows: declared+eda NÃO mostra.
+
+        Prova que a query SQL não usa mais a ponte ``Case.exam_type``.
+        """
+        user = _login_as(client)
+        Case.objects.all().delete()
+        Case.objects.create(
+            created_by=user,
+            status=CaseStatus.NEW,
+            exam_type="eda",
+            agency_record_number="LEG-SF",
+        )
+
+        eda_url = reverse("dashboard:index") + "?procedure_dimension=declared&procedure_selection=eda"
+        assert "LEG-SF" not in client.get(eda_url).content.decode()
+
+        none_url = reverse("dashboard:index") + "?procedure_dimension=declared&procedure_selection=none"
+        assert "LEG-SF" in client.get(none_url).content.decode()
+
+    def test_combined_still_closes_as_one_case_two_components(self, client) -> None:
+        """R4 — regressão: combinado continua 1 caso / 2 componentes sem fallback."""
+        from apps.dashboard.procedure_analytics import compute_procedure_analytics
+
+        user = _login_as(client)
+        Case.objects.all().delete()
+        _make_case(
+            user,
+            "CB-1",
+            declared=("eda", "colonoscopy"),
+            detected=("eda", "colonoscopy"),
+            approved=("eda", "colonoscopy"),
+            appointment_status="confirmed",
+        )
+
+        analytics = compute_procedure_analytics(Case.objects.all())
+        assert analytics["breakdown"]["declared"]["eda_colonoscopy"] == 1
+        assert analytics["volume"]["declared"] == {"eda": 1, "colonoscopy": 1, "combined": 1}
+        assert analytics["paired_confirmed"] == 1

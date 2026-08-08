@@ -33,7 +33,9 @@ from apps.cases.models import (
 )
 from apps.cases.procedures import (
     format_procedure_selection,
+    get_approved_procedure_types,
     get_declared_procedure_types,
+    get_detected_procedure_types,
     set_declared_procedures,
 )
 
@@ -299,39 +301,72 @@ class TestDeclaredProjectionService:
 
     def test_get_declared_and_format_helpers(self, user, case_factory) -> None:
         case = case_factory(user)
-        # ponte transitória: caso antigo sem projeção reflete o exam_type
-        assert get_declared_procedure_types(case) == ("eda",)
+        # Slice 010 (R3): caso sem rows projetiona vazio (não reflete a ponte).
+        assert get_declared_procedure_types(case) == ()
         set_declared_procedures(case=case, procedure_types=["colonoscopy"], actor=user)
         assert get_declared_procedure_types(case) == ("colonoscopy",)
         assert format_procedure_selection(["eda"]) == "EDA"
         assert format_procedure_selection(["colonoscopy"]) == "Colonoscopia"
         assert format_procedure_selection(["colonoscopy", "eda"]) == "EDA + Colonoscopia"
 
-    def test_strict_mode_disables_bridge_fallback_for_unmigrated_callers(self, user, case_factory) -> None:
-        """Contrato do modo estrito (Slice 008 review fix F1).
+    def test_getters_fail_closed_without_bridge(self, user, case_factory) -> None:
+        """Slice 010 (R3) — getters sempre retornam apenas rows normalizadas.
 
-        O fallback da ponte permanece o DEFAULT (consumidores ainda não
-        migrados até os Slices 009–010 continuam verdes). O modo estrito
-        (``fallback_to_bridge=False``) devolve conjunto vazio para caso sem
-        rows e NÃO chega à ponte — nem direto, nem via getter declarado no
-        aprovado.
+        Default e ``fallback_to_bridge=False`` são idênticos: um caso sem rows
+        devolve ``()`` em todas as três dimensões, sem ler a ponte
+        ``Case.exam_type`` e sem o fallback global ``doctor_decision=accept``
+        no aprovado.
         """
-        from apps.cases.procedures import (
-            get_approved_procedure_types,
-            get_declared_procedure_types,
-            get_detected_procedure_types,
-        )
-
         case = case_factory(user)  # exam_type=EDA, sem rows
-        # DEFAULT: fallback da ponte preservado (compatibilidade).
-        assert get_declared_procedure_types(case) == ("eda",)
-        assert get_detected_procedure_types(case) == ("eda",)
-        # Estrito: sem rows ⇒ conjunto vazio, sem ler a ponte.
+        # Slice 010 (R3): os getters são ALWAYS fail-closed — default e
+        # ``fallback_to_bridge=False`` devolvem o mesmo conjunto de rows.
+        # Caso sem rows ⇒ () em todas as três dimensões, sem ler a ponte.
+        assert get_declared_procedure_types(case) == ()
+        assert get_detected_procedure_types(case) == ()
+        assert get_approved_procedure_types(case) == ()
+        # O parâmetro ``fallback_to_bridge`` permanece aceito (compat com
+        # consumidores já migrados), mas não altera o resultado.
         assert get_declared_procedure_types(case, fallback_to_bridge=False) == ()
         assert get_detected_procedure_types(case, fallback_to_bridge=False) == ()
         assert get_approved_procedure_types(case, fallback_to_bridge=False) == ()
-        # Aprovado estrito tampouco chega à ponte via indireção do declarado,
-        # mesmo com doctor_decision=accept.
+        # Aprovado tampouco chega à ponte via indireção do declarado, mesmo
+        # com doctor_decision=accept (fallback global removido).
         case.doctor_decision = "accept"
         case.save(update_fields=["doctor_decision"])
+        assert get_approved_procedure_types(case) == ()
         assert get_approved_procedure_types(case, fallback_to_bridge=False) == ()
+
+
+class TestProcedureGettersReturnOnlyRows:
+    """Slice 010 (R3) — getters retornam apenas rows normalizadas.
+
+    Prova que nenhum getter cai na ponte ``Case.exam_type`` nem no fallback
+    global ``doctor_decision=accept``: um caso sem rows projeta ``()`` em todas
+    as dimensões, mesmo com ``exam_type``/``doctor_decision`` preenchidos.
+    """
+
+    def test_case_without_rows_is_empty_in_all_dimensions(self, user, case_factory) -> None:
+        case = case_factory(user)  # exam_type=EDA default, sem rows
+        assert case.exam_type == ExamType.EDA, "pré-condição: ponte preenchida"
+        assert get_declared_procedure_types(case) == ()
+        assert get_detected_procedure_types(case) == ()
+        assert get_approved_procedure_types(case) == ()
+
+    def test_case_without_rows_empty_even_with_combined_bridge(self, user) -> None:
+        case = Case.objects.create(
+            created_by=user,
+            exam_type=EDA_COLONOSCOPY,
+            doctor_decision="accept",
+        )
+        assert get_declared_procedure_types(case) == ()
+        assert get_detected_procedure_types(case) == ()
+        assert get_approved_procedure_types(case) == ()
+
+    def test_declared_rows_returned_without_bridge(self, user, case_factory) -> None:
+        case = case_factory(user)
+        set_declared_procedures(case=case, procedure_types=["colonoscopy", "eda"], actor=user)
+        case = Case.objects.get(pk=case.pk)
+        assert get_declared_procedure_types(case) == ("eda", "colonoscopy")
+        # Detecção ainda pendente: detected vazio (não herda a declaração).
+        assert get_detected_procedure_types(case) == ()
+        assert get_approved_procedure_types(case) == ()
