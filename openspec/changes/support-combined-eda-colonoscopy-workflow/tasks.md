@@ -48,7 +48,7 @@ A ADR-0004 deve ser commitada, enviada e aprovada explicitamente antes de entreg
 > **Terceiro bloqueio legítimo (011-C revisado em execução, relatório `/tmp/support-combined-eda-colonoscopy-workflow-slice-011c-report.md`, BASE_REF `097492e`):** o gate R8 expôs dependência latente invisível ao inventário textual — `TestBackfillD3Table` roda o backfill da migration 0015 (cujo corpo lê `case.exam_type`) contra o estado leaf. Fix aprovado como micro-slice **011-C0 antes do cutover** (teste é verde nos dois mundos), mantendo o commit do 011-C com exatamente os 9 arquivos planejados — sem aprovar footprint expandido.
 - [x] Slice 011-A — Fixtures sem ponte: cases/dashboard/doctor/pipeline (`slices/slice-011a-fixture-bridge-independence-cases-dashboard-doctor-pipeline.md`)
 - [x] Slice 011-B — Fixtures sem ponte: intake/scheduler (`slices/slice-011b-fixture-bridge-independence-intake-scheduler.md`)
-- [ ] Slice 011-C0 — TestBackfillD3Table em sandbox de schema (pré-requisito do cutover com 9 arquivos) (`slices/slice-011c0-backfill-test-schema-sandbox.md`)
+- [x] Slice 011-C0 — TestBackfillD3Table em sandbox de schema (pré-requisito do cutover com 9 arquivos) (`slices/slice-011c0-backfill-test-schema-sandbox.md`)
 - [ ] Slice 011-C (revisado) — Cutover físico: migration remove Case.exam_type; classe ExamType preservada (`slices/slice-011c-authoritative-procedure-schema-cutover.md`)
 - [ ] Slice 011-D (revisado) — Remoção do kwarg fallback_to_bridge de todos os call sites (`slices/slice-011d-bridge-compat-cleanup.md`)
 - [ ] Slice 011-E — Encerramento simbólico: classe ExamType e parâmetro fallback_to_bridge (`slices/slice-011e-bridge-symbol-cleanup.md`)

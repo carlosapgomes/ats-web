@@ -12,7 +12,8 @@ Cobre:
 
 from __future__ import annotations
 
-import importlib
+from collections.abc import Iterator
+from typing import Any
 from unittest import mock
 
 import pytest
@@ -40,8 +41,6 @@ from apps.cases.procedures import (
 pytestmark = pytest.mark.django_db
 
 User = get_user_model()
-
-_MIGRATION_MODULE = "apps.cases.migrations.0015_caseprocedure"
 
 _PENDING_STATUSES = (
     CaseStatus.NEW,
@@ -120,21 +119,60 @@ class TestCaseProcedureModel:
         assert row.doctor_disposition == DoctorDisposition.PENDING
 
 
+@pytest.mark.django_db(transaction=True)
 class TestBackfillD3Table:
-    """R2 — backfill fecha a tabela D3 nos 18 estados sem inferir/reprocessar."""
+    """R2 — backfill fecha a tabela D3 nos 18 estados sem inferir/reprocessar.
+
+    Sandbox de schema (Slice 011-C0): migra o banco down até 0014 — estado
+    histórico em que ``Case.exam_type`` sempre existe — cria/inspeciona os
+    casos pelos modelos históricos e aplica/reverte a 0015 via
+    MigrationExecutor (backfill/reverse reais, nunca o leaf). O rollback
+    total do atomic desfaz DDL e ``django_migrations``: o banco de teste
+    permanece no schema leaf entre testes, com ou sem a coluna no leaf
+    (independência do cutover 011-C).
+    """
+
+    _MIGRATION_0014 = "0014_case_exam_type"
+    _MIGRATION_0015 = "0015_caseprocedure"
+    _TARGETS_0014 = [("cases", _MIGRATION_0014)]
+    _TARGETS_0015 = [("cases", _MIGRATION_0015)]
 
     @pytest.fixture(autouse=True)
-    def _historical_apps(self) -> None:
+    def _schema_sandbox(self) -> Iterator[None]:
+        """Sandbox: schema 0014 no setup; rollback total no teardown."""
         executor = MigrationExecutor(connection)
-        self._apps = executor.loader.project_state(executor.loader.graph.leaf_nodes()).apps
+        # Estado histórico 0014: modelos com a coluna (criação/leitura de
+        # casos — nunca o ORM do leaf). Targets parciais: o plan de migrate
+        # cobre apenas o app ``cases``; os demais apps permanecem no leaf.
+        self._apps = executor.loader.project_state(self._TARGETS_0014).apps
+        with transaction.atomic():
+            # Hygiene de isolamento (o flush entre testes já limpa; mantido
+            # por fidelidade aos testes originais — a tabela existe no leaf).
+            CaseProcedure.objects.all().delete()
+            self._immediate_constraints()
+            # Down até 0014: reverse da 0015 (reverse do backfill + drop da
+            # tabela). Após o cutover, o reverse da 0016 re-adiciona a coluna
+            # (precheck com reverse noop). O rollback no teardown desfaz tudo.
+            MigrationExecutor(connection).migrate(self._TARGETS_0014)
+            yield
+            transaction.set_rollback(True)
+
+    @staticmethod
+    def _immediate_constraints() -> None:
+        """Dispara checagens deferidas antes de DDL (o container cria FKs
+        DEFERRABLE INITIALLY DEFERRED — artefato de ambiente)."""
+        with connection.cursor() as cursor:
+            cursor.execute("SET CONSTRAINTS ALL IMMEDIATE")
 
     def _backfill(self) -> None:
-        module = importlib.import_module(_MIGRATION_MODULE)
-        module.backfill_case_procedures(self._apps, connection.schema_editor())
+        """Aplica a 0015: cria a tabela e roda o backfill sobre os casos 0014."""
+        self._immediate_constraints()
+        MigrationExecutor(connection).migrate(self._TARGETS_0015)
 
     def _reverse(self) -> None:
-        module = importlib.import_module(_MIGRATION_MODULE)
-        module.reverse_backfill_case_procedures(self._apps, connection.schema_editor())
+        """Reverte a 0015: reverse do backfill + remoção da tabela."""
+        self._immediate_constraints()
+        MigrationExecutor(connection).migrate(self._TARGETS_0014)
 
     def _make_case(
         self,
@@ -145,9 +183,16 @@ class TestBackfillD3Table:
         appointment_status: str = "",
         doctor_reason: str = "",
         events: tuple[str, ...] = (),
-    ) -> Case:
-        case = Case.objects.create(
-            created_by=user,
+    ) -> Any:
+        """Cria caso pelo modelo histórico 0014 (a coluna existe nesse estado)."""
+        historical_case: Any = self._apps.get_model("cases", "Case")
+        historical_case_event: Any = self._apps.get_model("cases", "CaseEvent")
+        historical_user: Any = self._apps.get_model("accounts", "User")
+        # FKs históricas validam a CLASSE do modelo: resolve o mesmo row no
+        # registry 0014 (classes dos modelos históricos combinam entre si).
+        owner = historical_user.objects.get(pk=user.pk)
+        case = historical_case.objects.create(
+            created_by=owner,
             status=status,
             agency_record_number=record,
             doctor_decision=doctor_decision,
@@ -155,12 +200,11 @@ class TestBackfillD3Table:
             doctor_reason=doctor_reason,
         )
         for event_type in events:
-            CaseEvent.objects.create(case=case, event_type=event_type, actor=user, actor_type="system")
+            historical_case_event.objects.create(case=case, event_type=event_type, actor=owner, actor_type="system")
         return case
 
     def test_covers_all_18_statuses_and_conditional_markers(self, user) -> None:
         """Representante de cada linha D3; condicionais com e sem marcador."""
-        CaseProcedure.objects.all().delete()
         created: dict[tuple[str, str], Case] = {}
         seq = 0
         for status in _PENDING_STATUSES:
@@ -181,46 +225,46 @@ class TestBackfillD3Table:
         self._backfill()
 
         for status in _PENDING_STATUSES:
-            row = CaseProcedure.objects.get(case=created[(str(status), "none")])
+            row = CaseProcedure.objects.get(case_id=created[(str(status), "none")].pk)
             assert row.detection_status == DetectionStatus.PENDING
             assert row.declared_by_nir is True
             assert row.doctor_disposition == DoctorDisposition.PENDING
         for status in _DETECTED_STATUSES:
-            row = CaseProcedure.objects.get(case=created[(str(status), "none")])
+            row = CaseProcedure.objects.get(case_id=created[(str(status), "none")].pk)
             assert row.detection_status == DetectionStatus.DETECTED
         for status in _CONDITIONAL_STATUSES:
-            without = CaseProcedure.objects.get(case=created[(str(status), "none")])
+            without = CaseProcedure.objects.get(case_id=created[(str(status), "none")].pk)
             assert without.detection_status == DetectionStatus.PENDING
-            with_marker = CaseProcedure.objects.get(case=created[(str(status), "marker")])
+            with_marker = CaseProcedure.objects.get(case_id=created[(str(status), "marker")].pk)
             assert with_marker.detection_status == DetectionStatus.DETECTED
-        llm1_only = CaseProcedure.objects.get(case=created[("CLEANED", "llm1_only")])
+        llm1_only = CaseProcedure.objects.get(case_id=created[("CLEANED", "llm1_only")].pk)
         assert llm1_only.detection_status == DetectionStatus.PENDING
 
     def test_appointment_status_and_events_are_downstream_markers(self, user) -> None:
-        CaseProcedure.objects.all().delete()
         by_appt = self._make_case(user, "CLEANED", "M-APPT", appointment_status="confirmed")
         by_event = self._make_case(user, "FAILED", "M-EVENT", events=("CASE_READY_FOR_SCHEDULER",))
         self._backfill()
-        assert CaseProcedure.objects.get(case=by_appt).detection_status == DetectionStatus.DETECTED
-        assert CaseProcedure.objects.get(case=by_event).detection_status == DetectionStatus.DETECTED
+        assert CaseProcedure.objects.get(case_id=by_appt.pk).detection_status == DetectionStatus.DETECTED
+        assert CaseProcedure.objects.get(case_id=by_event.pk).detection_status == DetectionStatus.DETECTED
 
     def test_doctor_disposition_closed_table(self, user) -> None:
-        CaseProcedure.objects.all().delete()
         accepted = self._make_case(user, "DOCTOR_ACCEPTED", "DIS-ACC", doctor_decision="accept", doctor_reason="sobra")
         denied = self._make_case(user, "DOCTOR_DENIED", "DIS-DEN", doctor_decision="deny", doctor_reason="motivo exato")
         pending = self._make_case(user, "WAIT_DOCTOR", "DIS-PEN")
         self._backfill()
-        assert CaseProcedure.objects.get(case=accepted).doctor_disposition == DoctorDisposition.APPROVED
-        assert CaseProcedure.objects.get(case=accepted).doctor_reason == ""
-        assert CaseProcedure.objects.get(case=denied).doctor_disposition == DoctorDisposition.DENIED
-        assert CaseProcedure.objects.get(case=denied).doctor_reason == "motivo exato"
-        assert CaseProcedure.objects.get(case=pending).doctor_disposition == DoctorDisposition.PENDING
-        assert CaseProcedure.objects.get(case=pending).doctor_reason == ""
+        assert CaseProcedure.objects.get(case_id=accepted.pk).doctor_disposition == DoctorDisposition.APPROVED
+        assert CaseProcedure.objects.get(case_id=accepted.pk).doctor_reason == ""
+        assert CaseProcedure.objects.get(case_id=denied.pk).doctor_disposition == DoctorDisposition.DENIED
+        assert CaseProcedure.objects.get(case_id=denied.pk).doctor_reason == "motivo exato"
+        assert CaseProcedure.objects.get(case_id=pending.pk).doctor_disposition == DoctorDisposition.PENDING
+        assert CaseProcedure.objects.get(case_id=pending.pk).doctor_reason == ""
 
     def test_backfill_preserves_fields_and_events(self, user) -> None:
-        CaseProcedure.objects.all().delete()
-        case = Case.objects.create(
-            created_by=user,
+        historical_case: Any = self._apps.get_model("cases", "Case")
+        historical_user: Any = self._apps.get_model("accounts", "User")
+        owner = historical_user.objects.get(pk=user.pk)
+        case = historical_case.objects.create(
+            created_by=owner,
             status=CaseStatus.DOCTOR_DENIED,
             doctor_decision="deny",
             doctor_reason="recusa",
@@ -228,22 +272,27 @@ class TestBackfillD3Table:
         )
         events_before = case.events.count()
         self._backfill()
-        reloaded = Case.objects.get(pk=case.pk)
+        reloaded = historical_case.objects.get(pk=case.pk)
         assert reloaded.status == CaseStatus.DOCTOR_DENIED
         assert reloaded.doctor_reason == "recusa"
-        row = CaseProcedure.objects.get(case=case)
+        row = CaseProcedure.objects.get(case_id=case.pk)
         assert row.procedure_type == ProcedureType.EDA
         assert row.declared_by_nir is True
         # Nenhum evento novo: backfill não reprocessa nem audita
         assert case.events.count() == events_before
 
     def test_forward_and_reverse_are_deterministic(self, user) -> None:
-        CaseProcedure.objects.all().delete()
         case = self._make_case(user, "NEW", "REV-001")
         self._backfill()
-        assert CaseProcedure.objects.filter(case=case).count() == 1
+        assert CaseProcedure.objects.filter(case_id=case.pk).count() == 1
         self._reverse()
-        assert CaseProcedure.objects.filter(case=case).count() == 0
+        # Reversão determinística: o estado 0014 não conhece a tabela — o
+        # reverse do backfill apagou as rows e o CreateModel foi revertido.
+        assert "CaseProcedure" not in {m.__name__ for m in self._apps.get_models()}
+        # Re-forward determinístico: o backfill recria exatamente 1 row (sem
+        # duplicação), provando que o reverse removeu as rows anteriores.
+        self._backfill()
+        assert CaseProcedure.objects.filter(case_id=case.pk).count() == 1
         assert Case.objects.get(pk=case.pk).status == CaseStatus.NEW
 
 
