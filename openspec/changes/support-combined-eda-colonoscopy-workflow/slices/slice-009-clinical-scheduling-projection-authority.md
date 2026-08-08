@@ -103,6 +103,42 @@ Qualquer reader/query da coluna; default EDA em legado ambíguo; lookup singular
 
 Criar `/tmp/support-combined-eda-colonoscopy-workflow-slice-009-report.md` com matriz, baseline, RED/GREEN/REFACTOR, snippets, inventário/classificação, inspections, cap/gates, baseline-final e Handoff R1–R6.
 
+## Addendum de correção — Status: INCOMPLETE (revisão pós-commit `9caf210`)
+
+Tentativa de correção (C1–C5) iniciada a partir de `9caf210`. Produto corretamente
+implementado (C1 doctor strict via `fallback_to_bridge=False`; C2 `_require_approved_procedure`
+em todos os universos + fail-closed em `scheduler_confirm`/`scheduler_submit`;
+`decision.html` projetado; C4 spies/divergência; C3 helpers explícitos). RED real
+provado para C1 (doctor strict) e C2 (exclusão/bloqueio CHD).
+
+**Bloqueador (INCOMPLETE):** C1 (doctor strict) + C2 (filtrar universos CHD)
+enforçam invariantes de produção (`WAIT_DOCTOR` ⇒ rows detectadas;
+`WAIT_APPT` ⇒ rows aprovadas). A infraestrutura de teste existente cria casos
+nesses estados **sem `CaseProcedure`** (bypass do pipeline via `advance_to` e
+`Case.objects.create(status=WAIT_APPT/WAIT_DOCTOR, ...)`), violando esses
+invariantes. Aplicar C1+C2 quebra **~105 testes** em **~10 arquivos de teste**
+(scheduler: `test_views` 58, `test_post_schedule_issue` 24 via `advance_to`,
+`test_operational_post_acceptance_chd` 11, `test_communication` 2; doctor:
+`test_pediatric_em_scheduling` 4, `test_views` 1, `test_operational_admission_flows` 1,
+`test_colonoscopy_doctor` 1, `test_queue_exam_type_filters` 2; intake:
+`test_exam_type_intake` 1). Migrar todas as fixtures é o trabalho correto, mas o
+diff acumulado (`78b390b..HEAD`) subiria para **~24 arquivos produto/teste/template**
+(~13 arquivos de teste além dos 13 do commit reprovado) — **não enxuto**.
+
+C3 proíbe usar `advance_to`/signals/autouse (mecanismo global) para esconder
+fixtures incompletas — e ~66 fixtures scheduler usam justamente `advance_to`
+(`test_post_schedule_issue`), tornando a migração por-teste o único caminho
+permitido, porém volumoso.
+
+Per C5 ("Se não puder justificar um cap enxuto, reporte INCOMPLETE"): reportado
+**INCOMPLETE**. Produto/teste foram revertidos ao estado limpo `9caf210`
+(3045 passed) para não deixar a árvore quebrada. Recomendação: (a) dedicar um
+slice próprio à migração da infraestrutura de teste scheduler/doctor para criar
+rows coerentes (declaradas/detectadas/aprovadas) antes de reexecutar C1+C2, ou
+(b) elevar substancialmente o cap e migrar as ~100 fixtures num único esforço.
+C4 (derivação 1.1 fail-closed + spy) já está correto no commit `9caf210` e não
+requer mudança de produto.
+
 ## Prompt pronto
 
 ```text
