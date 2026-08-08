@@ -40,6 +40,35 @@ def _is_v2_structured(structured_data: Any) -> bool:
     return isinstance(structured_data, dict) and structured_data.get("schema_version") == "2.0"
 
 
+# Tipos de procedimento aceitos na derivação 1.1 (R2).
+_LEGACY_PROCEDURE_TYPES: tuple[str, ...] = ("eda", "colonoscopy")
+
+
+def _derive_legacy_procedure_type(case: Case) -> str:
+    """Deriva o ``procedure_type`` de um caso 1.1 SEM ler a ponte ``Case.exam_type``.
+
+    Slice 009 (R2): o relatório histórico 1.1 deriva o tipo do payload
+    validado (``preop_screening.exam_type``) e, se ausente, de uma única row
+    ``declared_by_nir`` inequívoca. Ambíguo/ausente → ``""`` (fail-closed:
+    sem lookup anterior e label neutro no presenter, nunca default EDA).
+    """
+    structured = case.structured_data
+    if isinstance(structured, dict):
+        preop = structured.get("preop_screening")
+        if isinstance(preop, dict):
+            raw = preop.get("exam_type")
+            if raw in _LEGACY_PROCEDURE_TYPES:
+                return str(raw)
+    declared = [
+        row.procedure_type
+        for row in case.procedures.all()
+        if row.declared_by_nir and row.procedure_type in _LEGACY_PROCEDURE_TYPES
+    ]
+    if len(declared) == 1:
+        return declared[0]
+    return ""
+
+
 def _map_prior_decision_to_denial_type(decision: str) -> str:
     """Map PriorCaseSummary.decision to denial type for the presenter."""
     if decision == "doctor_denied":
@@ -104,35 +133,38 @@ def _build_prior_sections(case: Case) -> list[dict[str, Any]]:
 def prepare_doctor_case_report(case: Case) -> PreparedDoctorReport:
     """Prepare a ``DoctorReportPresenter`` and denial context from a ``Case``.
 
-    Centralizes the logic that was duplicated between the doctor decision
-    view and the dashboard. Returns a ``PreparedDoctorReport`` with:
-    - The fully initialized ``DoctorReportPresenter``
-    - ``prior_context``: ``PriorCaseContext`` (or ``None``) — modo legado 1.1
-    - ``prior_decision_display``: human-readable label for the prior decision
-    - ``prior_sections``: seções por procedimento (modo 2.0, R6/D10)
+    Slice 009 (R2): nenhum caminho passa a coluna ``Case.exam_type`` ao
+    presenter/lookup. Contrato 2.0 produz ``prior_sections`` por componente;
+    contrato 1.1 deriva ``procedure_type`` do payload histórico (ou row
+    inequívoca) e, se derivável, consulta o histórico por componente. Tipo
+    ambíguo/ausente é fail-closed (sem lookup, presenter neutro).
     """
     prior_context = None
     prior_decision_display = ""
     recent_denial_ctx = None
     prior_sections: list[dict[str, Any]] = []
+    presenter_exam_type = ""  # fail-closed default; v2 ignora este campo
 
     if _is_v2_structured(case.structured_data):
         prior_sections = _build_prior_sections(case)
-    elif case.agency_record_number:
-        pc = lookup_prior_case_context(
-            case_id=case.case_id,
-            agency_record_number=case.agency_record_number,
-            exam_type=case.exam_type,
-        )
-        if pc.prior_case is not None:
-            prior_context = pc
-            prior_decision_display = PRIOR_DECISION_DISPLAY.get(pc.prior_case.decision, pc.prior_case.decision)
-            recent_denial_ctx = {
-                "decision": _map_prior_decision_to_denial_type(pc.prior_case.decision),
-                "reason": pc.prior_case.reason,
-                "decided_at": pc.prior_case.decided_at,
-                "prior_denial_count_7d": pc.prior_denial_count_7d,
-            }
+    else:
+        derived_type = _derive_legacy_procedure_type(case)
+        presenter_exam_type = derived_type
+        if case.agency_record_number and derived_type:
+            pc = lookup_prior_case_context(
+                case_id=case.case_id,
+                agency_record_number=case.agency_record_number,
+                procedure_type=derived_type,
+            )
+            if pc.prior_case is not None:
+                prior_context = pc
+                prior_decision_display = PRIOR_DECISION_DISPLAY.get(pc.prior_case.decision, pc.prior_case.decision)
+                recent_denial_ctx = {
+                    "decision": _map_prior_decision_to_denial_type(pc.prior_case.decision),
+                    "reason": pc.prior_case.reason,
+                    "decided_at": pc.prior_case.decided_at,
+                    "prior_denial_count_7d": pc.prior_denial_count_7d,
+                }
 
     presenter = DoctorReportPresenter(
         structured_data=case.structured_data or {},
@@ -141,7 +173,7 @@ def prepare_doctor_case_report(case: Case) -> PreparedDoctorReport:
         recent_denial_context=recent_denial_ctx,
         source_text=case.extracted_text or "",
         priority_signals=case.priority_signals or [],
-        exam_type=case.exam_type,
+        exam_type=presenter_exam_type,
         prior_sections=prior_sections,
     )
 

@@ -38,7 +38,6 @@ from apps.cases.priority_signals import build_priority_signal_badges
 from apps.cases.procedures import (
     format_procedure_selection,
     get_approved_procedure_types,
-    get_declared_procedure_types,
     get_detected_procedure_types,
     selection_key,
 )
@@ -136,26 +135,25 @@ def _approved_snapshot(case: Case) -> dict[str, Any]:
     """Snapshot da dimensão autorizada para o CHD (R1/D11, Slice 004).
 
     Fonte exclusiva: rows ``CaseProcedure`` com ``doctor_disposition=approved``
-    (fallback da ponte para casos legados via ``get_approved_procedure_types``).
-    Inclui a chave de seleção (filtro JS), o label textual, o badge
-    ``EDA + Colonoscopia · Agendamento casado`` quando ambos aprovados, a
-    comparação detectado → autorizado e as razões médicas por componente
-    (apenas presença/razão — sem texto clínico integral no evento).
+    (modo estrito, Slice 009/R4 — sem fallback da ponte). Sem rows aprovadas,
+    fail-closed: ``approved_selection_key="none"`` e label vazio (o caso não
+    aparece nos buckets por tipo). Inclui a chave de seleção (filtro JS), o
+    label textual, o badge ``EDA + Colonoscopia · Agendamento casado`` quando
+    ambos aprovados, a comparação detectado → autorizado e as razões médicas
+    por componente (apenas presença/razão — sem texto clínico integral no
+    evento).
     """
-    approved_types = get_approved_procedure_types(case)
-    detected_types = get_detected_procedure_types(case)
+    approved_types = get_approved_procedure_types(case, fallback_to_bridge=False)
+    detected_types = get_detected_procedure_types(case, fallback_to_bridge=False)
     paired = len(approved_types) == 2
     if approved_types:
         approved_label = format_procedure_selection(approved_types)
         approved_selection_key = selection_key(approved_types)
     else:
-        # F2: fallback consistente — badge e chave de seleção derivam da MESMA
-        # fonte (declarado via ponte), nunca label EDA com key "none" (card
-        # invisível nos buckets do JS). Sem approved E sem fallback válido,
-        # manter "none" e label vazio.
-        fallback_types = get_declared_procedure_types(case)
-        approved_label = format_procedure_selection(fallback_types) if fallback_types else ""
-        approved_selection_key = selection_key(fallback_types) if fallback_types else "none"
+        # R4: sem approved projetado → fail-closed (não cai na ponte); o caso
+        # permanece na fila (filtro por status), mas não entra em bucket de tipo.
+        approved_label = ""
+        approved_selection_key = "none"
     detected_label = format_procedure_selection(detected_types) if detected_types else "Nenhum"
     transformation = ""
     if approved_types and approved_types != detected_types:
@@ -219,8 +217,8 @@ def _build_case_card(case: Case, wait_minutes: int, user: Any = None) -> dict[st
         "wait_minutes": wait_minutes,
         # Tipo de exame declarado no intake (Slice 005) — cards/badges usam
         # exclusivamente o valor persistido, nunca inferido de texto/JSON.
-        "exam_type": case.exam_type,
-        "exam_type_label": case.get_exam_type_display(),
+        "exam_type": approved["approved_selection_key"],
+        "exam_type_label": approved["approved_label"],
         # Dimensão autorizada (R1/D11): badge/filtro principal do CHD usam
         # exclusivamente o conjunto aprovado; a ponte data-exam-type
         # permanece apenas para compatibilidade legada com o JS.
@@ -425,8 +423,8 @@ def _build_processed_card(case: Case) -> dict[str, Any]:
         "appointment_at": case.appointment_at,
         "appointment_reason": case.appointment_reason or "",
         # Tipo de exame declarado no intake (Slice 005).
-        "exam_type": case.exam_type,
-        "exam_type_label": case.get_exam_type_display(),
+        "exam_type": approved["approved_selection_key"],
+        "exam_type_label": approved["approved_label"],
         # Dimensão autorizada (R1/R5): Processados Hoje filtra pelo aprovado.
         **approved,
         # Badges projetados exclusivamente do valor persistido (Slice 004).
@@ -1045,7 +1043,7 @@ def scheduler_submit(request: HttpRequest, case_id: uuid.UUID) -> HttpResponse:
         # Snapshot da dimensão autorizada (R4/D11): o evento de
         # confirmação/negativa carrega o conjunto aprovado ordenado + flag
         # de agenda casada — no MESMO evento, sem duplicar transição.
-        approved_types = get_approved_procedure_types(case)
+        approved_types = get_approved_procedure_types(case, fallback_to_bridge=False)
         paired = len(approved_types) == 2
         snapshot: dict[str, Any] = {"approved_procedures": list(approved_types), "paired": paired}
 
@@ -1172,12 +1170,11 @@ _HISTORICAL_DIMENSION_CHOICES: tuple[str, ...] = ("all", "eda", "colonoscopy", E
 def _filter_by_approved_dimension(qs: QuerySet[Case], dimension: str) -> QuerySet[Case]:
     """Filtra um queryset pela dimensão autorizada (R5/D13).
 
-    Casos com rows: exige row(s) ``doctor_disposition=approved`` do(s)
-    tipo(s) — ``eda``/``colonoscopy`` são EXCLUSIVOS (um caso só pertence a
-    um bucket); combinado exige as duas rows aprovadas. Casos legados sem
-    rows (fixtures/pré-projeção) com ``doctor_decision=accept`` caem na
-    ponte ``exam_type`` (inclusive ``eda_colonoscopy``, F1), refletindo a
-    dimensão autorizada até o cutover.
+    Slice 009 (R4): somente rows ``doctor_disposition=approved``.
+    ``eda``/``colonoscopy`` são EXCLUSIVOS (um caso só pertence a um bucket);
+    combinado exige as duas rows aprovadas. O fallback legado
+    ``filter(exam_type=..., procedures__isnull=True)`` foi removido — caso sem
+    autorização projetada não aparece nos buckets (fail-closed).
     """
     other = ProcedureType.COLONOSCOPY if dimension == ProcedureType.EDA else ProcedureType.EDA
     row_matches = qs.filter(
@@ -1195,11 +1192,8 @@ def _filter_by_approved_dimension(qs: QuerySet[Case], dimension: str) -> QuerySe
             procedures__procedure_type=ProcedureType.COLONOSCOPY,
             procedures__doctor_disposition=DoctorDisposition.APPROVED,
         )
-        # F1: fallback legado — caso combinado sem rows usa a ponte exam_type.
-        legacy = qs.filter(exam_type=EDA_COLONOSCOPY, procedures__isnull=True)
-        return (combined | legacy).distinct()
-    legacy = qs.filter(exam_type=dimension, procedures__isnull=True)
-    return (row_matches | legacy).distinct()
+        return combined.distinct()
+    return row_matches.distinct()
 
 
 @login_required
@@ -1244,10 +1238,10 @@ def scheduler_historical_search(request: HttpRequest) -> HttpResponse:
                     else ("Negado" if case.appointment_status == "denied" else "Cancelado"),
                     "appointment_at": case.appointment_at,
                     "doctor_display": case.doctor_display,
-                    # Tipo de exame declarado no intake (Slice 005).
-                    "exam_type": case.exam_type,
-                    "exam_type_label": case.get_exam_type_display(),
-                    # Dimensão autorizada (R5): badge/histórico por aprovado.
+                    # Dimensão autorizada projetada (Slice 009/R4) — nunca a ponte.
+                    "exam_type": approved["approved_selection_key"],
+                    "exam_type_label": approved["approved_label"],
+                    # Badge/histórico por aprovado (R5).
                     **approved,
                 }
             )

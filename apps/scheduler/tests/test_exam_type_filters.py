@@ -60,8 +60,21 @@ class TestSchedulerQueueExamTypeFilters:
         session.save()
         return user
 
+    def _approve_procedures(self, case: Case, exam_type: str) -> None:
+        """Cria rows aprovadas coerentes (R5) — a fila CHD projeta do aprovado."""
+        from apps.cases.models import CaseProcedure, DoctorDisposition
+
+        types = ("eda", "colonoscopy") if exam_type == "eda_colonoscopy" else (exam_type,)
+        for procedure_type in types:
+            CaseProcedure.objects.create(
+                case=case,
+                procedure_type=procedure_type,
+                declared_by_nir=True,
+                doctor_disposition=DoctorDisposition.APPROVED,
+            )
+
     def _make_wait_appt(self, nir: Any, *, exam_type: str, name: str, record: str) -> Case:
-        return Case.objects.create(
+        case = Case.objects.create(
             created_by=nir,
             status=CaseStatus.WAIT_APPT,
             exam_type=exam_type,
@@ -70,6 +83,8 @@ class TestSchedulerQueueExamTypeFilters:
             doctor_admission_flow="scheduled",
             structured_data={"patient": {"name": name, "age": 55, "gender": "F"}},
         )
+        self._approve_procedures(case, exam_type)
+        return case
 
     def _make_immediate_notice(self, nir: Any, *, exam_type: str, name: str, record: str) -> Case:
         case = Case.objects.create(
@@ -88,13 +103,14 @@ class TestSchedulerQueueExamTypeFilters:
             event_type="IMMEDIATE_ADMISSION_OPERATIONAL_NOTICE",
             timestamp=timezone.now(),
         )
+        self._approve_procedures(case, exam_type)
         return case
 
     def _make_operational_issue(self, nir: Any, *, exam_type: str, name: str, record: str) -> Case:
         # Status fora de WAIT_APPT para manter os três grupos disjuntos no
         # teste (caso com issue em WAIT_APPT aparece também na lista pendente,
         # comportamento real do sistema que os contadores seguem fielmente).
-        return Case.objects.create(
+        case = Case.objects.create(
             created_by=nir,
             status=CaseStatus.WAIT_R1_CLEANUP_THUMBS,
             exam_type=exam_type,
@@ -105,9 +121,11 @@ class TestSchedulerQueueExamTypeFilters:
             post_acceptance_issue_context="operational_notice",
             structured_data={"patient": {"name": name, "age": 50, "gender": "M"}},
         )
+        self._approve_procedures(case, exam_type)
+        return case
 
     def _make_processed(self, scheduler_user: Any, nir: Any, *, exam_type: str, name: str, record: str) -> Case:
-        return Case.objects.create(
+        case = Case.objects.create(
             created_by=nir,
             status=CaseStatus.WAIT_R1_CLEANUP_THUMBS,
             exam_type=exam_type,
@@ -119,11 +137,13 @@ class TestSchedulerQueueExamTypeFilters:
             appointment_decided_at=timezone.now(),
             structured_data={"patient": {"name": name, "age": 45, "gender": "F"}},
         )
+        self._approve_procedures(case, exam_type)
+        return case
 
     def _make_historical(
         self, nir: Any, *, exam_type: str, name: str, record: str, patient_name: str | None = None
     ) -> Case:
-        return Case.objects.create(
+        case = Case.objects.create(
             created_by=nir,
             status=CaseStatus.CLEANED,
             exam_type=exam_type,
@@ -133,6 +153,8 @@ class TestSchedulerQueueExamTypeFilters:
             appointment_status="confirmed",
             structured_data={"patient": {"name": patient_name or name, "age": 60, "gender": "F"}},
         )
+        self._approve_procedures(case, exam_type)
+        return case
 
     # ── R1: contagens pendentes por tipo fecham com o total ───────────
 
@@ -290,10 +312,23 @@ class TestSchedulerHistoricalExamType:
         session.save()
         return user
 
+    def _approve_procedures(self, case: Case, exam_type: str) -> None:
+        """Cria rows aprovadas coerentes (R5) — o histórico filtra pelo aprovado."""
+        from apps.cases.models import CaseProcedure, DoctorDisposition
+
+        types = ("eda", "colonoscopy") if exam_type == "eda_colonoscopy" else (exam_type,)
+        for procedure_type in types:
+            CaseProcedure.objects.create(
+                case=case,
+                procedure_type=procedure_type,
+                declared_by_nir=True,
+                doctor_disposition=DoctorDisposition.APPROVED,
+            )
+
     def _make_historical(
         self, nir: Any, *, exam_type: str, name: str, record: str, patient_name: str | None = None
     ) -> Case:
-        return Case.objects.create(
+        case = Case.objects.create(
             created_by=nir,
             status=CaseStatus.CLEANED,
             exam_type=exam_type,
@@ -303,6 +338,8 @@ class TestSchedulerHistoricalExamType:
             appointment_status="confirmed",
             structured_data={"patient": {"name": patient_name or name, "age": 60, "gender": "F"}},
         )
+        self._approve_procedures(case, exam_type)
+        return case
 
     def test_historical_type_without_q_returns_latest_of_type(self, client) -> None:
         """Tipo específico sem termo lista os últimos casos daquele tipo."""

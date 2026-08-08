@@ -207,12 +207,27 @@ def _is_v2_case(case: Case) -> bool:
     return isinstance(structured, dict) and structured.get("schema_version") == "2.0"
 
 
-def _build_case_card(case: Case, wait_minutes: int, user: Any = None) -> dict[str, Any]:
-    """Build a dict with all display data for a case card."""
+def _build_case_card(
+    case: Case,
+    wait_minutes: int,
+    user: Any = None,
+    *,
+    primary_types: tuple[str, ...] | None = None,
+) -> dict[str, Any]:
+    """Build a dict with all display data for a case card.
+
+    Slice 009 (R1): nenhuma leitura da ponte ``Case.exam_type``. As dimensões
+    vêm exclusivamente das rows (modo estrito). O campo ``exam_type`` do card
+    recebe a ``selection_key`` projetada da dimensão principal do card
+    (Pendentes = detectado; Decididos = autorizado) — semântica documentada; o
+    JS prioriza ``data-proc-selection`` e usa este campo só como compat.
+    """
     detected_types = get_detected_procedure_types(case)
     approved_types = get_approved_procedure_types(case)
     declared_types = get_declared_procedure_types(case)
-    exam_type_label = case.get_exam_type_display()
+    if primary_types is None:
+        primary_types = detected_types
+    primary_label = format_procedure_selection(primary_types) if primary_types else ""
 
     card: dict[str, Any] = {
         "case_id": str(case.case_id),
@@ -232,14 +247,15 @@ def _build_case_card(case: Case, wait_minutes: int, user: Any = None) -> dict[st
         "wait_display": _format_wait_minutes(wait_minutes),
         "is_urgent": wait_minutes <= 15,
         "regulation_days_on_screen": case.regulation_days_on_screen,
-        # Tipo de exame declarado (R6) — a fila identifica Colonoscopia.
-        "exam_type": case.exam_type,
-        "exam_type_label": exam_type_label,
+        # Dimensão principal projetada (R1): ``exam_type``/``exam_type_label``
+        # recebem a selection_key/label da dimensão do card — nunca a ponte direta.
+        "exam_type": selection_key(primary_types),
+        "exam_type_label": primary_label,
         # Dimensões projetadas (R7): Pendentes filtra pelo detectado;
         # Decididos Hoje pelo autorizado. A ponte ``data-exam-type``
         # permanece para compatibilidade legada com o JS.
         "detected_selection_key": selection_key(detected_types) or "none",
-        "detected_label": format_procedure_selection(detected_types) if detected_types else exam_type_label,
+        "detected_label": format_procedure_selection(detected_types) if detected_types else "",
         "approved_selection_key": selection_key(approved_types) or "none",
         "approved_label": format_procedure_selection(approved_types) if approved_types else "Nenhum autorizado",
         # Transformação (cards): quando o conjunto da dimensão diverge.
@@ -296,7 +312,14 @@ def _doctor_queue_context(request: HttpRequest) -> dict[str, Any]:
     for case in pending_cases:
         delta = now - case.created_at
         wait_minutes = int(delta.total_seconds() // 60)
-        pending_cards.append(_build_case_card(case, wait_minutes, user=doctor_user))
+        pending_cards.append(
+            _build_case_card(
+                case,
+                wait_minutes,
+                user=doctor_user,
+                primary_types=get_detected_procedure_types(case),
+            )
+        )
 
     total_wait = sum(c["wait_minutes"] for c in pending_cards)
     avg_wait = int(total_wait / len(pending_cards)) if pending_cards else 0
@@ -317,7 +340,13 @@ def _doctor_queue_context(request: HttpRequest) -> dict[str, Any]:
 
     decided_cards: list[dict[str, Any]] = []
     for case in decided_qs:
-        decided_cards.append(_build_case_card(case, 0))
+        decided_cards.append(
+            _build_case_card(
+                case,
+                0,
+                primary_types=get_approved_procedure_types(case),
+            )
+        )
 
     return {
         "active_tab": active_tab,

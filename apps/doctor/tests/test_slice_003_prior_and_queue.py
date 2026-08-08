@@ -287,7 +287,7 @@ class TestPriorSectionsPerProcedure:
         assert eda_section["prior_denial_count_7d"] == 2
 
     def test_legacy_case_keeps_single_prior_context(self, django_user_model) -> None:
-        """Casos 1.1 (sem schema 2.0) mantêm o comportamento legado (sem seções)."""
+        """Casos 1.1 (sem schema 2.0) mantêm prior context único por derivação (R2)."""
         user = _make_user("nir_prior6")
         now = _now()
         legacy = Case.objects.create(
@@ -298,19 +298,31 @@ class TestPriorSectionsPerProcedure:
             doctor_decision="deny",
             doctor_reason="motivo global",
             doctor_decided_at=now - timedelta(days=1),
-            structured_data={"schema_version": "1.1", "patient": {"name": "P", "age": 30, "sex": "M"}},
+            structured_data={
+                "schema_version": "1.1",
+                "patient": {"name": "P", "age": 30, "sex": "M"},
+                "preop_screening": {"exam_type": "eda"},
+            },
+        )
+        CaseProcedure.objects.create(
+            case=legacy, procedure_type="eda", declared_by_nir=True, doctor_disposition="denied"
         )
         current = Case.objects.create(
             created_by=user,
             agency_record_number="AR-P6",
             status=CaseStatus.WAIT_DOCTOR,
             exam_type="eda",
-            structured_data={"schema_version": "1.1", "patient": {"name": "C", "age": 30, "sex": "M"}},
+            structured_data={
+                "schema_version": "1.1",
+                "patient": {"name": "C", "age": 30, "sex": "M"},
+                "preop_screening": {"exam_type": "eda"},
+            },
         )
         prepared = prepare_doctor_case_report(current)
         assert prepared.prior_sections == []
         assert prepared.prior_context is not None
         assert prepared.prior_context.prior_case is not None
+        assert prepared.prior_context.prior_case.prior_case_id == str(legacy.case_id)
         assert prepared.prior_context.prior_case.prior_case_id == str(legacy.case_id)
 
     def test_decision_page_renders_both_prior_sections(self, client, django_user_model) -> None:
@@ -483,3 +495,124 @@ class TestDoctorQueueProcedureFilters:
         # Comportamento legado preservado (busca/limpar/afterSwap).
         assert "htmx:afterSwap" in js
         assert "clearFilter" in js
+
+
+# ── Slice 009 (R2): relatório 1.1 deriva tipo sem ler a coluna ─────────────
+
+
+@pytest.mark.django_db
+class TestLegacyReportDerivesTypeFromPayload:
+    """R2: schema 1.1 deriva ``procedure_type`` do payload histórico ou de
+    uma única row declarada inequívoca; ambíguo/ausente é fail-closed
+    (sem lookup, label neutro), nunca default EDA."""
+
+    def _legacy_structured(self, *, exam_type: str | None, name: str = "P") -> dict[str, Any]:
+        payload: dict[str, Any] = {"schema_version": "1.1", "patient": {"name": name, "age": 30, "sex": "M"}}
+        if exam_type is not None:
+            payload["preop_screening"] = {"exam_type": exam_type}
+        return payload
+
+    def test_preop_screening_drives_colonoscopy_report(self, django_user_model) -> None:
+        user = _make_user("nir_r2a")
+        current = Case.objects.create(
+            created_by=user,
+            agency_record_number="AR-R2A",
+            status=CaseStatus.WAIT_DOCTOR,
+            exam_type="colonoscopy",
+            structured_data=self._legacy_structured(exam_type="colonoscopy"),
+        )
+        prepared = prepare_doctor_case_report(current)
+        report = prepared.presenter.build_report()
+        # Tipo derivado do payload, não default EDA.
+        assert report["context"]["procedure"] == "procedimento solicitado: Colonoscopia"
+
+    def test_single_declared_row_derives_type_when_payload_absent(self, django_user_model) -> None:
+        user = _make_user("nir_r2b")
+        current = Case.objects.create(
+            created_by=user,
+            agency_record_number="AR-R2B",
+            status=CaseStatus.WAIT_DOCTOR,
+            exam_type="colonoscopy",
+            structured_data=self._legacy_structured(exam_type=None),
+        )
+        CaseProcedure.objects.create(
+            case=current,
+            procedure_type="colonoscopy",
+            declared_by_nir=True,
+        )
+        prepared = prepare_doctor_case_report(current)
+        report = prepared.presenter.build_report()
+        assert report["context"]["procedure"] == "procedimento solicitado: Colonoscopia"
+
+    def test_ambiguous_legacy_is_fail_closed_no_default_eda(self, django_user_model) -> None:
+        """Sem preop_screening.exam_type e sem row inequívoca → neutro, nunca EDA."""
+        user = _make_user("nir_r2c")
+        current = Case.objects.create(
+            created_by=user,
+            agency_record_number="AR-R2C",
+            status=CaseStatus.WAIT_DOCTOR,
+            exam_type="eda",
+            structured_data=self._legacy_structured(exam_type=None),
+        )
+        prepared = prepare_doctor_case_report(current)
+        report = prepared.presenter.build_report()
+        procedure_line = report["context"]["procedure"]
+        # Nunca cai no default EDA; label neutro/fail-closed.
+        assert "EDA" not in procedure_line
+        assert "Colonoscopia" not in procedure_line
+
+    def test_ambiguous_legacy_does_not_run_prior_lookup(self, django_user_model) -> None:
+        """Tipo ambíguo → nenhum lookup anterior (fail-closed), mesmo com ARN."""
+        user = _make_user("nir_r2d")
+        # Caso anterior negado do mesmo ARN (com row EDA negada).
+        prior = Case.objects.create(
+            created_by=user,
+            agency_record_number="AR-R2D",
+            status=CaseStatus.DOCTOR_DENIED,
+            doctor_decision="deny",
+            doctor_reason="motivo",
+            doctor_decided_at=_now() - timedelta(days=1),
+            structured_data=self._legacy_structured(exam_type=None),
+        )
+        CaseProcedure.objects.create(
+            case=prior, procedure_type="eda", declared_by_nir=True, doctor_disposition="denied"
+        )
+        # Caso atual 1.1 ambíguo (sem preop_screening.exam_type e sem rows).
+        current = Case.objects.create(
+            created_by=user,
+            agency_record_number="AR-R2D",
+            status=CaseStatus.WAIT_DOCTOR,
+            exam_type="eda",
+            structured_data=self._legacy_structured(exam_type=None),
+        )
+        prepared = prepare_doctor_case_report(current)
+        assert prepared.prior_sections == []
+        assert prepared.prior_context is None
+
+    def test_legacy_case_keeps_single_prior_context_via_payload(self, django_user_model) -> None:
+        """Caso 1.1 com tipo derivável mantém o prior context legado (single)."""
+        user = _make_user("nir_r2e")
+        legacy = Case.objects.create(
+            created_by=user,
+            agency_record_number="AR-R2E",
+            status=CaseStatus.DOCTOR_DENIED,
+            doctor_decision="deny",
+            doctor_reason="motivo global",
+            doctor_decided_at=_now() - timedelta(days=1),
+            structured_data=self._legacy_structured(exam_type="eda"),
+        )
+        CaseProcedure.objects.create(
+            case=legacy, procedure_type="eda", declared_by_nir=True, doctor_disposition="denied"
+        )
+        current = Case.objects.create(
+            created_by=user,
+            agency_record_number="AR-R2E",
+            status=CaseStatus.WAIT_DOCTOR,
+            exam_type="eda",
+            structured_data=self._legacy_structured(exam_type="eda"),
+        )
+        prepared = prepare_doctor_case_report(current)
+        assert prepared.prior_sections == []
+        assert prepared.prior_context is not None
+        assert prepared.prior_context.prior_case is not None
+        assert prepared.prior_context.prior_case.prior_case_id == str(legacy.case_id)

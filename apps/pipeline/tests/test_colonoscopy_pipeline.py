@@ -639,22 +639,28 @@ class TestColonoscopyPreopPolicy:
 
 
 class TestPriorCaseColonoscopyTypeAware:
-    def test_prior_lookup_filters_same_exam_type(self, django_user_model) -> None:
+    def test_prior_lookup_filters_by_procedure_type(self, django_user_model) -> None:
+        """R3 (Slice 009): lookup por ``procedure_type`` consulta rows
+        ``CaseProcedure``; a dimensão EDA não aparece para Colonoscopia e vice-versa."""
         from datetime import UTC, datetime, timedelta
 
+        from apps.cases.models import CaseProcedure
         from apps.pipeline.prior_case import lookup_prior_case_context
 
         user = django_user_model.objects.create_user(username="prior_colon", password="pw")
         now = datetime.now(tz=UTC)
 
         # EDA denial (prior, same agency) — must NOT appear for colonoscopy lookup.
-        Case.objects.create(
+        eda_prior = Case.objects.create(
             created_by=user,
             agency_record_number="AR800",
             exam_type="eda",
             status=CaseStatus.DOCTOR_DENIED,
             doctor_decision="deny",
             doctor_decided_at=now - timedelta(days=1),
+        )
+        CaseProcedure.objects.create(
+            case=eda_prior, procedure_type="eda", declared_by_nir=True, doctor_disposition="denied"
         )
         # Colonoscopy denial (prior) — must appear for colonoscopy lookup.
         colon_prior = Case.objects.create(
@@ -664,6 +670,12 @@ class TestPriorCaseColonoscopyTypeAware:
             status=CaseStatus.DOCTOR_DENIED,
             doctor_decision="deny",
             doctor_decided_at=now - timedelta(days=2),
+        )
+        CaseProcedure.objects.create(
+            case=colon_prior,
+            procedure_type="colonoscopy",
+            declared_by_nir=True,
+            doctor_disposition="denied",
         )
         current = Case.objects.create(
             created_by=user,
@@ -675,7 +687,7 @@ class TestPriorCaseColonoscopyTypeAware:
             current.case_id,
             "AR800",
             now=now,
-            exam_type="colonoscopy",
+            procedure_type="colonoscopy",
         )
         assert colon_ctx.prior_case is not None
         assert colon_ctx.prior_case.prior_case_id == str(colon_prior.case_id)
@@ -685,10 +697,10 @@ class TestPriorCaseColonoscopyTypeAware:
             current.case_id,
             "AR800",
             now=now,
-            exam_type="eda",
+            procedure_type="eda",
         )
         assert eda_ctx.prior_case is not None
-        assert eda_ctx.prior_case.prior_case_id != str(colon_prior.case_id)
+        assert eda_ctx.prior_case.prior_case_id == str(eda_prior.case_id)
         assert eda_ctx.prior_denial_count_7d == 1
 
 

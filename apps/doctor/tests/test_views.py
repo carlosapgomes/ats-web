@@ -1631,6 +1631,8 @@ class TestDoctorDecisionPriorCaseCard:
         """Create a prior DOCTOR_DENIED case with the same agency_record_number."""
         from datetime import timedelta
 
+        from apps.cases.models import CaseProcedure
+
         case = Case.objects.create(
             created_by=user,
             agency_record_number=arn,
@@ -1640,6 +1642,16 @@ class TestDoctorDecisionPriorCaseCard:
             doctor_decided_at=timezone.now() - timedelta(days=days_ago),
         )
         Case.objects.filter(case_id=case.case_id).update(created_at=timezone.now() - timedelta(days=days_ago))
+        # Slice 009 (R5): row declarada/negada coerente com o estágio — o lookup
+        # anterior consulta ``CaseProcedure`` por componente (não mais a ponte);
+        # a razão autoritativa é a da row (D10).
+        CaseProcedure.objects.create(
+            case=case,
+            procedure_type="eda",
+            declared_by_nir=True,
+            doctor_disposition="denied",
+            doctor_reason=reason,
+        )
         return case
 
     def test_prior_case_card_shows_when_recent_denial(self, client) -> None:
@@ -1651,7 +1663,10 @@ class TestDoctorDecisionPriorCaseCard:
             created_by=nir_user,
             status=CaseStatus.WAIT_DOCTOR,
             agency_record_number="ARN-001",
-            structured_data={"patient": {"name": "João Prior", "age": 50, "gender": "Masculino"}},
+            structured_data={
+                "patient": {"name": "João Prior", "age": 50, "gender": "Masculino"},
+                "preop_screening": {"exam_type": "eda"},
+            },
         )
         current.save()
 
@@ -1705,7 +1720,10 @@ class TestDoctorDecisionPriorCaseCard:
             created_by=nir_user,
             status=CaseStatus.WAIT_DOCTOR,
             agency_record_number="ARN-003",
-            structured_data={"patient": {"name": "Multi Prior", "age": 60, "gender": "Masculino"}},
+            structured_data={
+                "patient": {"name": "Multi Prior", "age": 60, "gender": "Masculino"},
+                "preop_screening": {"exam_type": "eda"},
+            },
         )
         current.save()
 

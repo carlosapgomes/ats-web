@@ -227,37 +227,36 @@ class TestSchedulerPairedAppointment:
 
     # ── F2: fallback consistente quando não há aprovados ────────────
 
-    def test_snapshot_fallback_consistent_when_no_approved(self) -> None:
-        """F2: sem aprovados, badge e chave derivam da MESMA fonte (declarado/ponte).
+    def test_snapshot_fail_closed_without_approved_rows(self) -> None:
+        """R4: sem rows aprovadas, fail-closed — badge vazio e key "none",
+        independentemente da ponte ``exam_type`` ou ``doctor_decision``.
 
-        Caso sem rows aprovadas e sem fallback de accept (doctor_decision != accept)
-        deve exibir label consistente com a chave de seleção — nunca badge EDA com
-        key "none" (invisível nos buckets do JS).
+        O fallback transitivo (declarado/ponte) foi removido no Slice 009:
+        caso sem autorização projetada não aparece nos buckets por tipo.
         """
-        nir = User.objects.create_user(username=f"nir-slice004f2.{uuid.uuid4().hex[:8]}.test")
+        nir = User.objects.create_user(username=f"nir-slice009r4.{uuid.uuid4().hex[:8]}.test")
         nir.roles.add(_create_role("nir"))
-        # Sem aprovados: fallback = declarado (ponte) → label e key coerentes.
+        # Sem aprovados, mesmo com ponte eda e doctor_decision=accept → fail-closed.
         case = Case.objects.create(
             created_by=nir,
             status=CaseStatus.WAIT_APPT,
             exam_type="eda",
-            doctor_decision="deny",
+            doctor_decision="accept",
             structured_data={"patient": {"name": "Sem Aprovado", "age": 50, "gender": "F"}},
         )
         snap = _approved_snapshot(case)
-        assert snap["approved_label"] == "EDA"
-        assert snap["approved_selection_key"] == "eda"
-        # Sem approved E sem fallback válido: "none" + label vazio.
-        bogus = Case.objects.create(
-            created_by=nir,
-            status=CaseStatus.WAIT_APPT,
-            exam_type="bogus",
-            doctor_decision="deny",
-            structured_data={"patient": {"name": "Bogus", "age": 50, "gender": "F"}},
+        assert snap["approved_label"] == ""
+        assert snap["approved_selection_key"] == "none"
+        # Com row aprovada → label/key coerentes pela row.
+        CaseProcedure.objects.create(
+            case=case,
+            procedure_type="eda",
+            declared_by_nir=True,
+            doctor_disposition=DoctorDisposition.APPROVED,
         )
-        snap_bogus = _approved_snapshot(bogus)
-        assert snap_bogus["approved_label"] == ""
-        assert snap_bogus["approved_selection_key"] == "none"
+        snap_ok = _approved_snapshot(case)
+        assert snap_ok["approved_label"] == "EDA"
+        assert snap_ok["approved_selection_key"] == "eda"
 
     # ── F3: confirm sem aprovados não renderiza card vazio ──────────
 
@@ -546,11 +545,12 @@ class TestSchedulerPairedQueueAndHistory:
 
     # ── R5: histórico combinado sem termo, top 50 e ordem ───────────
 
-    def test_historical_combined_legacy_fallback_without_rows(self, client) -> None:
-        """F1: caso legado (exam_type=eda_colonoscopy, SEM rows) aparece em Combinado.
+    def test_historical_combined_without_rows_not_listed(self, client) -> None:
+        """R4: caso sem rows aprovadas NÃO aparece no bucket Combinado.
 
-        Queryset histórico já restringe doctor_decision=accept; caso sem rows
-        usa a ponte exam_type como fallback da dimensão autorizada.
+        O fallback legado ``filter(exam_type=eda_colonoscopy, procedures__isnull=True)``
+        foi removido (Slice 009): buckets exigem rows aprovadas; caso sem
+        autorização projetada não aparece. Apenas o caso com rows é listado.
         """
         nir = self._login_as(client, "nir")
         Case.objects.create(
@@ -563,7 +563,7 @@ class TestSchedulerPairedQueueAndHistory:
             agency_record_number="HC-LEG-COMB",
             structured_data={"patient": {"name": "Legado Combinado", "age": 61, "gender": "M"}},
         )
-        # Caso combinado com rows NÃO deve ser afetado pelo fallback (regressão).
+        # Caso combinado com rows aprovadas — aparece normalmente.
         self._make_case(
             nir,
             status=CaseStatus.CLEANED,
@@ -576,7 +576,7 @@ class TestSchedulerPairedQueueAndHistory:
         )
         self._login_as(client, "scheduler")
         content = client.get("/scheduler/historical/?exam_type=eda_colonoscopy").content.decode()
-        assert "HC-LEG-COMB" in content
+        assert "HC-LEG-COMB" not in content
         assert "HC-ROW-COMB" in content
 
     # ── R5: histórico combinado sem termo, top 50 e ordem ───────────

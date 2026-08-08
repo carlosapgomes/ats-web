@@ -4619,7 +4619,7 @@ class TestDashboardDoctorReportAudit:
                     "ecg": {"report_present": "yes", "abnormal_flag": "no"},
                 },
                 "origin_context": {"city": "Salvador", "hospital": "Hospital Geral"},
-                "preop_screening": {"comorbidities_described": []},
+                "preop_screening": {"exam_type": "eda", "comorbidities_described": []},
                 "policy_precheck": {
                     "labs_pass": "yes",
                     "ecg_present": "yes",

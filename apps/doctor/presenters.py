@@ -770,6 +770,10 @@ class DoctorReportPresenter:
             return "EDA"
         if self.exam_type == "colonoscopy":
             return "Colonoscopia"
+        if not self.exam_type:
+            # Slice 009 (R2): tipo 1.1 ambíguo/ausente é fail-closed neutro —
+            # nunca default EDA. O reporting só passa "" quando não deriva.
+            return "procedimento não identificado no laudo"
         subtype = self._extract_eda_subtype()
         if subtype == "foreign_body":
             return "EDA para retirada de corpo estranho"

@@ -9,8 +9,6 @@ import uuid
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 
-from django.db.models import Q
-
 from apps.cases.models import Case, CaseProcedure
 
 # Janela de busca: 7 dias corridos para trás
@@ -40,29 +38,29 @@ class PriorCaseContext:
 def lookup_prior_case_context(
     case_id: uuid.UUID | str,
     agency_record_number: str,
+    *,
+    procedure_type: str,
     now: datetime | None = None,
-    exam_type: str | None = None,
-    procedure_type: str | None = None,
 ) -> PriorCaseContext:
-    """Busca casos anteriores do mesmo paciente (mesmo ``agency_record_number``).
+    """Busca casos anteriores do mesmo paciente por componente (D10/ADR-0004).
 
-    Retorna o caso de decisão mais recente (últimos 7 dias) e a contagem de
-    negações no período para o contexto solicitado.
+    Slice 009 (R3): ``procedure_type`` é keyword-only obrigatório. O caminho
+    legado ``exam_type``/``filter(exam_type=...)`` foi removido — casos
+    históricos já foram backfillados para ``CaseProcedure`` no Slice 001, e os
+    artefatos 1.1 derivam o ``procedure_type`` no caller (``reporting``).
 
-    Dois modos (Slice 002, D10/ADR-0004):
+    Seleciona candidatos pela row ``CaseProcedure`` correspondente e decide por
+    componente na ordem fechada D10:
 
-    - ``procedure_type`` (contrato 2.0): seleciona candidatos pela row
-      ``CaseProcedure`` correspondente e decide por componente na ordem fechada
-      D10 — row ``denied`` → ``doctor_denied`` (razão da row); row ``approved``
-      com ``Case.appointment_status=denied`` → ``appointment_denied``; row
-      ``approved`` → ``doctor_approved``; row ``pending``/fora da janela → fora
-      do contexto. ``prior_denial_count_7d`` conta somente negativas do
-      procedimento (nunca ``doctor_approved``).
+    1. row ``doctor_disposition=denied`` → ``doctor_denied`` (razão da row);
+    2. row ``approved`` + ``Case.appointment_status=denied`` →
+       ``appointment_denied`` (razão/instante do agendamento global);
+    3. row ``approved`` → ``doctor_approved``;
+    4. row ``pending`` ou timestamps fora da janela → fora do contexto.
 
-    - ``exam_type`` (legado 1.1): preserva o comportamento anterior com filtro
-      por ``Case.exam_type`` e campos globais de decisão.
-
-    A identificação usa campos semânticos de decisão, não ``Case.status``
+    ``prior_denial_count_7d`` conta somente negativas do procedimento
+    (médica ou de agenda); ``doctor_approved`` nunca aumenta o contador. A
+    identificação usa campos semânticos de decisão, não ``Case.status``
     (transitório). A negativa global de agendamento aplica-se apenas a rows
     aprovadas — nunca a componente medicamente negado (D10).
 
@@ -70,10 +68,9 @@ def lookup_prior_case_context(
         case_id: UUID do caso atual (excluído da busca).
         agency_record_number: Número de protocolo da agência (chave de
             agrupamento do paciente).
+        procedure_type: componente solicitado (``eda`` | ``colonoscopy``) —
+            consulta por row ``CaseProcedure`` correspondente.
         now: Referência temporal (útil em testes). Default: UTC now.
-        exam_type: Slice 003 (R7) — filtra candidatos pelo mesmo tipo de exame
-            (modo legado 1.1).
-        procedure_type: contrato 2.0 — consulta por componente (D10).
 
     Returns:
         PriorCaseContext com o caso anterior mais relevante (ou None) e a
@@ -82,55 +79,11 @@ def lookup_prior_case_context(
     if not agency_record_number.strip():
         return PriorCaseContext()
 
-    if procedure_type is not None:
-        return _lookup_prior_procedure_context(
-            case_id=case_id,
-            agency_record_number=agency_record_number,
-            procedure_type=procedure_type,
-            now=now,
-        )
-
-    return _lookup_legacy_exam_type_context(
+    return _lookup_prior_procedure_context(
         case_id=case_id,
         agency_record_number=agency_record_number,
-        exam_type=exam_type,
+        procedure_type=procedure_type,
         now=now,
-    )
-
-
-def _lookup_legacy_exam_type_context(
-    *,
-    case_id: uuid.UUID | str,
-    agency_record_number: str,
-    exam_type: str | None,
-    now: datetime | None,
-) -> PriorCaseContext:
-    """Modo legado 1.1: filtro por ``Case.exam_type`` e decisões globais."""
-    now = now or datetime.now(tz=UTC)
-    window_start = now - timedelta(days=PRIOR_CASE_WINDOW_DAYS)
-    current_case_id = str(case_id)
-
-    candidates_qs = Case.objects.filter(agency_record_number=agency_record_number)
-    if exam_type is not None:
-        candidates_qs = candidates_qs.filter(exam_type=exam_type)
-    prior_case_qs: list[Case] = list(
-        candidates_qs.exclude(case_id=current_case_id)
-        .filter(
-            Q(doctor_decision="deny", doctor_decided_at__gte=window_start)
-            | Q(appointment_status="denied", appointment_decided_at__gte=window_start),
-        )
-        .select_related("doctor", "scheduler")
-    )
-
-    candidates = _build_denial_candidates(prior_case_qs, window_start, now)
-    if not candidates:
-        return PriorCaseContext()
-    candidates.sort(key=lambda x: x[0], reverse=True)
-    most_recent_decided_at, most_recent_case, denial_type = candidates[0]
-    summary = _build_summary(most_recent_case, denial_type)
-    return PriorCaseContext(
-        prior_case=summary,
-        prior_denial_count_7d=len(candidates),
     )
 
 
@@ -234,78 +187,6 @@ def _build_procedure_summary(*, case: Case, kind: str, reason: str | None) -> Pr
         decided_at=decided_at_str,
         decision=decision,
         reason=normalized_reason,
-        decided_by=decided_by,
-        decided_by_role=decided_by_role,
-    )
-
-
-def _is_doctor_denial(case: Case, window_start: datetime, now: datetime) -> bool:
-    """Retorna True se o caso é uma negação médica válida dentro da janela."""
-    return (
-        case.doctor_decision == "deny"
-        and case.doctor_decided_at is not None
-        and window_start <= case.doctor_decided_at <= now
-    )
-
-
-def _is_appointment_denial(case: Case, window_start: datetime, now: datetime) -> bool:
-    """Retorna True se o caso é uma negação de agendamento válida dentro da janela."""
-    return (
-        case.appointment_status == "denied"
-        and case.appointment_decided_at is not None
-        and window_start <= case.appointment_decided_at <= now
-    )
-
-
-def _build_denial_candidates(
-    cases: list[Case],
-    window_start: datetime,
-    now: datetime,
-) -> list[tuple[datetime, Case, str]]:
-    """Constrói lista de (decided_at, case, denial_type) para candidatos válidos.
-
-    Para casos com ambas as negativas preenchidas, a negação de agendamento
-    tem precedência (comportamento determinístico definido no requisito R7).
-    """
-    candidates: list[tuple[datetime, Case, str]] = []
-    for case in cases:
-        # R7: appointment tem precedência sobre doctor
-        if _is_appointment_denial(case, window_start, now):
-            candidates.append((case.appointment_decided_at, case, "appointment"))  # type: ignore[arg-type]
-        elif _is_doctor_denial(case, window_start, now):
-            candidates.append((case.doctor_decided_at, case, "doctor"))  # type: ignore[arg-type]
-    return candidates
-
-
-def _build_summary(case: Case, denial_type: str) -> PriorCaseSummary:
-    """Converte um Case + tipo de negação em PriorCaseSummary."""
-    if denial_type == "doctor":
-        decision = "doctor_denied"
-        decided_at = case.doctor_decided_at
-        reason = _normalize_reason(case.doctor_reason)
-        decided_by = case.doctor_display
-        decided_by_role = "doctor"
-    elif denial_type == "appointment":
-        decision = "appointment_denied"
-        decided_at = case.appointment_decided_at
-        reason = _normalize_reason(case.appointment_reason)
-        decided_by = case.scheduler_display
-        decided_by_role = "scheduler"
-    else:
-        # Fallback — não deve acontecer
-        decision = "unknown"
-        decided_at = case.created_at
-        reason = _normalize_reason(None)
-        decided_by = ""
-        decided_by_role = ""
-
-    decided_at_str = decided_at.isoformat() if decided_at else ""
-
-    return PriorCaseSummary(
-        prior_case_id=str(case.case_id),
-        decided_at=decided_at_str,
-        decision=decision,
-        reason=reason,
         decided_by=decided_by,
         decided_by_role=decided_by_role,
     )

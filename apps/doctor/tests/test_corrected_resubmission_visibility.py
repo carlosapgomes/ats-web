@@ -261,7 +261,7 @@ class TestDoctorDecisionCorrectionVisibility:
         nir = _nir_user()
 
         # Criar caso anterior "negado" que será detectado pelo prior lookup
-        Case.objects.create(
+        prior = Case.objects.create(
             created_by=nir,
             agency_record_number="PRIOR-KEEP-001",
             status=CaseStatus.DOCTOR_DENIED,
@@ -270,6 +270,12 @@ class TestDoctorDecisionCorrectionVisibility:
             doctor_reason="Sem indicação",
             doctor_decided_at=timezone.now(),
         )
+        from apps.cases.models import CaseProcedure
+
+        # Slice 009 (R5): row declarada/negada — o lookup consulta CaseProcedure.
+        CaseProcedure.objects.create(
+            case=prior, procedure_type="eda", declared_by_nir=True, doctor_disposition="denied"
+        )
 
         # Novo caso SEM corrects_case, mas com mesmo agency_record_number
         new_case = Case.objects.create(
@@ -277,7 +283,10 @@ class TestDoctorDecisionCorrectionVisibility:
             agency_record_number="PRIOR-KEEP-001",  # Mesmo número, prior lookup detecta
             status=CaseStatus.WAIT_DOCTOR,
         )
-        new_case.structured_data = {"patient": {"name": "Prior Keep", "age": 40, "gender": "Feminino"}}
+        new_case.structured_data = {
+            "patient": {"name": "Prior Keep", "age": 40, "gender": "Feminino"},
+            "preop_screening": {"exam_type": "eda"},
+        }
         new_case.summary_text = "Indicação de EDA"
         new_case.suggested_action = {"suggestion": "accept", "support_recommendation": "none"}
         new_case.save()
