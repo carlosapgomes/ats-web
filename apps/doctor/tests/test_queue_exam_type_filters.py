@@ -57,55 +57,86 @@ class TestDoctorQueueExamTypeFilters:
         session.save()
         return user
 
-    def _make_pending(self, nir: Any, *, exam_type: str, name: str, record: str) -> Case:
-        # Slice 009-A (R4): rows detectadas explícitas autorizam o badge do
-        # card médico (modo estrito, sem fallback da ponte).
+    def _make_pending(
+        self,
+        nir: Any,
+        *,
+        bridge_exam_type: str,
+        declared: tuple[str, ...] = (),
+        detected: tuple[str, ...] = (),
+        name: str,
+        record: str,
+    ) -> Case:
+        # Slice 009-A correction (R4/F2): ``bridge_exam_type`` preenche apenas a
+        # ponte transitória; as rows vêm EXCLUSIVAMENTE dos conjuntos explícitos
+        # ``declared``/``detected`` — nunca inferidas do campo/status/decisão.
         case = Case.objects.create(
             created_by=nir,
             status=CaseStatus.WAIT_DOCTOR,
-            exam_type=exam_type,
+            exam_type=bridge_exam_type,
             agency_record_number=record,
             structured_data={"patient": {"name": name, "age": 50, "gender": "F"}},
         )
-        for procedure_type in ("eda", "colonoscopy"):
-            if exam_type == procedure_type or exam_type == "eda_colonoscopy":
-                CaseProcedure.objects.create(
-                    case=case,
-                    procedure_type=procedure_type,
-                    declared_by_nir=True,
-                    detection_status="detected",
-                )
+        for procedure_type in set(declared) | set(detected):
+            CaseProcedure.objects.create(
+                case=case,
+                procedure_type=procedure_type,
+                declared_by_nir=procedure_type in declared,
+                detection_status="detected" if procedure_type in detected else "not_detected",
+            )
         return case
 
-    def _make_decided(self, doctor: Any, nir: Any, *, exam_type: str, name: str) -> Case:
-        # Slice 009-A (R4): rows aprovadas explícitas autorizam o badge do
-        # card Decididos Hoje (modo estrito, sem fallback da ponte).
+    def _make_decided(
+        self,
+        doctor: Any,
+        nir: Any,
+        *,
+        bridge_exam_type: str,
+        declared: tuple[str, ...] = (),
+        detected: tuple[str, ...] = (),
+        approved: tuple[str, ...] = (),
+        denied: tuple[str, ...] = (),
+        name: str,
+    ) -> Case:
+        # Slice 009-A correction (R4/F2): ``bridge_exam_type`` é só ponte; as
+        # rows vêm da união explícita de ``declared``/``detected``/``approved``/
+        # ``denied``. ``doctor_decision`` é setup fixo, não fonte de inferência.
         case = Case.objects.create(
             created_by=nir,
             status=CaseStatus.DOCTOR_ACCEPTED,
             doctor=doctor,
             doctor_decision="accept",
             doctor_decided_at=timezone.now(),
-            exam_type=exam_type,
+            exam_type=bridge_exam_type,
             structured_data={"patient": {"name": name, "age": 60, "gender": "F"}},
         )
-        for procedure_type in ("eda", "colonoscopy"):
-            if exam_type == procedure_type or exam_type == "eda_colonoscopy":
-                CaseProcedure.objects.create(
-                    case=case,
-                    procedure_type=procedure_type,
-                    declared_by_nir=True,
-                    detection_status="detected",
-                    doctor_disposition="approved",
-                )
+        for procedure_type in set(declared) | set(detected) | set(approved) | set(denied):
+            CaseProcedure.objects.create(
+                case=case,
+                procedure_type=procedure_type,
+                declared_by_nir=procedure_type in declared,
+                detection_status="detected" if procedure_type in detected else "not_detected",
+                doctor_disposition=(
+                    "approved" if procedure_type in approved else "denied" if procedure_type in denied else "pending"
+                ),
+            )
         return case
 
     # ── R1 ───────────────────────────────────────────────────────────
 
     def test_pending_has_accessible_type_filter_with_todos_default(self, client) -> None:
         nir = self._login_as(client, "nir")
-        self._make_pending(nir, exam_type="eda", name="Joao EDA", record="1001")
-        self._make_pending(nir, exam_type="colonoscopy", name="Maria Colon", record="1002")
+        self._make_pending(
+            nir, bridge_exam_type="eda", declared=("eda",), detected=("eda",), name="Joao EDA", record="1001"
+        )
+        self._make_pending(
+            nir,
+            bridge_exam_type="colonoscopy",
+            declared=("colonoscopy",),
+            detected=("colonoscopy",),
+            name="Maria Colon",
+            record="1002",
+        )
         self._login_as(client, "doctor")
         response = client.get("/doctor/")
         assert response.status_code == 200
@@ -128,8 +159,15 @@ class TestDoctorQueueExamTypeFilters:
 
     def test_pending_nav_count_remains_total(self, client) -> None:
         nir = self._login_as(client, "nir")
-        self._make_pending(nir, exam_type="eda", name="A", record="1001")
-        self._make_pending(nir, exam_type="colonoscopy", name="B", record="1002")
+        self._make_pending(nir, bridge_exam_type="eda", declared=("eda",), detected=("eda",), name="A", record="1001")
+        self._make_pending(
+            nir,
+            bridge_exam_type="colonoscopy",
+            declared=("colonoscopy",),
+            detected=("colonoscopy",),
+            name="B",
+            record="1002",
+        )
         self._login_as(client, "doctor")
         response = client.get("/doctor/")
         content = response.content.decode()
@@ -142,8 +180,18 @@ class TestDoctorQueueExamTypeFilters:
         doctor = self._login_as(client, "doctor")
         nir = User.objects.create_user(username="nir-decided@filters.test", password="testpass123")
         nir.roles.add(self._create_role("nir"))
-        self._make_decided(doctor, nir, exam_type="eda", name="A")
-        self._make_decided(doctor, nir, exam_type="colonoscopy", name="B")
+        self._make_decided(
+            doctor, nir, bridge_exam_type="eda", declared=("eda",), detected=("eda",), approved=("eda",), name="A"
+        )
+        self._make_decided(
+            doctor,
+            nir,
+            bridge_exam_type="colonoscopy",
+            declared=("colonoscopy",),
+            detected=("colonoscopy",),
+            approved=("colonoscopy",),
+            name="B",
+        )
         response = client.get("/doctor/?tab=decided")
         assert response.status_code == 200
         content = response.content.decode()
@@ -158,8 +206,17 @@ class TestDoctorQueueExamTypeFilters:
 
     def test_pending_cards_expose_persisted_exam_type_and_badge(self, client) -> None:
         nir = self._login_as(client, "nir")
-        self._make_pending(nir, exam_type="eda", name="Joao EDA", record="1001")
-        self._make_pending(nir, exam_type="colonoscopy", name="Maria Colon", record="1002")
+        self._make_pending(
+            nir, bridge_exam_type="eda", declared=("eda",), detected=("eda",), name="Joao EDA", record="1001"
+        )
+        self._make_pending(
+            nir,
+            bridge_exam_type="colonoscopy",
+            declared=("colonoscopy",),
+            detected=("colonoscopy",),
+            name="Maria Colon",
+            record="1002",
+        )
         self._login_as(client, "doctor")
         response = client.get("/doctor/")
         content = response.content.decode()
@@ -173,8 +230,18 @@ class TestDoctorQueueExamTypeFilters:
         doctor = self._login_as(client, "doctor")
         nir = User.objects.create_user(username="nir-decided2@filters.test", password="testpass123")
         nir.roles.add(self._create_role("nir"))
-        self._make_decided(doctor, nir, exam_type="eda", name="A")
-        self._make_decided(doctor, nir, exam_type="colonoscopy", name="B")
+        self._make_decided(
+            doctor, nir, bridge_exam_type="eda", declared=("eda",), detected=("eda",), approved=("eda",), name="A"
+        )
+        self._make_decided(
+            doctor,
+            nir,
+            bridge_exam_type="colonoscopy",
+            declared=("colonoscopy",),
+            detected=("colonoscopy",),
+            approved=("colonoscopy",),
+            name="B",
+        )
         response = client.get("/doctor/?tab=decided")
         content = response.content.decode()
         assert "data-doctor-queue-card" in content
@@ -187,8 +254,17 @@ class TestDoctorQueueExamTypeFilters:
 
     def test_links_polling_and_tabs_preserved(self, client) -> None:
         nir = self._login_as(client, "nir")
-        c1 = self._make_pending(nir, exam_type="eda", name="Joao", record="1001")
-        c2 = self._make_pending(nir, exam_type="colonoscopy", name="Maria", record="1002")
+        c1 = self._make_pending(
+            nir, bridge_exam_type="eda", declared=("eda",), detected=("eda",), name="Joao", record="1001"
+        )
+        c2 = self._make_pending(
+            nir,
+            bridge_exam_type="colonoscopy",
+            declared=("colonoscopy",),
+            detected=("colonoscopy",),
+            name="Maria",
+            record="1002",
+        )
         self._login_as(client, "doctor")
         response = client.get("/doctor/")
         content = response.content.decode()

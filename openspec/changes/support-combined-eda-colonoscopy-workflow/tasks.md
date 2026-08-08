@@ -36,7 +36,7 @@ A ADR-0004 deve ser commitada, enviada e aprovada explicitamente antes de entreg
 - [x] Slice 006 — Gestor acompanha casos, procedimentos e conversões (`slices/slice-006-procedure-dimension-analytics.md`)
 - [x] Slice 007 — Pipeline executa somente v2 e prompts neutros (`slices/slice-007-neutral-pipeline-prompt-cutover.md`)
 - [x] Slice 008 — NIR opera somente pela projeção declarada (`slices/slice-008-nir-declared-projection-authority.md`)
-- [ ] Slice 009-A — Médico opera somente por detecção/autorização projetadas (`slices/slice-009a-doctor-projection-authority.md`)
+- [x] Slice 009-A — Médico opera somente por detecção/autorização projetadas (`slices/slice-009a-doctor-projection-authority.md`)
 - [ ] Slice 009-B — CHD lista e agenda somente autorização projetada (`slices/slice-009b-scheduler-projection-authority.md`)
 - [ ] Slice 010 — Dashboard e helpers tornam CaseProcedure autoritativo (`slices/slice-010-dashboard-domain-projection-authority.md`)
 

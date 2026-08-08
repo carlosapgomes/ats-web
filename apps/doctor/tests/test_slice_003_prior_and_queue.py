@@ -566,8 +566,23 @@ class TestLegacyReportDerivesTypeFromPayload:
         assert "Colonoscopia" not in procedure_line
 
     def test_two_declared_rows_without_payload_is_neutral(self, django_user_model) -> None:
-        """Duas rows declaradas (ambíguo) sem payload válido → neutro, nunca EDA."""
+        """Duas rows declaradas (ambiguidade real) + ARN ⇒ lookup não chamado
+        (spy fail-closed) e label neutro, nunca EDA/Colonoscopia."""
         user = _make_user("nir_r2c2")
+        # Prior negado do mesmo ARN: se o lookup fosse alcançado, o encontraria.
+        prior = Case.objects.create(
+            created_by=user,
+            agency_record_number="AR-R2C2",
+            status=CaseStatus.DOCTOR_DENIED,
+            doctor_decision="deny",
+            doctor_reason="motivo",
+            doctor_decided_at=_now() - timedelta(days=1),
+            structured_data=self._legacy_structured(exam_type=None),
+        )
+        CaseProcedure.objects.create(
+            case=prior, procedure_type="eda", declared_by_nir=True, doctor_disposition="denied"
+        )
+        # Caso atual 1.1 com DUAS rows declaradas (ambíguo) e sem payload de tipo.
         current = Case.objects.create(
             created_by=user,
             agency_record_number="AR-R2C2",
@@ -581,14 +596,20 @@ class TestLegacyReportDerivesTypeFromPayload:
                 procedure_type=procedure_type,
                 declared_by_nir=True,
             )
-        prepared = prepare_doctor_case_report(current)
+        # Spy obrigatório (R3/F1): ambiguidade real (2 rows) ⇒ lookup NÃO chamado.
+        with patch("apps.doctor.reporting.lookup_prior_case_context") as spy_lookup:
+            prepared = prepare_doctor_case_report(current)
+            spy_lookup.assert_not_called()
         report = prepared.presenter.build_report()
         procedure_line = report["context"]["procedure"]
         assert "EDA" not in procedure_line
         assert "Colonoscopia" not in procedure_line
+        assert prepared.prior_sections == []
+        assert prepared.prior_context is None
 
-    def test_ambiguous_legacy_does_not_run_prior_lookup(self, django_user_model) -> None:
-        """Tipo ambíguo → nenhum lookup anterior (spy fail-closed), mesmo com ARN."""
+    def test_zero_declared_rows_does_not_run_prior_lookup(self, django_user_model) -> None:
+        """Ausência de rows (zero) + ARN ⇒ lookup não chamado (spy): prova de
+        ausência complementar à ambiguidade de duas rows."""
         user = _make_user("nir_r2d")
         # Caso anterior negado do mesmo ARN (com row EDA negada).
         prior = Case.objects.create(
