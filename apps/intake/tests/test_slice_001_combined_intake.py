@@ -79,7 +79,6 @@ class TestCombinedIntake:
         )
         assert Case.objects.count() == 1
         case = Case.objects.get()
-        assert case.exam_type == _COMBINED_VALUE
         rows = list(CaseProcedure.objects.filter(case=case).order_by("procedure_type"))
         assert len(rows) == 2
         assert {r.procedure_type for r in rows} == {"eda", "colonoscopy"}

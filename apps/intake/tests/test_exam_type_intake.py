@@ -19,7 +19,7 @@ from django.core.files.uploadedfile import SimpleUploadedFile
 from django.test import override_settings
 from django.urls import reverse
 
-from apps.cases.models import Case, CaseEvent, CaseStatus, ExamType
+from apps.cases.models import Case, CaseEvent, CaseProcedure, CaseStatus, ExamType
 
 User = get_user_model()
 
@@ -164,7 +164,10 @@ class TestIntakeFlag:
             follow=True,
         )
         assert Case.objects.count() == 1
-        assert Case.objects.get().exam_type == ExamType.EDA
+        # Slice 008 (R5): prova row declarada, não a coluna.
+        assert CaseProcedure.objects.filter(
+            case=Case.objects.get(), procedure_type=ExamType.EDA, declared_by_nir=True
+        ).exists()
 
     def test_existing_colonoscopy_readable_and_processable_when_flag_off(self, client, user) -> None:
         """Caso colonoscopia preexistente segue legível/processável com flag off.

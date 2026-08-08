@@ -28,7 +28,7 @@ import pytest
 from django.contrib.auth import get_user_model
 from django.urls import reverse
 
-from apps.cases.models import Case, CaseEvent, CaseStatus, ExamType
+from apps.cases.models import Case, CaseEvent, CaseProcedure, CaseStatus, ExamType
 from apps.cases.services import (
     assert_case_lock as real_assert_case_lock,
 )
@@ -144,7 +144,7 @@ def _eligible_case(
     extracted_text: str | None = None,
 ) -> Case:
     """Cria um caso em WAIT_R1_CLEANUP_THUMBS com manual review elegível."""
-    return Case.objects.create(
+    case = Case.objects.create(
         created_by=user,
         exam_type=exam_type,
         status=CaseStatus.WAIT_R1_CLEANUP_THUMBS,
@@ -165,6 +165,10 @@ def _eligible_case(
         },
         priority_signals=[{"code": "foreign_body", "label": "Corpo estranho"}],
     )
+    # Slice 008 (R5): row declarada explícita — a correção lê o conjunto das
+    # rows (nunca a coluna), então a fixture cria a projeção declarada.
+    CaseProcedure.objects.create(case=case, procedure_type=exam_type, declared_by_nir=True)
+    return case
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -241,8 +245,6 @@ class TestCorrectionService:
             "old_procedures": [ExamType.EDA],
             "new_procedures": [ExamType.COLONOSCOPY],
             "reason_code": "nir_identified_exam",
-            "old_exam_type": ExamType.EDA,
-            "new_exam_type": ExamType.COLONOSCOPY,
         }
         assert corrected.actor_id == user.pk
         # payload não carrega texto clínico integral

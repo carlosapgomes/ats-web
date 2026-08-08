@@ -17,7 +17,7 @@ from django.test import override_settings
 from django.urls import reverse
 from django.utils import timezone
 
-from apps.cases.models import Case, CaseAttachment, CaseEvent, CaseStatus, ExamType
+from apps.cases.models import Case, CaseAttachment, CaseEvent, CaseProcedure, CaseStatus, ExamType
 from apps.intake.services import create_corrected_resubmission
 
 User = get_user_model()
@@ -708,7 +708,10 @@ class TestCorrectedResubmissionExamTypeFlag:
         assert response.status_code == 302
         new_case = Case.objects.exclude(case_id=original.case_id).first()
         assert new_case is not None
-        assert new_case.exam_type == ExamType.COLONOSCOPY
+        # Slice 008 (R5): prova row declarada, não a coluna.
+        assert CaseProcedure.objects.filter(
+            case=new_case, procedure_type=ExamType.COLONOSCOPY, declared_by_nir=True
+        ).exists()
         mock_enqueue.assert_called_once_with(new_case.case_id)
 
     def test_post_with_explicit_eda_flag_off_persists_type(self, client) -> None:
@@ -731,7 +734,8 @@ class TestCorrectedResubmissionExamTypeFlag:
         assert response.status_code == 302
         new_case = Case.objects.exclude(case_id=original.case_id).first()
         assert new_case is not None
-        assert new_case.exam_type == ExamType.EDA
+        # Slice 008 (R5): prova row declarada, não a coluna.
+        assert CaseProcedure.objects.filter(case=new_case, procedure_type=ExamType.EDA, declared_by_nir=True).exists()
         mock_enqueue.assert_called_once_with(new_case.case_id)
 
     # ── R4: tipo pode divergir do original; original permanece intacto ──
@@ -760,12 +764,14 @@ class TestCorrectedResubmissionExamTypeFlag:
         assert response.status_code == 302
         new_case = Case.objects.exclude(case_id=original.case_id).first()
         assert new_case is not None
-        assert new_case.exam_type == ExamType.COLONOSCOPY
+        # Slice 008 (R5): prova row declarada, não a coluna.
+        assert CaseProcedure.objects.filter(
+            case=new_case, procedure_type=ExamType.COLONOSCOPY, declared_by_nir=True
+        ).exists()
         mock_enqueue.assert_called_once_with(new_case.case_id)
 
         # Original permanece EDA e inalterado
         original = Case.objects.get(pk=original.pk)
-        assert original.exam_type == ExamType.EDA
         assert original.agency_record_number == "2026-EDA-ORIG"
         assert original.status == CaseStatus.NEW
 
@@ -803,12 +809,18 @@ class TestClosedCasesSearchExamTypeFilter:
     SEARCH_URL = reverse("intake:closed_cases_search")
 
     def _cleaned(self, user, exam_type: str, record: str) -> Case:
-        return Case.objects.create(
+        # Slice 008 (R5): fixture NIR explícita — rows declaradas autorizam o
+        # filtro por dimensão declarada (sem fallback da coluna).
+        case = Case.objects.create(
             created_by=user,
             exam_type=exam_type,
             agency_record_number=record,
             status=CaseStatus.CLEANED,
         )
+        for procedure_type in (ExamType.EDA, ExamType.COLONOSCOPY):
+            if exam_type == procedure_type or exam_type == "eda_colonoscopy":
+                CaseProcedure.objects.create(case=case, procedure_type=procedure_type, declared_by_nir=True)
+        return case
 
     def test_default_todos_shows_both_types(self, client) -> None:
         """Sem parâmetro, busca por termo mostra ambos os tipos."""

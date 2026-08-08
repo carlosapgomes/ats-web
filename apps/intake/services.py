@@ -258,13 +258,14 @@ def correct_case_exam_type(
         case = _acquire_locked_case(case_id=case_id, user=user, active_role=active_role)
         if not is_exam_type_correction_eligible(case):
             raise ValueError("Caso não está em revisão manual elegível para correção de tipo.")
-        if validated_exam_type == case.exam_type:
-            raise ValueError("O novo tipo de exame deve ser diferente do tipo atual.")
-        _assert_receipt_lease(case=case, user=user, token=lock_token)
-
-        old_exam_type = case.exam_type
-        old_procedures = list(get_declared_procedure_types(case))
+        # Slice 008 (R2): igualdade/old/new usam CONJUNTOS de CaseProcedure —
+        # nunca a ponte Case.exam_type. Conjuntos iguais (mesmo com a coluna
+        # divergente das rows) não produzem correção.
         new_procedures = list(_procedure_types_for_selection(validated_exam_type))
+        old_procedures = list(get_declared_procedure_types(case))
+        if set(new_procedures) == set(old_procedures):
+            raise ValueError("O novo conjunto de procedimentos deve ser diferente do declarado.")
+        _assert_receipt_lease(case=case, user=user, token=lock_token)
 
         # R3 — invalida artefatos derivados do perfil anterior; fontes ficam.
         case.structured_data = None
@@ -276,9 +277,10 @@ def correct_case_exam_type(
         # permitida antes de qualquer decisão; nunca deixa projeção residual).
         reset_detection_and_doctor_statuses(case)
 
-        # R7 — evento enxuto de correção com conjuntos anterior/novo e motivo
-        # codificado (sem texto/PDF); a ponte old/new permanece para auditoria
-        # legível. Slice 005: substitui EXAM_TYPE_CORRECTED (valor singular).
+        # Slice 008 (R2/R7): evento enxuto com conjuntos anterior/novo e
+        # motivo codificado (sem texto/PDF). SEM chaves singulares
+        # old_exam_type/new_exam_type — a coluna deixou de ser fonte NIR.
+        # Slice 005: substitui EXAM_TYPE_CORRECTED (valor singular).
         case._record_event(
             "CASE_PROCEDURE_DECLARATION_CORRECTED",
             user=user,
@@ -286,8 +288,6 @@ def correct_case_exam_type(
                 "old_procedures": old_procedures,
                 "new_procedures": new_procedures,
                 "reason_code": reason_code,
-                "old_exam_type": old_exam_type,
-                "new_exam_type": validated_exam_type,
             },
         )
         # R3 (Slice 001) — reroteamento pelo serviço único de declaração:

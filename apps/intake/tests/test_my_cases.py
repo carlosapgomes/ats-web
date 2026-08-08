@@ -6,7 +6,7 @@ import pytest
 from django.contrib.auth import get_user_model
 from django.urls import reverse
 
-from apps.cases.models import Case, CaseStatus, ExamType
+from apps.cases.models import Case, CaseProcedure, CaseStatus, ExamType
 
 User = get_user_model()
 PAGE_URL = reverse("intake:my_cases")
@@ -314,12 +314,18 @@ class TestMyCasesExamTypeFilter:
     """R1: NIR compõe tipo de exame (Todos/EDA/Colonoscopia) com status e busca."""
 
     def _make(self, user, exam_type: str, record: str, status: str = CaseStatus.NEW) -> Case:
-        return Case.objects.create(
+        # Slice 008 (R5): fixture NIR explícita — rows declaradas autorizam o
+        # filtro por dimensão declarada (sem fallback da coluna).
+        case = Case.objects.create(
             created_by=user,
             exam_type=exam_type,
             agency_record_number=record,
             status=status,
         )
+        for procedure_type in (ExamType.EDA, ExamType.COLONOSCOPY):
+            if exam_type == procedure_type or exam_type == "eda_colonoscopy":
+                CaseProcedure.objects.create(case=case, procedure_type=procedure_type, declared_by_nir=True)
+        return case
 
     def test_default_todos_shows_both_types(self, client) -> None:
         """Sem parâmetro, Todos default mostra EDA e Colonoscopia."""

@@ -322,8 +322,6 @@ class TestCorrectionSetEligibility:
             "old_procedures": [ProcedureType.EDA],
             "new_procedures": [ProcedureType.EDA, ProcedureType.COLONOSCOPY],
             "reason_code": "nir_identified_exam",
-            "old_exam_type": ExamType.EDA,
-            "new_exam_type": EDA_COLONOSCOPY,
         }
         assert corrected.actor_id == user.pk
         assert "extracted_text" not in corrected.payload
@@ -620,14 +618,13 @@ class TestResubmissionCombined:
         assert response.status_code == 302
         new_case = Case.objects.exclude(case_id=original.case_id).first()
         assert new_case is not None
-        assert new_case.exam_type == EDA_COLONOSCOPY
+        # Slice 008 (R5): prova rows declaradas, não a coluna.
         declared = {p.procedure_type for p in CaseProcedure.objects.filter(case=new_case, declared_by_nir=True)}
         assert declared == {ProcedureType.EDA, ProcedureType.COLONOSCOPY}
         mock_enqueue.assert_called_once_with(new_case.case_id)
 
         # Original permanece EDA com uma única row; sem herança de rows/artefatos.
         original = Case.objects.get(pk=original.pk)
-        assert original.exam_type == ExamType.EDA
         assert original.status == CaseStatus.NEW
         assert CaseProcedure.objects.filter(case=original).count() == 1
         assert CaseProcedure.objects.get(case=original, procedure_type=ProcedureType.EDA).declared_by_nir is True
@@ -680,19 +677,28 @@ class TestDeclaredFilters:
         combined_case.exam_type = EDA_COLONOSCOPY
         combined_case.save()
 
-        # Legado sem rows cai na ponte declarada.
-        legacy = Case.objects.create(created_by=user, exam_type=ExamType.COLONOSCOPY, status=CaseStatus.NEW)
+        colon_case = _make_case(
+            user=user, exam_type=ExamType.COLONOSCOPY, status=CaseStatus.NEW, with_declared_rows=False
+        )
+        CaseProcedure.objects.create(case=colon_case, procedure_type=ProcedureType.COLONOSCOPY, declared_by_nir=True)
+        colon_case.exam_type = ExamType.COLONOSCOPY
+        colon_case.save()
+
+        # Slice 008 (R3): caso legado/inválido sem rows é fail-closed — não cai
+        # em bucket específico (não recebe default da coluna).
+        orphan = Case.objects.create(created_by=user, exam_type=ExamType.COLONOSCOPY, status=CaseStatus.NEW)
 
         response = client.get(reverse("intake:my_cases") + "?exam_type=eda_colonoscopy")
         content = response.content.decode()
         assert str(combined_case.case_id) in content
         assert str(eda_case.case_id) not in content
-        assert str(legacy.case_id) not in content
+        assert str(orphan.case_id) not in content
 
         response = client.get(reverse("intake:my_cases") + "?exam_type=colonoscopy")
         content = response.content.decode()
-        assert str(legacy.case_id) in content
+        assert str(colon_case.case_id) in content
         assert str(combined_case.case_id) not in content
+        assert str(orphan.case_id) not in content
 
     def test_my_cases_filter_uses_declared_not_detected(self, client) -> None:
         """Filtro usa declarado: auto-upgrade em voo (detectado combinado) segue em EDA."""

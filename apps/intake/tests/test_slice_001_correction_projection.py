@@ -125,6 +125,8 @@ class TestCorrectionReroutedThroughProjection:
         """CASE_PROCEDURE_DECLARATION_CORRECTED antes de CASE_REPROCESSING_REQUESTED."""
         user = _nir_user(django_user_model, "nir-proj-ev@test.com")
         case = _eligible_case(user=user, exam_type=ExamType.EDA)
+        # Slice 008 (R5): row declarada explícita (sem fallback da coluna).
+        CaseProcedure.objects.create(case=case, procedure_type=ExamType.EDA, declared_by_nir=True)
         token = _claim_receipt_lease(case, user)
 
         correct_case_exam_type(
@@ -143,6 +145,8 @@ class TestCorrectionReroutedThroughProjection:
         """Slice 005: correção aceita combinado — single→combined cria duas rows."""
         user = _nir_user(django_user_model, "nir-proj-cmb@test.com")
         case = _eligible_case(user=user, exam_type=ExamType.EDA)
+        # Slice 008 (R5): row declarada explícita (sem fallback da coluna).
+        CaseProcedure.objects.create(case=case, procedure_type=ExamType.EDA, declared_by_nir=True)
         token = _claim_receipt_lease(case, user)
 
         correct_case_exam_type(

@@ -98,15 +98,16 @@ _NIR_DECLARED_DIMENSIONS: frozenset[str] = frozenset({"all", ExamType.EDA, ExamT
 
 
 def _filter_by_declared_dimension(qs: models.QuerySet[Case], dimension: str) -> models.QuerySet[Case]:
-    """Filtra um queryset pela dimensão DECLARADA (R5/D13).
+    """Filtra um queryset pela dimensão DECLARADA (R5/D13, Slice 008).
 
     Usa subqueries ``Exists`` explícitas para evitar a semântica ambígua de
     ``exclude`` sobre relação múltipla (que divide condições em dois EXISTS
     separados). Buckets EXCLUSIVOS: ``eda``/``colonoscopy`` exigem a row
     declarada do tipo e a AUSÊNCIA da row declarada do outro; combinado exige
-    as duas rows declaradas. Casos legados sem rows caem na ponte
-    ``exam_type`` (inclusive ``eda_colonoscopy``). NUNCA consulta detected/
-    approved (D13).
+    as duas rows declaradas. NUNCA consulta detected/approved (D13) e, desde o
+    Slice 008, NUNCA consulta a ponte ``Case.exam_type``: um caso sem rows
+    declaradas (legado/inválido) é fail-closed — não aparece em bucket
+    específico e não recebe default EDA. Apenas "Todos" (sem filtro) o lista.
     """
     declared_eda = models.Exists(
         CaseProcedure.objects.filter(
@@ -122,23 +123,15 @@ def _filter_by_declared_dimension(qs: models.QuerySet[Case], dimension: str) -> 
             declared_by_nir=True,
         )
     )
-    has_rows = models.Exists(CaseProcedure.objects.filter(case_id=models.OuterRef("pk")))
     qs = qs.annotate(
         _decl_eda=declared_eda,
         _decl_colon=declared_colon,
-        _has_rows=has_rows,
     )
     if dimension == EDA_COLONOSCOPY:
-        return qs.filter(
-            models.Q(_decl_eda=True, _decl_colon=True) | models.Q(_has_rows=False, exam_type=EDA_COLONOSCOPY)
-        )
+        return qs.filter(_decl_eda=True, _decl_colon=True)
     if dimension == ProcedureType.EDA:
-        return qs.filter(
-            models.Q(_decl_eda=True, _decl_colon=False) | models.Q(_has_rows=False, exam_type=ProcedureType.EDA)
-        )
-    return qs.filter(
-        models.Q(_decl_colon=True, _decl_eda=False) | models.Q(_has_rows=False, exam_type=ProcedureType.COLONOSCOPY)
-    )
+        return qs.filter(_decl_eda=True, _decl_colon=False)
+    return qs.filter(_decl_colon=True, _decl_eda=False)
 
 
 def _procedure_origin_text(*, is_declared: bool, is_detected: bool, is_approved: bool) -> str:
