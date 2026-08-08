@@ -396,24 +396,22 @@ class TestDimensionTableFilter:
         assert "AND-3" not in content, "EDA único não pode casar com seleção combinado"
 
     def test_selection_filters_legacy_cases_without_rows(self, client) -> None:
-        """Slice 010 — casos legados sem rows caem em ``none`` em todas as dimensões.
+        """Slice 010 — casos sem rows caem em ``none`` em todas as dimensões.
 
-        Sem fallback da ponte: nem ``exam_type=eda`` nem ``doctor_decision=accept``
-        transformam ausência de rows em EDA/Colonoscopia.
+        Nem ``doctor_decision=accept`` transforma ausência de rows em
+        EDA/Colonoscopia.
         """
         user = _login_as(client)
         Case.objects.all().delete()
         Case.objects.create(
             created_by=user,
             status=CaseStatus.NEW,
-            exam_type="eda",
             doctor_decision="accept",
             agency_record_number="LEG-EDA",
         )
         Case.objects.create(
             created_by=user,
             status=CaseStatus.NEW,
-            exam_type="colonoscopy",
             doctor_decision="deny",
             agency_record_number="LEG-NONE",
         )
@@ -494,7 +492,7 @@ class TestBreakdownTableConsistency:
 
     Casos com rows em outra dimensão, mas não na consultada, caem em ``none`` —
     tanto no breakdown (Python) quanto no filtro SQL da tabela. Sem fallback
-    da ponte ``Case.exam_type`` nem de ``doctor_decision`` (R2/R3).
+    de ``doctor_decision`` (R2/R3).
     """
 
     def test_fresh_declared_eda_matches_detected_none_not_eda(self, client) -> None:
@@ -603,7 +601,7 @@ class TestProcedureDimensionAuthority:
     """Slice 010 — analytics/getters/filtro dependem somente de CaseProcedure.
 
     R2: ``apply_procedure_selection_filter`` usa só Exists/predicados de rows;
-        sem fallback da ponte ``Case.exam_type`` nem de ``doctor_decision``.
+        sem fallback de ``doctor_decision``.
     R3/R4: ausência de rows na dimensão consultada ⇒ categoria ``none``;
         nunca vira EDA/Colonoscopia por inferência.
     """
@@ -638,8 +636,8 @@ class TestProcedureDimensionAuthority:
         assert analytics["breakdown"]["approved"]["none"] == 1
         assert analytics["breakdown"]["approved"]["eda"] == 0
 
-    def test_legacy_case_without_rows_is_none_in_declared(self, client) -> None:
-        """Caso legado (exam_type=eda) sem rows: declared dimension = none (nunca eda)."""
+    def test_case_without_rows_is_none_in_declared(self, client) -> None:
+        """Caso sem rows: declared dimension = none (nunca eda)."""
         from apps.dashboard.procedure_analytics import compute_procedure_analytics
 
         user = _login_as(client)
@@ -647,7 +645,6 @@ class TestProcedureDimensionAuthority:
         Case.objects.create(
             created_by=user,
             status=CaseStatus.NEW,
-            exam_type="eda",
             agency_record_number="LEG-EDA",
         )
 
@@ -685,17 +682,16 @@ class TestProcedureDimensionAuthority:
         eda_url = reverse("dashboard:index") + "?procedure_dimension=approved&procedure_selection=eda"
         assert "SA-1" not in client.get(eda_url).content.decode()
 
-    def test_selection_filter_legacy_exam_type_is_ignored(self, client) -> None:
-        """R2 — caso legado (exam_type=eda) sem rows: declared+eda NÃO mostra.
+    def test_selection_filter_declared_none_includes_case_without_rows(self, client) -> None:
+        """R2 — caso sem rows: declared+eda NÃO mostra; declared+none mostra.
 
-        Prova que a query SQL não usa mais a ponte ``Case.exam_type``.
+        Prova que a query SQL depende somente de rows de ``CaseProcedure``.
         """
         user = _login_as(client)
         Case.objects.all().delete()
         Case.objects.create(
             created_by=user,
             status=CaseStatus.NEW,
-            exam_type="eda",
             agency_record_number="LEG-SF",
         )
 
@@ -704,6 +700,25 @@ class TestProcedureDimensionAuthority:
 
         none_url = reverse("dashboard:index") + "?procedure_dimension=declared&procedure_selection=none"
         assert "LEG-SF" in client.get(none_url).content.decode()
+
+    def test_breakdown_dimensions_come_only_from_rows(self, client) -> None:
+        """Fluxo canônico do módulo construído apenas com rows (Slice 011-A):
+        o breakdown de cada dimensão reflete exclusivamente as rows, sem
+        qualquer escrita de campo de ``Case`` na fixture."""
+        from apps.cases.procedures import set_declared_procedures, set_detected_procedures
+        from apps.dashboard.procedure_analytics import compute_procedure_analytics
+
+        user = _login_as(client)
+        Case.objects.all().delete()
+        case = Case.objects.create(created_by=user, status=CaseStatus.WAIT_DOCTOR, agency_record_number="R-ONLY")
+        set_declared_procedures(case=case, procedure_types=["eda"], actor=user)
+        set_detected_procedures(case=case, detected_types=["colonoscopy"], actor=user)
+
+        analytics = compute_procedure_analytics(Case.objects.all())
+        assert analytics["breakdown"]["declared"]["eda"] == 1
+        assert analytics["breakdown"]["declared"]["none"] == 0
+        assert analytics["breakdown"]["detected"]["colonoscopy"] == 1
+        assert analytics["breakdown"]["approved"]["none"] == 1
 
     def test_combined_still_closes_as_one_case_two_components(self, client) -> None:
         """R4 — regressão: combinado continua 1 caso / 2 componentes sem fallback."""

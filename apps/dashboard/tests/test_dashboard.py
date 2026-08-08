@@ -4838,7 +4838,6 @@ class TestDashboardExamTypeBreakdownAndFilter:
             status=CaseStatus.CLEANED,
             doctor_decision="accept",
             appointment_status="confirmed",
-            exam_type="eda",
             agency_record_number="CON-EDA-1",
         )
         _create_case(
@@ -4846,7 +4845,6 @@ class TestDashboardExamTypeBreakdownAndFilter:
             status=CaseStatus.CLEANED,
             doctor_decision="accept",
             appointment_status="confirmed",
-            exam_type="colonoscopy",
             agency_record_number="CON-COL-1",
         )
         result = _compute_summary(period="all")
@@ -4891,7 +4889,7 @@ class TestDashboardProcedureDimensionAuthority:
 
     O filtro singular ``exam_type`` e a tabela "BREAKDOWN POR TIPO DE EXAME"
     desaparecem; ``procedure_dimension`` + ``procedure_selection`` são a fonte
-    única de filtro. O card não lê mais ``Case.exam_type``.
+    única de filtro. O badge do card é projetado das rows.
     """
 
     def test_singular_exam_type_filter_select_removed(self, client) -> None:
@@ -4915,30 +4913,30 @@ class TestDashboardProcedureDimensionAuthority:
         """``?exam_type=eda`` não filtra mais (param ignorado; casos seguem visíveis)."""
         user = _login_as(client, "manager")
         Case.objects.all().delete()
-        _create_case(created_by=user, status=CaseStatus.NEW, exam_type="eda", agency_record_number="IGN-EDA")
-        _create_case(created_by=user, status=CaseStatus.NEW, exam_type="colonoscopy", agency_record_number="IGN-COL")
+        _create_case(created_by=user, status=CaseStatus.NEW, agency_record_number="IGN-EDA")
+        _create_case(created_by=user, status=CaseStatus.NEW, agency_record_number="IGN-COL")
         # Sem rows, ambos caem em 'none' na dimensão declared (default=all ⇒ todos visíveis)
         content = client.get(reverse("dashboard:index") + "?exam_type=eda").content.decode()
         assert "IGN-EDA" in content, "exam_type=eda não deve mais filtrar a lista"
         assert "IGN-COL" in content, "exam_type=eda não deve excluir colonoscopia"
 
-    def test_case_list_badge_not_read_from_column(self, client) -> None:
-        """O card do dashboard não lê ``item.case.exam_type`` diretamente da coluna."""
+    def test_case_list_badge_comes_from_projected_rows(self, client) -> None:
+        """O badge do card vem da projeção declarada das rows (dimensão ativa),
+        sem depender de nenhum campo do ``Case`` além das rows."""
         from apps.cases.procedures import set_declared_procedures
 
         user = _login_as(client, "manager")
         Case.objects.all().delete()
-        # Caso com row declarada EDA: o badge projetado (dimensão declared) mostra EDA
-        case = _create_case(
-            created_by=user, status=CaseStatus.NEW, exam_type="colonoscopy", agency_record_number="CARD-1"
-        )
-        # Declara EDA nas rows, MAS a ponte fica 'colonoscopy' (set_declared sobrescreve a ponte p/ eda;
-        # para isolar, forçamos ponte colonoscopy depois de declarar eda)
+        # Caso com row declarada EDA: o badge projetado (dimensão declared) mostra EDA.
+        case = _create_case(created_by=user, status=CaseStatus.NEW, agency_record_number="CARD-1")
         set_declared_procedures(case=case, procedure_types=["eda"], actor=user)
-        # Força a ponte para um valor diferente da projeção (prova que o badge NÃO lê a ponte)
-        Case.objects.filter(pk=case.pk).update(exam_type="colonoscopy")
         content = client.get(reverse("dashboard:index")).content.decode()
-        # O badge singular exam-type-{{ exam_type }} sumiu; resta o badge dimensional
-        assert "exam-type-colonoscopy" not in content, "Card não deve ler case.exam_type (ponte)"
-        # A projeção declared=EDA continua disponível via badge dimensional
+        # Badge dimensional projetado a partir das rows, na dimensão ativa default (declared).
+        assert 'title="Categoria na dimensão Declarado">EDA</span>' in content
         assert "CARD-1" in content
+        # Sem rows declaradas o badge dimensional some (ausência ⇒ vazio/none).
+        Case.objects.all().delete()
+        _create_case(created_by=user, status=CaseStatus.NEW, agency_record_number="CARD-2")
+        content = client.get(reverse("dashboard:index")).content.decode()
+        assert "CARD-2" in content
+        assert 'title="Categoria na dimensão Declarado">EDA</span>' not in content

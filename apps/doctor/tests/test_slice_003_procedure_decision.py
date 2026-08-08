@@ -94,7 +94,6 @@ class TestProcedureDecisionFormAndSubmit:
         case = Case.objects.create(
             created_by=nir,
             status=status,
-            exam_type="eda_colonoscopy" if len(declared) == 2 else declared[0],
             agency_record_number="ARN-S3-001",
             structured_data=_v2_structured(),
             suggested_action=_v2_suggested(global_support=global_support),

@@ -654,7 +654,6 @@ class TestPriorCaseColonoscopyTypeAware:
         eda_prior = Case.objects.create(
             created_by=user,
             agency_record_number="AR800",
-            exam_type="eda",
             status=CaseStatus.DOCTOR_DENIED,
             doctor_decision="deny",
             doctor_decided_at=now - timedelta(days=1),
@@ -666,7 +665,6 @@ class TestPriorCaseColonoscopyTypeAware:
         colon_prior = Case.objects.create(
             created_by=user,
             agency_record_number="AR800",
-            exam_type="colonoscopy",
             status=CaseStatus.DOCTOR_DENIED,
             doctor_decision="deny",
             doctor_decided_at=now - timedelta(days=2),
@@ -680,7 +678,6 @@ class TestPriorCaseColonoscopyTypeAware:
         current = Case.objects.create(
             created_by=user,
             agency_record_number="AR800",
-            exam_type="colonoscopy",
         )
 
         colon_ctx = lookup_prior_case_context(
@@ -702,6 +699,46 @@ class TestPriorCaseColonoscopyTypeAware:
         assert eda_ctx.prior_case is not None
         assert eda_ctx.prior_case.prior_case_id == str(eda_prior.case_id)
         assert eda_ctx.prior_denial_count_7d == 1
+
+    def test_combined_prior_rows_count_per_type(self, django_user_model) -> None:
+        """Fluxo canônico do módulo construído apenas com rows (Slice 011-A):
+        um prior combinado (1 caso, 2 rows) conta negativas por ``procedure_type``
+        nas próprias rows, sem nenhum campo de ``Case`` na fixture."""
+        from datetime import UTC, datetime, timedelta
+
+        from apps.cases.models import CaseProcedure
+        from apps.pipeline.prior_case import lookup_prior_case_context
+
+        user = django_user_model.objects.create_user(username="prior_combined", password="pw")
+        now = datetime.now(tz=UTC)
+
+        prior = Case.objects.create(
+            created_by=user,
+            agency_record_number="AR900",
+            status=CaseStatus.DOCTOR_ACCEPTED,
+            doctor_decision="accept",
+            doctor_decided_at=now - timedelta(days=1),
+        )
+        CaseProcedure.objects.create(
+            case=prior, procedure_type="eda", declared_by_nir=True, doctor_disposition="denied"
+        )
+        CaseProcedure.objects.create(
+            case=prior,
+            procedure_type="colonoscopy",
+            declared_by_nir=True,
+            doctor_disposition="approved",
+        )
+        current = Case.objects.create(created_by=user, agency_record_number="AR900")
+
+        eda_ctx = lookup_prior_case_context(current.case_id, "AR900", now=now, procedure_type="eda")
+        assert eda_ctx.prior_case is not None
+        assert eda_ctx.prior_case.prior_case_id == str(prior.case_id)
+        assert eda_ctx.prior_denial_count_7d == 1
+
+        colon_ctx = lookup_prior_case_context(current.case_id, "AR900", now=now, procedure_type="colonoscopy")
+        assert colon_ctx.prior_case is not None
+        assert colon_ctx.prior_case.prior_case_id == str(prior.case_id)
+        assert colon_ctx.prior_denial_count_7d == 0
 
 
 # ── RED 12: sinais colonoscopia apenas pediatric ────────────────────────────

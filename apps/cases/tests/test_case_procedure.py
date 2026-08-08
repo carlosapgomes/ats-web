@@ -6,8 +6,8 @@ Cobre:
 - R2: backfill fecha a tabela D3 nos 18 estados (com/sem marcador downstream
       nos cinco condicionais), mapeamento fechado de doctor_disposition,
       preservação de campos/eventos e reversão determinística.
-- R3: serviço único de declaração (conjunto ordenado, ponte transitória,
-      evento enxuto e atomicidade).
+- R3: serviço único de declaração (conjunto ordenado, evento enxuto e
+      atomicidade).
 """
 
 from __future__ import annotations
@@ -21,14 +21,12 @@ from django.db import IntegrityError, connection, transaction
 from django.db.migrations.executor import MigrationExecutor
 
 from apps.cases.models import (
-    EDA_COLONOSCOPY,
     Case,
     CaseEvent,
     CaseProcedure,
     CaseStatus,
     DetectionStatus,
     DoctorDisposition,
-    ExamType,
     ProcedureType,
 )
 from apps.cases.procedures import (
@@ -150,7 +148,6 @@ class TestBackfillD3Table:
     ) -> Case:
         case = Case.objects.create(
             created_by=user,
-            exam_type=ExamType.EDA,
             status=status,
             agency_record_number=record,
             doctor_decision=doctor_decision,
@@ -224,7 +221,6 @@ class TestBackfillD3Table:
         CaseProcedure.objects.all().delete()
         case = Case.objects.create(
             created_by=user,
-            exam_type=ExamType.COLONOSCOPY,
             status=CaseStatus.DOCTOR_DENIED,
             doctor_decision="deny",
             doctor_reason="recusa",
@@ -233,11 +229,10 @@ class TestBackfillD3Table:
         events_before = case.events.count()
         self._backfill()
         reloaded = Case.objects.get(pk=case.pk)
-        assert reloaded.exam_type == ExamType.COLONOSCOPY
         assert reloaded.status == CaseStatus.DOCTOR_DENIED
         assert reloaded.doctor_reason == "recusa"
         row = CaseProcedure.objects.get(case=case)
-        assert row.procedure_type == ExamType.COLONOSCOPY
+        assert row.procedure_type == ProcedureType.EDA
         assert row.declared_by_nir is True
         # Nenhum evento novo: backfill não reprocessa nem audita
         assert case.events.count() == events_before
@@ -253,24 +248,21 @@ class TestBackfillD3Table:
 
 
 class TestDeclaredProjectionService:
-    """R3 — serviço único de declaração: conjunto, ponte, evento e atomicidade."""
+    """R3 — serviço único de declaração: conjunto, evento e atomicidade."""
 
-    def test_combined_creates_exactly_two_declared_rows_and_bridge(self, user, case_factory) -> None:
+    def test_combined_creates_exactly_two_declared_rows(self, user, case_factory) -> None:
         case = case_factory(user)
         set_declared_procedures(case=case, procedure_types=["colonoscopy", "eda"], actor=user)
         rows = list(CaseProcedure.objects.filter(case=case).order_by("procedure_type"))
         assert len(rows) == 2
         assert {r.procedure_type for r in rows} == {"eda", "colonoscopy"}
         assert all(r.declared_by_nir for r in rows)
-        reloaded = Case.objects.get(pk=case.pk)
-        assert reloaded.exam_type == EDA_COLONOSCOPY
 
     def test_single_selection_unmarks_other_row(self, user, case_factory) -> None:
         case = case_factory(user)
         set_declared_procedures(case=case, procedure_types=["eda", "colonoscopy"], actor=user)
         set_declared_procedures(case=case, procedure_types=["colonoscopy"], actor=user)
         reloaded = Case.objects.get(pk=case.pk)
-        assert reloaded.exam_type == ExamType.COLONOSCOPY
         assert CaseProcedure.objects.get(case=reloaded, procedure_type="eda").declared_by_nir is False
         assert CaseProcedure.objects.get(case=reloaded, procedure_type="colonoscopy").declared_by_nir is True
 
@@ -281,7 +273,6 @@ class TestDeclaredProjectionService:
         with pytest.raises(ValueError):
             set_declared_procedures(case=case, procedure_types=["cpre"], actor=user)
         assert CaseProcedure.objects.filter(case=case).count() == 0
-        assert Case.objects.get(pk=case.pk).exam_type == ExamType.EDA
 
     def test_event_contains_ordered_set_without_clinical_text(self, user, case_factory) -> None:
         case = case_factory(user)
@@ -291,17 +282,16 @@ class TestDeclaredProjectionService:
         assert "text" not in event.payload
         assert event.actor_id == user.pk
 
-    def test_failure_rolls_back_projection_and_bridge(self, user, case_factory) -> None:
+    def test_failure_rolls_back_projection(self, user, case_factory) -> None:
         case = case_factory(user)
         with mock.patch("apps.cases.procedures._sync_declared_rows", side_effect=RuntimeError("boom")):
             with pytest.raises(RuntimeError):
                 set_declared_procedures(case=case, procedure_types=["eda"], actor=user)
         assert CaseProcedure.objects.filter(case=case).count() == 0
-        assert Case.objects.get(pk=case.pk).exam_type == ExamType.EDA
 
     def test_get_declared_and_format_helpers(self, user, case_factory) -> None:
         case = case_factory(user)
-        # Slice 010 (R3): caso sem rows projetiona vazio (não reflete a ponte).
+        # Slice 010 (R3): caso sem rows projetiona vazio (sem inferência).
         assert get_declared_procedure_types(case) == ()
         set_declared_procedures(case=case, procedure_types=["colonoscopy"], actor=user)
         assert get_declared_procedure_types(case) == ("colonoscopy",)
@@ -313,14 +303,13 @@ class TestDeclaredProjectionService:
         """Slice 010 (R3) — getters sempre retornam apenas rows normalizadas.
 
         Default e ``fallback_to_bridge=False`` são idênticos: um caso sem rows
-        devolve ``()`` em todas as três dimensões, sem ler a ponte
-        ``Case.exam_type`` e sem o fallback global ``doctor_decision=accept``
-        no aprovado.
+        devolve ``()`` em todas as três dimensões, sem o fallback global
+        ``doctor_decision=accept`` no aprovado.
         """
-        case = case_factory(user)  # exam_type=EDA, sem rows
+        case = case_factory(user)  # sem rows
         # Slice 010 (R3): os getters são ALWAYS fail-closed — default e
         # ``fallback_to_bridge=False`` devolvem o mesmo conjunto de rows.
-        # Caso sem rows ⇒ () em todas as três dimensões, sem ler a ponte.
+        # Caso sem rows ⇒ () em todas as três dimensões.
         assert get_declared_procedure_types(case) == ()
         assert get_detected_procedure_types(case) == ()
         assert get_approved_procedure_types(case) == ()
@@ -329,7 +318,7 @@ class TestDeclaredProjectionService:
         assert get_declared_procedure_types(case, fallback_to_bridge=False) == ()
         assert get_detected_procedure_types(case, fallback_to_bridge=False) == ()
         assert get_approved_procedure_types(case, fallback_to_bridge=False) == ()
-        # Aprovado tampouco chega à ponte via indireção do declarado, mesmo
+        # Aprovado tampouco é inferido de ``doctor_decision=accept``, mesmo
         # com doctor_decision=accept (fallback global removido).
         case.doctor_decision = "accept"
         case.save(update_fields=["doctor_decision"])
@@ -340,22 +329,21 @@ class TestDeclaredProjectionService:
 class TestProcedureGettersReturnOnlyRows:
     """Slice 010 (R3) — getters retornam apenas rows normalizadas.
 
-    Prova que nenhum getter cai na ponte ``Case.exam_type`` nem no fallback
-    global ``doctor_decision=accept``: um caso sem rows projeta ``()`` em todas
-    as dimensões, mesmo com ``exam_type``/``doctor_decision`` preenchidos.
+    Prova que nenhum getter depende de qualquer campo do ``Case`` além das
+    rows: um caso sem rows projeta ``()`` em todas as dimensões, mesmo com
+    ``doctor_decision=accept`` preenchido (fallback global removido).
     """
 
     def test_case_without_rows_is_empty_in_all_dimensions(self, user, case_factory) -> None:
-        case = case_factory(user)  # exam_type=EDA default, sem rows
-        assert case.exam_type == ExamType.EDA, "pré-condição: ponte preenchida"
+        case = case_factory(user)  # sem rows
         assert get_declared_procedure_types(case) == ()
         assert get_detected_procedure_types(case) == ()
         assert get_approved_procedure_types(case) == ()
 
-    def test_case_without_rows_empty_even_with_combined_bridge(self, user) -> None:
+    def test_case_without_rows_empty_even_with_doctor_accept(self, user) -> None:
+        """Sem rows, ``doctor_decision="accept"`` não recria o aprovado."""
         case = Case.objects.create(
             created_by=user,
-            exam_type=EDA_COLONOSCOPY,
             doctor_decision="accept",
         )
         assert get_declared_procedure_types(case) == ()
@@ -370,3 +358,19 @@ class TestProcedureGettersReturnOnlyRows:
         # Detecção ainda pendente: detected vazio (não herda a declaração).
         assert get_detected_procedure_types(case) == ()
         assert get_approved_procedure_types(case) == ()
+
+    def test_detected_and_approved_rows_drive_their_own_getters(self, user, case_factory) -> None:
+        """Fluxo canônico só com rows: cada dimensão reflete exclusivamente as
+        próprias rows, sem qualquer dependência de campo do ``Case``."""
+        case = case_factory(user)
+        set_declared_procedures(case=case, procedure_types=["eda"], actor=user)
+        CaseProcedure.objects.create(
+            case=case,
+            procedure_type="colonoscopy",
+            detection_status=DetectionStatus.DETECTED,
+            doctor_disposition=DoctorDisposition.APPROVED,
+        )
+        case = Case.objects.get(pk=case.pk)
+        assert get_declared_procedure_types(case) == ("eda",)
+        assert get_detected_procedure_types(case) == ("colonoscopy",)
+        assert get_approved_procedure_types(case) == ("colonoscopy",)

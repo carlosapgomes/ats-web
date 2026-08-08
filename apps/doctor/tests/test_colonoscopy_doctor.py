@@ -124,13 +124,12 @@ class TestColonoscopyDoctorDecision:
             created_by=user,
             agency_record_number="54321",
             extracted_text="Solicito colonoscopia.",
-            exam_type="colonoscopy",
             structured_data=_colonoscopy_structured(),
             summary_text="Colonoscopia eletiva.",
             suggested_action={"suggestion": "accept", "support_recommendation": "none"},
         )
         # Slice 009-A (R4): row detectada explícita autoriza o badge do card
-        # médico em modo estrito (sem fallback da ponte ``Case.exam_type``).
+        # médico em modo estrito (projeção vem somente das rows).
         from apps.cases.models import CaseProcedure
 
         CaseProcedure.objects.create(
@@ -230,3 +229,30 @@ class TestColonoscopyDoctorDecision:
         content = response.content.decode()
         # Badge explícito de tipo no card (não apenas o diagnóstico).
         assert 'class="badge exam-type-badge bg-secondary ms-1">Colonoscopia' in content
+
+    def test_decision_badge_comes_from_detected_rows_only(self, client) -> None:
+        """Fluxo canônico do módulo construído apenas com rows (Slice 011-A):
+        o badge da tela de decisão é projetado da row detectada, sem qualquer
+        escrita de campo de ``Case`` na fixture."""
+        nir = self._login_as(client, "nir")
+        case = Case.objects.create(
+            created_by=nir,
+            agency_record_number="54322",
+            extracted_text="Solicito colonoscopia.",
+            structured_data=_colonoscopy_structured(),
+            status=CaseStatus.WAIT_DOCTOR,
+        )
+        from apps.cases.models import CaseProcedure
+
+        CaseProcedure.objects.create(
+            case=case,
+            procedure_type="colonoscopy",
+            declared_by_nir=True,
+            detection_status="detected",
+        )
+        self._login_as(client, "doctor")
+        response = client.get(f"/doctor/{case.case_id}/")
+        assert response.status_code == 200
+        content = response.content.decode()
+        assert "exam-type-colonoscopy" in content
+        assert "Colonoscopia" in content

@@ -61,19 +61,16 @@ class TestDoctorQueueExamTypeFilters:
         self,
         nir: Any,
         *,
-        bridge_exam_type: str,
         declared: tuple[str, ...] = (),
         detected: tuple[str, ...] = (),
         name: str,
         record: str,
     ) -> Case:
-        # Slice 009-A correction (R4/F2): ``bridge_exam_type`` preenche apenas a
-        # ponte transitória; as rows vêm EXCLUSIVAMENTE dos conjuntos explícitos
-        # ``declared``/``detected`` — nunca inferidas do campo/status/decisão.
+        # Slice 011-A: as rows vêm EXCLUSIVAMENTE dos conjuntos explícitos
+        # ``declared``/``detected`` — nunca inferidas de campo/status/decisão.
         case = Case.objects.create(
             created_by=nir,
             status=CaseStatus.WAIT_DOCTOR,
-            exam_type=bridge_exam_type,
             agency_record_number=record,
             structured_data={"patient": {"name": name, "age": 50, "gender": "F"}},
         )
@@ -91,23 +88,21 @@ class TestDoctorQueueExamTypeFilters:
         doctor: Any,
         nir: Any,
         *,
-        bridge_exam_type: str,
         declared: tuple[str, ...] = (),
         detected: tuple[str, ...] = (),
         approved: tuple[str, ...] = (),
         denied: tuple[str, ...] = (),
         name: str,
     ) -> Case:
-        # Slice 009-A correction (R4/F2): ``bridge_exam_type`` é só ponte; as
-        # rows vêm da união explícita de ``declared``/``detected``/``approved``/
-        # ``denied``. ``doctor_decision`` é setup fixo, não fonte de inferência.
+        # Slice 011-A: as rows vêm da união explícita de ``declared``/
+        # ``detected``/``approved``/``denied``. ``doctor_decision`` é setup
+        # fixo, não fonte de inferência.
         case = Case.objects.create(
             created_by=nir,
             status=CaseStatus.DOCTOR_ACCEPTED,
             doctor=doctor,
             doctor_decision="accept",
             doctor_decided_at=timezone.now(),
-            exam_type=bridge_exam_type,
             structured_data={"patient": {"name": name, "age": 60, "gender": "F"}},
         )
         for procedure_type in set(declared) | set(detected) | set(approved) | set(denied):
@@ -126,12 +121,9 @@ class TestDoctorQueueExamTypeFilters:
 
     def test_pending_has_accessible_type_filter_with_todos_default(self, client) -> None:
         nir = self._login_as(client, "nir")
-        self._make_pending(
-            nir, bridge_exam_type="eda", declared=("eda",), detected=("eda",), name="Joao EDA", record="1001"
-        )
+        self._make_pending(nir, declared=("eda",), detected=("eda",), name="Joao EDA", record="1001")
         self._make_pending(
             nir,
-            bridge_exam_type="colonoscopy",
             declared=("colonoscopy",),
             detected=("colonoscopy",),
             name="Maria Colon",
@@ -159,10 +151,9 @@ class TestDoctorQueueExamTypeFilters:
 
     def test_pending_nav_count_remains_total(self, client) -> None:
         nir = self._login_as(client, "nir")
-        self._make_pending(nir, bridge_exam_type="eda", declared=("eda",), detected=("eda",), name="A", record="1001")
+        self._make_pending(nir, declared=("eda",), detected=("eda",), name="A", record="1001")
         self._make_pending(
             nir,
-            bridge_exam_type="colonoscopy",
             declared=("colonoscopy",),
             detected=("colonoscopy",),
             name="B",
@@ -180,13 +171,10 @@ class TestDoctorQueueExamTypeFilters:
         doctor = self._login_as(client, "doctor")
         nir = User.objects.create_user(username="nir-decided@filters.test", password="testpass123")
         nir.roles.add(self._create_role("nir"))
-        self._make_decided(
-            doctor, nir, bridge_exam_type="eda", declared=("eda",), detected=("eda",), approved=("eda",), name="A"
-        )
+        self._make_decided(doctor, nir, declared=("eda",), detected=("eda",), approved=("eda",), name="A")
         self._make_decided(
             doctor,
             nir,
-            bridge_exam_type="colonoscopy",
             declared=("colonoscopy",),
             detected=("colonoscopy",),
             approved=("colonoscopy",),
@@ -206,12 +194,9 @@ class TestDoctorQueueExamTypeFilters:
 
     def test_pending_cards_expose_persisted_exam_type_and_badge(self, client) -> None:
         nir = self._login_as(client, "nir")
-        self._make_pending(
-            nir, bridge_exam_type="eda", declared=("eda",), detected=("eda",), name="Joao EDA", record="1001"
-        )
+        self._make_pending(nir, declared=("eda",), detected=("eda",), name="Joao EDA", record="1001")
         self._make_pending(
             nir,
-            bridge_exam_type="colonoscopy",
             declared=("colonoscopy",),
             detected=("colonoscopy",),
             name="Maria Colon",
@@ -230,13 +215,10 @@ class TestDoctorQueueExamTypeFilters:
         doctor = self._login_as(client, "doctor")
         nir = User.objects.create_user(username="nir-decided2@filters.test", password="testpass123")
         nir.roles.add(self._create_role("nir"))
-        self._make_decided(
-            doctor, nir, bridge_exam_type="eda", declared=("eda",), detected=("eda",), approved=("eda",), name="A"
-        )
+        self._make_decided(doctor, nir, declared=("eda",), detected=("eda",), approved=("eda",), name="A")
         self._make_decided(
             doctor,
             nir,
-            bridge_exam_type="colonoscopy",
             declared=("colonoscopy",),
             detected=("colonoscopy",),
             approved=("colonoscopy",),
@@ -254,12 +236,9 @@ class TestDoctorQueueExamTypeFilters:
 
     def test_links_polling_and_tabs_preserved(self, client) -> None:
         nir = self._login_as(client, "nir")
-        c1 = self._make_pending(
-            nir, bridge_exam_type="eda", declared=("eda",), detected=("eda",), name="Joao", record="1001"
-        )
+        c1 = self._make_pending(nir, declared=("eda",), detected=("eda",), name="Joao", record="1001")
         c2 = self._make_pending(
             nir,
-            bridge_exam_type="colonoscopy",
             declared=("colonoscopy",),
             detected=("colonoscopy",),
             name="Maria",
@@ -310,6 +289,8 @@ class TestDoctorQueueFilterStatic:
         assert "Limpar" in html
         assert "Nenhum caso encontrado para os filtros selecionados." in html
         content_html = self._read(QUEUE_CONTENT_HTML)
+        # Atributo projetado no contexto do card (selection key da dimensão),
+        # nunca leitura de campo do ``Case``.
         assert 'data-exam-type="{{ c.exam_type }}"' in content_html
 
 
@@ -320,9 +301,8 @@ class TestDoctorQueueFilterStatic:
 class TestDoctorQueueProcedureAuthority:
     """R1: os cards médicos usam getters estritos (``fallback_to_bridge=False``).
 
-    Um caso sem rows nunca herda EDA/Colonoscopia da ponte ``Case.exam_type``;
-    rows detectadas vencem uma ponte oposta. A ponte permanece escrita
-    internamente, mas não participa do fluxo médico (Pendentes=detected,
+    Um caso sem rows nunca projeta EDA/Colonoscopia; rows detectadas definem a
+    seleção do card. A projeção vem somente das rows (Pendentes=detected,
     Decididos=autorizado).
     """
 
@@ -342,13 +322,12 @@ class TestDoctorQueueProcedureAuthority:
         return user
 
     def test_pending_without_rows_is_never_colonoscopy(self, client) -> None:
-        """WAIT_DOCTOR sem rows + ponte colonoscopia → projeção none/neutra."""
+        """WAIT_DOCTOR sem rows → projeção none/neutra."""
         nir = self._login_as(client, "nir")
-        # Caso inválido: ponte diz colonoscopia, mas NENHUMA row existe.
+        # Caso sem nenhuma row.
         Case.objects.create(
             created_by=nir,
             status=CaseStatus.WAIT_DOCTOR,
-            exam_type="colonoscopy",
             agency_record_number="NO-ROWS-PEND",
             structured_data={"patient": {"name": "Sem Rows Pend", "age": 50, "gender": "F"}},
         )
@@ -362,18 +341,17 @@ class TestDoctorQueueProcedureAuthority:
         assert ">Colonoscopia</span>" not in content
 
     def test_decided_without_approved_rows_is_never_eda(self, client) -> None:
-        """Decididos Hoje sem approved rows + ponte eda → none/Nenhum autorizado."""
+        """Decididos Hoje sem approved rows → none/Nenhum autorizado."""
         doctor = self._login_as(client, "doctor")
         nir = User.objects.create_user(username="nir-dec9a@auth9a.test", password="testpass123")
         nir.roles.add(self._create_role("nir"))
-        # Caso aceito sem rows aprovadas; ponte diz eda.
+        # Caso aceito sem rows aprovadas.
         Case.objects.create(
             created_by=nir,
             status=CaseStatus.DOCTOR_ACCEPTED,
             doctor=doctor,
             doctor_decision="accept",
             doctor_decided_at=timezone.now(),
-            exam_type="eda",
             agency_record_number="NO-APPR-DEC",
             structured_data={"patient": {"name": "Sem Approved", "age": 60, "gender": "F"}},
         )
@@ -384,13 +362,12 @@ class TestDoctorQueueProcedureAuthority:
         assert 'data-exam-type="eda"' not in content
         assert "Nenhum autorizado" in content
 
-    def test_pending_detected_rows_ignore_opposite_bridge(self, client) -> None:
-        """Rows detectadas vencem a ponte oposta no card médico."""
+    def test_pending_detected_rows_define_card_selection(self, client) -> None:
+        """Rows detectadas definem a seleção do card médico."""
         nir = self._login_as(client, "nir")
         case = Case.objects.create(
             created_by=nir,
             status=CaseStatus.WAIT_DOCTOR,
-            exam_type="colonoscopy",  # ponte oposta ao detectado
             agency_record_number="ROWS-OPP-PEND",
             structured_data={"patient": {"name": "Rows Opp", "age": 50, "gender": "F"}},
         )
@@ -404,7 +381,7 @@ class TestDoctorQueueProcedureAuthority:
         response = client.get("/doctor/")
         assert response.status_code == 200
         content = response.content.decode()
-        # Card mostra o detectado (EDA); a ponte colonoscopia é ignorada.
+        # Card mostra o detectado (EDA), via projeção das rows.
         assert 'data-proc-selection="eda"' in content
         assert 'data-exam-type="colonoscopy"' not in content
         assert ">EDA</span>" in content
@@ -446,13 +423,12 @@ class TestDoctorDecisionProjectionAuthority:
         session.save()
         return user
 
-    def test_decision_page_without_rows_is_neutral_not_bridge(self, client) -> None:
-        """Decisão sem rows + ponte colonoscopia → badge neutro, nunca colonoscopia."""
+    def test_decision_page_without_rows_is_neutral(self, client) -> None:
+        """Decisão sem rows → badge neutro, nunca colonoscopia."""
         nir = self._login_as(client, "nir")
         case = Case.objects.create(
             created_by=nir,
             status=CaseStatus.WAIT_DOCTOR,
-            exam_type="colonoscopy",  # ponte — não deve participar da decisão
             agency_record_number="NO-ROWS-DEC",
             structured_data={"patient": {"name": "Sem Rows Decisão", "age": 50, "gender": "F"}},
         )
@@ -460,17 +436,16 @@ class TestDoctorDecisionProjectionAuthority:
         response = client.get(f"/doctor/{case.case_id}/")
         assert response.status_code == 200
         content = response.content.decode()
-        # Badge projetado neutro; a ponte colonoscopia nunca aparece.
+        # Badge projetado neutro.
         assert "exam-type-colonoscopy" not in content
         assert "Não identificado" in content
 
-    def test_decision_page_detected_rows_ignore_opposite_bridge(self, client) -> None:
-        """Rows detectadas vencem a ponte oposta na tela de decisão."""
+    def test_decision_page_detected_rows_define_badge(self, client) -> None:
+        """Rows detectadas definem o badge da tela de decisão."""
         nir = self._login_as(client, "nir")
         case = Case.objects.create(
             created_by=nir,
             status=CaseStatus.WAIT_DOCTOR,
-            exam_type="colonoscopy",  # ponte oposta
             agency_record_number="ROWS-OPP-DEC",
             structured_data={"patient": {"name": "Rows Opp Dec", "age": 50, "gender": "F"}},
         )

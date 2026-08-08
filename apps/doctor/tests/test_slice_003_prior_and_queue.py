@@ -71,7 +71,6 @@ def _prior_case(
         created_by=user,
         agency_record_number=arn,
         status=status,
-        exam_type="eda_colonoscopy" if len(rows) == 2 else rows[0][0],
         structured_data=_v2_structured(),
         doctor_decision=doctor_decision,
         doctor_reason=doctor_reason,
@@ -96,7 +95,6 @@ def _current_v2_case(user: Any, *, arn: str, detected: list[str]) -> Case:
         created_by=user,
         agency_record_number=arn,
         status=CaseStatus.WAIT_DOCTOR,
-        exam_type="eda_colonoscopy" if len(detected) == 2 else detected[0],
         structured_data=_v2_structured(),
         suggested_action={
             "schema_version": "2.0",
@@ -296,7 +294,6 @@ class TestPriorSectionsPerProcedure:
             created_by=user,
             agency_record_number="AR-P6",
             status=CaseStatus.DOCTOR_DENIED,
-            exam_type="eda",
             doctor_decision="deny",
             doctor_reason="motivo global",
             doctor_decided_at=now - timedelta(days=1),
@@ -313,7 +310,6 @@ class TestPriorSectionsPerProcedure:
             created_by=user,
             agency_record_number="AR-P6",
             status=CaseStatus.WAIT_DOCTOR,
-            exam_type="eda",
             structured_data={
                 "schema_version": "1.1",
                 "patient": {"name": "C", "age": 30, "sex": "M"},
@@ -392,7 +388,6 @@ class TestDoctorQueueProcedureFilters:
         case = Case.objects.create(
             created_by=nir,
             status=CaseStatus.WAIT_DOCTOR,
-            exam_type="eda_colonoscopy" if len(detected) == 2 else detected[0],
             agency_record_number="REC-" + name,
             structured_data={"patient": {"name": name, "age": 50, "sex": "F"}},
         )
@@ -412,7 +407,6 @@ class TestDoctorQueueProcedureFilters:
             doctor=doctor,
             doctor_decision="accept",
             doctor_decided_at=timezone.now(),
-            exam_type="eda_colonoscopy" if len(approved) == 2 else (approved[0] if approved else "eda"),
             agency_record_number="REC-" + name,
             structured_data={"patient": {"name": name, "age": 50, "sex": "F"}},
         )
@@ -453,7 +447,6 @@ class TestDoctorQueueProcedureFilters:
             doctor=doctor,
             doctor_decision="deny",
             doctor_decided_at=timezone.now(),
-            exam_type="eda",
             agency_record_number="REC-NEG",
             structured_data={"patient": {"name": "Negado", "age": 50, "sex": "F"}},
         )
@@ -485,7 +478,8 @@ class TestDoctorQueueProcedureFilters:
     def test_queue_partial_exposes_procedure_selection_attribute(self) -> None:
         content_html = QUEUE_CONTENT_HTML.read_text(encoding="utf-8")
         assert "data-proc-selection" in content_html
-        assert 'data-exam-type="{{ c.exam_type }}"' in content_html  # bridge preservado
+        # Atributo projetado no contexto do card (selection key da dimensão).
+        assert 'data-exam-type="{{ c.exam_type }}"' in content_html
 
     def test_js_handles_combined_and_none_selection(self) -> None:
         js = QUEUE_FILTER_JS.read_text(encoding="utf-8")
@@ -520,8 +514,7 @@ class TestLegacyReportDerivesTypeFromPayload:
             created_by=user,
             agency_record_number="AR-R2A",
             status=CaseStatus.WAIT_DOCTOR,
-            # Ponte oposta ao payload: o tipo 1.1 deve vir do preop_screening.
-            exam_type="eda",
+            # O tipo 1.1 deve vir do payload (contrato histórico).
             structured_data=self._legacy_structured(exam_type="colonoscopy"),
         )
         prepared = prepare_doctor_case_report(current)
@@ -535,8 +528,7 @@ class TestLegacyReportDerivesTypeFromPayload:
             created_by=user,
             agency_record_number="AR-R2B",
             status=CaseStatus.WAIT_DOCTOR,
-            # Ponte oposta à row declarada: o tipo 1.1 deve vir da row única.
-            exam_type="eda",
+            # Sem payload de tipo: a row única declarada deriva o tipo 1.1.
             structured_data=self._legacy_structured(exam_type=None),
         )
         CaseProcedure.objects.create(
@@ -555,7 +547,6 @@ class TestLegacyReportDerivesTypeFromPayload:
             created_by=user,
             agency_record_number="AR-R2C",
             status=CaseStatus.WAIT_DOCTOR,
-            exam_type="eda",
             structured_data=self._legacy_structured(exam_type=None),
         )
         prepared = prepare_doctor_case_report(current)
@@ -587,7 +578,6 @@ class TestLegacyReportDerivesTypeFromPayload:
             created_by=user,
             agency_record_number="AR-R2C2",
             status=CaseStatus.WAIT_DOCTOR,
-            exam_type="eda",
             structured_data=self._legacy_structured(exam_type=None),
         )
         for procedure_type in ("eda", "colonoscopy"):
@@ -624,12 +614,11 @@ class TestLegacyReportDerivesTypeFromPayload:
         CaseProcedure.objects.create(
             case=prior, procedure_type="eda", declared_by_nir=True, doctor_disposition="denied"
         )
-        # Caso atual 1.1 ambíguo (sem preop_screening.exam_type e sem rows).
+        # Caso atual 1.1 (sem preop_screening.exam_type e sem rows).
         current = Case.objects.create(
             created_by=user,
             agency_record_number="AR-R2D",
             status=CaseStatus.WAIT_DOCTOR,
-            exam_type="eda",
             structured_data=self._legacy_structured(exam_type=None),
         )
         # Spy obrigatório (R3): o lookup anterior NÃO pode ser chamado para ambíguo.
@@ -648,7 +637,6 @@ class TestLegacyReportDerivesTypeFromPayload:
             created_by=user,
             agency_record_number="AR-R2F",
             status=CaseStatus.WAIT_DOCTOR,
-            exam_type="colonoscopy",
             structured_data=copy.deepcopy(payload),
         )
         CaseProcedure.objects.create(case=current, procedure_type="colonoscopy", declared_by_nir=True)
@@ -676,7 +664,6 @@ class TestLegacyReportDerivesTypeFromPayload:
             created_by=user,
             agency_record_number="AR-R2E",
             status=CaseStatus.WAIT_DOCTOR,
-            exam_type="eda",
             structured_data=self._legacy_structured(exam_type="eda"),
         )
         prepared = prepare_doctor_case_report(current)
