@@ -2,8 +2,8 @@
 
 Cobre R2/R3 do Slice 008 (specs exam-type-correction, exam-type-work-queues):
 
-- R2: a correção compara CONJUNTOS de ``CaseProcedure`` (nunca a ponte
-      ``Case.exam_type``) para decidir igualdade e gravar old/new; o evento
+- R2: a correção compara CONJUNTOS de ``CaseProcedure`` (nunca a coluna
+      legada) para decidir igualdade e gravar old/new; o evento
       ``CASE_PROCEDURE_DECLARATION_CORRECTED`` traz apenas ``old_procedures``/
       ``new_procedures`` — sem chaves singulares ``old_exam_type``/
       ``new_exam_type``.
@@ -64,7 +64,7 @@ def _nir_client(client, username: str = "nir-s8-view@test.com"):
     return client, user
 
 
-def _make_eligible_case(*, user, exam_type: str = ExamType.EDA) -> Case:
+def _make_eligible_case(*, user, exam_type: str = "eda") -> Case:
     """Cria caso em WAIT_R1_CLEANUP_THUMBS com manual review elegível (sem rows).
 
     As rows declaradas são criadas explicitamente por cada teste (R5) — nenhum
@@ -72,7 +72,6 @@ def _make_eligible_case(*, user, exam_type: str = ExamType.EDA) -> Case:
     """
     return Case.objects.create(
         created_by=user,
-        exam_type=exam_type,
         status=CaseStatus.WAIT_R1_CLEANUP_THUMBS,
         extracted_text="RELATÓRIO DE OCORRÊNCIAS\nGoverno do Estado da Bahia\nCódigo: 123",
         agency_record_number="REC-S8-001",
@@ -132,23 +131,17 @@ def _correct(*, case, user, new_exam_type, reason_code="nir_identified_exam") ->
 class TestCorrectionComparesSets:
     """R2: igualdade, old/new e reroteamento usam conjuntos de CaseProcedure."""
 
-    def test_rejects_same_set_even_when_bridge_diverges(self, django_user_model) -> None:
-        """Igualdade pelo CONJUNTO declarado, não pela ponte.
+    def test_rejects_correction_to_already_declared_set(self, django_user_model) -> None:
+        """Igualdade pelo CONJUNTO declarado, não por qualquer estado singular.
 
-        Caso com rows declarando o conjunto combinado {EDA, Colonoscopia} mas
-        com a ponte ``exam_type`` divergente (EDA). Corrigir para a seleção
-        combinada (``eda_colonoscopy``) significa o MESMO conjunto já declarado
-        — deve ser rejeitado como "igual". Antes do Slice 008 a comparação pela
-        coluna aceitava essa correção (bug). Prova que a decisão de igualdade
-        não consulta a coluna.
+        Caso com rows declarando o conjunto combinado {EDA, Colonoscopia}.
+        Corrigir para a seleção combinada (``eda_colonoscopy``) significa o
+        MESMO conjunto já declarado — deve ser rejeitado como "igual". Prova
+        que a decisão de igualdade vem das rows declaradas.
         """
         user = _nir_user(django_user_model, "nir-cmp-set@test.com")
         case = _make_eligible_case(user=user, exam_type=EDA_COLONOSCOPY)
         _declare(case, (ProcedureType.EDA, ProcedureType.COLONOSCOPY))
-        # Estado divergente ponte↔rows (não deveria existir em produção, mas
-        # isola a comparação da coluna).
-        case.exam_type = ExamType.EDA
-        case.save(update_fields=["exam_type"])
 
         with pytest.raises(ValueError):
             _correct(case=case, user=user, new_exam_type=EDA_COLONOSCOPY)
@@ -163,8 +156,8 @@ class TestCorrectionComparesSets:
         """Evento canônico traz apenas old_procedures/new_procedures.
 
         Não grava as chaves singulares ``old_exam_type``/``new_exam_type``
-        (essas pertenciam à ponte e não são fonte NIR). old/new refletem os
-        conjuntos lidos das rows declaradas.
+        (essas pertenciam à coluna legada e não são fonte NIR). old/new
+        refletem os conjuntos lidos das rows declaradas.
         """
         user = _nir_user(django_user_model, "nir-payload-set@test.com")
         case = _make_eligible_case(user=user, exam_type=ExamType.EDA)
@@ -215,7 +208,6 @@ class TestDeclaredFilterIsRowAuthoritative:
         client, user = _nir_client(client, "nir-fc-myc@test.com")
         legacy = Case.objects.create(
             created_by=user,
-            exam_type=ExamType.EDA,
             status=CaseStatus.NEW,
             agency_record_number="LEGACY-NO-ROW-MYC",
         )
@@ -236,7 +228,6 @@ class TestDeclaredFilterIsRowAuthoritative:
         client, user = _nir_client(client, "nir-fc-closed@test.com")
         legacy = Case.objects.create(
             created_by=user,
-            exam_type=ExamType.EDA,
             status=CaseStatus.CLEANED,
             agency_record_number="LEGACY-NO-ROW-CLS",
         )
@@ -249,13 +240,12 @@ class TestDeclaredFilterIsRowAuthoritative:
             )
 
     def test_my_cases_bucket_excludes_other_declared(self, client) -> None:
-        """Buckets exclusivos: EDA-declarado não cai em Combinado mesmo se a
-        ponte for combinada, e combinado exige as DUAS rows declaradas."""
+        """Buckets exclusivos: EDA-declarado não cai em Combinado, e o
+        combinado exige as DUAS rows declaradas."""
         client, user = _nir_client(client, "nir-bucket@test.com")
-        # Declarado EDA (1 row) com ponte combinada divergente.
+        # Declarado EDA (1 row) — sem a row Colonoscopia.
         eda_only = Case.objects.create(
             created_by=user,
-            exam_type=EDA_COLONOSCOPY,
             status=CaseStatus.NEW,
             agency_record_number="EDA-ONLY",
         )
@@ -293,7 +283,7 @@ class TestStrictModeNoTransitiveBridge:
             lambda case_id: pipeline_calls.append(case_id),
         )
         user = _nir_user(django_user_model, "nir-corr-norow@test.com")
-        case = _make_eligible_case(user=user, exam_type=ExamType.EDA)  # sem rows
+        case = _make_eligible_case(user=user, exam_type="eda")  # sem rows
         original_id = case.case_id
 
         result = _correct(case=case, user=user, new_exam_type=ExamType.EDA)
@@ -319,7 +309,7 @@ class TestStrictModeNoTransitiveBridge:
         from apps.intake.views import _declared_badge
 
         user = _nir_user(django_user_model, "nir-badge-unit@test.com")
-        case = Case.objects.create(created_by=user, exam_type=ExamType.EDA, status=CaseStatus.NEW)
+        case = Case.objects.create(created_by=user, status=CaseStatus.NEW)
         assert _declared_badge(case) == {"declared_label": "—", "declared_type_key": ""}
 
     def test_procedure_comparison_neutral_without_rows_no_approved_fallback(self, django_user_model) -> None:
@@ -331,9 +321,8 @@ class TestStrictModeNoTransitiveBridge:
         user = _nir_user(django_user_model, "nir-cmp-unit@test.com")
         case = Case.objects.create(
             created_by=user,
-            exam_type=ExamType.EDA,
             status=CaseStatus.WAIT_R1_CLEANUP_THUMBS,
-            doctor_decision="accept",  # legado: sugeriria approved via ponte
+            doctor_decision="accept",  # legado: sugeriria approved via coluna
         )
         comparison = _procedure_comparison(case)
         assert comparison["declared_label"] == "—"
@@ -348,7 +337,6 @@ class TestStrictModeNoTransitiveBridge:
         client, user = _nir_client(client, "nir-badge-list-fc@test.com")
         case = Case.objects.create(
             created_by=user,
-            exam_type=ExamType.EDA,
             status=CaseStatus.NEW,
             agency_record_number="NO-ROW-LIST",
         )

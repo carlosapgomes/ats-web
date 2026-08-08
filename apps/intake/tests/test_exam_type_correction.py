@@ -28,7 +28,8 @@ import pytest
 from django.contrib.auth import get_user_model
 from django.urls import reverse
 
-from apps.cases.models import Case, CaseEvent, CaseProcedure, CaseStatus, ExamType
+from apps.cases.models import Case, CaseEvent, CaseProcedure, CaseStatus, ExamType, ProcedureType
+from apps.cases.procedures import get_declared_procedure_types
 from apps.cases.services import (
     assert_case_lock as real_assert_case_lock,
 )
@@ -146,7 +147,6 @@ def _eligible_case(
     """Cria um caso em WAIT_R1_CLEANUP_THUMBS com manual review elegível."""
     case = Case.objects.create(
         created_by=user,
-        exam_type=exam_type,
         status=CaseStatus.WAIT_R1_CLEANUP_THUMBS,
         extracted_text=extracted_text
         or ("RELATÓRIO DE OCORRÊNCIAS\nGoverno do Estado da Bahia\nCódigo: 123\nMotivo da Solicitação: Colonoscopia"),
@@ -199,7 +199,7 @@ class TestCorrectionService:
         assert result.case_id == original_id
         reloaded = Case.objects.get(pk=result.pk)
         assert reloaded.status == CaseStatus.LLM_STRUCT
-        assert reloaded.exam_type == ExamType.COLONOSCOPY
+        assert get_declared_procedure_types(reloaded, fallback_to_bridge=False) == (ProcedureType.COLONOSCOPY,)
 
     def test_fsm_transition_reprocess_after_exam_type_correction(self, user) -> None:
         """Transição nomeada existe e registra CASE_REPROCESSING_REQUESTED."""
@@ -356,7 +356,7 @@ class TestCorrectionService:
 
         reloaded = Case.objects.get(pk=case.pk)
         assert reloaded.status == CaseStatus.WAIT_R1_CLEANUP_THUMBS
-        assert reloaded.exam_type == ExamType.EDA
+        assert get_declared_procedure_types(reloaded, fallback_to_bridge=False) == (ProcedureType.EDA,)
         assert reloaded.structured_data is not None
         assert reloaded.suggested_action is not None
 
@@ -378,7 +378,7 @@ class TestCorrectionService:
 
         reloaded = Case.objects.get(pk=case.pk)
         assert reloaded.status == CaseStatus.WAIT_R1_CLEANUP_THUMBS
-        assert reloaded.exam_type == ExamType.EDA
+        assert get_declared_procedure_types(reloaded, fallback_to_bridge=False) == (ProcedureType.EDA,)
 
     def test_invalid_reason_code_rejected(self, django_user_model) -> None:
         """R5: reason_code do NIR fora do conjunto é rejeitado."""
@@ -419,7 +419,8 @@ class TestCorrectionService:
 
         reloaded = Case.objects.get(pk=case.pk)
         assert reloaded.status == CaseStatus.WAIT_DOCTOR
-        assert reloaded.exam_type == ExamType.EDA
+        # Caso criado sem rows: projeção declarada permanece vazia (sem coluna).
+        assert get_declared_procedure_types(reloaded, fallback_to_bridge=False) == ()
 
     @pytest.mark.parametrize(
         "target",
@@ -456,7 +457,8 @@ class TestCorrectionService:
 
         reloaded = Case.objects.get(pk=case.pk)
         assert reloaded.status == target
-        assert reloaded.exam_type == ExamType.EDA
+        # Caso criado sem rows: projeção declarada permanece vazia (sem coluna).
+        assert get_declared_procedure_types(reloaded, fallback_to_bridge=False) == ()
         assert reloaded.suggested_action is not None
 
     def test_non_eda_and_invalid_regulation_not_eligible(self, django_user_model) -> None:
@@ -504,7 +506,7 @@ class TestCorrectionService:
 
         reloaded = Case.objects.get(pk=case.pk)
         assert reloaded.status == CaseStatus.WAIT_R1_CLEANUP_THUMBS
-        assert reloaded.exam_type == ExamType.EDA
+        assert get_declared_procedure_types(reloaded, fallback_to_bridge=False) == (ProcedureType.EDA,)
         assert reloaded.structured_data is not None
         assert not CaseEvent.objects.filter(case=case, event_type="CASE_PROCEDURE_DECLARATION_CORRECTED").exists()
         assert enqueue_calls == []
@@ -532,7 +534,7 @@ class TestCorrectionService:
 
         reloaded = Case.objects.get(pk=case.pk)
         assert reloaded.status == CaseStatus.WAIT_R1_CLEANUP_THUMBS
-        assert reloaded.exam_type == ExamType.EDA
+        assert get_declared_procedure_types(reloaded, fallback_to_bridge=False) == (ProcedureType.EDA,)
         assert not CaseEvent.objects.filter(case=case, event_type="CASE_PROCEDURE_DECLARATION_CORRECTED").exists()
         assert enqueue_calls == []
 
@@ -561,7 +563,7 @@ class TestCorrectionService:
 
         reloaded = Case.objects.get(pk=case.pk)
         assert reloaded.status == CaseStatus.WAIT_R1_CLEANUP_THUMBS
-        assert reloaded.exam_type == ExamType.EDA
+        assert get_declared_procedure_types(reloaded, fallback_to_bridge=False) == (ProcedureType.EDA,)
         assert reloaded.structured_data is not None
         assert enqueue_calls == []
 
@@ -596,7 +598,7 @@ class TestCorrectionService:
 
         reloaded = Case.objects.get(pk=case.pk)
         assert reloaded.status == CaseStatus.WAIT_R1_CLEANUP_THUMBS
-        assert reloaded.exam_type == ExamType.EDA
+        assert get_declared_procedure_types(reloaded, fallback_to_bridge=False) == (ProcedureType.EDA,)
         assert enqueue_calls == []
 
     def test_service_rejects_incompatible_role_same_user(self, django_user_model, monkeypatch) -> None:
@@ -630,7 +632,7 @@ class TestCorrectionService:
 
         reloaded = Case.objects.get(pk=case.pk)
         assert reloaded.status == CaseStatus.WAIT_R1_CLEANUP_THUMBS
-        assert reloaded.exam_type == ExamType.EDA
+        assert get_declared_procedure_types(reloaded, fallback_to_bridge=False) == (ProcedureType.EDA,)
         assert enqueue_calls == []
 
     def test_service_rejects_expired_lease(self, django_user_model, monkeypatch) -> None:
@@ -665,7 +667,7 @@ class TestCorrectionService:
 
         reloaded = Case.objects.get(pk=case.pk)
         assert reloaded.status == CaseStatus.WAIT_R1_CLEANUP_THUMBS
-        assert reloaded.exam_type == ExamType.EDA
+        assert get_declared_procedure_types(reloaded, fallback_to_bridge=False) == (ProcedureType.EDA,)
         assert enqueue_calls == []
 
     def test_incompatible_lock_other_user_rejected_without_mutation(self, django_user_model) -> None:
@@ -695,7 +697,7 @@ class TestCorrectionService:
 
         reloaded = Case.objects.get(pk=case.pk)
         assert reloaded.status == CaseStatus.WAIT_R1_CLEANUP_THUMBS
-        assert reloaded.exam_type == ExamType.EDA
+        assert get_declared_procedure_types(reloaded, fallback_to_bridge=False) == (ProcedureType.EDA,)
         assert reloaded.structured_data is not None
         assert reloaded.suggested_action is not None
 
@@ -787,7 +789,7 @@ class TestCorrectionService:
         assert excinfo.value.recovery_scheduled is True
         reloaded = Case.objects.get(pk=case.case_id)
         assert reloaded.status == CaseStatus.LLM_STRUCT
-        assert reloaded.exam_type == ExamType.COLONOSCOPY
+        assert get_declared_procedure_types(reloaded, fallback_to_bridge=False) == (ProcedureType.COLONOSCOPY,)
         assert reloaded.structured_data is None
         schedule = Schedule.objects.filter(
             func="apps.intake.tasks.execute_pdf_extraction",
@@ -823,7 +825,7 @@ class TestCorrectionService:
         assert excinfo.value.recovery_scheduled is False
         reloaded = Case.objects.get(pk=case.case_id)
         assert reloaded.status == CaseStatus.LLM_STRUCT
-        assert reloaded.exam_type == ExamType.COLONOSCOPY
+        assert get_declared_procedure_types(reloaded, fallback_to_bridge=False) == (ProcedureType.COLONOSCOPY,)
 
     def test_recovery_reenqueues_same_case_without_pdf(self, django_user_model, monkeypatch) -> None:
         """C5: retry automático do MESMO caso re-enfileira LLM sem extrair PDF."""
@@ -964,7 +966,7 @@ class TestConfirmReceiptService:
 
         reloaded = Case.objects.get(pk=case.case_id)
         assert reloaded.status == CaseStatus.LLM_STRUCT
-        assert reloaded.exam_type == ExamType.COLONOSCOPY
+        assert get_declared_procedure_types(reloaded, fallback_to_bridge=False) == (ProcedureType.COLONOSCOPY,)
         assert reloaded.structured_data is None
         assert not CaseEvent.objects.filter(case=case, event_type="CLEANUP_TRIGGERED").exists()
 
@@ -999,7 +1001,7 @@ class TestConfirmReceiptService:
 
         reloaded = Case.objects.get(pk=case.case_id)
         assert reloaded.status == CaseStatus.CLEANED
-        assert reloaded.exam_type == ExamType.EDA
+        assert get_declared_procedure_types(reloaded, fallback_to_bridge=False) == (ProcedureType.EDA,)
         assert not CaseEvent.objects.filter(case=case, event_type="CASE_PROCEDURE_DECLARATION_CORRECTED").exists()
         assert enqueue_calls == []
 
@@ -1132,7 +1134,7 @@ class TestCorrectionConfirmSerialization:
 
         reloaded = Case.objects.get(pk=case.case_id)
         assert reloaded.status == CaseStatus.LLM_STRUCT
-        assert reloaded.exam_type == ExamType.COLONOSCOPY
+        assert get_declared_procedure_types(reloaded, fallback_to_bridge=False) == (ProcedureType.COLONOSCOPY,)
         assert reloaded.structured_data is None
         assert not CaseEvent.objects.filter(case=case, event_type="CLEANUP_TRIGGERED").exists()
         assert pipeline_calls == [case.case_id]
@@ -1193,7 +1195,7 @@ class TestCorrectionConfirmSerialization:
 
         reloaded = Case.objects.get(pk=case.case_id)
         assert reloaded.status == CaseStatus.CLEANED
-        assert reloaded.exam_type == ExamType.EDA
+        assert get_declared_procedure_types(reloaded, fallback_to_bridge=False) == (ProcedureType.EDA,)
         assert not CaseEvent.objects.filter(case=case, event_type="CASE_PROCEDURE_DECLARATION_CORRECTED").exists()
         assert pipeline_calls == []  # correção perdedora não enfileira
 
@@ -1444,7 +1446,7 @@ class TestCorrectionView:
 
         reloaded = Case.objects.get(pk=case.pk)
         assert reloaded.status == CaseStatus.LLM_STRUCT
-        assert reloaded.exam_type == ExamType.COLONOSCOPY
+        assert get_declared_procedure_types(reloaded, fallback_to_bridge=False) == (ProcedureType.COLONOSCOPY,)
         assert len(pipeline_calls) == 1
 
     def test_second_post_idempotent_no_double_enqueue(self, client, monkeypatch) -> None:
@@ -1488,7 +1490,8 @@ class TestCorrectionView:
         assert response.status_code == 404
         reloaded = Case.objects.get(pk=case.pk)
         assert reloaded.status == CaseStatus.WAIT_R1_CLEANUP_THUMBS
-        assert reloaded.exam_type == ExamType.EDA
+        # Caso criado sem rows: projeção declarada permanece vazia (sem coluna).
+        assert get_declared_procedure_types(reloaded, fallback_to_bridge=False) == ()
 
     def test_doctor_cannot_post(self, client) -> None:
         """R6: role doctor é bloqueada no POST de correção."""
@@ -1502,7 +1505,7 @@ class TestCorrectionView:
         assert response.status_code == 302
         reloaded = Case.objects.get(pk=case.pk)
         assert reloaded.status == CaseStatus.WAIT_R1_CLEANUP_THUMBS
-        assert reloaded.exam_type == ExamType.EDA
+        assert get_declared_procedure_types(reloaded, fallback_to_bridge=False) == (ProcedureType.EDA,)
 
     def test_post_without_lock_token_rejected(self, client) -> None:
         """R6/R7: POST sem token de reserva é rejeitado sem mutação."""
@@ -1516,7 +1519,7 @@ class TestCorrectionView:
         assert response.status_code == 302
         reloaded = Case.objects.get(pk=case.pk)
         assert reloaded.status == CaseStatus.WAIT_R1_CLEANUP_THUMBS
-        assert reloaded.exam_type == ExamType.EDA
+        assert get_declared_procedure_types(reloaded, fallback_to_bridge=False) == (ProcedureType.EDA,)
 
     def test_confirm_receipt_not_executed_after_correction(self, client, monkeypatch) -> None:
         """R7: após correção, confirm receipt não roda (estado saiu da fila)."""
@@ -1568,7 +1571,7 @@ class TestCorrectionView:
         assert "Tipo de exame corrigido para" not in content
         reloaded = Case.objects.get(pk=case.pk)
         assert reloaded.status == CaseStatus.WAIT_R1_CLEANUP_THUMBS
-        assert reloaded.exam_type == ExamType.EDA
+        assert get_declared_procedure_types(reloaded, fallback_to_bridge=False) == (ProcedureType.EDA,)
         assert reloaded.structured_data is not None
 
     def test_postcommit_enqueue_failure_shows_error_not_success(self, client, monkeypatch) -> None:
@@ -1595,7 +1598,7 @@ class TestCorrectionView:
         # A correção foi aplicada (commit) mesmo com a falha de enqueue.
         reloaded = Case.objects.get(pk=case.pk)
         assert reloaded.status == CaseStatus.LLM_STRUCT
-        assert reloaded.exam_type == ExamType.COLONOSCOPY
+        assert get_declared_procedure_types(reloaded, fallback_to_bridge=False) == (ProcedureType.COLONOSCOPY,)
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -1630,8 +1633,6 @@ class TestTimelineLabels:
                 "old_procedures": [ExamType.EDA],
                 "new_procedures": [ExamType.COLONOSCOPY],
                 "reason_code": "other",
-                "old_exam_type": ExamType.EDA,
-                "new_exam_type": ExamType.COLONOSCOPY,
             },
         )
         case.save()

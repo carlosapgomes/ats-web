@@ -80,7 +80,7 @@ class TestSchedulerPairedAppointment:
         nir: Any,
         *,
         status: str = CaseStatus.WAIT_APPT,
-        exam_type: str = "eda",
+        selection: str = "eda",
         approved: tuple[str, ...] = (),
         detected: tuple[str, ...] = (),
         reasons: dict[str, str] | None = None,
@@ -89,17 +89,16 @@ class TestSchedulerPairedAppointment:
         reasons = reasons or {}
         kw.setdefault(
             "structured_data",
-            {"patient": {"name": f"Paciente {exam_type}", "age": 55, "gender": "F"}},
+            {"patient": {"name": f"Paciente {selection}", "age": 55, "gender": "F"}},
         )
         case = Case.objects.create(
             created_by=nir,
             status=status,
-            exam_type=exam_type,
             doctor_decision="accept",
             doctor_admission_flow="scheduled",
             **kw,
         )
-        proc_types: tuple[str, ...] = ("eda", "colonoscopy") if exam_type == "eda_colonoscopy" else (exam_type,)
+        proc_types: tuple[str, ...] = ("eda", "colonoscopy") if selection == "eda_colonoscopy" else (selection,)
         for pt in proc_types:
             row = CaseProcedure.objects.create(case=case, procedure_type=pt, declared_by_nir=True)
             fields: list[str] = []
@@ -114,14 +113,13 @@ class TestSchedulerPairedAppointment:
                 row.save(update_fields=fields)
         return case
 
-    def _make_notice(self, nir: Any, *, exam_type: str, approved: tuple[str, ...]) -> Case:
+    def _make_notice(self, nir: Any, *, selection: str, approved: tuple[str, ...]) -> Case:
         case = Case.objects.create(
             created_by=nir,
             status=CaseStatus.WAIT_R1_CLEANUP_THUMBS,
-            exam_type=exam_type,
             doctor_decision="accept",
             doctor_admission_flow="immediate",
-            structured_data={"patient": {"name": f"Notice {exam_type}", "age": 60, "gender": "F"}},
+            structured_data={"patient": {"name": f"Notice {selection}", "age": 60, "gender": "F"}},
         )
         CaseEvent.objects.create(
             case=case,
@@ -130,7 +128,7 @@ class TestSchedulerPairedAppointment:
             event_type="IMMEDIATE_ADMISSION_OPERATIONAL_NOTICE",
             timestamp=timezone.now(),
         )
-        for pt in ("eda", "colonoscopy") if exam_type == "eda_colonoscopy" else (exam_type,):
+        for pt in ("eda", "colonoscopy") if selection == "eda_colonoscopy" else (selection,):
             CaseProcedure.objects.create(
                 case=case,
                 procedure_type=pt,
@@ -139,18 +137,17 @@ class TestSchedulerPairedAppointment:
             )
         return case
 
-    def _make_issue(self, nir: Any, *, exam_type: str, approved: tuple[str, ...]) -> Case:
+    def _make_issue(self, nir: Any, *, selection: str, approved: tuple[str, ...]) -> Case:
         case = Case.objects.create(
             created_by=nir,
             status=CaseStatus.WAIT_R1_CLEANUP_THUMBS,
-            exam_type=exam_type,
             doctor_decision="accept",
             doctor_admission_flow="scheduled",
             post_schedule_issue_status="opened",
             post_acceptance_issue_context="operational_notice",
-            structured_data={"patient": {"name": f"Issue {exam_type}", "age": 50, "gender": "M"}},
+            structured_data={"patient": {"name": f"Issue {selection}", "age": 50, "gender": "M"}},
         )
-        for pt in ("eda", "colonoscopy") if exam_type == "eda_colonoscopy" else (exam_type,):
+        for pt in ("eda", "colonoscopy") if selection == "eda_colonoscopy" else (selection,):
             CaseProcedure.objects.create(
                 case=case,
                 procedure_type=pt,
@@ -191,7 +188,7 @@ class TestSchedulerPairedAppointment:
         nir = self._login_as(client, "nir")
         self._make_case(
             nir,
-            exam_type="eda_colonoscopy",
+            selection="eda_colonoscopy",
             approved=("eda", "colonoscopy"),
             detected=("eda", "colonoscopy"),
         )
@@ -201,7 +198,7 @@ class TestSchedulerPairedAppointment:
         assert "EDA + Colonoscopia · Agendamento casado" in content
         # Filtro/JS: dimensão autorizada projetada no card.
         assert 'data-approved-selection="eda_colonoscopy"' in content
-        # Ponte legada preservada (regressão test_exam_type_filters).
+        # data-exam-type = contexto projetado (selection_key) nos templates.
         assert 'data-exam-type="eda_colonoscopy"' in content
 
     # ── R1: transformação detectado→autorizado + razões no detalhe ──
@@ -210,7 +207,7 @@ class TestSchedulerPairedAppointment:
         nir = self._login_as(client, "nir")
         case = self._make_case(
             nir,
-            exam_type="eda_colonoscopy",
+            selection="eda_colonoscopy",
             detected=("eda",),  # apenas EDA detectada
             approved=("eda", "colonoscopy"),  # Colonoscopia incluída pelo médico
             reasons={"colonoscopy": "Suspeita de doença inflamatória na anamnese."},
@@ -231,7 +228,7 @@ class TestSchedulerPairedAppointment:
 
     def test_snapshot_fail_closed_without_approved_rows(self) -> None:
         """R4: sem rows aprovadas, fail-closed — badge vazio e key "none",
-        independentemente da ponte ``exam_type`` ou ``doctor_decision``.
+        independentemente de ``doctor_decision``.
 
         O fallback transitivo (declarado/ponte) foi removido no Slice 009:
         caso sem autorização projetada não aparece nos buckets por tipo.
@@ -242,7 +239,6 @@ class TestSchedulerPairedAppointment:
         case = Case.objects.create(
             created_by=nir,
             status=CaseStatus.WAIT_APPT,
-            exam_type="eda",
             doctor_decision="accept",
             structured_data={"patient": {"name": "Sem Aprovado", "age": 50, "gender": "F"}},
         )
@@ -265,18 +261,17 @@ class TestSchedulerPairedAppointment:
     def test_confirm_page_hides_empty_authorized_card(self, client) -> None:
         """F3: caso sem aprovados não renderiza o card 'Procedimentos Autorizados'."""
         nir = self._login_as(client, "nir")
-        # Estado defensivo: sem rows e sem fallback válido (exam_type inválido)
+        # Estado defensivo: sem rows e sem fallback válido
         # → approved_label vazio → card oculto (regressão: combinado continua visível).
         empty_case = Case.objects.create(
             created_by=nir,
             status=CaseStatus.WAIT_APPT,
-            exam_type="bogus",
             doctor_decision="accept",
             structured_data={"patient": {"name": "Sem Autorizado", "age": 50, "gender": "F"}},
         )
         combined = self._make_case(
             nir,
-            exam_type="eda_colonoscopy",
+            selection="eda_colonoscopy",
             approved=("eda", "colonoscopy"),
             detected=("eda", "colonoscopy"),
         )
@@ -293,7 +288,7 @@ class TestSchedulerPairedAppointment:
         nir = self._login_as(client, "nir")
         case = self._make_case(
             nir,
-            exam_type="eda_colonoscopy",
+            selection="eda_colonoscopy",
             approved=("eda", "colonoscopy"),
             detected=("eda", "colonoscopy"),
         )
@@ -334,7 +329,7 @@ class TestSchedulerPairedAppointment:
         nir = self._login_as(client, "nir")
         case = self._make_case(
             nir,
-            exam_type="eda_colonoscopy",
+            selection="eda_colonoscopy",
             approved=("eda", "colonoscopy"),
             detected=("eda", "colonoscopy"),
         )
@@ -354,7 +349,7 @@ class TestSchedulerPairedAppointment:
         nir = self._login_as(client, "nir")
         case = self._make_case(
             nir,
-            exam_type="eda_colonoscopy",
+            selection="eda_colonoscopy",
             approved=("eda", "colonoscopy"),
             detected=("eda", "colonoscopy"),
         )
@@ -381,7 +376,7 @@ class TestSchedulerPairedAppointment:
         nir = self._login_as(client, "nir")
         case = self._make_case(
             nir,
-            exam_type="eda_colonoscopy",
+            selection="eda_colonoscopy",
             approved=("eda", "colonoscopy"),
             detected=("eda", "colonoscopy"),
         )
@@ -427,17 +422,16 @@ class TestSchedulerPairedQueueAndHistory:
 
         kw.setdefault("status", CaseStatus.WAIT_APPT)
         kw.setdefault("doctor_admission_flow", "scheduled")
+        selection = kw.pop("selection", "eda")
         kw.setdefault(
             "structured_data",
-            {"patient": {"name": f"Paciente {kw.get('exam_type', 'eda')}", "age": 55, "gender": "F"}},
+            {"patient": {"name": f"Paciente {selection}", "age": 55, "gender": "F"}},
         )
         approved = tuple(kw.pop("approved", ()))
         detected = tuple(kw.pop("detected", ()))
         reasons = kw.pop("reasons", {})
         case = Case.objects.create(created_by=nir, doctor_decision="accept", **kw)
-        proc_types: tuple[str, ...] = (
-            ("eda", "colonoscopy") if case.exam_type == "eda_colonoscopy" else (case.exam_type,)
-        )
+        proc_types: tuple[str, ...] = ("eda", "colonoscopy") if selection == "eda_colonoscopy" else (selection,)
         for pt in proc_types:
             row = CaseProcedure.objects.create(case=case, procedure_type=pt, declared_by_nir=True)
             fields: list[str] = []
@@ -457,10 +451,10 @@ class TestSchedulerPairedQueueAndHistory:
     def test_pending_counts_combined_once_across_three_groups(self, client) -> None:
         nir = self._login_as(client, "nir")
         # WAIT_APPT combinado + notice combinado + issue combinado + EDA simples.
-        self._make_case(nir, exam_type="eda_colonoscopy", approved=("eda", "colonoscopy"))
-        notice = self._make_notice(nir, exam_type="eda_colonoscopy", approved=("eda", "colonoscopy"))
-        self._make_issue(nir, exam_type="eda_colonoscopy", approved=("eda", "colonoscopy"))
-        self._make_case(nir, exam_type="eda", approved=("eda",))
+        self._make_case(nir, selection="eda_colonoscopy", approved=("eda", "colonoscopy"))
+        notice = self._make_notice(nir, selection="eda_colonoscopy", approved=("eda", "colonoscopy"))
+        self._make_issue(nir, selection="eda_colonoscopy", approved=("eda", "colonoscopy"))
+        self._make_case(nir, selection="eda", approved=("eda",))
         self._login_as(client, "scheduler")
 
         content = client.get("/scheduler/").content.decode()
@@ -475,14 +469,13 @@ class TestSchedulerPairedQueueAndHistory:
         # ACK de notice combinado continua operacional (R6).
         assert f"/scheduler/{notice.case_id}/immediate-ack/" in content
 
-    def _make_notice(self, nir: Any, *, exam_type: str, approved: tuple[str, ...]) -> Case:
+    def _make_notice(self, nir: Any, *, selection: str, approved: tuple[str, ...]) -> Case:
         case = Case.objects.create(
             created_by=nir,
             status=CaseStatus.WAIT_R1_CLEANUP_THUMBS,
-            exam_type=exam_type,
             doctor_decision="accept",
             doctor_admission_flow="immediate",
-            structured_data={"patient": {"name": f"Notice {exam_type}", "age": 60, "gender": "F"}},
+            structured_data={"patient": {"name": f"Notice {selection}", "age": 60, "gender": "F"}},
         )
         CaseEvent.objects.create(
             case=case,
@@ -491,7 +484,7 @@ class TestSchedulerPairedQueueAndHistory:
             event_type="IMMEDIATE_ADMISSION_OPERATIONAL_NOTICE",
             timestamp=timezone.now(),
         )
-        for pt in ("eda", "colonoscopy") if exam_type == "eda_colonoscopy" else (exam_type,):
+        for pt in ("eda", "colonoscopy") if selection == "eda_colonoscopy" else (selection,):
             CaseProcedure.objects.create(
                 case=case,
                 procedure_type=pt,
@@ -500,18 +493,17 @@ class TestSchedulerPairedQueueAndHistory:
             )
         return case
 
-    def _make_issue(self, nir: Any, *, exam_type: str, approved: tuple[str, ...]) -> Case:
+    def _make_issue(self, nir: Any, *, selection: str, approved: tuple[str, ...]) -> Case:
         case = Case.objects.create(
             created_by=nir,
             status=CaseStatus.WAIT_R1_CLEANUP_THUMBS,
-            exam_type=exam_type,
             doctor_decision="accept",
             doctor_admission_flow="scheduled",
             post_schedule_issue_status="opened",
             post_acceptance_issue_context="operational_notice",
-            structured_data={"patient": {"name": f"Issue {exam_type}", "age": 50, "gender": "M"}},
+            structured_data={"patient": {"name": f"Issue {selection}", "age": 50, "gender": "M"}},
         )
-        for pt in ("eda", "colonoscopy") if exam_type == "eda_colonoscopy" else (exam_type,):
+        for pt in ("eda", "colonoscopy") if selection == "eda_colonoscopy" else (selection,):
             CaseProcedure.objects.create(
                 case=case,
                 procedure_type=pt,
@@ -529,7 +521,7 @@ class TestSchedulerPairedQueueAndHistory:
         self._make_case(
             nir,
             status=CaseStatus.WAIT_R1_CLEANUP_THUMBS,
-            exam_type="eda_colonoscopy",
+            selection="eda_colonoscopy",
             approved=("eda", "colonoscopy"),
             detected=("eda", "colonoscopy"),
             scheduler=scheduler,
@@ -550,15 +542,13 @@ class TestSchedulerPairedQueueAndHistory:
     def test_historical_combined_without_rows_not_listed(self, client) -> None:
         """R4: caso sem rows aprovadas NÃO aparece no bucket Combinado.
 
-        O fallback legado ``filter(exam_type=eda_colonoscopy, procedures__isnull=True)``
-        foi removido (Slice 009): buckets exigem rows aprovadas; caso sem
-        autorização projetada não aparece. Apenas o caso com rows é listado.
+        Buckets exigem rows aprovadas: caso sem autorização projetada não
+        aparece; apenas o caso com rows é listado (cenário de ausência).
         """
         nir = self._login_as(client, "nir")
         Case.objects.create(
             created_by=nir,
             status=CaseStatus.CLEANED,
-            exam_type="eda_colonoscopy",
             doctor_decision="accept",
             doctor_admission_flow="scheduled",
             appointment_status="confirmed",
@@ -569,7 +559,7 @@ class TestSchedulerPairedQueueAndHistory:
         self._make_case(
             nir,
             status=CaseStatus.CLEANED,
-            exam_type="eda_colonoscopy",
+            selection="eda_colonoscopy",
             approved=("eda", "colonoscopy"),
             detected=("eda", "colonoscopy"),
             appointment_status="confirmed",
@@ -592,7 +582,7 @@ class TestSchedulerPairedQueueAndHistory:
                 self._make_case(
                     nir,
                     status=CaseStatus.CLEANED,
-                    exam_type="eda_colonoscopy",
+                    selection="eda_colonoscopy",
                     approved=("eda", "colonoscopy"),
                     detected=("eda", "colonoscopy"),
                     appointment_status="confirmed",
@@ -614,7 +604,7 @@ class TestSchedulerPairedQueueAndHistory:
 
     def test_notice_ack_no_duplication_for_combined(self, client) -> None:
         nir = self._login_as(client, "nir")
-        case = self._make_notice(nir, exam_type="eda_colonoscopy", approved=("eda", "colonoscopy"))
+        case = self._make_notice(nir, selection="eda_colonoscopy", approved=("eda", "colonoscopy"))
         self._login_as(client, "scheduler")
 
         # Combinado aparece UMA vez na fila (dois componentes não duplicam).
@@ -698,12 +688,10 @@ class TestSchedulerExcludesAndBlocksUnauthorized:
         declared: tuple[str, ...],
         detected: tuple[str, ...],
         approved: tuple[str, ...],
-        exam_type: str = "eda",
     ) -> Case:
         case = Case.objects.create(
             created_by=nir,
             status=CaseStatus.WAIT_APPT,
-            exam_type=exam_type,
             doctor_decision="accept",
             doctor_admission_flow="scheduled",
             structured_data={"patient": {"name": name, "age": 50, "gender": "F"}},
@@ -722,7 +710,6 @@ class TestSchedulerExcludesAndBlocksUnauthorized:
         case = Case.objects.create(
             created_by=nir,
             status=CaseStatus.WAIT_R1_CLEANUP_THUMBS,
-            exam_type="eda",
             doctor_decision="accept",
             doctor_admission_flow="immediate",
             structured_data={"patient": {"name": name, "age": 60, "gender": "F"}},
@@ -748,7 +735,6 @@ class TestSchedulerExcludesAndBlocksUnauthorized:
         case = Case.objects.create(
             created_by=nir,
             status=CaseStatus.WAIT_R1_CLEANUP_THUMBS,
-            exam_type="eda",
             doctor_decision="accept",
             doctor_admission_flow="scheduled",
             post_schedule_issue_status="opened",
@@ -769,7 +755,6 @@ class TestSchedulerExcludesAndBlocksUnauthorized:
         case = Case.objects.create(
             created_by=scheduler,
             status=CaseStatus.WAIT_R1_CLEANUP_THUMBS,
-            exam_type="eda",
             doctor_decision="accept",
             doctor_admission_flow="scheduled",
             scheduler=scheduler,
@@ -792,7 +777,6 @@ class TestSchedulerExcludesAndBlocksUnauthorized:
         case = Case.objects.create(
             created_by=nir,
             status=CaseStatus.CLEANED,
-            exam_type="eda",
             doctor_decision="accept",
             doctor_admission_flow="scheduled",
             appointment_status="confirmed",
@@ -971,7 +955,6 @@ class TestSchedulerExcludesAndBlocksUnauthorized:
             declared=(),
             detected=(),
             approved=(),
-            exam_type="eda_colonoscopy",
         )
         # Combinado com ambas aprovadas — aparece uma vez.
         self._make_wait_appt(
@@ -980,7 +963,6 @@ class TestSchedulerExcludesAndBlocksUnauthorized:
             declared=("eda", "colonoscopy"),
             detected=("eda", "colonoscopy"),
             approved=("eda", "colonoscopy"),
-            exam_type="eda_colonoscopy",
         )
         self._login_as(client, "scheduler")
         content = client.get("/scheduler/").content.decode()
@@ -1008,7 +990,6 @@ class TestSchedulerExcludesAndBlocksUnauthorized:
         case = Case.objects.create(
             created_by=nir,
             status=CaseStatus.WAIT_APPT,
-            exam_type="eda",
             doctor_decision="accept",
             doctor_admission_flow="scheduled",
             appointment_status="confirmed",
@@ -1104,7 +1085,7 @@ class TestSchedulerExcludesAndBlocksUnauthorized:
         (somente declarada) pode permanecer ``PENDING``.
         """
         nir = self._login_as(client, "nir")
-        case = Case.objects.create(created_by=nir, status=CaseStatus.WAIT_APPT, exam_type="colonoscopy")
+        case = Case.objects.create(created_by=nir, status=CaseStatus.WAIT_APPT)
         # Colonoscopia declarada e autorizada, mas NÃO detectada (inclusão médica).
         attach_procedure_projection(
             case,
@@ -1119,14 +1100,14 @@ class TestSchedulerExcludesAndBlocksUnauthorized:
         assert row.detection_status == DetectionStatus.NOT_DETECTED
 
         # Aprovação não detectada SEM razão → ValueError (contrato de domínio).
-        case_no_reason = Case.objects.create(created_by=nir, status=CaseStatus.WAIT_APPT, exam_type="colonoscopy")
+        case_no_reason = Case.objects.create(created_by=nir, status=CaseStatus.WAIT_APPT)
         with pytest.raises(ValueError):
             attach_procedure_projection(
                 case_no_reason, declared=("colonoscopy",), detected=(), approved=("colonoscopy",)
             )
 
         # Sobreposição approved/denied → ValueError.
-        case_overlap = Case.objects.create(created_by=nir, status=CaseStatus.WAIT_APPT, exam_type="colonoscopy")
+        case_overlap = Case.objects.create(created_by=nir, status=CaseStatus.WAIT_APPT)
         with pytest.raises(ValueError):
             attach_procedure_projection(
                 case_overlap,

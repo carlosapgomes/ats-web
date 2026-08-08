@@ -19,7 +19,8 @@ from django.core.files.uploadedfile import SimpleUploadedFile
 from django.test import override_settings
 from django.urls import reverse
 
-from apps.cases.models import Case, CaseEvent, CaseProcedure, CaseStatus, ExamType
+from apps.cases.models import Case, CaseEvent, CaseProcedure, CaseStatus, ProcedureType
+from apps.cases.procedures import get_declared_procedure_types
 
 User = get_user_model()
 
@@ -104,7 +105,8 @@ class TestUploadRequiresExamType:
         )
         assert response.status_code == 200
         case = Case.objects.get()
-        assert case.exam_type == ExamType.EDA
+        # Slice 011-B (R3): projeção declarada via rows, sem a coluna.
+        assert get_declared_procedure_types(case, fallback_to_bridge=False) == (ProcedureType.EDA,)
 
 
 # ── R2: lote homogêneo ───────────────────────────────────────────────────
@@ -122,7 +124,8 @@ class TestBatchHomogeneity:
             follow=True,
         )
         assert Case.objects.count() == 3
-        assert set(Case.objects.values_list("exam_type", flat=True)) == {ExamType.EDA}
+        declared = set(CaseProcedure.objects.filter(declared_by_nir=True).values_list("procedure_type", flat=True))
+        assert declared == {ProcedureType.EDA}
 
     @override_settings(COLONOSCOPY_INTAKE_ENABLED=True)
     def test_colonoscopy_batch_creates_all_colonoscopy(self, client) -> None:
@@ -135,7 +138,8 @@ class TestBatchHomogeneity:
             follow=True,
         )
         assert Case.objects.count() == 3
-        assert set(Case.objects.values_list("exam_type", flat=True)) == {ExamType.COLONOSCOPY}
+        declared = set(CaseProcedure.objects.filter(declared_by_nir=True).values_list("procedure_type", flat=True))
+        assert declared == {ProcedureType.COLONOSCOPY}
 
 
 # ── R3: flag global bloqueia somente intake ──────────────────────────────
@@ -166,7 +170,7 @@ class TestIntakeFlag:
         assert Case.objects.count() == 1
         # Slice 008 (R5): prova row declarada, não a coluna.
         assert CaseProcedure.objects.filter(
-            case=Case.objects.get(), procedure_type=ExamType.EDA, declared_by_nir=True
+            case=Case.objects.get(), procedure_type=ProcedureType.EDA, declared_by_nir=True
         ).exists()
 
     def test_existing_colonoscopy_readable_and_processable_when_flag_off(self, client, user) -> None:
@@ -176,13 +180,19 @@ class TestIntakeFlag:
         """
         case = Case.objects.create(
             created_by=user,
-            exam_type=ExamType.COLONOSCOPY,
             agency_record_number="2026-C1",
         )
-        # Leitura por helper não-intake (consulta de fila) independe da flag
+        CaseProcedure.objects.create(
+            case=case,
+            procedure_type=ProcedureType.COLONOSCOPY,
+            declared_by_nir=True,
+        )
+        # Leitura por helper não-intake (consulta de fila por row declarada)
+        # independe da flag.
         fetched = Case.objects.filter(
             status=case.status,
-            exam_type=ExamType.COLONOSCOPY,
+            procedures__procedure_type=ProcedureType.COLONOSCOPY,
+            procedures__declared_by_nir=True,
         ).get(pk=case.pk)
         assert fetched.agency_record_number == "2026-C1"
 
@@ -233,7 +243,9 @@ class TestHtmlRadios:
 
 @pytest.mark.django_db
 class TestAuditViaUpload:
-    def test_case_created_event_contains_exam_type(self, client) -> None:
+    def test_case_created_event_carries_status_and_declared_rows(self, client) -> None:
+        """R3 (011-B): CASE_CREATED sobrevive ao cutover — evento com status
+        e a projeção declarada via rows; sem dependência da chave exam_type."""
         client, _ = _nir_client(client)
         client.post(
             reverse("intake:home"),
@@ -242,7 +254,27 @@ class TestAuditViaUpload:
         )
         case = Case.objects.get()
         event = CaseEvent.objects.get(case=case, event_type="CASE_CREATED")
-        assert event.payload.get("exam_type") == ExamType.EDA
+        # Contrato que sobrevive ao cutover (011-C): status no momento da
+        # criação; a projeção declarada vem das rows.
+        assert event.payload.get("status") == CaseStatus.NEW
+        assert get_declared_procedure_types(case, fallback_to_bridge=False) == (ProcedureType.EDA,)
+
+    @override_settings(COLONOSCOPY_INTAKE_ENABLED=True)
+    def test_combined_upload_projects_exactly_two_declared_rows(self, client) -> None:
+        """011-B: fluxo canônico construído apenas com rows — upload combinado
+        projeta exatamente duas rows declaradas (sem coluna)."""
+        client, _ = _nir_client(client)
+        client.post(
+            reverse("intake:home"),
+            {"pdf_files": [_simple_pdf()], "exam_type": "eda_colonoscopy"},
+            follow=True,
+        )
+        case = Case.objects.get()
+        assert get_declared_procedure_types(case, fallback_to_bridge=False) == (
+            ProcedureType.EDA,
+            ProcedureType.COLONOSCOPY,
+        )
+        assert CaseProcedure.objects.filter(case=case, declared_by_nir=True).count() == 2
 
 
 # ── R4: badges iniciais ──────────────────────────────────────────────────
@@ -250,23 +282,22 @@ class TestAuditViaUpload:
 
 @pytest.mark.django_db
 class TestBadges:
-    def _make_case(self, user, exam_type: str, record: str) -> Case:
-        # Slice 008 review fix F4: fixture NIR explícita — rows declaradas
-        # autorizam o badge (intake em modo estrito, sem fallback da ponte).
+    def _make_case(self, user, selection: str, record: str) -> Case:
+        # Slice 008 review fix F4/011-B: fixture NIR explícita — rows declaradas
+        # autorizam o badge (intake em modo estrito, sem fallback da coluna).
         case = Case.objects.create(
             created_by=user,
-            exam_type=exam_type,
             agency_record_number=record,
         )
-        for procedure_type in (ExamType.EDA, ExamType.COLONOSCOPY):
-            if exam_type == procedure_type or exam_type == "eda_colonoscopy":
+        for procedure_type in (ProcedureType.EDA, ProcedureType.COLONOSCOPY):
+            if selection == procedure_type or selection == "eda_colonoscopy":
                 CaseProcedure.objects.create(case=case, procedure_type=procedure_type, declared_by_nir=True)
         return case
 
     def test_badge_on_intake_home_recent_cases(self, client) -> None:
         client, nir_user = _nir_client(client)
-        self._make_case(nir_user, ExamType.EDA, "2026-E1")
-        self._make_case(nir_user, ExamType.COLONOSCOPY, "2026-C1")
+        self._make_case(nir_user, "eda", "2026-E1")
+        self._make_case(nir_user, "colonoscopy", "2026-C1")
         response = client.get(reverse("intake:home"))
         content = response.content.decode()
         assert "2026-E1" in content and "2026-C1" in content
@@ -276,7 +307,7 @@ class TestBadges:
 
     def test_badge_on_my_cases(self, client, user) -> None:
         client, _ = _nir_client(client)
-        self._make_case(user, ExamType.COLONOSCOPY, "2026-C2")
+        self._make_case(user, "colonoscopy", "2026-C2")
         response = client.get(reverse("intake:my_cases"))
         content = response.content.decode()
         assert "2026-C2" in content
@@ -285,7 +316,7 @@ class TestBadges:
 
     def test_badge_on_nir_case_detail(self, client, user) -> None:
         client, _ = _nir_client(client)
-        case = self._make_case(user, ExamType.EDA, "2026-E2")
+        case = self._make_case(user, "eda", "2026-E2")
         response = client.get(reverse("intake:case_detail", args=[case.case_id]))
         assert response.status_code == 200
         content = response.content.decode()
@@ -301,14 +332,13 @@ class TestBadges:
         client, _ = _doctor_client(client)
         case = Case.objects.create(
             created_by=user,
-            exam_type=ExamType.COLONOSCOPY,
             structured_data={"patient": {"name": "Paciente Badge", "age": 60}},
         )
         case = advance_to(case, CaseStatus.WAIT_DOCTOR)
         assert case.status == CaseStatus.WAIT_DOCTOR
         CaseProcedure.objects.create(
             case=case,
-            procedure_type=ExamType.COLONOSCOPY,
+            procedure_type=ProcedureType.COLONOSCOPY,
             declared_by_nir=True,
             detection_status="detected",
         )

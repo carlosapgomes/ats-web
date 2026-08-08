@@ -6,7 +6,7 @@ import pytest
 from django.contrib.auth import get_user_model
 from django.urls import reverse
 
-from apps.cases.models import Case, CaseProcedure, CaseStatus, ExamType
+from apps.cases.models import Case, CaseProcedure, CaseStatus, ProcedureType
 
 User = get_user_model()
 PAGE_URL = reverse("intake:my_cases")
@@ -313,25 +313,24 @@ class TestMyCasesList:
 class TestMyCasesExamTypeFilter:
     """R1: NIR compõe tipo de exame (Todos/EDA/Colonoscopia) com status e busca."""
 
-    def _make(self, user, exam_type: str, record: str, status: str = CaseStatus.NEW) -> Case:
-        # Slice 008 (R5): fixture NIR explícita — rows declaradas autorizam o
-        # filtro por dimensão declarada (sem fallback da coluna).
+    def _make(self, user, selection: str, record: str, status: str = CaseStatus.NEW) -> Case:
+        # Slice 008 (R5)/011-B: fixture NIR explícita — rows declaradas
+        # autorizam o filtro por dimensão declarada (sem coluna).
         case = Case.objects.create(
             created_by=user,
-            exam_type=exam_type,
             agency_record_number=record,
             status=status,
         )
-        for procedure_type in (ExamType.EDA, ExamType.COLONOSCOPY):
-            if exam_type == procedure_type or exam_type == "eda_colonoscopy":
+        for procedure_type in (ProcedureType.EDA, ProcedureType.COLONOSCOPY):
+            if selection == procedure_type or selection == "eda_colonoscopy":
                 CaseProcedure.objects.create(case=case, procedure_type=procedure_type, declared_by_nir=True)
         return case
 
     def test_default_todos_shows_both_types(self, client) -> None:
         """Sem parâmetro, Todos default mostra EDA e Colonoscopia."""
         client, user = _nir_client(client)
-        self._make(user, ExamType.EDA, "EDA-001")
-        self._make(user, ExamType.COLONOSCOPY, "COL-001")
+        self._make(user, "eda", "EDA-001")
+        self._make(user, "colonoscopy", "COL-001")
 
         response = client.get(PAGE_URL)
         assert response.status_code == 200
@@ -342,8 +341,8 @@ class TestMyCasesExamTypeFilter:
     def test_filter_eda(self, client) -> None:
         """?exam_type=eda lista somente casos EDA."""
         client, user = _nir_client(client)
-        self._make(user, ExamType.EDA, "EDA-001")
-        self._make(user, ExamType.COLONOSCOPY, "COL-001")
+        self._make(user, "eda", "EDA-001")
+        self._make(user, "colonoscopy", "COL-001")
 
         response = client.get(PAGE_URL + "?exam_type=eda")
         content = response.content.decode()
@@ -353,8 +352,8 @@ class TestMyCasesExamTypeFilter:
     def test_filter_colonoscopy(self, client) -> None:
         """?exam_type=colonoscopy lista somente casos Colonoscopia."""
         client, user = _nir_client(client)
-        self._make(user, ExamType.EDA, "EDA-001")
-        self._make(user, ExamType.COLONOSCOPY, "COL-001")
+        self._make(user, "eda", "EDA-001")
+        self._make(user, "colonoscopy", "COL-001")
 
         response = client.get(PAGE_URL + "?exam_type=colonoscopy")
         content = response.content.decode()
@@ -364,8 +363,8 @@ class TestMyCasesExamTypeFilter:
     def test_invalid_exam_type_falls_back_to_all(self, client) -> None:
         """Tipo inválido cai para Todos (default), sem erro."""
         client, user = _nir_client(client)
-        self._make(user, ExamType.EDA, "EDA-001")
-        self._make(user, ExamType.COLONOSCOPY, "COL-001")
+        self._make(user, "eda", "EDA-001")
+        self._make(user, "colonoscopy", "COL-001")
 
         response = client.get(PAGE_URL + "?exam_type=cpre")
         content = response.content.decode()
@@ -375,9 +374,9 @@ class TestMyCasesExamTypeFilter:
     def test_composes_with_status(self, client) -> None:
         """Tipo compõe com status (conjunção)."""
         client, user = _nir_client(client)
-        self._make(user, ExamType.EDA, "EDA-WAIT", status=CaseStatus.WAIT_DOCTOR)
-        self._make(user, ExamType.EDA, "EDA-NEW", status=CaseStatus.NEW)
-        self._make(user, ExamType.COLONOSCOPY, "COL-WAIT", status=CaseStatus.WAIT_DOCTOR)
+        self._make(user, "eda", "EDA-WAIT", status=CaseStatus.WAIT_DOCTOR)
+        self._make(user, "eda", "EDA-NEW", status=CaseStatus.NEW)
+        self._make(user, "colonoscopy", "COL-WAIT", status=CaseStatus.WAIT_DOCTOR)
 
         response = client.get(PAGE_URL + "?exam_type=eda&status=WAIT_DOCTOR")
         content = response.content.decode()
@@ -388,9 +387,9 @@ class TestMyCasesExamTypeFilter:
     def test_composes_with_search_term(self, client) -> None:
         """Tipo compõe com busca por ocorrência (conjunção)."""
         client, user = _nir_client(client)
-        self._make(user, ExamType.COLONOSCOPY, "2026-COL-001")
-        self._make(user, ExamType.EDA, "2026-COL-002")
-        self._make(user, ExamType.COLONOSCOPY, "2026-EDA-001")
+        self._make(user, "colonoscopy", "2026-COL-001")
+        self._make(user, "eda", "2026-COL-002")
+        self._make(user, "colonoscopy", "2026-EDA-001")
 
         response = client.get(PAGE_URL + "?exam_type=colonoscopy&q=COL")
         content = response.content.decode()
@@ -427,7 +426,7 @@ class TestMyCasesExamTypeFilter:
     def test_cards_show_exam_type_badge(self, client) -> None:
         """Cards exibem badge persistido do tipo de exame."""
         client, user = _nir_client(client)
-        self._make(user, ExamType.COLONOSCOPY, "COL-BADGE")
+        self._make(user, "colonoscopy", "COL-BADGE")
 
         response = client.get(PAGE_URL)
         content = response.content.decode()

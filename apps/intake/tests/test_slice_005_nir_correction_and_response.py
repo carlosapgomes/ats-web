@@ -36,6 +36,7 @@ from apps.cases.models import (
     ExamType,
     ProcedureType,
 )
+from apps.cases.procedures import get_declared_procedure_types
 from apps.cases.services import claim_case_lock
 from apps.intake.services import correct_case_exam_type, is_exam_type_correction_eligible
 
@@ -85,7 +86,6 @@ def _make_case(
     """Cria caso com projeção declarada (rows) e suggested_action de revisão."""
     case = Case.objects.create(
         created_by=user,
-        exam_type=exam_type,
         status=status,
         extracted_text="RELATÓRIO DE OCORRÊNCIAS\nGoverno do Estado da Bahia\nCódigo: 123\nMotivo da Solicitação: EDA",
         agency_record_number="REC-S5-001",
@@ -183,7 +183,7 @@ class TestCorrectionSetEligibility:
         assert result.case_id == original_id
         reloaded = Case.objects.get(pk=case.pk)
         assert reloaded.status == CaseStatus.LLM_STRUCT
-        assert reloaded.exam_type == ExamType.EDA
+        assert get_declared_procedure_types(reloaded, fallback_to_bridge=False) == (ProcedureType.EDA,)
         eda = CaseProcedure.objects.get(case=reloaded, procedure_type=ProcedureType.EDA)
         colon = CaseProcedure.objects.get(case=reloaded, procedure_type=ProcedureType.COLONOSCOPY)
         assert eda.declared_by_nir is True
@@ -212,7 +212,10 @@ class TestCorrectionSetEligibility:
 
         reloaded = Case.objects.get(pk=case.pk)
         assert reloaded.status == CaseStatus.LLM_STRUCT
-        assert reloaded.exam_type == EDA_COLONOSCOPY
+        assert get_declared_procedure_types(reloaded, fallback_to_bridge=False) == (
+            ProcedureType.EDA,
+            ProcedureType.COLONOSCOPY,
+        )
         declared = {p.procedure_type for p in CaseProcedure.objects.filter(case=reloaded, declared_by_nir=True)}
         assert declared == {ProcedureType.EDA, ProcedureType.COLONOSCOPY}
         assert pipeline_calls == [case.case_id]
@@ -350,7 +353,7 @@ class TestCorrectionSetEligibility:
 
         reloaded = Case.objects.get(pk=case.pk)
         assert reloaded.status == CaseStatus.WAIT_DOCTOR
-        assert reloaded.exam_type == ExamType.EDA
+        assert get_declared_procedure_types(reloaded, fallback_to_bridge=False) == (ProcedureType.EDA,)
         # Comparação em voo continua visível no refresh (sem CTA).
         client, _ = _nir_client(client, "nir-wd-view@test.com")
         response = client.get(reverse("intake:case_detail", args=[case.case_id]))
@@ -387,7 +390,7 @@ class TestCorrectionSetEligibility:
 
         reloaded = Case.objects.get(pk=case.pk)
         assert reloaded.status == CaseStatus.WAIT_R1_CLEANUP_THUMBS
-        assert reloaded.exam_type == ExamType.EDA
+        assert get_declared_procedure_types(reloaded, fallback_to_bridge=False) == (ProcedureType.EDA,)
         assert enqueue_calls == []
 
 
@@ -599,7 +602,6 @@ class TestResubmissionCombined:
             client, user = _nir_client(client, "nir-resub5@test.com")
             original = Case.objects.create(
                 created_by=user,
-                exam_type=ExamType.EDA,
                 agency_record_number="2026-EDA-ORIG",
             )
             CaseProcedure.objects.create(case=original, procedure_type=ProcedureType.EDA, declared_by_nir=True)
@@ -636,7 +638,7 @@ class TestResubmissionCombined:
 
         with override_settings(COLONOSCOPY_INTAKE_ENABLED=False):
             client, user = _nir_client(client, "nir-resub-off@test.com")
-            original = Case.objects.create(created_by=user, exam_type=ExamType.EDA)
+            original = Case.objects.create(created_by=user)
             with patch("apps.intake.tasks.enqueue_pdf_extraction") as mock_enqueue:
                 response = client.post(
                     reverse("intake:corrected_resubmission", args=[original.case_id]),
@@ -666,27 +668,21 @@ class TestDeclaredFilters:
         client, user = _nir_client(client, "nir-filter5@test.com")
         eda_case = _make_case(user=user, exam_type=ExamType.EDA, status=CaseStatus.NEW, with_declared_rows=False)
         CaseProcedure.objects.create(case=eda_case, procedure_type=ProcedureType.EDA, declared_by_nir=True)
-        eda_case.exam_type = ExamType.EDA
-        eda_case.save()
 
         combined_case = _make_case(
             user=user, exam_type=EDA_COLONOSCOPY, status=CaseStatus.NEW, with_declared_rows=False
         )
         for t in (ProcedureType.EDA, ProcedureType.COLONOSCOPY):
             CaseProcedure.objects.create(case=combined_case, procedure_type=t, declared_by_nir=True)
-        combined_case.exam_type = EDA_COLONOSCOPY
-        combined_case.save()
 
         colon_case = _make_case(
             user=user, exam_type=ExamType.COLONOSCOPY, status=CaseStatus.NEW, with_declared_rows=False
         )
         CaseProcedure.objects.create(case=colon_case, procedure_type=ProcedureType.COLONOSCOPY, declared_by_nir=True)
-        colon_case.exam_type = ExamType.COLONOSCOPY
-        colon_case.save()
 
         # Slice 008 (R3): caso legado/inválido sem rows é fail-closed — não cai
         # em bucket específico (não recebe default da coluna).
-        orphan = Case.objects.create(created_by=user, exam_type=ExamType.COLONOSCOPY, status=CaseStatus.NEW)
+        orphan = Case.objects.create(created_by=user, status=CaseStatus.NEW)
 
         response = client.get(reverse("intake:my_cases") + "?exam_type=eda_colonoscopy")
         content = response.content.decode()
@@ -749,8 +745,6 @@ class TestDeclaredFilters:
         combined = _make_case(user=user, exam_type=EDA_COLONOSCOPY, status=CaseStatus.CLEANED, with_declared_rows=False)
         for t in (ProcedureType.EDA, ProcedureType.COLONOSCOPY):
             CaseProcedure.objects.create(case=combined, procedure_type=t, declared_by_nir=True)
-        combined.exam_type = EDA_COLONOSCOPY
-        combined.save()
         eda_case = _make_case(user=user, exam_type=ExamType.EDA, status=CaseStatus.CLEANED, with_declared_rows=False)
         CaseProcedure.objects.create(case=eda_case, procedure_type=ProcedureType.EDA, declared_by_nir=True)
 
@@ -770,8 +764,6 @@ class TestDeclaredFilters:
         combined = _make_case(user=user, exam_type=EDA_COLONOSCOPY, status=CaseStatus.CLEANED, with_declared_rows=False)
         for t in (ProcedureType.EDA, ProcedureType.COLONOSCOPY):
             CaseProcedure.objects.create(case=combined, procedure_type=t, declared_by_nir=True)
-        combined.exam_type = EDA_COLONOSCOPY
-        combined.save()
 
         response = client.get(reverse("intake:closed_cases_search") + "?exam_type=eda_colonoscopy")
         content = response.content.decode()

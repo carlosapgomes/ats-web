@@ -60,11 +60,11 @@ class TestSchedulerQueueExamTypeFilters:
         session.save()
         return user
 
-    def _approve_procedures(self, case: Case, exam_type: str) -> None:
+    def _approve_procedures(self, case: Case, selection: str) -> None:
         """Cria rows aprovadas coerentes (R5) — a fila CHD projeta do aprovado."""
         from apps.cases.models import CaseProcedure, DoctorDisposition
 
-        types = ("eda", "colonoscopy") if exam_type == "eda_colonoscopy" else (exam_type,)
+        types = ("eda", "colonoscopy") if selection == "eda_colonoscopy" else (selection,)
         for procedure_type in types:
             CaseProcedure.objects.create(
                 case=case,
@@ -73,24 +73,22 @@ class TestSchedulerQueueExamTypeFilters:
                 doctor_disposition=DoctorDisposition.APPROVED,
             )
 
-    def _make_wait_appt(self, nir: Any, *, exam_type: str, name: str, record: str) -> Case:
+    def _make_wait_appt(self, nir: Any, *, selection: str, name: str, record: str) -> Case:
         case = Case.objects.create(
             created_by=nir,
             status=CaseStatus.WAIT_APPT,
-            exam_type=exam_type,
             agency_record_number=record,
             doctor_decision="accept",
             doctor_admission_flow="scheduled",
             structured_data={"patient": {"name": name, "age": 55, "gender": "F"}},
         )
-        self._approve_procedures(case, exam_type)
+        self._approve_procedures(case, selection)
         return case
 
-    def _make_immediate_notice(self, nir: Any, *, exam_type: str, name: str, record: str) -> Case:
+    def _make_immediate_notice(self, nir: Any, *, selection: str, name: str, record: str) -> Case:
         case = Case.objects.create(
             created_by=nir,
             status=CaseStatus.WAIT_R1_CLEANUP_THUMBS,
-            exam_type=exam_type,
             agency_record_number=record,
             doctor_decision="accept",
             doctor_admission_flow="immediate",
@@ -103,17 +101,16 @@ class TestSchedulerQueueExamTypeFilters:
             event_type="IMMEDIATE_ADMISSION_OPERATIONAL_NOTICE",
             timestamp=timezone.now(),
         )
-        self._approve_procedures(case, exam_type)
+        self._approve_procedures(case, selection)
         return case
 
-    def _make_operational_issue(self, nir: Any, *, exam_type: str, name: str, record: str) -> Case:
+    def _make_operational_issue(self, nir: Any, *, selection: str, name: str, record: str) -> Case:
         # Status fora de WAIT_APPT para manter os três grupos disjuntos no
         # teste (caso com issue em WAIT_APPT aparece também na lista pendente,
         # comportamento real do sistema que os contadores seguem fielmente).
         case = Case.objects.create(
             created_by=nir,
             status=CaseStatus.WAIT_R1_CLEANUP_THUMBS,
-            exam_type=exam_type,
             agency_record_number=record,
             doctor_decision="accept",
             doctor_admission_flow="scheduled",
@@ -121,14 +118,13 @@ class TestSchedulerQueueExamTypeFilters:
             post_acceptance_issue_context="operational_notice",
             structured_data={"patient": {"name": name, "age": 50, "gender": "M"}},
         )
-        self._approve_procedures(case, exam_type)
+        self._approve_procedures(case, selection)
         return case
 
-    def _make_processed(self, scheduler_user: Any, nir: Any, *, exam_type: str, name: str, record: str) -> Case:
+    def _make_processed(self, scheduler_user: Any, nir: Any, *, selection: str, name: str, record: str) -> Case:
         case = Case.objects.create(
             created_by=nir,
             status=CaseStatus.WAIT_R1_CLEANUP_THUMBS,
-            exam_type=exam_type,
             agency_record_number=record,
             doctor_decision="accept",
             doctor_admission_flow="scheduled",
@@ -137,23 +133,22 @@ class TestSchedulerQueueExamTypeFilters:
             appointment_decided_at=timezone.now(),
             structured_data={"patient": {"name": name, "age": 45, "gender": "F"}},
         )
-        self._approve_procedures(case, exam_type)
+        self._approve_procedures(case, selection)
         return case
 
     def _make_historical(
-        self, nir: Any, *, exam_type: str, name: str, record: str, patient_name: str | None = None
+        self, nir: Any, *, selection: str, name: str, record: str, patient_name: str | None = None
     ) -> Case:
         case = Case.objects.create(
             created_by=nir,
             status=CaseStatus.CLEANED,
-            exam_type=exam_type,
             agency_record_number=record,
             doctor_decision="accept",
             doctor_admission_flow="scheduled",
             appointment_status="confirmed",
             structured_data={"patient": {"name": patient_name or name, "age": 60, "gender": "F"}},
         )
-        self._approve_procedures(case, exam_type)
+        self._approve_procedures(case, selection)
         return case
 
     # ── R1: contagens pendentes por tipo fecham com o total ───────────
@@ -161,12 +156,12 @@ class TestSchedulerQueueExamTypeFilters:
     def test_pending_type_counts_close_with_total(self, client) -> None:
         """Contadores por tipo somam o mesmo universo do badge primário."""
         nir = self._login_as(client, "nir")
-        self._make_wait_appt(nir, exam_type="eda", name="EDA Wait", record="W-EDA")
-        self._make_wait_appt(nir, exam_type="colonoscopy", name="COL Wait", record="W-COL")
-        self._make_immediate_notice(nir, exam_type="eda", name="EDA Notice", record="N-EDA")
-        self._make_immediate_notice(nir, exam_type="colonoscopy", name="COL Notice", record="N-COL")
-        self._make_operational_issue(nir, exam_type="eda", name="EDA Issue", record="I-EDA")
-        self._make_operational_issue(nir, exam_type="colonoscopy", name="COL Issue", record="I-COL")
+        self._make_wait_appt(nir, selection="eda", name="EDA Wait", record="W-EDA")
+        self._make_wait_appt(nir, selection="colonoscopy", name="COL Wait", record="W-COL")
+        self._make_immediate_notice(nir, selection="eda", name="EDA Notice", record="N-EDA")
+        self._make_immediate_notice(nir, selection="colonoscopy", name="COL Notice", record="N-COL")
+        self._make_operational_issue(nir, selection="eda", name="EDA Issue", record="I-EDA")
+        self._make_operational_issue(nir, selection="colonoscopy", name="COL Issue", record="I-COL")
         self._login_as(client, "scheduler")
         response = client.get("/scheduler/")
         assert response.status_code == 200
@@ -182,8 +177,8 @@ class TestSchedulerQueueExamTypeFilters:
         scheduler_user = self._login_as(client, "scheduler")
         nir = User.objects.create_user(username="nir-schfilter-proc@test.com", password="testpass123")
         nir.roles.add(self._create_role("nir"))
-        self._make_wait_appt(nir, exam_type="eda", name="EDA Wait", record="W-EDA")
-        self._make_processed(scheduler_user, nir, exam_type="colonoscopy", name="COL Proc", record="P-COL")
+        self._make_wait_appt(nir, selection="eda", name="EDA Wait", record="W-EDA")
+        self._make_processed(scheduler_user, nir, selection="colonoscopy", name="COL Proc", record="P-COL")
         content = client.get("/scheduler/").content.decode()
         # Pendentes: 1 EDA e 0 colonoscopia — o processado colonoscopia não conta.
         assert 'data-exam-type-count="all">1<' in content
@@ -194,8 +189,8 @@ class TestSchedulerQueueExamTypeFilters:
 
     def test_pending_has_accessible_type_filter_todos_default(self, client) -> None:
         nir = self._login_as(client, "nir")
-        self._make_wait_appt(nir, exam_type="eda", name="A", record="1001")
-        self._make_wait_appt(nir, exam_type="colonoscopy", name="B", record="1002")
+        self._make_wait_appt(nir, selection="eda", name="A", record="1001")
+        self._make_wait_appt(nir, selection="colonoscopy", name="B", record="1002")
         self._login_as(client, "scheduler")
         content = client.get("/scheduler/").content.decode()
         # Controle secundário dentro de Pendentes (não substitui tabs primárias).
@@ -213,12 +208,12 @@ class TestSchedulerQueueExamTypeFilters:
     def test_pending_filter_covers_three_groups(self, client) -> None:
         """Cards de WAIT_APPT, notices e issues participam do filtro por tipo."""
         nir = self._login_as(client, "nir")
-        self._make_wait_appt(nir, exam_type="eda", name="EDA Wait", record="W-EDA")
-        self._make_wait_appt(nir, exam_type="colonoscopy", name="COL Wait", record="W-COL")
-        self._make_immediate_notice(nir, exam_type="eda", name="EDA Notice", record="N-EDA")
-        self._make_immediate_notice(nir, exam_type="colonoscopy", name="COL Notice", record="N-COL")
-        self._make_operational_issue(nir, exam_type="eda", name="EDA Issue", record="I-EDA")
-        self._make_operational_issue(nir, exam_type="colonoscopy", name="COL Issue", record="I-COL")
+        self._make_wait_appt(nir, selection="eda", name="EDA Wait", record="W-EDA")
+        self._make_wait_appt(nir, selection="colonoscopy", name="COL Wait", record="W-COL")
+        self._make_immediate_notice(nir, selection="eda", name="EDA Notice", record="N-EDA")
+        self._make_immediate_notice(nir, selection="colonoscopy", name="COL Notice", record="N-COL")
+        self._make_operational_issue(nir, selection="eda", name="EDA Issue", record="I-EDA")
+        self._make_operational_issue(nir, selection="colonoscopy", name="COL Issue", record="I-COL")
         self._login_as(client, "scheduler")
         content = client.get("/scheduler/").content.decode()
         # 3 grupos × 2 tipos = 6 cards no escopo do filtro client-side.
@@ -234,8 +229,8 @@ class TestSchedulerQueueExamTypeFilters:
 
     def test_pending_cards_expose_exam_type_and_badge(self, client) -> None:
         nir = self._login_as(client, "nir")
-        self._make_wait_appt(nir, exam_type="eda", name="Joao EDA", record="1001")
-        self._make_wait_appt(nir, exam_type="colonoscopy", name="Maria Colon", record="1002")
+        self._make_wait_appt(nir, selection="eda", name="Joao EDA", record="1001")
+        self._make_wait_appt(nir, selection="colonoscopy", name="Maria Colon", record="1002")
         self._login_as(client, "scheduler")
         content = client.get("/scheduler/").content.decode()
         assert 'data-exam-type="eda"' in content
@@ -249,8 +244,8 @@ class TestSchedulerQueueExamTypeFilters:
         scheduler_user = self._login_as(client, "scheduler")
         nir = User.objects.create_user(username="nir-schfilter-proc2@test.com", password="testpass123")
         nir.roles.add(self._create_role("nir"))
-        self._make_processed(scheduler_user, nir, exam_type="eda", name="A EDA", record="P-EDA")
-        self._make_processed(scheduler_user, nir, exam_type="colonoscopy", name="B COL", record="P-COL")
+        self._make_processed(scheduler_user, nir, selection="eda", name="A EDA", record="P-EDA")
+        self._make_processed(scheduler_user, nir, selection="colonoscopy", name="B COL", record="P-COL")
         response = client.get("/scheduler/?tab=processed")
         assert response.status_code == 200
         content = response.content.decode()
@@ -275,7 +270,7 @@ class TestSchedulerQueueExamTypeFilters:
         self._login_as(client, "scheduler")
         nir = User.objects.create_user(username="nir-schfilter-ack@test.com", password="testpass123")
         nir.roles.add(self._create_role("nir"))
-        case = self._make_immediate_notice(nir, exam_type="colonoscopy", name="Col Ack", record="A-COL")
+        case = self._make_immediate_notice(nir, selection="colonoscopy", name="Col Ack", record="A-COL")
         response = client.post(f"/scheduler/{case.case_id}/immediate-ack/")
         assert response.status_code == 302
         content = client.get("/scheduler/").content.decode()
@@ -290,6 +285,18 @@ class TestSchedulerQueueExamTypeFilters:
         session["active_role"] = "nir"
         session.save()
         assert client.get("/scheduler/").status_code == 302
+
+    def test_combined_wait_appt_badge_and_count_from_rows(self, client) -> None:
+        """011-B: fluxo canônico CHD construído apenas com rows — combinado
+        aprovado projeta badge casado e conta uma vez (sem coluna)."""
+        nir = self._login_as(client, "nir")
+        self._make_wait_appt(nir, selection="eda_colonoscopy", name="Comb Rows", record="W-COMB")
+        self._login_as(client, "scheduler")
+        content = client.get("/scheduler/").content.decode()
+        assert "EDA + Colonoscopia · Agendamento casado" in content
+        assert 'data-exam-type-count="eda_colonoscopy">1<' in content
+        assert 'data-approved-selection="eda_colonoscopy"' in content
+        assert content.count("data-scheduler-queue-card") == 1
 
 
 @pytest.mark.django_db
@@ -312,11 +319,11 @@ class TestSchedulerHistoricalExamType:
         session.save()
         return user
 
-    def _approve_procedures(self, case: Case, exam_type: str) -> None:
+    def _approve_procedures(self, case: Case, selection: str) -> None:
         """Cria rows aprovadas coerentes (R5) — o histórico filtra pelo aprovado."""
         from apps.cases.models import CaseProcedure, DoctorDisposition
 
-        types = ("eda", "colonoscopy") if exam_type == "eda_colonoscopy" else (exam_type,)
+        types = ("eda", "colonoscopy") if selection == "eda_colonoscopy" else (selection,)
         for procedure_type in types:
             CaseProcedure.objects.create(
                 case=case,
@@ -326,19 +333,18 @@ class TestSchedulerHistoricalExamType:
             )
 
     def _make_historical(
-        self, nir: Any, *, exam_type: str, name: str, record: str, patient_name: str | None = None
+        self, nir: Any, *, selection: str, name: str, record: str, patient_name: str | None = None
     ) -> Case:
         case = Case.objects.create(
             created_by=nir,
             status=CaseStatus.CLEANED,
-            exam_type=exam_type,
             agency_record_number=record,
             doctor_decision="accept",
             doctor_admission_flow="scheduled",
             appointment_status="confirmed",
             structured_data={"patient": {"name": patient_name or name, "age": 60, "gender": "F"}},
         )
-        self._approve_procedures(case, exam_type)
+        self._approve_procedures(case, selection)
         return case
 
     def test_historical_type_without_q_returns_latest_of_type(self, client) -> None:
@@ -347,8 +353,8 @@ class TestSchedulerHistoricalExamType:
         nir = User.objects.create_user(username="nir-schhist-1@test.com")
         nir.roles.add(self._create_role("nir"))
         for i in range(3):
-            self._make_historical(nir, exam_type="colonoscopy", name=f"COL {i}", record=f"HC-{i}")
-            self._make_historical(nir, exam_type="eda", name=f"EDA {i}", record=f"HE-{i}")
+            self._make_historical(nir, selection="colonoscopy", name=f"COL {i}", record=f"HC-{i}")
+            self._make_historical(nir, selection="eda", name=f"EDA {i}", record=f"HE-{i}")
         response = client.get("/scheduler/historical/?exam_type=colonoscopy")
         assert response.status_code == 200
         content = response.content.decode()
@@ -361,12 +367,12 @@ class TestSchedulerHistoricalExamType:
         nir = User.objects.create_user(username="nir-schhist-2@test.com")
         nir.roles.add(self._create_role("nir"))
         self._make_historical(
-            nir, exam_type="colonoscopy", name="Maria Colon", record="H-COL-1", patient_name="Maria Colon"
+            nir, selection="colonoscopy", name="Maria Colon", record="H-COL-1", patient_name="Maria Colon"
         )
         self._make_historical(
-            nir, exam_type="colonoscopy", name="Joao Colon", record="H-COL-2", patient_name="Joao Colon"
+            nir, selection="colonoscopy", name="Joao Colon", record="H-COL-2", patient_name="Joao Colon"
         )
-        self._make_historical(nir, exam_type="eda", name="Maria EDA", record="H-EDA-1", patient_name="Maria EDA")
+        self._make_historical(nir, selection="eda", name="Maria EDA", record="H-EDA-1", patient_name="Maria EDA")
         response = client.get("/scheduler/historical/?exam_type=colonoscopy&q=Maria")
         assert response.status_code == 200
         content = response.content.decode()
@@ -379,8 +385,8 @@ class TestSchedulerHistoricalExamType:
         self._login_as(client, "scheduler")
         nir = User.objects.create_user(username="nir-schhist-3@test.com")
         nir.roles.add(self._create_role("nir"))
-        self._make_historical(nir, exam_type="eda", name="Maria EDA", record="H-EDA-2")
-        self._make_historical(nir, exam_type="colonoscopy", name="Maria COL", record="H-COL-3")
+        self._make_historical(nir, selection="eda", name="Maria EDA", record="H-EDA-2")
+        self._make_historical(nir, selection="colonoscopy", name="Maria COL", record="H-COL-3")
         response = client.get("/scheduler/historical/?exam_type=bogus&q=Maria")
         assert response.status_code == 200
         content = response.content.decode()
@@ -392,7 +398,7 @@ class TestSchedulerHistoricalExamType:
         self._login_as(client, "scheduler")
         nir = User.objects.create_user(username="nir-schhist-4@test.com")
         nir.roles.add(self._create_role("nir"))
-        self._make_historical(nir, exam_type="colonoscopy", name="Col Badge", record="H-BADGE")
+        self._make_historical(nir, selection="colonoscopy", name="Col Badge", record="H-BADGE")
         response = client.get("/scheduler/historical/?exam_type=colonoscopy")
         assert response.status_code == 200
         content = response.content.decode()

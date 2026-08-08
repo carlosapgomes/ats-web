@@ -17,7 +17,7 @@ from django.test import override_settings
 from django.urls import reverse
 from django.utils import timezone
 
-from apps.cases.models import Case, CaseAttachment, CaseEvent, CaseProcedure, CaseStatus, ExamType
+from apps.cases.models import Case, CaseAttachment, CaseEvent, CaseProcedure, CaseStatus, ProcedureType
 from apps.intake.services import create_corrected_resubmission
 
 User = get_user_model()
@@ -558,7 +558,7 @@ class TestCorrectedResubmissionExamTypeFlag:
     def test_service_requires_exam_type(self) -> None:
         """Sem tipo explícito, o serviço levanta ValueError sem efeitos."""
         nir_user = _nir_user()
-        original = Case.objects.create(created_by=nir_user, exam_type=ExamType.EDA)
+        original = Case.objects.create(created_by=nir_user)
         with patch("apps.intake.tasks.enqueue_pdf_extraction") as mock_enqueue:
             with pytest.raises(ValueError):
                 create_corrected_resubmission(
@@ -571,14 +571,15 @@ class TestCorrectedResubmissionExamTypeFlag:
         assert Case.objects.count() == 1
         mock_enqueue.assert_not_called()
         original = Case.objects.get(pk=original.pk)
-        assert original.exam_type == ExamType.EDA
+        # Nada foi declarado no original (projeção intacta, sem coluna).
+        assert CaseProcedure.objects.filter(case=original).count() == 0
         assert original.status == CaseStatus.NEW
         assert set(original.events.values_list("event_type", flat=True)) == {"CASE_CREATED"}
 
     def test_post_without_exam_type_creates_no_case(self, client) -> None:
         """View: POST sem tipo re-renderiza com warning; nada é criado."""
         nir_client, nir_user = _nir_client(client)
-        original = Case.objects.create(created_by=nir_user, exam_type=ExamType.EDA)
+        original = Case.objects.create(created_by=nir_user)
         url = reverse("intake:corrected_resubmission", args=[original.case_id])
         with patch("apps.intake.tasks.enqueue_pdf_extraction") as mock_enqueue:
             response = nir_client.post(
@@ -599,7 +600,7 @@ class TestCorrectedResubmissionExamTypeFlag:
     def test_post_with_invalid_exam_type_creates_no_case(self, client) -> None:
         """Tipo inválido também é rejeitado pelo backend."""
         nir_client, nir_user = _nir_client(client)
-        original = Case.objects.create(created_by=nir_user, exam_type=ExamType.EDA)
+        original = Case.objects.create(created_by=nir_user)
         url = reverse("intake:corrected_resubmission", args=[original.case_id])
         with patch("apps.intake.tasks.enqueue_pdf_extraction") as mock_enqueue:
             response = nir_client.post(
@@ -621,7 +622,7 @@ class TestCorrectedResubmissionExamTypeFlag:
         import re
 
         nir_client, nir_user = _nir_client(client)
-        original = Case.objects.create(created_by=nir_user, exam_type=ExamType.EDA)
+        original = Case.objects.create(created_by=nir_user)
         url = reverse("intake:corrected_resubmission", args=[original.case_id])
         response = nir_client.get(url)
         assert response.status_code == 200
@@ -639,14 +640,14 @@ class TestCorrectedResubmissionExamTypeFlag:
         """Flag false + tipo explícito colonoscopia → ValueError sem efeitos."""
         with override_settings(COLONOSCOPY_INTAKE_ENABLED=False):
             nir_user = _nir_user()
-            original = Case.objects.create(created_by=nir_user, exam_type=ExamType.EDA)
+            original = Case.objects.create(created_by=nir_user)
             with pytest.raises(ValueError):
                 create_corrected_resubmission(
                     original_case=original,
                     pdf_file=_simple_pdf(),
                     user=nir_user,
                     correction_reason="Laudo corrigido",
-                    exam_type=ExamType.COLONOSCOPY,
+                    exam_type="colonoscopy",
                 )
         assert Case.objects.count() == 1
 
@@ -656,7 +657,6 @@ class TestCorrectedResubmissionExamTypeFlag:
             nir_client, nir_user = _nir_client(client)
             original = Case.objects.create(
                 created_by=nir_user,
-                exam_type=ExamType.COLONOSCOPY,
                 agency_record_number="2026-C1",
             )
             url = reverse("intake:corrected_resubmission", args=[original.case_id])
@@ -679,7 +679,8 @@ class TestCorrectedResubmissionExamTypeFlag:
         assert Case.objects.count() == 1
         mock_enqueue.assert_not_called()
         original = Case.objects.get(pk=original.pk)
-        assert original.exam_type == ExamType.COLONOSCOPY
+        # Nada foi declarado no original (projeção intacta, sem coluna).
+        assert CaseProcedure.objects.filter(case=original).count() == 0
         assert original.status == CaseStatus.NEW
         assert original.agency_record_number == "2026-C1"
         event_types = set(original.events.values_list("event_type", flat=True))
@@ -692,7 +693,7 @@ class TestCorrectedResubmissionExamTypeFlag:
         """Flag true + colonoscopia explícita → novo caso colonoscopia."""
         with override_settings(COLONOSCOPY_INTAKE_ENABLED=True):
             nir_client, nir_user = _nir_client(client)
-            original = Case.objects.create(created_by=nir_user, exam_type=ExamType.COLONOSCOPY)
+            original = Case.objects.create(created_by=nir_user)
             url = reverse("intake:corrected_resubmission", args=[original.case_id])
             with patch("apps.intake.tasks.enqueue_pdf_extraction") as mock_enqueue:
                 response = nir_client.post(
@@ -710,7 +711,7 @@ class TestCorrectedResubmissionExamTypeFlag:
         assert new_case is not None
         # Slice 008 (R5): prova row declarada, não a coluna.
         assert CaseProcedure.objects.filter(
-            case=new_case, procedure_type=ExamType.COLONOSCOPY, declared_by_nir=True
+            case=new_case, procedure_type=ProcedureType.COLONOSCOPY, declared_by_nir=True
         ).exists()
         mock_enqueue.assert_called_once_with(new_case.case_id)
 
@@ -718,7 +719,7 @@ class TestCorrectedResubmissionExamTypeFlag:
         """Flag false + EDA explícito → novo caso EDA (EDA segue ok)."""
         with override_settings(COLONOSCOPY_INTAKE_ENABLED=False):
             nir_client, nir_user = _nir_client(client)
-            original = Case.objects.create(created_by=nir_user, exam_type=ExamType.EDA)
+            original = Case.objects.create(created_by=nir_user)
             url = reverse("intake:corrected_resubmission", args=[original.case_id])
             with patch("apps.intake.tasks.enqueue_pdf_extraction") as mock_enqueue:
                 response = nir_client.post(
@@ -735,7 +736,9 @@ class TestCorrectedResubmissionExamTypeFlag:
         new_case = Case.objects.exclude(case_id=original.case_id).first()
         assert new_case is not None
         # Slice 008 (R5): prova row declarada, não a coluna.
-        assert CaseProcedure.objects.filter(case=new_case, procedure_type=ExamType.EDA, declared_by_nir=True).exists()
+        assert CaseProcedure.objects.filter(
+            case=new_case, procedure_type=ProcedureType.EDA, declared_by_nir=True
+        ).exists()
         mock_enqueue.assert_called_once_with(new_case.case_id)
 
     # ── R4: tipo pode divergir do original; original permanece intacto ──
@@ -746,7 +749,6 @@ class TestCorrectedResubmissionExamTypeFlag:
             nir_client, nir_user = _nir_client(client)
             original = Case.objects.create(
                 created_by=nir_user,
-                exam_type=ExamType.EDA,
                 agency_record_number="2026-EDA-ORIG",
             )
             url = reverse("intake:corrected_resubmission", args=[original.case_id])
@@ -766,7 +768,7 @@ class TestCorrectedResubmissionExamTypeFlag:
         assert new_case is not None
         # Slice 008 (R5): prova row declarada, não a coluna.
         assert CaseProcedure.objects.filter(
-            case=new_case, procedure_type=ExamType.COLONOSCOPY, declared_by_nir=True
+            case=new_case, procedure_type=ProcedureType.COLONOSCOPY, declared_by_nir=True
         ).exists()
         mock_enqueue.assert_called_once_with(new_case.case_id)
 
@@ -779,7 +781,7 @@ class TestCorrectedResubmissionExamTypeFlag:
         """Evento de correção inclui o tipo do novo caso (R4)."""
         with override_settings(COLONOSCOPY_INTAKE_ENABLED=True):
             nir_client, nir_user = _nir_client(client)
-            original = Case.objects.create(created_by=nir_user, exam_type=ExamType.EDA)
+            original = Case.objects.create(created_by=nir_user)
             url = reverse("intake:corrected_resubmission", args=[original.case_id])
             with patch("apps.intake.tasks.enqueue_pdf_extraction"):
                 nir_client.post(
@@ -795,7 +797,9 @@ class TestCorrectedResubmissionExamTypeFlag:
         new_case = Case.objects.exclude(case_id=original.case_id).first()
         assert new_case is not None
         event = CaseEvent.objects.get(case=new_case, event_type="CASE_CORRECTION_CREATED")
-        assert event.payload.get("exam_type") == ExamType.COLONOSCOPY
+        # Contrato form→evento: a escolha explícita do reenvio (SSR) persiste
+        # no payload do CASE_CORRECTION_CREATED (auditoria, sem coluna).
+        assert event.payload.get("exam_type") == "colonoscopy"
         assert "pdf" not in event.payload and "extracted_text" not in event.payload
 
 
@@ -808,25 +812,24 @@ class TestClosedCasesSearchExamTypeFilter:
 
     SEARCH_URL = reverse("intake:closed_cases_search")
 
-    def _cleaned(self, user, exam_type: str, record: str) -> Case:
-        # Slice 008 (R5): fixture NIR explícita — rows declaradas autorizam o
-        # filtro por dimensão declarada (sem fallback da coluna).
+    def _cleaned(self, user, selection: str, record: str) -> Case:
+        # Slice 008 (R5)/011-B: fixture NIR explícita — rows declaradas
+        # autorizam o filtro por dimensão declarada (sem coluna).
         case = Case.objects.create(
             created_by=user,
-            exam_type=exam_type,
             agency_record_number=record,
             status=CaseStatus.CLEANED,
         )
-        for procedure_type in (ExamType.EDA, ExamType.COLONOSCOPY):
-            if exam_type == procedure_type or exam_type == "eda_colonoscopy":
+        for procedure_type in (ProcedureType.EDA, ProcedureType.COLONOSCOPY):
+            if selection == procedure_type or selection == "eda_colonoscopy":
                 CaseProcedure.objects.create(case=case, procedure_type=procedure_type, declared_by_nir=True)
         return case
 
     def test_default_todos_shows_both_types(self, client) -> None:
         """Sem parâmetro, busca por termo mostra ambos os tipos."""
         nir_client, nir_user = _nir_client(client)
-        self._cleaned(nir_user, ExamType.EDA, "CLOSED-EDA-001")
-        self._cleaned(nir_user, ExamType.COLONOSCOPY, "CLOSED-COL-001")
+        self._cleaned(nir_user, "eda", "CLOSED-EDA-001")
+        self._cleaned(nir_user, "colonoscopy", "CLOSED-COL-001")
 
         response = nir_client.get(self.SEARCH_URL, {"q": "CLOSED"})
         content = response.content.decode()
@@ -836,8 +839,8 @@ class TestClosedCasesSearchExamTypeFilter:
     def test_filter_eda_composes_with_term(self, client) -> None:
         """exam_type=eda + termo → somente EDA."""
         nir_client, nir_user = _nir_client(client)
-        self._cleaned(nir_user, ExamType.EDA, "CLOSED-EDA-001")
-        self._cleaned(nir_user, ExamType.COLONOSCOPY, "CLOSED-COL-001")
+        self._cleaned(nir_user, "eda", "CLOSED-EDA-001")
+        self._cleaned(nir_user, "colonoscopy", "CLOSED-COL-001")
 
         response = nir_client.get(self.SEARCH_URL, {"q": "CLOSED", "exam_type": "eda"})
         content = response.content.decode()
@@ -847,8 +850,8 @@ class TestClosedCasesSearchExamTypeFilter:
     def test_filter_colonoscopy_composes_with_term(self, client) -> None:
         """exam_type=colonoscopy + termo → somente Colonoscopia."""
         nir_client, nir_user = _nir_client(client)
-        self._cleaned(nir_user, ExamType.EDA, "CLOSED-EDA-001")
-        self._cleaned(nir_user, ExamType.COLONOSCOPY, "CLOSED-COL-001")
+        self._cleaned(nir_user, "eda", "CLOSED-EDA-001")
+        self._cleaned(nir_user, "colonoscopy", "CLOSED-COL-001")
 
         response = nir_client.get(self.SEARCH_URL, {"q": "CLOSED", "exam_type": "colonoscopy"})
         content = response.content.decode()
@@ -859,8 +862,8 @@ class TestClosedCasesSearchExamTypeFilter:
         """Tipo específico sem termo lista recentes do tipo (comportamento
         definido no design D13, consistente com o histórico CHD)."""
         nir_client, nir_user = _nir_client(client)
-        self._cleaned(nir_user, ExamType.EDA, "CLOSED-EDA-001")
-        self._cleaned(nir_user, ExamType.COLONOSCOPY, "CLOSED-COL-001")
+        self._cleaned(nir_user, "eda", "CLOSED-EDA-001")
+        self._cleaned(nir_user, "colonoscopy", "CLOSED-COL-001")
 
         response = nir_client.get(self.SEARCH_URL, {"exam_type": "eda"})
         content = response.content.decode()
@@ -870,8 +873,8 @@ class TestClosedCasesSearchExamTypeFilter:
     def test_invalid_type_falls_back_to_all(self, client) -> None:
         """Tipo inválido cai para Todos (default)."""
         nir_client, nir_user = _nir_client(client)
-        self._cleaned(nir_user, ExamType.EDA, "CLOSED-EDA-001")
-        self._cleaned(nir_user, ExamType.COLONOSCOPY, "CLOSED-COL-001")
+        self._cleaned(nir_user, "eda", "CLOSED-EDA-001")
+        self._cleaned(nir_user, "colonoscopy", "CLOSED-COL-001")
 
         response = nir_client.get(self.SEARCH_URL, {"q": "CLOSED", "exam_type": "cpre"})
         content = response.content.decode()
@@ -889,7 +892,7 @@ class TestClosedCasesSearchExamTypeFilter:
     def test_cards_show_exam_type_badge(self, client) -> None:
         """Cards de encerrados exibem badge persistido do tipo."""
         nir_client, nir_user = _nir_client(client)
-        self._cleaned(nir_user, ExamType.COLONOSCOPY, "CLOSED-COL-BADGE")
+        self._cleaned(nir_user, "colonoscopy", "CLOSED-COL-BADGE")
 
         response = nir_client.get(self.SEARCH_URL, {"q": "CLOSED-COL-BADGE"})
         content = response.content.decode()
