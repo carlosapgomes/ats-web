@@ -50,8 +50,11 @@ def attach_procedure_projection(
     Contrato (R5/Slice 009-B):
     - rows vêm somente da união dos conjuntos explícitos;
     - ``declared_by_nir`` deriva somente de ``declared``;
-    - ``detection_status='detected'`` deriva somente de ``detected`` (demais
-      ficam ``pending``);
+    - ``detection_status`` deriva somente das dimensões explícitas:
+      ``DETECTED`` para tipo em ``detected``;
+      ``NOT_DETECTED`` para tipo já decidido (``approved``/``denied`) e
+      ausente de ``detected``; ``PENDING`` somente para row apenas declarada,
+      ainda sem detecção/decisão;
     - ``doctor_disposition`` deriva somente de ``approved``/``denied``;
     - ``approved`` e ``denied`` não podem se sobrepor;
     - tipos inválidos ou combinações incoerentes falham claramente;
@@ -88,11 +91,20 @@ def attach_procedure_projection(
     for procedure_type in sorted(
         declared_set | detected_set | approved_set | denied_set, key=lambda t: _PROCEDURE_ORDER[t]
     ):
+        if procedure_type in detected_set:
+            detection = DetectionStatus.DETECTED
+        elif procedure_type in approved_set or procedure_type in denied_set:
+            # Row já decidida (approved/denied) e não detectada: inclusão/negação
+            # médica persiste como NOT_DETECTED (projeção normalizada downstream).
+            detection = DetectionStatus.NOT_DETECTED
+        else:
+            # Row apenas declarada, ainda sem detecção/decisão.
+            detection = DetectionStatus.PENDING
         CaseProcedure.objects.create(
             case=case,
             procedure_type=procedure_type,
             declared_by_nir=procedure_type in declared_set,
-            detection_status=(DetectionStatus.DETECTED if procedure_type in detected_set else DetectionStatus.PENDING),
+            detection_status=detection,
             doctor_disposition=(
                 DoctorDisposition.APPROVED
                 if procedure_type in approved_set
