@@ -161,6 +161,12 @@ def _normalize_openai_strict_schema(schema: dict[str, object]) -> dict[str, obje
     OpenAI strict mode requires every object node to have:
     - ``additionalProperties: false``
     - ``required`` listing all property names
+
+    Unions are only supported via ``anyOf``: any ``oneOf`` node is rewritten
+    to ``anyOf`` (preserving variant order and ``$ref``) and the unsupported
+    ``discriminator`` key is dropped. Local Pydantic validation keeps using
+    the discriminator on the models themselves; only the copy sent to the
+    API is rewritten.
     """
     normalized = copy.deepcopy(schema)
     _normalize_schema_node(normalized)
@@ -169,6 +175,11 @@ def _normalize_openai_strict_schema(schema: dict[str, object]) -> dict[str, obje
 
 def _normalize_schema_node(node: object) -> None:
     if isinstance(node, dict):
+        # Mutations happen before recursion so dict views are stable.
+        if "oneOf" in node:
+            node["anyOf"] = node.pop("oneOf")
+        node.pop("discriminator", None)
+
         node_type = node.get("type")
         properties = node.get("properties")
         if node_type == "object" and isinstance(properties, dict):

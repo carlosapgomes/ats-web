@@ -394,6 +394,58 @@ class TestNormalizeOpenAiStrictSchema:
         # Non-object string type is preserved
         assert schema["properties"]["name"]["type"] == "string"
 
+    def test_rewrites_oneof_to_anyof_and_drops_discriminator(self) -> None:
+        """Synthetic union node is rewritten to anyOf; original is untouched."""
+        from apps.pipeline.llm import _normalize_openai_strict_schema
+
+        variants: list[dict[str, object]] = [
+            {"type": "object", "properties": {"procedure_type": {"const": "eda"}}},
+            {"type": "object", "properties": {"procedure_type": {"const": "colonoscopy"}}},
+        ]
+        schema: Any = {
+            "type": "array",
+            "items": {
+                "oneOf": variants,
+                "discriminator": {"propertyName": "procedure_type"},
+            },
+        }
+        normalized = _normalize_openai_strict_schema(schema)
+        items: dict[str, Any] = normalized["items"]
+        # Same variants, same order (strict-mode keys added by the normalizer).
+        assert [v["properties"]["procedure_type"]["const"] for v in items["anyOf"]] == [
+            "eda",
+            "colonoscopy",
+        ]
+        assert "oneOf" not in items
+        assert "discriminator" not in items
+        # Original schema was not mutated.
+        assert "oneOf" in schema["items"]
+        assert "discriminator" in schema["items"]
+
+    def test_normalized_llm1_v2_schema_has_no_oneof_or_discriminator(self) -> None:
+        """Normalized Llm1ResponseV2 schema keeps the union via anyOf only."""
+        from apps.pipeline.llm import _normalize_openai_strict_schema
+        from apps.pipeline.schemas.llm1_v2 import Llm1ResponseV2
+
+        normalized: Any = _normalize_openai_strict_schema(Llm1ResponseV2.model_json_schema())
+        self._assert_absent(normalized, "oneOf")
+        self._assert_absent(normalized, "discriminator")
+        items: dict[str, Any] = normalized["properties"]["requested_procedures"]["items"]
+        assert "oneOf" not in items
+        assert "discriminator" not in items
+        assert len(items["anyOf"]) == 2
+        assert all("$ref" in variant for variant in items["anyOf"])
+
+    def _assert_absent(self, node: Any, key: str) -> None:
+        """Assert ``key`` is absent at every level of the schema tree."""
+        if isinstance(node, dict):
+            assert key not in node, f"found {key!r} in schema node: {node}"
+            for value in node.values():
+                self._assert_absent(value, key)
+        elif isinstance(node, list):
+            for value in node:
+                self._assert_absent(value, key)
+
     def test_preserves_original_schema(self) -> None:
         """Normalize returns a copy; original is not mutated."""
         from apps.pipeline.llm import _normalize_openai_strict_schema
