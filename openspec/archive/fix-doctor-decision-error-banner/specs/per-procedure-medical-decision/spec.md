@@ -2,7 +2,7 @@
 
 ## MODIFIED Requirements
 
-### Requirement: Re-renderização com erro de validação SHALL exibir banner de erro no topo
+### Requirement: Re-renderização com erro de validação SHALL reposicionar o médico no formulário
 
 A página de decisão médica SHALL exibir um banner de erro no topo do conteúdo sempre que uma submissão falhar por validação, com mensagem clara e botão de âncora para o formulário, de modo que os erros fiquem visíveis sem depender de rolagem automática.
 
