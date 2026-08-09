@@ -8,6 +8,10 @@ from .models import Case, CaseEvent
 def record_case_event(sender: type[Case], instance: Case, created: bool, **kwargs: object) -> None:
     """Registra evento pendente após save do Case."""
     if created:
+        # Decisão de contrato (Slice 011-C): eventos novos têm somente
+        # ``status`` — a declaração é auditada por CASE_PROCEDURES_DECLARED e
+        # o sinal dispara antes de rows existirem. Eventos já persistidos
+        # preservam a chave ``exam_type`` (append-only).
         CaseEvent.objects.create(
             case=instance,
             event_type="CASE_CREATED",
@@ -15,7 +19,6 @@ def record_case_event(sender: type[Case], instance: Case, created: bool, **kwarg
             actor_type="human",
             payload={
                 "status": instance.status,
-                "exam_type": instance.exam_type,
             },
         )
         return

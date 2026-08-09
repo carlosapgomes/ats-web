@@ -804,6 +804,9 @@ def case_detail(request: HttpRequest, case_id: uuid.UUID) -> HttpResponse:
         correction_form_context = {
             # Label declarado projetado da projeção (combinado → "EDA + Colonoscopia").
             "declared_label": declared_badge["declared_label"],
+            # Slice 011-C (decisão 2): chave de seleção derivada da projeção
+            # para os radios marcarem "(atual)" — nunca a coluna removida.
+            "declared_type_key": declared_badge["declared_type_key"],
             "detected_exam_type_label": CORRECTION_DETECTED_TYPE_LABELS.get(detected, detected or "—"),
             "reason_text": suggested.get("reason_text", ""),
             "correction_reason_choices": list(EXAM_TYPE_CORRECTION_REASONS.items()),

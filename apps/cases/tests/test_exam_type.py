@@ -1,163 +1,192 @@
-"""Slice 002 — ExamType, Case.exam_type, migration backfill EDA e auditoria.
+"""Slice 011-C — Contrato final pós-cutover: payload CASE_CREATED, schema e projeção.
 
-Cobre R1 (enum/campo/backfill/índice) e a parte de auditoria de R4
-(payload de CASE_CREATED para novos casos, sem reescrever eventos antigos).
+A migration 0016 (Slice 011-C) removeu a coluna ``Case.exam_type`` e o índice
+composto ``cases_status_exam_type_idx``; a classe ``ExamType`` permanece apenas
+por compatibilidade e é removida no Slice 011-E — por isso este módulo NÃO a
+importa. Os testes de enum/campo/índice/backfill 0014 morreram com a coluna e
+foram substituídos por testes do contrato final (R5): payload de criação com
+somente ``status`` (decisão 1), schema sem field/índice e radios da correção
+marcando "(atual)" pela projeção declarada (decisão 2) — nunca pela coluna.
 """
 
 from __future__ import annotations
 
-import importlib
+from typing import Any
 
 import pytest
 from django.contrib.auth import get_user_model
-from django.db import connection
-from django.db.migrations.executor import MigrationExecutor
+from django.urls import reverse
 
-from apps.cases.models import Case, CaseEvent, CaseStatus, ExamType
+from apps.cases.models import Case, CaseEvent, CaseProcedure, CaseStatus, ProcedureType
+from apps.cases.procedures import (
+    get_declared_procedure_types,
+    selection_key,
+    set_declared_procedures,
+)
 
 pytestmark = pytest.mark.django_db
 
 User = get_user_model()
 
-_MIGRATION_MODULE = "apps.cases.migrations.0014_case_exam_type"
-_MIGRATION_NAME = "0014_case_exam_type"
-_PREV_MIGRATION = "0013_case_priority_signals"
+
+# ── Helpers ──────────────────────────────────────────────────────────────
 
 
-class TestExamTypeEnum:
-    """R1 — enum com somente eda e colonoscopy."""
+def _nir_user(django_user_model: Any, username: str) -> Any:
+    """Cria usuário com o papel NIR atribuído (sem sessão HTTP)."""
+    from apps.accounts.models import Role
 
-    def test_only_eda_and_colonoscopy_values(self) -> None:
-        assert set(ExamType.values) == {"eda", "colonoscopy"}
-        assert ExamType.EDA.value == "eda"
-        assert ExamType.COLONOSCOPY.value == "colonoscopy"
-
-    def test_human_labels(self) -> None:
-        assert ExamType(ExamType.EDA).label == "EDA"
-        assert ExamType(ExamType.COLONOSCOPY).label == "Colonoscopia"
+    user = django_user_model.objects.create_user(username=username, password="testpass123")
+    role, _ = Role.objects.get_or_create(name="nir")
+    user.roles.add(role)
+    return user
 
 
-class TestCaseExamTypeField:
-    """R1/R5 — campo persistido e compatibilidade de fixtures EDA."""
-
-    def test_new_case_defaults_to_eda_for_fixture_compat(self, case_factory, user) -> None:
-        """Fixture existente (Case sem tipo) permanece EDA — default documentado."""
-        case = case_factory(user)
-        assert case.exam_type == ExamType.EDA
-
-    def test_colonoscopy_case_is_persisted(self, case_factory, user) -> None:
-        case = Case.objects.create(created_by=user, exam_type=ExamType.COLONOSCOPY)
-        fetched = Case.objects.get(pk=case.pk)
-        assert fetched.exam_type == ExamType.COLONOSCOPY
-
-    def test_index_composite_status_exam_type_exists(self) -> None:
-        index_names = [idx.name for idx in Case._meta.indexes]
-        assert "cases_status_exam_type_idx" in index_names
+def _nir_client(client: Any, username: str) -> tuple[Any, Any]:
+    """Cria usuário NIR, faz login e retorna (client, user)."""
+    user = _nir_user(User, username)
+    client.force_login(user)
+    session = client.session
+    session["active_role"] = "nir"
+    session.save()
+    return client, user
 
 
-class TestCaseCreatedAuditPayload:
-    """R4 — CASE_CREATED de novos casos inclui exam_type."""
+def _eligible_case(*, user: Any, declared: str = "eda") -> Case:
+    """Cria caso em WAIT_R1_CLEANUP_THUMBS com manual review elegível.
 
-    def test_case_created_payload_includes_colonoscopy(self, user) -> None:
-        case = Case.objects.create(created_by=user, exam_type=ExamType.COLONOSCOPY)
+    A projeção declarada vem exclusivamente da row ``CaseProcedure``; nenhum
+    kwarg de coluna é usado (o campo não existe mais no modelo final).
+    """
+    case = Case.objects.create(
+        created_by=user,
+        status=CaseStatus.WAIT_R1_CLEANUP_THUMBS,
+        extracted_text=(
+            "RELATÓRIO DE OCORRÊNCIAS\nGoverno do Estado da Bahia\nCódigo: 123\nMotivo da Solicitação: EDA"
+        ),
+        agency_record_number="REC-CORR-011C",
+        regulation_days_on_screen=3,
+        structured_data={"patient": {"name": "Paciente de Teste"}},
+        summary_text="Resumo antigo do perfil anterior.",
+        suggested_action={
+            "decision": "manual_review_required",
+            "suggestion": "manual_review_required",
+            "reason_code": "exam_type_mismatch",
+            "reason_text": "Tipo de exame declarado difere da solicitacao atual.",
+            "exam_type": "colonoscopy",
+            "declared_exam_type": declared,
+            "detected_exam_type": "colonoscopy",
+        },
+        priority_signals=[{"code": "foreign_body", "label": "Corpo estranho"}],
+    )
+    CaseProcedure.objects.create(case=case, procedure_type=declared, declared_by_nir=True)
+    return case
+
+
+# ── Decisão 1 — payload CASE_CREATED de novos casos ───────────────────────
+
+
+class TestCaseCreatedAuditPayloadFinal:
+    """Decisão 1 — payload de ``CASE_CREATED`` de NOVOS casos tem somente status."""
+
+    def test_case_created_payload_has_status_only(self, user) -> None:
+        case = Case.objects.create(created_by=user)
         event = CaseEvent.objects.get(case=case, event_type="CASE_CREATED")
-        assert event.payload.get("exam_type") == ExamType.COLONOSCOPY
+        assert event.payload == {"status": CaseStatus.NEW}
+        assert "exam_type" not in event.payload
 
-    def test_case_created_payload_includes_eda(self, user) -> None:
-        case = Case.objects.create(created_by=user, exam_type=ExamType.EDA)
-        event = CaseEvent.objects.get(case=case, event_type="CASE_CREATED")
-        assert event.payload.get("exam_type") == ExamType.EDA
-
-
-class TestBackfillFunctionDirect:
-    """R1 — função de backfill força EDA em todos os casos, sem artefatos."""
-
-    @pytest.fixture(autouse=True)
-    def _registry(self) -> None:
-        executor = MigrationExecutor(connection)
-        targets = [
-            (
-                "cases",
-                _MIGRATION_NAME,
-            )
-            if node == ("cases", _MIGRATION_NAME)
-            else node
-            for node in executor.loader.graph.leaf_nodes()
-        ]
-        self._historical_apps = executor.loader.project_state(targets).apps
-
-    def _backfill(self) -> None:
-        module = importlib.import_module(_MIGRATION_MODULE)
-        module.backfill_exam_type_eda(self._historical_apps, connection.schema_editor())
-
-    def test_backfill_sets_all_existing_cases_to_eda(self, user, case_factory, advance_to) -> None:
-        """Casos em status variados (aberto, decidido, encerrado) viram EDA."""
-        open_case = advance_to(case_factory(user), CaseStatus.WAIT_DOCTOR)
-        denied = advance_to(case_factory(user), CaseStatus.DOCTOR_DENIED)
-        cleaned = advance_to(case_factory(user), CaseStatus.CLEANED)
-
-        # Simula divergência para provar que o backfill força EDA
-        for c in (open_case, denied, cleaned):
-            Case.objects.filter(pk=c.pk).update(exam_type="colonoscopy")
-
-        self._backfill()
-
-        for c in (open_case, denied, cleaned):
-            assert Case.objects.get(pk=c.pk).exam_type == ExamType.EDA
-
-    def test_backfill_preserves_other_fields(self, user, case_factory, advance_to) -> None:
-        """Backfill não altera status/decisão/registro — sem reprocessamento."""
-        case = advance_to(case_factory(user), CaseStatus.DOCTOR_DENIED)
-        case.agency_record_number = "2026-0909-001"
-        case.doctor_decision = "deny"
-        case.save(update_fields=["agency_record_number", "doctor_decision"])
-        Case.objects.filter(pk=case.pk).update(exam_type="colonoscopy")
-
-        self._backfill()
-
-        case = Case.objects.get(pk=case.pk)
-        assert case.exam_type == ExamType.EDA
-        assert case.status == CaseStatus.DOCTOR_DENIED
-        assert case.doctor_decision == "deny"
-        assert case.agency_record_number == "2026-0909-001"
-
-
-@pytest.mark.django_db(transaction=True)
-class TestMigrationForwardReal:
-    """R1 — execução forward real da migration 0014 sobre casos 0013."""
-
-    @pytest.fixture(autouse=True)
-    def _migration_sandbox(self):
-        executor = MigrationExecutor(connection)
-        self._leaf_nodes = executor.loader.graph.leaf_nodes()
-        self._targets_prev = [
-            ("cases", _PREV_MIGRATION) if node == ("cases", _MIGRATION_NAME) else node for node in self._leaf_nodes
-        ]
-        try:
-            yield
-        finally:
-            MigrationExecutor(connection).migrate(self._leaf_nodes)
-
-    def test_forward_backfills_existing_cases_as_eda_preserving_fields(self, user, case_factory) -> None:
-        # Usuário criado antes do migrate down (tabela accounts não é tocada)
-        MigrationExecutor(connection).migrate(self._targets_prev)
-        old_apps = MigrationExecutor(connection).loader.project_state(self._targets_prev).apps
-        old_case_cls = old_apps.get_model("cases", "Case")
-        old_case = old_case_cls.objects.create(
-            created_by_id=user.pk,
-            status=CaseStatus.WAIT_DOCTOR,
-            agency_record_number="2026-HIST-001",
-            extracted_text="laudo histórico EDA",
+    def test_case_created_payload_with_declared_projection(self, user) -> None:
+        """Mesmo com projeção declarada, o payload de criação não grava a chave."""
+        case = set_declared_procedures(
+            case=Case.objects.create(created_by=user),
+            procedure_types=[ProcedureType.COLONOSCOPY],
+            actor=user,
         )
-        old_case_id = old_case.pk
+        event = CaseEvent.objects.get(case=case, event_type="CASE_CREATED")
+        assert event.payload == {"status": CaseStatus.NEW}
+        assert "exam_type" not in event.payload
 
-        # Aplica 0014 (AddField + backfill + índice)
-        MigrationExecutor(connection).migrate(self._leaf_nodes)
 
-        case = Case.objects.get(pk=old_case_id)
-        assert case.exam_type == ExamType.EDA
-        assert case.status == CaseStatus.WAIT_DOCTOR
-        assert case.agency_record_number == "2026-HIST-001"
-        assert case.extracted_text == "laudo histórico EDA"
-        # Nenhum evento novo deve ter sido criado pelo backfill
-        assert case.events.count() == 0
+# ── R2/R3 — schema final sem a coluna e o índice compostos ────────────────
+
+
+class TestCaseSchemaFinal:
+    """R2/R3 — o modelo final não possui field nem índice compostos."""
+
+    def test_case_model_has_no_exam_type_field(self) -> None:
+        field_names = {f.name for f in Case._meta.get_fields()}
+        assert "exam_type" not in field_names
+
+    def test_composite_index_cases_status_exam_type_removed(self) -> None:
+        index_names = {idx.name for idx in Case._meta.indexes}
+        assert "cases_status_exam_type_idx" not in index_names
+
+    def test_case_creation_requires_no_exam_type(self, user) -> None:
+        case = Case.objects.create(created_by=user)
+        assert case.status == CaseStatus.NEW
+        assert get_declared_procedure_types(case) == ()
+
+    def test_declared_projection_drives_selection_key(self, user) -> None:
+        """``EDA_COLONOSCOPY`` permanece apenas como chave derivada da projeção."""
+        case = set_declared_procedures(
+            case=Case.objects.create(created_by=user),
+            procedure_types=[ProcedureType.EDA, ProcedureType.COLONOSCOPY],
+            actor=user,
+        )
+        assert selection_key(get_declared_procedure_types(case)) == "eda_colonoscopy"
+        assert "eda_colonoscopy" not in {f.name for f in Case._meta.get_fields()}
+
+
+# ── Decisão 2 — radios da correção pela projeção, nunca pela coluna ───────
+
+
+class TestCorrectionScreenRadiosUseProjection:
+    """Decisão 2 — radios da correção marcam (atual)/disabled pela PROJEÇÃO.
+
+    Um caso com histórico legado divergente (payload antigo de ``CASE_CREATED``
+    com ``exam_type`` de outro tipo) continua marcando o conjunto declarado
+    projetado das rows.
+    """
+
+    def _assert_radio_state(self, content: str, radio_id: str, label_for: str, current: bool) -> None:
+        """Verifica o estado de um radio pelo bloco input (disabled) e label ((atual))."""
+        input_block = content.split(f'id="{radio_id}"')[1].split("<label")[0]
+        label_block = content.split(f'for="{label_for}"')[1].split("</label>")[0]
+        if current:
+            assert "disabled" in input_block, f"radio {radio_id} deveria estar disabled"
+            assert "(atual)" in label_block, f"label {label_for} deveria marcar (atual)"
+        else:
+            assert "disabled" not in input_block, f"radio {radio_id} não deveria estar disabled"
+            assert "(atual)" not in label_block, f"label {label_for} não deveria marcar (atual)"
+
+    def test_eda_projection_marks_eda_radio_current(self, client) -> None:
+        """Projeção EDA → radio EDA disabled com (atual); demais habilitados."""
+        client, user = _nir_client(client, "nir-011c-eda@test.com")
+        case = _eligible_case(user=user, declared="eda")
+        # Histórico legado: payload antigo de criação apontava colonoscopia —
+        # deve ser IGNORADO pelos radios (append-only, sem coluna).
+        CaseEvent.objects.filter(case=case, event_type="CASE_CREATED").update(
+            payload={"status": CaseStatus.NEW, "exam_type": "colonoscopy"}
+        )
+
+        content = client.get(reverse("intake:case_detail", args=[case.case_id])).content.decode()
+        assert "Correção de Tipo de Exame" in content
+        self._assert_radio_state(content, "exam-type-eda", "exam-type-eda", current=True)
+        self._assert_radio_state(content, "exam-type-colonoscopy", "exam-type-colonoscopy", current=False)
+        self._assert_radio_state(content, "exam-type-combined", "exam-type-combined", current=False)
+
+    def test_combined_projection_marks_combined_radio_current(self, client) -> None:
+        """Projeção combinada → radio EDA + Colonoscopia disabled com (atual)."""
+        client, user = _nir_client(client, "nir-011c-comb@test.com")
+        case = _eligible_case(user=user, declared="eda")
+        set_declared_procedures(
+            case=case,
+            procedure_types=[ProcedureType.EDA, ProcedureType.COLONOSCOPY],
+            actor=user,
+        )
+
+        content = client.get(reverse("intake:case_detail", args=[case.case_id])).content.decode()
+        assert "Correção de Tipo de Exame" in content
+        self._assert_radio_state(content, "exam-type-eda", "exam-type-eda", current=False)
+        self._assert_radio_state(content, "exam-type-colonoscopy", "exam-type-colonoscopy", current=False)
+        self._assert_radio_state(content, "exam-type-combined", "exam-type-combined", current=True)

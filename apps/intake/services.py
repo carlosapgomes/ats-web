@@ -51,8 +51,8 @@ def is_colonoscopy_intake_enabled() -> bool:
 
 
 # Seleção declarada aceita no intake (Slice 001): EDA, Colonoscopia ou a
-# combinação transitória eda_colonoscopy (ponte). O valor combinado NÃO é
-# membro de ExamType.values (dashboard/filas legadas o iteram).
+# combinação eda_colonoscopy. O valor combinado NÃO é membro de
+# ExamType.values — é chave de seleção derivada da projeção, não field choice.
 _DECLARED_SELECTION_VALUES: frozenset[str] = frozenset({ExamType.EDA, ExamType.COLONOSCOPY, EDA_COLONOSCOPY})
 
 
@@ -60,10 +60,11 @@ def validate_exam_type(exam_type: str | None) -> str:
     """Valida e normaliza a seleção declarada (intake e correção NIR).
 
     Levanta ``ValueError`` se ausente/inválida. Aceita EDA, Colonoscopia ou a
-    combinação ``eda_colonoscopy`` (ponte transitória) — nunca inferência por
-    texto (R1). Desde o Slice 005 a correção NIR aceita as TRÊS seleções, então
-    esta validação é compartilhada por novos intakes/reenvios e pela correção;
-    o gate de flag de intake fica em ``ensure_exam_type_allowed`` (não aqui).
+    combinação ``eda_colonoscopy`` (chave de seleção derivada) — nunca
+    inferência por texto (R1). Desde o Slice 005 a correção NIR aceita as
+    TRÊS seleções, então esta validação é compartilhada por novos
+    intakes/reenvios e pela correção; o gate de flag de intake fica em
+    ``ensure_exam_type_allowed`` (não aqui).
     """
     value = (exam_type or "").strip()
     if value not in _DECLARED_SELECTION_VALUES:
@@ -92,7 +93,8 @@ def ensure_exam_type_allowed(exam_type: str | None) -> str:
 def _procedure_types_for_selection(exam_type: str) -> tuple[str, ...]:
     """Mapeia a seleção declarada para o conjunto de procedimentos.
 
-    ``eda_colonoscopy`` (ponte) → (eda, colonoscopy); tipos únicos → o próprio.
+    ``eda_colonoscopy`` (chave derivada) → (eda, colonoscopy); tipos únicos →
+    o próprio.
     """
     if exam_type == EDA_COLONOSCOPY:
         return (ExamType.EDA, ExamType.COLONOSCOPY)
@@ -259,8 +261,7 @@ def correct_case_exam_type(
         if not is_exam_type_correction_eligible(case):
             raise ValueError("Caso não está em revisão manual elegível para correção de tipo.")
         # Slice 008 (R2): igualdade/old/new usam CONJUNTOS de CaseProcedure —
-        # nunca a ponte Case.exam_type. Conjuntos iguais (mesmo com a coluna
-        # divergente das rows) não produzem correção.
+        # o conjunto declarado vem das rows (coluna ponte removida no 011-C).
         new_procedures = list(_procedure_types_for_selection(validated_exam_type))
         old_procedures = list(get_declared_procedure_types(case, fallback_to_bridge=False))
         if set(new_procedures) == set(old_procedures):
@@ -291,8 +292,8 @@ def correct_case_exam_type(
             },
         )
         # R3 (Slice 001) — reroteamento pelo serviço único de declaração:
-        # projeção CaseProcedure.declared_by_nir e ponte Case.exam_type sob a
-        # MESMA transação/lock; falha reverte tudo (incl. derivados/eventos/FSM).
+        # projeção CaseProcedure.declared_by_nir sob a MESMA transação/lock;
+        # falha reverte tudo (incl. derivados/eventos/FSM).
         sync_declared_projection(case, new_procedures)
         case.save()
 
@@ -717,7 +718,7 @@ def _create_case_from_file(
     """Create a single Case from an uploaded PDF file.
 
     Steps:
-    1. Create ``Case(created_by=user, exam_type=exam_type)``.
+    1. Create ``Case(created_by=user)`` (conjunto declarado via rows).
     2. Save ``pdf_file``.
     3. FSM transition ``NEW → R1_ACK_PROCESSING``.
     4. Enqueue async PDF extraction.
@@ -727,14 +728,14 @@ def _create_case_from_file(
     """
     # 1. Create case
     with transaction.atomic():
-        case = Case.objects.create(created_by=user, exam_type=exam_type)
+        case = Case.objects.create(created_by=user)
 
         # 2. Save PDF
         case.pdf_file = file
         case.save()
 
-        # Slice 001 (R5): projeção declarada + ponte no MESMO caso — um PDF
-        # combinado vira UM Case com DUAS rows; falha aqui reverte o caso.
+        # Slice 001 (R5): projeção declarada no MESMO caso — um PDF combinado
+        # vira UM Case com DUAS rows; falha aqui reverte o caso.
         set_declared_procedures(
             case=case,
             procedure_types=_procedure_types_for_selection(exam_type),
@@ -810,11 +811,10 @@ def create_corrected_resubmission(
 
     # 4/5/6. Create new Case (atomic): PDF, projeção declarada e FSM inicial.
     # Slice 001: reenvio é NOVO intake — a seleção declarada projeta rows
-    # (combinação → duas rows) e a ponte; falha reverte o caso inteiro.
+    # (combinação → duas rows); falha reverte o caso inteiro.
     with transaction.atomic():
         new_case = Case.objects.create(
             created_by=user,
-            exam_type=validated_exam_type,
             corrects_case=original_case,
             correction_reason=reason,
             correction_created_by=user,

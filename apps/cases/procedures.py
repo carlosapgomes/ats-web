@@ -1,8 +1,8 @@
 """Projeção de procedimentos por caso — serviço central (design D1/D4).
 
-``CaseProcedure`` é a fonte alvo de EDA/Colonoscopia como componentes de um
-único caso; ``Case.exam_type`` permanece apenas como ponte transitória
-(dual-write centralizado, removida no Slice 007).
+``CaseProcedure`` é a fonte autoritativa de EDA/Colonoscopia como componentes
+de um único caso; o conjunto declarado é derivado exclusivamente das rows
+(Slice 011-C removeu a coluna ponte ``Case.exam_type``).
 
 Writes críticos (declaração) passam por este módulo: nenhuma view escreve rows
 diretamente. A declaração é atômica — falha em uma row não deixa caso/projeção
@@ -57,17 +57,6 @@ def normalize_procedure_selection(procedure_types: Any) -> tuple[str, ...]:
     return tuple(seen)
 
 
-def bridge_exam_type_for_types(procedure_types: tuple[str, ...]) -> str:
-    """Valor transitório de ``Case.exam_type`` para um conjunto declarado.
-
-    Um tipo → o próprio tipo; dois tipos → ``EDA_COLONOSCOPY`` (ponte).
-    Nunca chamado com conjunto vazio/inválido (passa por normalize).
-    """
-    if len(procedure_types) == 2:
-        return EDA_COLONOSCOPY
-    return procedure_types[0]
-
-
 def _sync_declared_rows(case: Case, procedure_types: tuple[str, ...]) -> None:
     """Marca as rows declaradas e desmarca as demais do caso.
 
@@ -84,7 +73,7 @@ def _sync_declared_rows(case: Case, procedure_types: tuple[str, ...]) -> None:
 
 
 def sync_declared_projection(case: Case, procedure_types: Any) -> None:
-    """Escreve projeção + ponte numa transação/lock já existentes (correção).
+    """Escreve a projeção declarada numa transação/lock já existentes (correção).
 
     Usado por fluxos que já possuem ``transaction.atomic`` + ``select_for_update``
     (ex.: ``correct_case_exam_type``). NÃO salva o ``Case`` nem registra evento:
@@ -92,7 +81,6 @@ def sync_declared_projection(case: Case, procedure_types: Any) -> None:
     """
     types = normalize_procedure_selection(procedure_types)
     _sync_declared_rows(case, types)
-    case.exam_type = bridge_exam_type_for_types(types)
 
 
 def set_declared_procedures(
@@ -103,10 +91,9 @@ def set_declared_procedures(
 ) -> Case:
     """Define o conjunto declarado de um caso atomicamente (D4).
 
-    Cria/atualiza rows declaradas, atualiza a ponte ``Case.exam_type`` e
-    registra o evento enxuto ``CASE_PROCEDURES_DECLARED`` com o conjunto
-    ordenado (sem texto clínico). Toda falha reverte a operação inteira —
-    nunca deixa caso/projeção parcial.
+    Cria/atualiza rows declaradas e registra o evento enxuto
+    ``CASE_PROCEDURES_DECLARED`` com o conjunto ordenado (sem texto clínico).
+    Toda falha reverte a operação inteira — nunca deixa caso/projeção parcial.
 
     Args:
         case: instância do caso (a linha é relockada dentro da transação).
@@ -120,7 +107,6 @@ def set_declared_procedures(
     with transaction.atomic():
         locked = Case.objects.select_for_update().get(pk=case.pk)
         _sync_declared_rows(locked, types)
-        locked.exam_type = bridge_exam_type_for_types(types)
         locked._record_event(
             "CASE_PROCEDURES_DECLARED",
             user=actor,
@@ -274,10 +260,9 @@ def get_declared_procedure_types(case: Case, *, fallback_to_bridge: bool = False
     """Conjunto declarado ordenado a partir da projeção (Slice 010, R3).
 
     Retorna apenas rows normalizadas: um caso sem rows declaradas devolve
-    ``()``. O parâmetro ``fallback_to_bridge`` permanece aceito somente como
-    nome de parâmetro para consumidores já migrados (intake/médico/CHD), mas
-    não altera o resultado — a ponte ``Case.exam_type`` deixa de ser lida e é
-    removida fisicamente no Slice 011.
+    ``()``. A coluna ponte ``Case.exam_type`` foi removida no Slice 011-C;
+    o parâmetro ``fallback_to_bridge`` permanece aceito somente como nome de
+    parâmetro para consumidores já migrados (intake/médico/CHD), sem efeito.
     """
     del fallback_to_bridge  # compat: aceito, sem efeito (Slice 011 remove o parâmetro)
     return _declared_types_from_rows(case)
@@ -287,7 +272,7 @@ def get_detected_procedure_types(case: Case, *, fallback_to_bridge: bool = False
     """Conjunto detectado ordenado (dimensão da fila médica Pendentes, Slice 010 R3).
 
     Retorna apenas rows com ``detection_status=DETECTED``: caso sem rows
-    detectadas devolve ``()`` (não herda a declaração nem a ponte).
+    detectadas devolve ``()`` (não herda a declaração).
     """
     del fallback_to_bridge  # compat: aceito, sem efeito (Slice 011 remove o parâmetro)
     return tuple(

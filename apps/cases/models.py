@@ -17,22 +17,21 @@ class ReturnState:
 
 
 class ExamType(models.TextChoices):
-    """Tipo de exame operacional declarado no intake (Slice 002).
+    """Valores legados de seleção de exame (deprecado desde o Slice 011-C).
 
-    Fonte única para labels, filtros e seleção de perfil/prompt (Slice 003+).
-    Apenas EDA e Colonoscopia — CPRE não é escopo deste change.
+    Mantido apenas como referência de contrato em services/views/testes de
+    intake (valores ``eda|colonoscopy``); não é membro do schema e não
+    corresponde a nenhuma coluna. Removido no Slice 011-E.
     """
 
     EDA = "eda", "EDA"
     COLONOSCOPY = "colonoscopy", "Colonoscopia"
 
 
-# Ponte transitória (Slice 001→007): valor persistido em ``Case.exam_type`` para
-# a combinação declarada EDA + Colonoscopia. NÃO é membro de ``ExamType.choices``
-# /``ExamType.values`` — dashboard e filas legadas iteram ``ExamType.values`` e
-# sua inclusão mudaria leitores fora do intake antes do cutover. O valor é
-# escrito/removido exclusivamente pelo serviço central de declaração
-# (``apps.cases.procedures``) e desaparece no Slice 007 junto com a coluna.
+# Chave de seleção derivada para a combinação declarada EDA + Colonoscopia.
+# NÃO é membro de ``ExamType.choices``/``ExamType.values`` e NÃO é field
+# choice: existe apenas como chave textual de badge/CSS/filtro/radio calculada
+# pela projeção (``selection_key``) a partir das rows ``CaseProcedure``.
 EDA_COLONOSCOPY: str = "eda_colonoscopy"
 
 
@@ -93,10 +92,10 @@ class CaseProcedure(models.Model):
     (``detection_status``) e disposição médica (``doctor_disposition``) são
     fatos distintos por ``(case, procedure_type)``. Rows podem permanecer com
     flags false/pending para preservar a projeção de uma transformação;
-    ``CaseEvent`` preserva a história integral. ``Case.exam_type`` é apenas a
-    ponte transitória atualizada pelo serviço central (nunca dual-write fora
-    dele). A razão é o único dado verdadeiramente por componente: ator/instante
-    globais continuam no ``Case``.
+    ``CaseEvent`` preserva a história integral. O contrato do conjunto é
+    derivado exclusivamente das rows (``apps.cases.procedures``) — não existe
+    mais coluna singular no ``Case``. A razão é o único dado verdadeiramente
+    por componente: ator/instante globais continuam no ``Case``.
     """
 
     case = models.ForeignKey("Case", on_delete=models.CASCADE, related_name="procedures")
@@ -132,15 +131,6 @@ class Case(models.Model):
     """Caso de triagem EDA — entidade central do sistema."""
 
     case_id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
-
-    # Exam type — declared explicitly at intake (Slice 002)
-    # Historical default EDA kept for fixture compatibility (documented in
-    # migration 0014); new uploads REQUIRE an explicit type at service level.
-    exam_type = models.CharField(
-        max_length=20,
-        choices=ExamType.choices,
-        default=ExamType.EDA,
-    )
 
     # FSM Status
     status = FSMField(
@@ -274,10 +264,6 @@ class Case(models.Model):
             models.Index(fields=["status"]),
             models.Index(fields=["status", "locked_until"]),
             models.Index(fields=["agency_record_number", "created_at"]),
-            # Fila por status+tipo (Slices 004-008 filtram por exam_type).
-            # O prefixo status cobre lookups por status; exam_type composto
-            # evita índice adicional de coluna única.
-            models.Index(fields=["status", "exam_type"], name="cases_status_exam_type_idx"),
         ]
 
     def __str__(self) -> str:
