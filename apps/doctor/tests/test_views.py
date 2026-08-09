@@ -1097,15 +1097,15 @@ class TestDoctorDecisionView:
         response = client.get(f"/doctor/{case.case_id}/")
         assert response.status_code == 200
 
-    def test_decision_page_without_errors_has_no_scroll_marker(self, client) -> None:
-        """Initial decision page carries no data-scroll-to-errors marker."""
+    def test_decision_page_without_errors_has_no_error_banner(self, client) -> None:
+        """Initial decision page carries no error banner."""
         case = self._create_case_in_status(CaseStatus.WAIT_DOCTOR)
-        case.structured_data = {"patient": {"name": "Sem Marcador", "age": 30, "gender": "Masculino"}}
+        case.structured_data = {"patient": {"name": "Sem Banner", "age": 30, "gender": "Masculino"}}
         case.save()
         self._login_as(client, "doctor")
         response = client.get(f"/doctor/{case.case_id}/")
         assert response.status_code == 200
-        assert "data-scroll-to-errors" not in response.content.decode()
+        assert "decision-error-banner" not in response.content.decode()
 
     def test_decision_returns_404_for_non_wait_doctor(self, client) -> None:
         """GET /doctor/<case_id>/ returns 404 for non-WAIT_DOCTOR case."""
@@ -2552,10 +2552,10 @@ class TestDoctorSubmitView:
         assert case.status == CaseStatus.WAIT_DOCTOR
         assert case.doctor_observation == ""
 
-    def test_submit_with_validation_error_marks_form_for_scroll(self, client) -> None:
-        """Invalid submit re-renders the form marked to scroll to the errors."""
+    def test_submit_with_validation_error_shows_error_banner(self, client) -> None:
+        """Invalid submit re-renders a top error banner with anchor to the form."""
         case = self._create_case_in_status(CaseStatus.WAIT_DOCTOR)
-        case.structured_data = {"patient": {"name": "Scroll Mark", "age": 50, "gender": "Masculino"}}
+        case.structured_data = {"patient": {"name": "Banner", "age": 50, "gender": "Masculino"}}
         case.save()
 
         doctor = self._login_as(client, "doctor")
@@ -2572,7 +2572,10 @@ class TestDoctorSubmitView:
             },
         )
         assert response.status_code == 200
-        assert "data-scroll-to-errors" in response.content.decode()
+        content = response.content.decode()
+        assert 'id="decision-error-banner"' in content
+        assert 'href="#doctor-decision-form"' in content
+        assert "data-scroll-to-errors" not in content
 
     def test_submit_non_wait_doctor_returns_404(self, client) -> None:
         """POST to non-WAIT_DOCTOR case returns 404."""

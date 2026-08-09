@@ -11,6 +11,16 @@
 
 {% block content %}
 
+{% if form.errors %}
+<div class="alert alert-danger d-flex flex-wrap align-items-center justify-content-between gap-2 mb-3" role="alert" id="decision-error-banner">
+  <span>
+    <strong>Não foi possível salvar a decisão.</strong>
+    Há {{ form.errors|length }} campo(s) com erro: corrija os campos destacados no formulário.
+  </span>
+  <a href="#doctor-decision-form" class="btn btn-danger btn-sm">Ir para o formulário</a>
+</div>
+{% endif %}
+
 <div class="doctor-decision-layout">
 
   <!-- Patient data + shortcut -->
@@ -311,7 +321,7 @@
     <!-- Lock status warning -->
     <div id="work-lock-warning" class="alert alert-warning mb-3" style="display:none;"></div>
 
-    <form id="decision-form" method="post" action="{% url 'doctor:submit' case.case_id %}" novalidate{% if form.errors %} data-scroll-to-errors{% endif %}>
+    <form id="decision-form" method="post" action="{% url 'doctor:submit' case.case_id %}" novalidate>
       {% csrf_token %}
 
       {% if per_procedure %}
