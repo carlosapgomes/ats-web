@@ -130,22 +130,22 @@ def create_openai_client(
 
 
 def create_openai_llm1_client() -> LlmClient:
-    """Create OpenAI client for LLM1 with strict Llm1Response schema."""
-    from apps.pipeline.schemas.llm1 import Llm1Response
+    """Create OpenAI client for LLM1 with strict Llm1ResponseV2 schema."""
+    from apps.pipeline.schemas.llm1_v2 import Llm1ResponseV2
 
     return create_openai_client(
         response_schema_name="llm1_response",
-        response_schema=Llm1Response.model_json_schema(),
+        response_schema=Llm1ResponseV2.model_json_schema(),
     )
 
 
 def create_openai_llm2_client() -> LlmClient:
-    """Create OpenAI client for LLM2 with strict Llm2Response schema."""
-    from apps.pipeline.schemas.llm2 import Llm2Response
+    """Create OpenAI client for LLM2 with strict Llm2ResponseV2 schema."""
+    from apps.pipeline.schemas.llm2_v2 import Llm2ResponseV2
 
     return create_openai_client(
         response_schema_name="llm2_response",
-        response_schema=Llm2Response.model_json_schema(),
+        response_schema=Llm2ResponseV2.model_json_schema(),
     )
 
 

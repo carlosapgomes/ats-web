@@ -104,87 +104,6 @@ def _dummy_factory() -> Any:
 
     return StaticLlmClient(response_text="dummy-response")
 
-    def test_adds_additional_properties_false_to_objects(self) -> None:
-        from apps.pipeline.llm import _normalize_openai_strict_schema
-
-        schema: Any = {
-            "type": "object",
-            "properties": {"name": {"type": "string"}},
-        }
-        normalized = _normalize_openai_strict_schema(schema)
-        assert normalized["additionalProperties"] is False
-
-    def test_adds_required_from_property_names(self) -> None:
-        from apps.pipeline.llm import _normalize_openai_strict_schema
-
-        schema: Any = {
-            "type": "object",
-            "properties": {"a": {"type": "string"}, "b": {"type": "integer"}},
-        }
-        normalized = _normalize_openai_strict_schema(schema)
-        assert set(normalized["required"]) == {"a", "b"}
-
-    def test_recurses_into_nested_objects(self) -> None:
-        from apps.pipeline.llm import _normalize_openai_strict_schema
-
-        schema: Any = {
-            "type": "object",
-            "properties": {
-                "inner": {
-                    "type": "object",
-                    "properties": {"x": {"type": "string"}},
-                },
-            },
-        }
-        normalized = _normalize_openai_strict_schema(schema)
-        inner: dict[str, Any] = normalized["properties"]["inner"]
-        assert inner["additionalProperties"] is False
-        assert set(inner["required"]) == {"x"}
-
-    def test_recurses_into_arrays_of_objects(self) -> None:
-        from apps.pipeline.llm import _normalize_openai_strict_schema
-
-        schema: Any = {
-            "type": "object",
-            "properties": {
-                "items": {
-                    "type": "array",
-                    "items": {
-                        "type": "object",
-                        "properties": {"k": {"type": "string"}},
-                    },
-                },
-            },
-        }
-        normalized = _normalize_openai_strict_schema(schema)
-        items_schema: dict[str, Any] = normalized["properties"]["items"]
-        inner: dict[str, Any] = items_schema["items"]
-        assert inner["additionalProperties"] is False
-        assert "required" in inner
-
-    def test_does_not_modify_non_object_nodes(self) -> None:
-        from apps.pipeline.llm import _normalize_openai_strict_schema
-
-        schema: Any = {
-            "type": "object",
-            "properties": {"name": {"type": "string"}},
-        }
-        _normalize_openai_strict_schema(schema)
-        # Non-object string type is preserved
-        assert schema["properties"]["name"]["type"] == "string"
-
-    def test_preserves_original_schema(self) -> None:
-        """Normalize returns a copy; original is not mutated."""
-        from apps.pipeline.llm import _normalize_openai_strict_schema
-
-        schema: Any = {
-            "type": "object",
-            "properties": {"x": {"type": "string"}},
-        }
-        normalized = _normalize_openai_strict_schema(schema)
-        assert "additionalProperties" not in schema
-        assert normalized["additionalProperties"] is False
-
 
 class TestCreateOpenAiClient:
     """Tests for create_openai_client."""
@@ -261,7 +180,7 @@ class TestCreateOpenAiStrictSchemaClients:
             assert rf["type"] == "json_schema"
             assert rf["json_schema"]["strict"] is True
             assert rf["json_schema"]["name"] == "llm1_response"
-            # Schema should contain Llm1Response properties
+            # Schema should carry the bound strict schema properties
             schema = rf["json_schema"]["schema"]
             assert "additionalProperties" in schema
             assert "agency_record_number" in schema.get("properties", {})
@@ -286,6 +205,78 @@ class TestCreateOpenAiStrictSchemaClients:
             assert rf["type"] == "json_schema"
             assert rf["json_schema"]["strict"] is True
             assert rf["json_schema"]["name"] == "llm2_response"
+
+    def test_llm1_client_binds_v2_strict_schema(self, settings: Any) -> None:
+        """Contract test: production LLM1 client binds the V2 strict schema.
+
+        Must fail when the factory binds the 1.1 contract (Llm1Response).
+        """
+        with patch("openai.OpenAI") as mock_openai_cls:
+            mock_client = MagicMock()
+            mock_openai_cls.return_value = mock_client
+            mock_completion = MagicMock()
+            mock_choice = MagicMock()
+            mock_choice.message.content = '{"schema_version": "2.0"}'
+            mock_completion.choices = [mock_choice]
+            mock_client.chat.completions.create.return_value = mock_completion
+
+            from apps.pipeline.llm import create_openai_llm1_client
+
+            client = create_openai_llm1_client()
+            client.complete(system_prompt="sys", user_prompt="usr")
+
+            call_kwargs = mock_client.chat.completions.create.call_args.kwargs
+            rf = call_kwargs["response_format"]
+            assert rf["type"] == "json_schema"
+            assert rf["json_schema"]["strict"] is True
+            assert rf["json_schema"]["name"] == "llm1_response"
+
+            schema = rf["json_schema"]["schema"]
+            properties = schema["properties"]
+            schema_version = properties["schema_version"]
+            if "const" in schema_version:
+                assert schema_version["const"] == "2.0"
+            else:
+                assert schema_version["enum"] == ["2.0"]
+            assert "common_preop" in properties
+            assert "requested_procedures" in properties
+            assert "preop_screening" not in properties
+            assert "eda" not in properties
+
+    def test_llm2_client_binds_v2_strict_schema(self, settings: Any) -> None:
+        """Contract test: production LLM2 client binds the V2 strict schema.
+
+        Must fail when the factory binds the 1.1 contract (Llm2Response).
+        """
+        with patch("openai.OpenAI") as mock_openai_cls:
+            mock_client = MagicMock()
+            mock_openai_cls.return_value = mock_client
+            mock_completion = MagicMock()
+            mock_choice = MagicMock()
+            mock_choice.message.content = '{"schema_version": "2.0"}'
+            mock_completion.choices = [mock_choice]
+            mock_client.chat.completions.create.return_value = mock_completion
+
+            from apps.pipeline.llm import create_openai_llm2_client
+
+            client = create_openai_llm2_client()
+            client.complete(system_prompt="sys", user_prompt="usr")
+
+            call_kwargs = mock_client.chat.completions.create.call_args.kwargs
+            rf = call_kwargs["response_format"]
+            assert rf["type"] == "json_schema"
+            assert rf["json_schema"]["strict"] is True
+            assert rf["json_schema"]["name"] == "llm2_response"
+
+            schema = rf["json_schema"]["schema"]
+            properties = schema["properties"]
+            schema_version = properties["schema_version"]
+            if "const" in schema_version:
+                assert schema_version["const"] == "2.0"
+            else:
+                assert schema_version["enum"] == ["2.0"]
+            assert "procedure_recommendations" in properties
+            assert "suggestion" not in properties
 
     def test_create_openai_client_with_schema_uses_strict(self, settings: Any) -> None:
         with patch("openai.OpenAI") as mock_openai_cls:
@@ -329,3 +320,114 @@ class TestCreateOpenAiStrictSchemaClients:
 
             call_kwargs = mock_client.chat.completions.create.call_args.kwargs
             assert call_kwargs["response_format"] == {"type": "json_object"}
+
+
+class TestNormalizeOpenAiStrictSchema:
+    """Tests for strict-mode normalization of the V2 pipeline schemas."""
+
+    def test_adds_additional_properties_false_to_objects(self) -> None:
+        from apps.pipeline.llm import _normalize_openai_strict_schema
+
+        schema: Any = {
+            "type": "object",
+            "properties": {"name": {"type": "string"}},
+        }
+        normalized = _normalize_openai_strict_schema(schema)
+        assert normalized["additionalProperties"] is False
+
+    def test_adds_required_from_property_names(self) -> None:
+        from apps.pipeline.llm import _normalize_openai_strict_schema
+
+        schema: Any = {
+            "type": "object",
+            "properties": {"a": {"type": "string"}, "b": {"type": "integer"}},
+        }
+        normalized: Any = _normalize_openai_strict_schema(schema)
+        assert set(normalized["required"]) == {"a", "b"}
+
+    def test_recurses_into_nested_objects(self) -> None:
+        from apps.pipeline.llm import _normalize_openai_strict_schema
+
+        schema: Any = {
+            "type": "object",
+            "properties": {
+                "inner": {
+                    "type": "object",
+                    "properties": {"x": {"type": "string"}},
+                },
+            },
+        }
+        normalized: Any = _normalize_openai_strict_schema(schema)
+        inner: dict[str, Any] = normalized["properties"]["inner"]
+        assert inner["additionalProperties"] is False
+        assert set(inner["required"]) == {"x"}
+
+    def test_recurses_into_arrays_of_objects(self) -> None:
+        from apps.pipeline.llm import _normalize_openai_strict_schema
+
+        schema: Any = {
+            "type": "object",
+            "properties": {
+                "items": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "properties": {"k": {"type": "string"}},
+                    },
+                },
+            },
+        }
+        normalized: Any = _normalize_openai_strict_schema(schema)
+        items_schema: dict[str, Any] = normalized["properties"]["items"]
+        inner: dict[str, Any] = items_schema["items"]
+        assert inner["additionalProperties"] is False
+        assert "required" in inner
+
+    def test_does_not_modify_non_object_nodes(self) -> None:
+        from apps.pipeline.llm import _normalize_openai_strict_schema
+
+        schema: Any = {
+            "type": "object",
+            "properties": {"name": {"type": "string"}},
+        }
+        _normalize_openai_strict_schema(schema)
+        # Non-object string type is preserved
+        assert schema["properties"]["name"]["type"] == "string"
+
+    def test_preserves_original_schema(self) -> None:
+        """Normalize returns a copy; original is not mutated."""
+        from apps.pipeline.llm import _normalize_openai_strict_schema
+
+        schema: Any = {
+            "type": "object",
+            "properties": {"x": {"type": "string"}},
+        }
+        normalized = _normalize_openai_strict_schema(schema)
+        assert "additionalProperties" not in schema
+        assert normalized["additionalProperties"] is False
+
+    def test_v2_schemas_normalize_for_strict_mode(self) -> None:
+        """Normalized V2 schemas satisfy OpenAI strict mode requirements.
+
+        Every object node must declare ``additionalProperties: false`` and
+        list all of its properties in ``required``.
+        """
+        from apps.pipeline.llm import _normalize_openai_strict_schema
+        from apps.pipeline.schemas.llm1_v2 import Llm1ResponseV2
+        from apps.pipeline.schemas.llm2_v2 import Llm2ResponseV2
+
+        for model in (Llm1ResponseV2, Llm2ResponseV2):
+            normalized = _normalize_openai_strict_schema(model.model_json_schema())
+            self._assert_object_nodes_strict(normalized)
+
+    def _assert_object_nodes_strict(self, node: Any) -> None:
+        """Assert every object node in the (normalized) schema is strict-ready."""
+        if isinstance(node, dict):
+            if node.get("type") == "object" and isinstance(node.get("properties"), dict):
+                assert node.get("additionalProperties") is False
+                assert set(node["required"]) == set(node["properties"].keys())
+            for value in node.values():
+                self._assert_object_nodes_strict(value)
+        elif isinstance(node, list):
+            for value in node:
+                self._assert_object_nodes_strict(value)
