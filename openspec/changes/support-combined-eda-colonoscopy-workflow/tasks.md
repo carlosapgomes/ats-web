@@ -52,7 +52,7 @@ A ADR-0004 deve ser commitada, enviada e aprovada explicitamente antes de entreg
 - [x] Slice 011-C (revisado) — Cutover físico: migration remove Case.exam_type; classe ExamType preservada (`slices/slice-011c-authoritative-procedure-schema-cutover.md`)
 - [x] Slice 011-D (revisado) — Remoção do kwarg fallback_to_bridge de todos os call sites (`slices/slice-011d-bridge-compat-cleanup.md`)
 - [x] Slice 011-E — Encerramento simbólico: classe ExamType e parâmetro fallback_to_bridge (`slices/slice-011e-bridge-symbol-cleanup.md`)
-- [ ] Slice 012 — Operação ativa e reverte o fluxo combinado com segurança (`slices/slice-012-rollout-documentation-and-verification.md`)
+- [x] Slice 012 — Operação ativa e reverte o fluxo combinado com segurança (`slices/slice-012-rollout-documentation-and-verification.md`)
 
 ## Definition of Done do change
 
@@ -97,13 +97,13 @@ A ADR-0004 deve ser commitada, enviada e aprovada explicitamente antes de entreg
 - [x] Dashboard permite dimensão declarado/detectado/autorizado e mostra matriz de conversão.
 - [x] `Case.exam_type` e dispatch operacional dependente dele foram removidos.
 - [x] Quatro prompts neutros são canônicos; prompts antigos permanecem apenas como histórico inativo.
-- [ ] Nenhum reset de produção é requisito.
+- [x] Nenhum reset de produção é requisito.
 
 ### Operação e evidência
 
-- [ ] ADR-0004, OpenSpec, manual, contexto e runbook estão alinhados.
-- [ ] Rollout mantém flag desligada até migration/prompts/prechecks passarem.
-- [ ] Rollback preferencial mantém imagem nova; bridge para imagem antiga é binário/fail-fast.
-- [ ] Todos os slices têm relatório revisado, baseline/final, zero failures/errors e `passed_final >= passed_baseline`.
-- [ ] Quality gate completo e `openspec validate --strict` passam.
-- [ ] Cada slice foi commitado e enviado antes do próximo.
+- [x] ADR-0004, OpenSpec, manual, contexto e runbook estão alinhados.
+- [x] Rollout mantém flag desligada até migration/prompts/prechecks passarem.
+- [x] Rollback preferencial mantém imagem nova; bridge para imagem antiga é binário/fail-fast.
+- [x] Todos os slices têm relatório revisado, baseline/final, zero failures/errors e `passed_final >= passed_baseline`.
+- [x] Quality gate completo e `openspec validate --strict` passam.
+- [x] Cada slice foi commitado e enviado antes do próximo.

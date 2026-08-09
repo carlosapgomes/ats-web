@@ -218,6 +218,27 @@ Nesse caso:
 
 Importante: a mensagem do CHD para o NIR **não reabre o caso sozinha**. Quem abre a intercorrência no sistema é o **NIR**, depois de ler o contexto.
 
+### 1.9 Fluxo combinado: EDA + Colonoscopia em um único caso
+
+1. **NIR** enviar o PDF e declarar **EDA + Colonoscopia** na seleção.
+2. O sistema processa o documento **uma vez** e gera componentes por
+   procedimento.
+3. O caso (único) entra na fila do **Médico** com badge **EDA + Colonoscopia**.
+4. **Médico** decidir cada procedimento (aprovar/negar/incluir), com razão por
+   componente quando necessário.
+5. Se ambos forem aprovados com agendamento, o **CHD** confirma **um único
+   agendamento casado** (data/hora/local).
+6. O resultado volta para o **NIR** com **Solicitado**, **Detectado** e
+   **Autorizado**.
+7. **NIR** confirmar o recebimento e inserir a resposta no SUREM.
+
+**Upgrade automático:** se o NIR declara um único procedimento e o relatório
+mostra os dois com evidência forte, o sistema registra o **upgrade
+automático** para **EDA + Colonoscopia** na linha do tempo e o caso segue ao
+médico. Se a divergência for no sentido contrário (declarado combinado,
+detectado único) ou sem evidência forte, o caso volta ao NIR para correção da
+seleção declarada.
+
 ---
 
 ## 2. Comunicação operacional e notificações
@@ -280,18 +301,22 @@ Acesse a aba **Novo Encaminhamento**.
 
 Na área de upload:
 
-1. selecionar o **tipo de exame** do lote: **EDA** ou **Colonoscopia** (seleção obrigatória — o envio é bloqueado sem escolha);
+1. selecionar o(s) **procedimento(s)** do lote: **EDA**, **Colonoscopia** ou **EDA + Colonoscopia** (seleção obrigatória — o envio é bloqueado sem escolha);
 2. clicar para selecionar os PDFs ou arraste os arquivos para a área indicada;
 3. conferir a lista de arquivos selecionados;
 4. clicar em **Enviar para Regulação**.
 
 O sistema aceita arquivos PDF de encaminhamento, com até **20 MB por arquivo**. O processamento ocorre em segundo plano. Você pode sair da tela; o sistema continuará processando o caso.
 
-**Lote homogêneo:** o tipo selecionado vale para **todos os PDFs enviados naquele lote**. Não é possível misturar EDA e Colonoscopia no mesmo envio.
+**Lote com seleção única:** a seleção vale para **todos os PDFs enviados naquele lote**. Quando você escolhe **EDA + Colonoscopia**, o sistema cria **um único caso** com os dois procedimentos — não são criados dois casos nem dois envios.
 
-**Solicitações mistas no mesmo PDF:** se um mesmo PDF contiver solicitações atuais de **EDA e Colonoscopia juntas**, o sistema bloqueia o caso e encaminha para revisão manual — o NIR deve **separar os PDFs** e reenviar um pedido por tipo.
+**Divergência entre o que você declara e o que o relatório mostra:**
 
-**Colonoscopia indisponível:** quando a operação ainda não ativou a colonoscopia, a opção **Colonoscopia** fica desabilitada com uma explicação. Casos de colonoscopia já existentes continuam sendo processados normalmente — apenas novos uploads ficam bloqueados nessa situação.
+- se você declara **um procedimento** e o relatório mostra **os dois** com evidência forte, o sistema registra o **upgrade automático** para **EDA + Colonoscopia** e o caso segue para o médico — a mudança fica registrada na linha do tempo do caso;
+- se você declara **EDA + Colonoscopia** e o relatório mostra **apenas um** dos procedimentos, ou a evidência não é forte, o caso volta para a **revisão manual** do NIR, que corrige a seleção declarada antes de seguir;
+- trocas entre tipos únicos (declarou EDA e o relatório mostra Colonoscopia, por exemplo) também voltam para a revisão manual.
+
+**Colonoscopia/Combinado indisponíveis:** quando a operação ainda não ativou a colonoscopia, as opções **Colonoscopia** e **EDA + Colonoscopia** ficam desabilitadas com uma explicação. Casos de colonoscopia já existentes continuam sendo processados normalmente — apenas novos uploads ficam bloqueados nessa situação.
 
 ### Envio de um único relatório com anexos
 
@@ -565,11 +590,12 @@ Se a mensagem do CHD for apenas informativa e não exigir mudança no agendament
 
 ---
 
-## 3.10 Corrigir o tipo de exame de um caso
+## 3.10 Corrigir a seleção de procedimentos de um caso
 
-Quando o sistema identifica divergência entre o tipo declarado no upload e o
-conteúdo do relatório, o caso vai para **Revisão Manual** e o NIR pode
-corrigir o tipo de exame.
+Quando o sistema identifica divergência entre a seleção declarada no upload e
+o conteúdo do relatório, o caso vai para **Revisão Manual** e o NIR pode
+corrigir o conjunto de procedimentos declarado (**EDA**, **Colonoscopia** ou
+**EDA + Colonoscopia**).
 
 A correção está disponível **somente** quando o caso está exatamente nesta
 situação:
@@ -587,14 +613,35 @@ acima, o formulário de correção não aparece.
 Passo a passo:
 
 1. abrir o caso em **Meus Casos**;
-2. localizar a seção de **correção do tipo de exame** (visível apenas quando
-   o caso está em revisão manual, conforme as condições acima);
-3. selecionar o tipo correto (**EDA** ou **Colonoscopia**);
+2. localizar a seção de **correção da seleção de procedimentos** (visível
+   apenas quando o caso está em revisão manual, conforme as condições acima);
+3. selecionar a seleção correta (**EDA**, **Colonoscopia** ou
+   **EDA + Colonoscopia**);
 4. confirmar a correção.
 
-O sistema reprocessa o caso com o tipo corrigido, sem novo upload e sem
+O sistema reprocessa o caso com a seleção corrigida, sem novo upload e sem
 perder o PDF, os anexos, o texto extraído ou o histórico de eventos. A
-correção fica registrada na linha do tempo do caso para auditoria.
+correção fica registrada na linha do tempo do caso para auditoria. A seleção
+declarada corrigida não altera o que foi detectado na análise nem qualquer
+decisão médica (que não existe nesta etapa).
+
+---
+
+## 3.11 Resposta final: solicitado, detectado e autorizado
+
+Quando o caso termina, a resposta final mostra as três dimensões do caso,
+separadas por procedimento:
+
+- **Solicitado** — o que o NIR declarou no envio (EDA, Colonoscopia ou
+  EDA + Colonoscopia);
+- **Detectado** — o que a análise do relatório identificou como solicitação
+  atual;
+- **Autorizado** — o que o médico aprovou, com as razões registradas.
+
+Em um caso combinado, as três dimensões aparecem para cada procedimento.
+Confira as três antes de inserir a resposta no SUREM. Se algo estiver
+divergente, use a comunicação operacional para esclarecer com o médico ou o
+CHD antes de encerrar.
 
 ---
 
@@ -733,6 +780,23 @@ Depois que o NIR responder ou anexar o documento, o médico poderá abrir o caso
 A fila médica também pode mostrar casos já decididos no dia.
 
 Use essa área para consultar rapidamente uma decisão recente e abrir os detalhes quando necessário.
+
+## 4.7 Decidir um caso combinado (EDA + Colonoscopia)
+
+Quando o caso tem os dois procedimentos (badge **EDA + Colonoscopia**), a
+decisão é feita **por componente**: o médico avalia e decide cada
+procedimento separadamente na mesma tela.
+
+- **Aprovar** um procedimento e **negar** o outro é permitido — a negativa
+exige **razão específica para aquele procedimento**.
+- **Incluir** um procedimento não detectado também é permitido — a inclusão
+exige razão específica e **não** reexecuta a análise automática: o
+procedimento incluído entra com o contexto clínico já extraído.
+- O **Suporte Necessário** e o **Fluxo de Admissão** continuam sendo
+escolhidos para o caso como um todo; a sugestão global usa o requisito mais
+restritivo entre os procedimentos, mas a escolha final permanece médica.
+- Depois de confirmar, o conjunto **Autorizado** é o que vale para o CHD e
+para a resposta final.
 
 ---
 
@@ -944,6 +1008,18 @@ Use esse espaço para mensagens complementares, por exemplo:
 
 Lembre-se: a comunicação operacional não substitui a confirmação, negativa, resolução de intercorrência ou comunicação histórica ao NIR nos formulários próprios.
 
+## 5.8 Agendamento casado (caso com EDA + Colonoscopia autorizadas)
+
+Quando o médico autoriza **os dois procedimentos** (EDA e Colonoscopia) com
+fluxo de agendamento, o card do CHD aparece como **Agendamento casado**: os
+dois componentes são apresentados juntos, e o CHD confirma **uma única**
+data, hora e localização para o caso — não existe agendamento separado por
+procedimento.
+
+O CHD não altera silenciosamente os componentes do conjunto autorizado. Se
+precisar ajustar alguma informação do agendamento, use as orientações
+médicas e a comunicação operacional com o médico/NIR.
+
 ---
 
 # 6. Boas práticas para todos os usuários
@@ -1008,10 +1084,10 @@ Neste manual:
 - usamos `@medico` e `@chd` como menções preferenciais;
 - as menções devem ser digitadas sem acento.
 
-## 7.2 Ativação da colonoscopia é assunto da operação
+## 7.2 Ativação da colonoscopia e do combinado é assunto da operação
 
-A disponibilidade da **Colonoscopia** no upload é controlada pela operação
-(flag de configuração). Esse controle não é assunto de usuário comum: o
-usuário apenas vê a opção habilitada quando o sistema a liberar, ou
-desabilitada com explicação quando não. Nenhuma ação individual ativa ou
-desativa o tipo de exame.
+A disponibilidade da **Colonoscopia** e da seleção **EDA + Colonoscopia** no
+upload é controlada pela operação (flag de configuração). Esse controle não é
+assunto de usuário comum: o usuário apenas vê as opções habilitadas quando o
+sistema as liberar, ou desabilitadas com explicação quando não. Nenhuma ação
+individual ativa ou desativa os procedimentos.
