@@ -23,6 +23,15 @@
 
     if (!form) return;
 
+    // ── Scroll até erros após re-renderização com validação falha ─────
+    if (form.hasAttribute('data-scroll-to-errors')) {
+        var invalidField = form.querySelector('.is-invalid');
+        if (invalidField) {
+            invalidField.scrollIntoView({ behavior: 'smooth', block: 'center' });
+            invalidField.focus({ preventScroll: true });
+        }
+    }
+
     var confirmModal = null;
     if (confirmModalEl) {
         confirmModal = new bootstrap.Modal(confirmModalEl);

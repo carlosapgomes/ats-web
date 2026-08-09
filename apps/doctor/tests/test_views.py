@@ -1097,6 +1097,16 @@ class TestDoctorDecisionView:
         response = client.get(f"/doctor/{case.case_id}/")
         assert response.status_code == 200
 
+    def test_decision_page_without_errors_has_no_scroll_marker(self, client) -> None:
+        """Initial decision page carries no data-scroll-to-errors marker."""
+        case = self._create_case_in_status(CaseStatus.WAIT_DOCTOR)
+        case.structured_data = {"patient": {"name": "Sem Marcador", "age": 30, "gender": "Masculino"}}
+        case.save()
+        self._login_as(client, "doctor")
+        response = client.get(f"/doctor/{case.case_id}/")
+        assert response.status_code == 200
+        assert "data-scroll-to-errors" not in response.content.decode()
+
     def test_decision_returns_404_for_non_wait_doctor(self, client) -> None:
         """GET /doctor/<case_id>/ returns 404 for non-WAIT_DOCTOR case."""
         case = self._create_case_in_status(CaseStatus.DOCTOR_ACCEPTED)
@@ -2541,6 +2551,28 @@ class TestDoctorSubmitView:
         case = Case.objects.get(pk=case.pk)
         assert case.status == CaseStatus.WAIT_DOCTOR
         assert case.doctor_observation == ""
+
+    def test_submit_with_validation_error_marks_form_for_scroll(self, client) -> None:
+        """Invalid submit re-renders the form marked to scroll to the errors."""
+        case = self._create_case_in_status(CaseStatus.WAIT_DOCTOR)
+        case.structured_data = {"patient": {"name": "Scroll Mark", "age": 50, "gender": "Masculino"}}
+        case.save()
+
+        doctor = self._login_as(client, "doctor")
+        token = self._claim_lock(case.case_id, doctor)
+
+        response = client.post(
+            f"/doctor/{case.case_id}/submit/",
+            data={
+                "decision": "accept",
+                "support_flag": "none",
+                "admission_flow": "scheduled",
+                "observation": "x" * 501,
+                "lock_token": token,
+            },
+        )
+        assert response.status_code == 200
+        assert "data-scroll-to-errors" in response.content.decode()
 
     def test_submit_non_wait_doctor_returns_404(self, client) -> None:
         """POST to non-WAIT_DOCTOR case returns 404."""
