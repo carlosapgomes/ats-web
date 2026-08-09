@@ -17,8 +17,8 @@
   - [x] `uv run ruff format --check .`
   - [x] `uv run mypy .`
   - [x] `uv run pytest`
-- [ ] Relatório do slice gerado em markdown temporário com evidência TDD e respostas aos gates de autoavaliação.
-- [ ] Commit e push realizados na branch do change.
+- [x] Relatório do slice gerado em markdown temporário com evidência TDD e respostas aos gates de autoavaliação.
+- [x] Commit e push realizados na branch do change.
 - [ ] Tag/release candidata publicada com imagem OCI verificada (pós-aprovação do slice).
 - [ ] Smoke em produção: 1 caso EDA e 1 colonoscopia chegam a `WAIT_DOCTOR` com `schema_version: "2.0"`.
 - [ ] Casos falhos do incidente tratados operacionalmente (encerramento + reapresentação).
