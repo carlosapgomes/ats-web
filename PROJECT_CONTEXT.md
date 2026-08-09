@@ -173,8 +173,9 @@ static/          # css/app.css (paleta hospitalar), js/upload.js, js/password-to
 
 - **Fase atual**: Fase 3 (débitos técnicos) — capacity de anexos clínicos entregue
 - **Change ativo**: nenhum — os últimos changes foram arquivados em
-  `openspec/archive/support-combined-eda-colonoscopy-workflow/` e
-  `openspec/archive/fix-pipeline-v2-openai-strict-schema/`.
+  `openspec/archive/support-combined-eda-colonoscopy-workflow/`,
+  `openspec/archive/fix-pipeline-v2-openai-strict-schema/` e
+  `openspec/archive/fix-openai-strict-oneof-normalization/`.
 - **Changes concluídos**:
   - `openspec/archive/bootstrap-django-ats-core/` (7 slices, Fase 0)
   - `openspec/archive/intake-nir/` (6 slices, Fase 1)
@@ -193,6 +194,7 @@ static/          # css/app.css (paleta hospitalar), js/upload.js, js/password-to
   - `openspec/archive/introduce-colonoscopy-exam-workflow/` (8 slices — tipo de exame explícito EDA/Colonoscopia: declaração de tipo por lote no intake com gate de escopo e flag `COLONOSCOPY_INTAKE_ENABLED` web-only, roteamento para médico, filtros por tipo em médico/CHD/NIR, correção de tipo com reenvio explícito e reprocessamento seguro, breakdown gerencial no dashboard e runbook de rollout/rollback em `docs/deploy/introduce-colonoscopy-exam-workflow.md`; rollback preferido mantém a imagem nova; bridge de schema binário fail-fast; elegibilidade de correção exata em `WAIT_R1_CLEANUP_THUMBS`; prompts colonoscopia permanecem ativos enquanto houver casos em voo; specs principais atualizadas em `openspec/specs/`).
   - `openspec/archive/support-combined-eda-colonoscopy-workflow/` (Slices 001–012 — fluxo combinado EDA + Colonoscopia em um caso com 1–2 rows `CaseProcedure`; contrato LLM neutro 2.0 e quatro prompts canônicos; decisão por componente, agendamento casado, resposta final solicitado/detectado/autorizado e analytics por dimensão; cutover físico removeu `Case.exam_type` via migration 0016; runbook CRITICAL em `docs/deploy/support-combined-eda-colonoscopy-workflow.md` com backup/preflight fail-closed, deploy serializado, flag web-only pós-smoke, rollback preferencial na imagem nova e bridge binária para imagem antiga. ADR-0004 aceita; ADR-0003 parcialmente superada nas decisões 1, 2, 3, 5, 6, 8 e 9; specs canônicas promovidas em `openspec/specs/`).
   - `openspec/archive/fix-pipeline-v2-openai-strict-schema/` (hotfix de produção pós-`v0.3.0-rc.1` — as factories `create_openai_llm1_client()`/`create_openai_llm2_client()` vinculavam o strict json_schema aos schemas legados 1.1 (`Llm1Response`/`Llm2Response`); em modo strict a API forçava saída 1.1 e a validação `Llm1ResponseV2` falhava para 100% dos casos novos. Corrigido para `Llm1ResponseV2`/`Llm2ResponseV2` com testes de contrato (schema_version fixo `"2.0"`, chaves distintivas 2.0, ausência de chaves 1.1) e normalização strict validada; 6 testes de normalização mortos desde `eae3751` foram restaurados. Spec `procedure-neutral-analysis` ganhou requisito de vínculo. Sem migration; incidente tratado operacionalmente por encerramento + reapresentação).
+  - `openspec/archive/fix-openai-strict-oneof-normalization/` (hotfix de produção pós-`v0.3.0-rc.2` — a API recusava o schema V2 do LLM1 com `400 invalid_json_schema` porque a união discriminada de `requested_procedures` serializa como `oneOf` + `discriminator`, não suportados pelo modo strict. O normalizador `_normalize_openai_strict_schema` passou a reescrever `oneOf`→`anyOf` e remover `discriminator` apenas na cópia enviada à API; modelos Pydantic e validação local inalterados. Spec `procedure-neutral-analysis` ganhou requisito de compatibilidade de uniões. Sem migration).
   - `openspec/archive/case-operational-communication-mvp/` (2 slices — thread operacional append-only por caso `CaseCommunicationMessage` para esclarecimentos entre NIR/médico/scheduler; serviço `post_case_communication_message` com validações + endpoint POST `/cases/<id>/communication/` com redirect seguro + partial reutilizado em 4 telas + evento auditável `CASE_COMMUNICATION_MESSAGE_POSTED`. Sem notificações/polling/HTMX/WebSocket; FSM inalterada).
   - `openspec/archive/case-communication-mentions-notifications/` (2 slices + 2 hardening pós-revisão — menções `@role`/`@username` em `CaseCommunicationMessage` criam `UserNotification` (UUID PK, indexes, unique constraint); parser + `create_case_communication_notifications` (exclui autor, deduplica, ignora inativos/blocked) + badge SSR via helper DRY `get_unread_notification_count()` + inbox “Minhas notificações” com redirect seguro por papel/status + endpoint `GET /notifications/unread-count/` (`@require_GET`) + polling Vanilla JS (`fetch()`, 45s, `document.visibilityState`, backoff). Sem autocomplete/aliases/push/SMS/email/WebSocket/SSE/marcação AJAX/polling de thread).
   - `openspec/archive/workflow-system-notices-in-case-communication/` (2 slices + 2 hardening pós-revisão — eventos estruturados selecionados projetam `CaseCommunicationMessage` sistêmica (`message_type="system"`) na thread via serviço central `create_system_communication_notice_for_event` + signal `CaseEvent.post_save` + formatadores por `event_type` (DRY); 7 eventos (`CASE_ATTACHMENT_SUPPRESSED`/`CASE_ATTACHMENT_SUPPLEMENT_ADDED`/`CASE_CORRECTION_CREATED`/`CASE_MARKED_SUPERSEDED`/`POST_SCHEDULE_ISSUE_OPENED`/`POST_SCHEDULE_ISSUE_RESPONDED`/`CASE_ADMINISTRATIVELY_CLOSED`), `POST_SCHEDULE_ISSUE_ACKNOWLEDGED` omitido (payload vazio); render “Sistema” + badge SISTEMA; idempotência por `source_event` OneToOne; sem `UserNotification`/badge/read-resolved/backfill/inbox. FSM e workflows estruturados inalterados).
@@ -221,10 +223,10 @@ static/          # css/app.css (paleta hospitalar), js/upload.js, js/password-to
   - `openspec/archive/restore-isolated-deterministic-test-baseline/` (1 slice — baseline de testes isolado e determinístico restaurado e endurecido (gates baseline-vs-final)).
 - **Apps criados**: `apps/accounts/`, `apps/cases/`, `apps/llm/`, `apps/intake/`, `apps/pipeline/`,
   `apps/doctor/`, `apps/scheduler/`, `apps/dashboard/`, `apps/admin_ui/`
-- **Testes**: 3135 passando (gate final do hotfix `fix-pipeline-v2-openai-strict-schema`;
-  inclui testes de contrato do vínculo strict V2 e os testes de contrato de documentação
-  do rollout — `tests/test_colonoscopy_rollout_docs.py` e `tests/test_combined_rollout_docs.py`),
-  quality gate verde (ruff + mypy + pytest)
+- **Testes**: 3137 passando (gate final do hotfix `fix-openai-strict-oneof-normalization`;
+  inclui testes de contrato do vínculo strict V2, da normalização `oneOf`→`anyOf` e os
+  testes de contrato de documentação do rollout — `tests/test_colonoscopy_rollout_docs.py`
+  e `tests/test_combined_rollout_docs.py`), quality gate verde (ruff + mypy + pytest)
 - **Templates**: base.html com tema hospitalar, login, switch-role, perfil, password reset/change,
   intake (home, my_cases, case_detail), doctor (queue, decision)
 - **Documentacao de dominio**: `docs/DOMAIN_ANALYSIS.md`
