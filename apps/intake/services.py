@@ -24,7 +24,7 @@ from apps.cases.models import (
     Case,
     CaseAttachment,
     CaseStatus,
-    ExamType,
+    ProcedureType,
 )
 from apps.cases.procedures import (
     get_declared_procedure_types,
@@ -52,8 +52,9 @@ def is_colonoscopy_intake_enabled() -> bool:
 
 # Seleção declarada aceita no intake (Slice 001): EDA, Colonoscopia ou a
 # combinação eda_colonoscopy. O valor combinado NÃO é membro de
-# ExamType.values — é chave de seleção derivada da projeção, não field choice.
-_DECLARED_SELECTION_VALUES: frozenset[str] = frozenset({ExamType.EDA, ExamType.COLONOSCOPY, EDA_COLONOSCOPY})
+# ProcedureType.values — é chave de seleção derivada da projeção, não field
+# choice.
+_DECLARED_SELECTION_VALUES: frozenset[str] = frozenset({ProcedureType.EDA, ProcedureType.COLONOSCOPY, EDA_COLONOSCOPY})
 
 
 def validate_exam_type(exam_type: str | None) -> str:
@@ -82,7 +83,7 @@ def ensure_exam_type_allowed(exam_type: str | None) -> str:
     Backend é a fonte de verdade; templates/JS apenas melhoram a UX.
     """
     value = validate_exam_type(exam_type)
-    if value in (ExamType.COLONOSCOPY, EDA_COLONOSCOPY) and not is_colonoscopy_intake_enabled():
+    if value in (ProcedureType.COLONOSCOPY, EDA_COLONOSCOPY) and not is_colonoscopy_intake_enabled():
         raise ValueError(
             "Colonoscopia e EDA + Colonoscopia ainda não estão habilitadas para novos envios. "
             "Envie lotes apenas de EDA."
@@ -97,7 +98,7 @@ def _procedure_types_for_selection(exam_type: str) -> tuple[str, ...]:
     o próprio.
     """
     if exam_type == EDA_COLONOSCOPY:
-        return (ExamType.EDA, ExamType.COLONOSCOPY)
+        return (ProcedureType.EDA, ProcedureType.COLONOSCOPY)
     return (exam_type,)
 
 

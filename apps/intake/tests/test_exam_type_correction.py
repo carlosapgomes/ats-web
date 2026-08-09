@@ -28,7 +28,7 @@ import pytest
 from django.contrib.auth import get_user_model
 from django.urls import reverse
 
-from apps.cases.models import Case, CaseEvent, CaseProcedure, CaseStatus, ExamType, ProcedureType
+from apps.cases.models import Case, CaseEvent, CaseProcedure, CaseStatus, ProcedureType
 from apps.cases.procedures import get_declared_procedure_types
 from apps.cases.services import (
     assert_case_lock as real_assert_case_lock,
@@ -139,7 +139,7 @@ def _regulation_pass_text() -> str:
 def _eligible_case(
     *,
     user,
-    exam_type: str = ExamType.EDA,
+    exam_type: str = ProcedureType.EDA,
     reason_code: str = "exam_type_mismatch",
     detected: str = "colonoscopy",
     extracted_text: str | None = None,
@@ -189,7 +189,7 @@ class TestCorrectionService:
 
         result = correct_case_exam_type(
             case_id=case.case_id,
-            new_exam_type=ExamType.COLONOSCOPY,
+            new_exam_type=ProcedureType.COLONOSCOPY,
             user=user,
             active_role="nir",
             lock_token=token,
@@ -227,7 +227,7 @@ class TestCorrectionService:
 
         correct_case_exam_type(
             case_id=case.case_id,
-            new_exam_type=ExamType.COLONOSCOPY,
+            new_exam_type=ProcedureType.COLONOSCOPY,
             user=user,
             active_role="nir",
             lock_token=token,
@@ -242,8 +242,8 @@ class TestCorrectionService:
 
         corrected = next(e for e in events if e.event_type == "CASE_PROCEDURE_DECLARATION_CORRECTED")
         assert corrected.payload == {
-            "old_procedures": [ExamType.EDA],
-            "new_procedures": [ExamType.COLONOSCOPY],
+            "old_procedures": [ProcedureType.EDA],
+            "new_procedures": [ProcedureType.COLONOSCOPY],
             "reason_code": "nir_identified_exam",
         }
         assert corrected.actor_id == user.pk
@@ -261,7 +261,7 @@ class TestCorrectionService:
 
         correct_case_exam_type(
             case_id=case.case_id,
-            new_exam_type=ExamType.COLONOSCOPY,
+            new_exam_type=ProcedureType.COLONOSCOPY,
             user=user,
             active_role="nir",
             lock_token=token,
@@ -303,7 +303,7 @@ class TestCorrectionService:
 
         correct_case_exam_type(
             case_id=case.case_id,
-            new_exam_type=ExamType.COLONOSCOPY,
+            new_exam_type=ProcedureType.COLONOSCOPY,
             user=user,
             active_role="nir",
             lock_token=token,
@@ -330,7 +330,7 @@ class TestCorrectionService:
 
         correct_case_exam_type(
             case_id=case.case_id,
-            new_exam_type=ExamType.COLONOSCOPY,
+            new_exam_type=ProcedureType.COLONOSCOPY,
             user=user,
             active_role="nir",
             lock_token=token,
@@ -341,13 +341,13 @@ class TestCorrectionService:
     def test_same_type_rejected_without_mutation(self, django_user_model) -> None:
         """R1: novo tipo igual ao atual é rejeitado sem mutação."""
         user = _nir_user(django_user_model, "nir-same-type@test.com")
-        case = _eligible_case(user=user, exam_type=ExamType.EDA)
+        case = _eligible_case(user=user, exam_type=ProcedureType.EDA)
         token = _claim_receipt_lease(case, user)
 
         with pytest.raises(ValueError):
             correct_case_exam_type(
                 case_id=case.case_id,
-                new_exam_type=ExamType.EDA,
+                new_exam_type=ProcedureType.EDA,
                 user=user,
                 active_role="nir",
                 lock_token=token,
@@ -389,7 +389,7 @@ class TestCorrectionService:
         with pytest.raises(ValueError):
             correct_case_exam_type(
                 case_id=case.case_id,
-                new_exam_type=ExamType.COLONOSCOPY,
+                new_exam_type=ProcedureType.COLONOSCOPY,
                 user=user,
                 active_role="nir",
                 lock_token=token,
@@ -410,7 +410,7 @@ class TestCorrectionService:
         with pytest.raises(ValueError):
             correct_case_exam_type(
                 case_id=case.case_id,
-                new_exam_type=ExamType.COLONOSCOPY,
+                new_exam_type=ProcedureType.COLONOSCOPY,
                 user=user,
                 active_role="nir",
                 lock_token=uuid.uuid4(),
@@ -448,7 +448,7 @@ class TestCorrectionService:
         with pytest.raises(ValueError):
             correct_case_exam_type(
                 case_id=case.case_id,
-                new_exam_type=ExamType.COLONOSCOPY,
+                new_exam_type=ProcedureType.COLONOSCOPY,
                 user=user,
                 active_role="nir",
                 lock_token=uuid.uuid4(),
@@ -471,7 +471,7 @@ class TestCorrectionService:
             with pytest.raises(ValueError):
                 correct_case_exam_type(
                     case_id=case.case_id,
-                    new_exam_type=ExamType.COLONOSCOPY,
+                    new_exam_type=ProcedureType.COLONOSCOPY,
                     user=user,
                     active_role="nir",
                     lock_token=token,
@@ -497,7 +497,7 @@ class TestCorrectionService:
         with pytest.raises(PermissionError):
             correct_case_exam_type(
                 case_id=case.case_id,
-                new_exam_type=ExamType.COLONOSCOPY,
+                new_exam_type=ProcedureType.COLONOSCOPY,
                 user=actor,
                 active_role="nir",
                 lock_token=token,
@@ -525,7 +525,7 @@ class TestCorrectionService:
         with pytest.raises(PermissionError):
             correct_case_exam_type(
                 case_id=case.case_id,
-                new_exam_type=ExamType.COLONOSCOPY,
+                new_exam_type=ProcedureType.COLONOSCOPY,
                 user=actor,
                 active_role="doctor",  # papel ativo da sessão ≠ nir
                 lock_token=token,
@@ -554,7 +554,7 @@ class TestCorrectionService:
         with pytest.raises(PermissionError):
             correct_case_exam_type(
                 case_id=case.case_id,
-                new_exam_type=ExamType.COLONOSCOPY,
+                new_exam_type=ProcedureType.COLONOSCOPY,
                 user=user,
                 active_role="nir",
                 lock_token=uuid.uuid4(),  # token T2 ≠ T1
@@ -589,7 +589,7 @@ class TestCorrectionService:
         with pytest.raises(PermissionError):
             correct_case_exam_type(
                 case_id=case.case_id,
-                new_exam_type=ExamType.COLONOSCOPY,
+                new_exam_type=ProcedureType.COLONOSCOPY,
                 user=user,
                 active_role="nir",
                 lock_token=result.token,
@@ -623,7 +623,7 @@ class TestCorrectionService:
         with pytest.raises(PermissionError):
             correct_case_exam_type(
                 case_id=case.case_id,
-                new_exam_type=ExamType.COLONOSCOPY,
+                new_exam_type=ProcedureType.COLONOSCOPY,
                 user=user,
                 active_role="nir",
                 lock_token=result.token,
@@ -658,7 +658,7 @@ class TestCorrectionService:
         with pytest.raises(PermissionError):
             correct_case_exam_type(
                 case_id=case.case_id,
-                new_exam_type=ExamType.COLONOSCOPY,
+                new_exam_type=ProcedureType.COLONOSCOPY,
                 user=user,
                 active_role="nir",
                 lock_token=result.token,
@@ -688,7 +688,7 @@ class TestCorrectionService:
         with pytest.raises(PermissionError):
             correct_case_exam_type(
                 case_id=case.case_id,
-                new_exam_type=ExamType.COLONOSCOPY,
+                new_exam_type=ProcedureType.COLONOSCOPY,
                 user=user,
                 active_role="nir",
                 lock_token=result.token,
@@ -710,7 +710,7 @@ class TestCorrectionService:
 
         correct_case_exam_type(
             case_id=case.case_id,
-            new_exam_type=ExamType.COLONOSCOPY,
+            new_exam_type=ProcedureType.COLONOSCOPY,
             user=user,
             active_role="nir",
             lock_token=token,
@@ -738,7 +738,7 @@ class TestCorrectionService:
 
         correct_case_exam_type(
             case_id=case.case_id,
-            new_exam_type=ExamType.COLONOSCOPY,
+            new_exam_type=ProcedureType.COLONOSCOPY,
             user=user,
             active_role="nir",
             lock_token=token,
@@ -750,7 +750,7 @@ class TestCorrectionService:
         with pytest.raises(ValueError):
             correct_case_exam_type(
                 case_id=case.case_id,
-                new_exam_type=ExamType.EDA,
+                new_exam_type=ProcedureType.EDA,
                 user=user,
                 active_role="nir",
                 lock_token=token,
@@ -779,7 +779,7 @@ class TestCorrectionService:
         with pytest.raises(EnqueueAfterCommitError) as excinfo:
             correct_case_exam_type(
                 case_id=case.case_id,
-                new_exam_type=ExamType.COLONOSCOPY,
+                new_exam_type=ProcedureType.COLONOSCOPY,
                 user=user,
                 active_role="nir",
                 lock_token=token,
@@ -815,7 +815,7 @@ class TestCorrectionService:
         with pytest.raises(EnqueueAfterCommitError) as excinfo:
             correct_case_exam_type(
                 case_id=case.case_id,
-                new_exam_type=ExamType.COLONOSCOPY,
+                new_exam_type=ProcedureType.COLONOSCOPY,
                 user=user,
                 active_role="nir",
                 lock_token=token,
@@ -854,7 +854,7 @@ class TestCorrectionService:
         with pytest.raises(EnqueueAfterCommitError):
             correct_case_exam_type(
                 case_id=case.case_id,
-                new_exam_type=ExamType.COLONOSCOPY,
+                new_exam_type=ProcedureType.COLONOSCOPY,
                 user=user,
                 active_role="nir",
                 lock_token=token,
@@ -948,7 +948,7 @@ class TestConfirmReceiptService:
 
         correct_case_exam_type(
             case_id=case.case_id,
-            new_exam_type=ExamType.COLONOSCOPY,
+            new_exam_type=ProcedureType.COLONOSCOPY,
             user=user,
             active_role="nir",
             lock_token=token,
@@ -992,7 +992,7 @@ class TestConfirmReceiptService:
         with pytest.raises(ValueError):
             correct_case_exam_type(
                 case_id=case.case_id,
-                new_exam_type=ExamType.COLONOSCOPY,
+                new_exam_type=ProcedureType.COLONOSCOPY,
                 user=user,
                 active_role="nir",
                 lock_token=token,
@@ -1103,7 +1103,7 @@ class TestCorrectionConfirmSerialization:
         def run_correction() -> Case:
             return correct_case_exam_type(
                 case_id=case.case_id,
-                new_exam_type=ExamType.COLONOSCOPY,
+                new_exam_type=ProcedureType.COLONOSCOPY,
                 user=user,
                 active_role="nir",
                 lock_token=token,
@@ -1172,7 +1172,7 @@ class TestCorrectionConfirmSerialization:
         def run_correction() -> Case:
             return correct_case_exam_type(
                 case_id=case.case_id,
-                new_exam_type=ExamType.COLONOSCOPY,
+                new_exam_type=ProcedureType.COLONOSCOPY,
                 user=user,
                 active_role="nir",
                 lock_token=token,
@@ -1236,7 +1236,7 @@ class TestRecoveryClusterRouting:
         with pytest.raises(EnqueueAfterCommitError) as caught:
             correct_case_exam_type(
                 case_id=case.case_id,
-                new_exam_type=ExamType.COLONOSCOPY,
+                new_exam_type=ProcedureType.COLONOSCOPY,
                 user=user,
                 active_role="nir",
                 lock_token=token,
@@ -1279,7 +1279,7 @@ class TestRecoveryClusterRouting:
         with pytest.raises(EnqueueAfterCommitError) as caught:
             correct_case_exam_type(
                 case_id=case.case_id,
-                new_exam_type=ExamType.COLONOSCOPY,
+                new_exam_type=ProcedureType.COLONOSCOPY,
                 user=user,
                 active_role="nir",
                 lock_token=token,
@@ -1336,7 +1336,7 @@ class TestRecoveryClusterRouting:
         with pytest.raises(EnqueueAfterCommitError):
             correct_case_exam_type(
                 case_id=case.case_id,
-                new_exam_type=ExamType.COLONOSCOPY,
+                new_exam_type=ProcedureType.COLONOSCOPY,
                 user=user,
                 active_role="nir",
                 lock_token=token,
@@ -1440,7 +1440,7 @@ class TestCorrectionView:
 
         response = client.post(
             reverse("intake:exam_type_correction", args=[case.case_id]),
-            {"exam_type": ExamType.COLONOSCOPY, "reason_code": "nir_identified_exam", "lock_token": token},
+            {"exam_type": ProcedureType.COLONOSCOPY, "reason_code": "nir_identified_exam", "lock_token": token},
         )
         assert response.status_code == 302
 
@@ -1465,7 +1465,7 @@ class TestCorrectionView:
 
         first = client.post(
             url,
-            {"exam_type": ExamType.COLONOSCOPY, "reason_code": "nir_identified_exam", "lock_token": token},
+            {"exam_type": ProcedureType.COLONOSCOPY, "reason_code": "nir_identified_exam", "lock_token": token},
         )
         assert first.status_code == 302
         assert len(pipeline_calls) == 1
@@ -1473,7 +1473,7 @@ class TestCorrectionView:
         # Estado já LLM_STRUCT → POST inelegível retorna 404 seguro
         second = client.post(
             url,
-            {"exam_type": ExamType.EDA, "reason_code": "nir_identified_exam", "lock_token": token},
+            {"exam_type": ProcedureType.EDA, "reason_code": "nir_identified_exam", "lock_token": token},
         )
         assert second.status_code == 404
         assert len(pipeline_calls) == 1
@@ -1485,7 +1485,7 @@ class TestCorrectionView:
 
         response = client.post(
             reverse("intake:exam_type_correction", args=[case.case_id]),
-            {"exam_type": ExamType.COLONOSCOPY, "reason_code": "nir_identified_exam"},
+            {"exam_type": ProcedureType.COLONOSCOPY, "reason_code": "nir_identified_exam"},
         )
         assert response.status_code == 404
         reloaded = Case.objects.get(pk=case.pk)
@@ -1500,7 +1500,7 @@ class TestCorrectionView:
 
         response = client.post(
             reverse("intake:exam_type_correction", args=[case.case_id]),
-            {"exam_type": ExamType.COLONOSCOPY, "reason_code": "nir_identified_exam"},
+            {"exam_type": ProcedureType.COLONOSCOPY, "reason_code": "nir_identified_exam"},
         )
         assert response.status_code == 302
         reloaded = Case.objects.get(pk=case.pk)
@@ -1514,7 +1514,7 @@ class TestCorrectionView:
 
         response = client.post(
             reverse("intake:exam_type_correction", args=[case.case_id]),
-            {"exam_type": ExamType.COLONOSCOPY, "reason_code": "nir_identified_exam"},
+            {"exam_type": ProcedureType.COLONOSCOPY, "reason_code": "nir_identified_exam"},
         )
         assert response.status_code == 302
         reloaded = Case.objects.get(pk=case.pk)
@@ -1534,7 +1534,7 @@ class TestCorrectionView:
         token = self._lock_token_for(case.case_id)
         client.post(
             reverse("intake:exam_type_correction", args=[case.case_id]),
-            {"exam_type": ExamType.COLONOSCOPY, "reason_code": "nir_identified_exam", "lock_token": token},
+            {"exam_type": ProcedureType.COLONOSCOPY, "reason_code": "nir_identified_exam", "lock_token": token},
         )
         assert Case.objects.get(pk=case.pk).status == CaseStatus.LLM_STRUCT
 
@@ -1589,7 +1589,7 @@ class TestCorrectionView:
 
         response = client.post(
             reverse("intake:exam_type_correction", args=[case.case_id]),
-            {"exam_type": ExamType.COLONOSCOPY, "reason_code": "nir_identified_exam", "lock_token": token},
+            {"exam_type": ProcedureType.COLONOSCOPY, "reason_code": "nir_identified_exam", "lock_token": token},
             follow=True,
         )
         content = response.content.decode()
@@ -1630,8 +1630,8 @@ class TestTimelineLabels:
             "CASE_PROCEDURE_DECLARATION_CORRECTED",
             user=user,
             payload={
-                "old_procedures": [ExamType.EDA],
-                "new_procedures": [ExamType.COLONOSCOPY],
+                "old_procedures": [ProcedureType.EDA],
+                "new_procedures": [ProcedureType.COLONOSCOPY],
                 "reason_code": "other",
             },
         )

@@ -1228,8 +1228,9 @@ def scheduler_lock_release(request: HttpRequest, case_id: uuid.UUID) -> HttpResp
 # ── Historical search ───────────────────────────────────────────────────────
 
 # Opções da dimensão autorizada no histórico (R5/D13): além dos tipos
-# simples, ``eda_colonoscopy`` (Combinado) — valor da ponte fora de
-# ``ExamType.values``, validado explicitamente aqui.
+# simples, ``eda_colonoscopy`` (Combinado) — chave de seleção derivada da
+# projeção (``ProcedureType``/``EDA_COLONOSCOPY``), validada explicitamente
+# aqui.
 _HISTORICAL_DIMENSION_CHOICES: tuple[str, ...] = ("all", "eda", "colonoscopy", EDA_COLONOSCOPY)
 
 

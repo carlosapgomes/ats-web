@@ -256,25 +256,21 @@ def _declared_types_from_rows(case: Case) -> tuple[str, ...]:
     )
 
 
-def get_declared_procedure_types(case: Case, *, fallback_to_bridge: bool = False) -> tuple[str, ...]:
+def get_declared_procedure_types(case: Case) -> tuple[str, ...]:
     """Conjunto declarado ordenado a partir da projeção (Slice 010, R3).
 
     Retorna apenas rows normalizadas: um caso sem rows declaradas devolve
-    ``()``. A coluna ponte ``Case.exam_type`` foi removida no Slice 011-C;
-    o parâmetro ``fallback_to_bridge`` permanece aceito somente como nome de
-    parâmetro para consumidores já migrados (intake/médico/CHD), sem efeito.
+    ``()``. A coluna ponte ``Case.exam_type`` foi removida no Slice 011-C.
     """
-    del fallback_to_bridge  # compat: aceito, sem efeito (Slice 011 remove o parâmetro)
     return _declared_types_from_rows(case)
 
 
-def get_detected_procedure_types(case: Case, *, fallback_to_bridge: bool = False) -> tuple[str, ...]:
+def get_detected_procedure_types(case: Case) -> tuple[str, ...]:
     """Conjunto detectado ordenado (dimensão da fila médica Pendentes, Slice 010 R3).
 
     Retorna apenas rows com ``detection_status=DETECTED``: caso sem rows
     detectadas devolve ``()`` (não herda a declaração).
     """
-    del fallback_to_bridge  # compat: aceito, sem efeito (Slice 011 remove o parâmetro)
     return tuple(
         sorted(
             (p.procedure_type for p in case.procedures.all() if p.detection_status == DetectionStatus.DETECTED),
@@ -283,15 +279,13 @@ def get_detected_procedure_types(case: Case, *, fallback_to_bridge: bool = False
     )
 
 
-def get_approved_procedure_types(case: Case, *, fallback_to_bridge: bool = False) -> tuple[str, ...]:
+def get_approved_procedure_types(case: Case) -> tuple[str, ...]:
     """Conjunto autorizado pelo médico, ordenado (dimensão do CHD/Decididos, Slice 010 R3).
 
     Fonte autoritativa: rows ``CaseProcedure.doctor_disposition=approved``. O
     fallback global ``doctor_decision=accept`` foi removido — um caso aceito
-    sem rows aprovadas devolve ``()``. O parâmetro ``fallback_to_bridge`` é
-    aceito por compatibilidade, sem efeito.
+    sem rows aprovadas devolve ``()``.
     """
-    del fallback_to_bridge  # compat: aceito, sem efeito (Slice 011 remove o parâmetro)
     return tuple(
         sorted(
             (p.procedure_type for p in case.procedures.all() if p.doctor_disposition == DoctorDisposition.APPROVED),

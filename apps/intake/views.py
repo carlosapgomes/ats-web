@@ -29,7 +29,6 @@ from apps.cases.models import (
     CaseStatus,
     DetectionStatus,
     DoctorDisposition,
-    ExamType,
     ProcedureType,
 )
 from apps.cases.navigation import resolve_safe_next_url
@@ -99,7 +98,9 @@ def _declared_badge(case: Case) -> dict[str, str]:
 # Dimensões aceitas nos filtros NIR (R5/D13): Todos + EDA/Colonoscopia/Combinado,
 # SEMPRE pelo conjunto DECLARADO (nunca detected/approved). ``eda_colonoscopy``
 # é a seleção combinada; o valor inválido cai para all.
-_NIR_DECLARED_DIMENSIONS: frozenset[str] = frozenset({"all", ExamType.EDA, ExamType.COLONOSCOPY, EDA_COLONOSCOPY})
+_NIR_DECLARED_DIMENSIONS: frozenset[str] = frozenset(
+    {"all", ProcedureType.EDA, ProcedureType.COLONOSCOPY, EDA_COLONOSCOPY}
+)
 
 
 def _filter_by_declared_dimension(qs: models.QuerySet[Case], dimension: str) -> models.QuerySet[Case]:

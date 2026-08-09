@@ -30,7 +30,6 @@ from apps.cases.models import (
     CaseEvent,
     CaseProcedure,
     CaseStatus,
-    ExamType,
     ProcedureType,
 )
 from apps.cases.services import claim_case_lock
@@ -85,7 +84,7 @@ def _make_eligible_case(*, user, exam_type: str = "eda") -> Case:
             "reason_text": "Conjunto declarado difere da solicitacao atual.",
             "exam_type": exam_type,
             "declared_exam_type": exam_type,
-            "detected_exam_type": "colonoscopy" if exam_type == ExamType.EDA else "eda",
+            "detected_exam_type": "colonoscopy" if exam_type == ProcedureType.EDA else "eda",
         },
         priority_signals=[{"code": "foreign_body", "label": "Corpo estranho"}],
     )
@@ -160,7 +159,7 @@ class TestCorrectionComparesSets:
         refletem os conjuntos lidos das rows declaradas.
         """
         user = _nir_user(django_user_model, "nir-payload-set@test.com")
-        case = _make_eligible_case(user=user, exam_type=ExamType.EDA)
+        case = _make_eligible_case(user=user, exam_type=ProcedureType.EDA)
         _declare(case, (ProcedureType.EDA,))
 
         _correct(case=case, user=user, new_exam_type=EDA_COLONOSCOPY)
@@ -183,7 +182,7 @@ class TestCorrectionComparesSets:
         case = _make_eligible_case(user=user, exam_type=EDA_COLONOSCOPY)
         _declare(case, (ProcedureType.EDA, ProcedureType.COLONOSCOPY))
 
-        _correct(case=case, user=user, new_exam_type=ExamType.EDA)
+        _correct(case=case, user=user, new_exam_type=ProcedureType.EDA)
 
         event = CaseEvent.objects.get(case=case, event_type="CASE_PROCEDURE_DECLARATION_CORRECTED")
         assert event.payload["old_procedures"] == [ProcedureType.EDA, ProcedureType.COLONOSCOPY]
@@ -212,7 +211,7 @@ class TestDeclaredFilterIsRowAuthoritative:
             agency_record_number="LEGACY-NO-ROW-MYC",
         )
 
-        for dimension in (ExamType.EDA, ExamType.COLONOSCOPY, EDA_COLONOSCOPY):
+        for dimension in (ProcedureType.EDA, ProcedureType.COLONOSCOPY, EDA_COLONOSCOPY):
             response = client.get(reverse("intake:my_cases") + f"?exam_type={dimension}")
             content = response.content.decode()
             assert str(legacy.case_id) not in content, (
@@ -232,7 +231,7 @@ class TestDeclaredFilterIsRowAuthoritative:
             agency_record_number="LEGACY-NO-ROW-CLS",
         )
 
-        for dimension in (ExamType.EDA, ExamType.COLONOSCOPY, EDA_COLONOSCOPY):
+        for dimension in (ProcedureType.EDA, ProcedureType.COLONOSCOPY, EDA_COLONOSCOPY):
             response = client.get(reverse("intake:closed_cases_search") + f"?exam_type={dimension}")
             content = response.content.decode()
             assert str(legacy.case_id) not in content, (
@@ -286,7 +285,7 @@ class TestStrictModeNoTransitiveBridge:
         case = _make_eligible_case(user=user, exam_type="eda")  # sem rows
         original_id = case.case_id
 
-        result = _correct(case=case, user=user, new_exam_type=ExamType.EDA)
+        result = _correct(case=case, user=user, new_exam_type=ProcedureType.EDA)
 
         assert result.case_id == original_id
         assert result.status == CaseStatus.LLM_STRUCT

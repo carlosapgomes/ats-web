@@ -21,7 +21,6 @@ from apps.cases.models import (
     CaseEvent,
     CaseProcedure,
     CaseStatus,
-    ExamType,
     ProcedureType,
 )
 from apps.cases.procedures import get_declared_procedure_types
@@ -93,7 +92,7 @@ class TestCorrectionReroutedThroughProjection:
 
         correct_case_exam_type(
             case_id=case.case_id,
-            new_exam_type=ExamType.COLONOSCOPY,
+            new_exam_type=ProcedureType.COLONOSCOPY,
             user=user,
             active_role="nir",
             lock_token=token,
@@ -115,7 +114,7 @@ class TestCorrectionReroutedThroughProjection:
 
         correct_case_exam_type(
             case_id=case.case_id,
-            new_exam_type=ExamType.EDA,
+            new_exam_type=ProcedureType.EDA,
             user=user,
             active_role="nir",
             lock_token=token,
@@ -139,7 +138,7 @@ class TestCorrectionReroutedThroughProjection:
 
         correct_case_exam_type(
             case_id=case.case_id,
-            new_exam_type=ExamType.COLONOSCOPY,
+            new_exam_type=ProcedureType.COLONOSCOPY,
             user=user,
             active_role="nir",
             lock_token=token,
@@ -189,7 +188,7 @@ class TestCorrectionReroutedThroughProjection:
             with pytest.raises(RuntimeError):
                 correct_case_exam_type(
                     case_id=case.case_id,
-                    new_exam_type=ExamType.COLONOSCOPY,
+                    new_exam_type=ProcedureType.COLONOSCOPY,
                     user=user,
                     active_role="nir",
                     lock_token=token,

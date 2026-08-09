@@ -33,7 +33,6 @@ from apps.cases.models import (
     CaseStatus,
     DetectionStatus,
     DoctorDisposition,
-    ExamType,
     ProcedureType,
 )
 from apps.cases.procedures import get_declared_procedure_types
@@ -45,8 +44,8 @@ pytestmark = pytest.mark.django_db
 User = get_user_model()
 
 _PROCEDURES_BY_SELECTION: dict[str, tuple[str, ...]] = {
-    ExamType.EDA: (ProcedureType.EDA,),
-    ExamType.COLONOSCOPY: (ProcedureType.COLONOSCOPY,),
+    ProcedureType.EDA: (ProcedureType.EDA,),
+    ProcedureType.COLONOSCOPY: (ProcedureType.COLONOSCOPY,),
     EDA_COLONOSCOPY: (ProcedureType.EDA, ProcedureType.COLONOSCOPY),
 }
 
@@ -77,7 +76,7 @@ def _nir_client(client, username: str = "nir-s5-view@test.com"):
 def _make_case(
     *,
     user,
-    exam_type: str = ExamType.EDA,
+    exam_type: str = ProcedureType.EDA,
     status: str = CaseStatus.WAIT_R1_CLEANUP_THUMBS,
     reason_code: str = "exam_type_mismatch",
     detected: str | None = None,
@@ -173,7 +172,7 @@ class TestCorrectionSetEligibility:
 
         result = correct_case_exam_type(
             case_id=case.case_id,
-            new_exam_type=ExamType.EDA,
+            new_exam_type=ProcedureType.EDA,
             user=user,
             active_role="nir",
             lock_token=token,
@@ -198,7 +197,7 @@ class TestCorrectionSetEligibility:
             lambda case_id: pipeline_calls.append(case_id),
         )
         user = _nir_user(django_user_model, "nir-s2c@test.com")
-        case = _make_case(user=user, exam_type=ExamType.EDA)
+        case = _make_case(user=user, exam_type=ProcedureType.EDA)
         token = _claim_receipt_lease(case, user)
 
         correct_case_exam_type(
@@ -231,14 +230,14 @@ class TestCorrectionSetEligibility:
     def test_supported_reasons_eligible(self, django_user_model, reason_code: str, detected: str) -> None:
         """combined-incomplete/mismatch/unknown continuam elegíveis."""
         user = _nir_user(django_user_model, f"nir-reason-{reason_code}@test.com")
-        case = _make_case(user=user, exam_type=ExamType.EDA, reason_code=reason_code, detected=detected)
+        case = _make_case(user=user, exam_type=ProcedureType.EDA, reason_code=reason_code, detected=detected)
         assert is_exam_type_correction_eligible(case) is True
 
     def test_correction_resets_detection_and_dispositions(self, django_user_model, monkeypatch) -> None:
         """R2: detecção/disposições voltam a pending; razão médica apagada."""
         monkeypatch.setattr("apps.pipeline.tasks.enqueue_pipeline", lambda case_id: None)
         user = _nir_user(django_user_model, "nir-reset@test.com")
-        case = _make_case(user=user, exam_type=ExamType.EDA)
+        case = _make_case(user=user, exam_type=ProcedureType.EDA)
         _set_detection(case, (ProcedureType.EDA, ProcedureType.COLONOSCOPY))
         _set_doctor_decision(
             case,
@@ -250,7 +249,7 @@ class TestCorrectionSetEligibility:
 
         correct_case_exam_type(
             case_id=case.case_id,
-            new_exam_type=ExamType.COLONOSCOPY,
+            new_exam_type=ProcedureType.COLONOSCOPY,
             user=user,
             active_role="nir",
             lock_token=token,
@@ -278,14 +277,14 @@ class TestCorrectionSetEligibility:
             lambda case_id: pdf_calls.append(case_id),
         )
         user = _nir_user(django_user_model, "nir-derived5@test.com")
-        case = _make_case(user=user, exam_type=ExamType.EDA)
+        case = _make_case(user=user, exam_type=ProcedureType.EDA)
         case.pdf_file = "pdfs/2025/01/original.pdf"
         case.save()
         token = _claim_receipt_lease(case, user)
 
         correct_case_exam_type(
             case_id=case.case_id,
-            new_exam_type=ExamType.COLONOSCOPY,
+            new_exam_type=ProcedureType.COLONOSCOPY,
             user=user,
             active_role="nir",
             lock_token=token,
@@ -307,7 +306,7 @@ class TestCorrectionSetEligibility:
         """R7: evento enxuto com conjuntos anterior/novo e motivo codificado."""
         monkeypatch.setattr("apps.pipeline.tasks.enqueue_pipeline", lambda case_id: None)
         user = _nir_user(django_user_model, "nir-lean-ev@test.com")
-        case = _make_case(user=user, exam_type=ExamType.EDA)
+        case = _make_case(user=user, exam_type=ProcedureType.EDA)
         token = _claim_receipt_lease(case, user)
 
         correct_case_exam_type(
@@ -335,7 +334,7 @@ class TestCorrectionSetEligibility:
         user = _nir_user(django_user_model, "nir-wd@test.com")
         case = _make_case(
             user=user,
-            exam_type=ExamType.EDA,
+            exam_type=ProcedureType.EDA,
             status=CaseStatus.WAIT_DOCTOR,
             reason_code="exam_type_mismatch",
         )
@@ -375,13 +374,13 @@ class TestCorrectionSetEligibility:
             lambda case_id: enqueue_calls.append(case_id),
         )
         user = _nir_user(django_user_model, "nir-inv@test.com")
-        case = _make_case(user=user, exam_type=ExamType.EDA)
+        case = _make_case(user=user, exam_type=ProcedureType.EDA)
         token = _claim_receipt_lease(case, user)
 
         with pytest.raises(PermissionError):
             correct_case_exam_type(
                 case_id=case.case_id,
-                new_exam_type=ExamType.COLONOSCOPY,
+                new_exam_type=ProcedureType.COLONOSCOPY,
                 user=plain,
                 active_role="nir",
                 lock_token=token,
@@ -425,8 +424,8 @@ class TestCorrectionConcurrency:
                 results[key] = type(exc).__name__
 
         threads = [
-            threading.Thread(target=run, args=(ExamType.EDA, "t1"), daemon=True),
-            threading.Thread(target=run, args=(ExamType.COLONOSCOPY, "t2"), daemon=True),
+            threading.Thread(target=run, args=(ProcedureType.EDA, "t1"), daemon=True),
+            threading.Thread(target=run, args=(ProcedureType.COLONOSCOPY, "t2"), daemon=True),
         ]
         for t in threads:
             t.start()
@@ -456,7 +455,7 @@ class TestComparativeResponse:
         client, user = _nir_client(client, "nir-inflight@test.com")
         case = _make_case(
             user=user,
-            exam_type=ExamType.EDA,
+            exam_type=ProcedureType.EDA,
             status=CaseStatus.WAIT_DOCTOR,
         )
         _set_detection(case, (ProcedureType.EDA, ProcedureType.COLONOSCOPY))
@@ -508,7 +507,7 @@ class TestComparativeResponse:
         client, user = _nir_client(client, "nir-incl@test.com")
         case = _make_case(
             user=user,
-            exam_type=ExamType.EDA,
+            exam_type=ProcedureType.EDA,
             status=CaseStatus.APPT_CONFIRMED,
         )
         _set_detection(case, (ProcedureType.EDA,))
@@ -666,7 +665,7 @@ class TestDeclaredFilters:
 
     def test_my_cases_combined_filter(self, client) -> None:
         client, user = _nir_client(client, "nir-filter5@test.com")
-        eda_case = _make_case(user=user, exam_type=ExamType.EDA, status=CaseStatus.NEW, with_declared_rows=False)
+        eda_case = _make_case(user=user, exam_type=ProcedureType.EDA, status=CaseStatus.NEW, with_declared_rows=False)
         CaseProcedure.objects.create(case=eda_case, procedure_type=ProcedureType.EDA, declared_by_nir=True)
 
         combined_case = _make_case(
@@ -676,7 +675,7 @@ class TestDeclaredFilters:
             CaseProcedure.objects.create(case=combined_case, procedure_type=t, declared_by_nir=True)
 
         colon_case = _make_case(
-            user=user, exam_type=ExamType.COLONOSCOPY, status=CaseStatus.NEW, with_declared_rows=False
+            user=user, exam_type=ProcedureType.COLONOSCOPY, status=CaseStatus.NEW, with_declared_rows=False
         )
         CaseProcedure.objects.create(case=colon_case, procedure_type=ProcedureType.COLONOSCOPY, declared_by_nir=True)
 
@@ -701,7 +700,7 @@ class TestDeclaredFilters:
         client, user = _nir_client(client, "nir-decl5@test.com")
         case = _make_case(
             user=user,
-            exam_type=ExamType.EDA,
+            exam_type=ProcedureType.EDA,
             status=CaseStatus.WAIT_DOCTOR,
             with_declared_rows=False,
         )
@@ -718,7 +717,7 @@ class TestDeclaredFilters:
         client, user = _nir_client(client, "nir-comp5@test.com")
         target = _make_case(
             user=user,
-            exam_type=ExamType.EDA,
+            exam_type=ProcedureType.EDA,
             status=CaseStatus.WAIT_DOCTOR,
             with_declared_rows=False,
         )
@@ -727,7 +726,7 @@ class TestDeclaredFilters:
         target.save()
         other = _make_case(
             user=user,
-            exam_type=ExamType.EDA,
+            exam_type=ProcedureType.EDA,
             status=CaseStatus.NEW,
             with_declared_rows=False,
         )
@@ -745,7 +744,9 @@ class TestDeclaredFilters:
         combined = _make_case(user=user, exam_type=EDA_COLONOSCOPY, status=CaseStatus.CLEANED, with_declared_rows=False)
         for t in (ProcedureType.EDA, ProcedureType.COLONOSCOPY):
             CaseProcedure.objects.create(case=combined, procedure_type=t, declared_by_nir=True)
-        eda_case = _make_case(user=user, exam_type=ExamType.EDA, status=CaseStatus.CLEANED, with_declared_rows=False)
+        eda_case = _make_case(
+            user=user, exam_type=ProcedureType.EDA, status=CaseStatus.CLEANED, with_declared_rows=False
+        )
         CaseProcedure.objects.create(case=eda_case, procedure_type=ProcedureType.EDA, declared_by_nir=True)
 
         response = client.get(reverse("intake:closed_cases_search") + "?exam_type=eda_colonoscopy")

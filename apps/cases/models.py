@@ -16,22 +16,11 @@ class ReturnState:
         return result
 
 
-class ExamType(models.TextChoices):
-    """Valores legados de seleção de exame (deprecado desde o Slice 011-C).
-
-    Mantido apenas como referência de contrato em services/views/testes de
-    intake (valores ``eda|colonoscopy``); não é membro do schema e não
-    corresponde a nenhuma coluna. Removido no Slice 011-E.
-    """
-
-    EDA = "eda", "EDA"
-    COLONOSCOPY = "colonoscopy", "Colonoscopia"
-
-
 # Chave de seleção derivada para a combinação declarada EDA + Colonoscopia.
-# NÃO é membro de ``ExamType.choices``/``ExamType.values`` e NÃO é field
-# choice: existe apenas como chave textual de badge/CSS/filtro/radio calculada
-# pela projeção (``selection_key``) a partir das rows ``CaseProcedure``.
+# NÃO é membro de ``ProcedureType.choices``/``ProcedureType.values`` e NÃO é
+# field choice: existe apenas como chave textual de badge/CSS/filtro/radio
+# calculada pela projeção (``selection_key``) a partir das rows
+# ``CaseProcedure``.
 EDA_COLONOSCOPY: str = "eda_colonoscopy"
 
 
