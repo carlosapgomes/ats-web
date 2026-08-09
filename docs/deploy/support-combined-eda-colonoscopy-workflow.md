@@ -691,10 +691,15 @@ print(PromptTemplate.objects.filter(name__in=names, is_active=True).count())
 $DPROD run --rm web uv run python manage.py migrate --settings=config.settings.prod
 
 # 6. Casos criados pela imagem antiga (sem rows CaseProcedure) ganham a row
-#    declarada a partir da ponte exam_type — antes de remover a coluna
+#    declarada a partir da ponte exam_type — antes de remover a coluna.
+#    detection_status/doctor_disposition/doctor_reason são NOT NULL SEM default
+#    de banco (o ORM aplica 'pending'/'pending'/''); o SQL cru lista as colunas
+#    com esses valores explicitamente (mesmos do backfill da migration 0015).
 $DPROD exec -T db psql -U ats_web -d ats_web -v ON_ERROR_STOP=1 -c \
-  "INSERT INTO cases_caseprocedure (case_id, procedure_type, declared_by_nir) \
-   SELECT c.id, c.exam_type, true FROM cases_case c \
+  "INSERT INTO cases_caseprocedure \
+      (case_id, procedure_type, declared_by_nir, detection_status, doctor_disposition, doctor_reason) \
+   SELECT c.id, c.exam_type, true, 'pending', 'pending', '' \
+   FROM cases_case c \
    WHERE NOT EXISTS (SELECT 1 FROM cases_caseprocedure cp WHERE cp.case_id = c.id);"
 
 # 7. Remover a ponte (coluna criada pela bridge 4.2)

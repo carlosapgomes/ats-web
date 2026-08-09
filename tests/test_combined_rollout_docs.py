@@ -407,6 +407,28 @@ class TestRunbookForward:
         up_pos = forward.find("up -d --force-recreate")
         assert drop_pos != -1 and up_pos != -1 and drop_pos < up_pos
 
+    def test_forward_insert_lists_not_null_columns_with_orm_defaults(self) -> None:
+        """Passo 6 do forward declara detection_status/doctor_disposition/doctor_reason.
+
+        Essas colunas são NOT NULL **sem default de banco** (Django aplica
+        'pending'/'pending'/'' apenas via ORM); SQL cru sem as colunas viola a
+        constraint e aborta o forward exatamente no cenário para o qual ele
+        existe (casos da imagem antiga sem rows CaseProcedure). O INSERT deve
+        listar as colunas com valores explícitos e manter WHERE NOT EXISTS.
+        """
+        forward = self._forward()
+        step6 = forward.split("# 6.")[1].split("# 7.")[0]
+        # Corta a partir do INSERT (o comentário do passo pode conter ';')
+        # até o terminador do statement; o "\\\n" são continuações de linha shell.
+        insert = step6.split("INSERT INTO", 1)[1].split(";")[0].replace("\\\n", " ")
+        assert "detection_status" in insert, "INSERT sem detection_status (NOT NULL sem default de banco)"
+        assert "doctor_disposition" in insert, "INSERT sem doctor_disposition (NOT NULL sem default de banco)"
+        assert "doctor_reason" in insert, "INSERT sem doctor_reason (NOT NULL sem default de banco)"
+        assert "'pending', 'pending', ''" in insert, (
+            "Valores ORM explícitos esperados no SELECT ('pending'/'pending'/'')"
+        )
+        assert "WHERE NOT EXISTS" in insert, "INSERT deve preservar WHERE NOT EXISTS (sem duplicatas)"
+
 
 # ── Blocos autocontidos: cada bloco mutável com fail-fast próprio ──────────
 
