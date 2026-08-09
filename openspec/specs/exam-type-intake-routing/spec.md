@@ -5,55 +5,59 @@ TBD - created by archiving change introduce-colonoscopy-exam-workflow. Update Pu
 ## Requirements
 ### Requirement: NIR declara um tipo por lote
 
-Todo novo upload MUST ter exatamente um tipo válido aplicado a todos os PDFs do lote.
+Todo novo upload MUST escolher exatamente uma seleção válida — EDA, Colonoscopia ou EDA + Colonoscopia — aplicada a todos os PDFs do lote. Cada PDF MUST criar um único `Case`; combinado MUST criar dois procedimentos associados ao mesmo caso.
 
 #### Scenario: Upload sem seleção
 
-- **GIVEN** NIR selecionou PDFs mas não selecionou tipo
+- **GIVEN** NIR selecionou PDFs mas não selecionou procedimento
 - **WHEN** envia o formulário
 - **THEN** nenhum caso é criado
-- **AND** a interface informa que o tipo é obrigatório.
+- **AND** interface informa obrigatoriedade.
 
-#### Scenario: Lote colonoscopia válido
+#### Scenario: Lote combinado válido
 
-- **GIVEN** flag de intake ativa e NIR selecionou Colonoscopia
+- **GIVEN** flag ativa e NIR escolheu EDA + Colonoscopia
 - **WHEN** envia vários PDFs válidos
-- **THEN** cada `Case` criado possui `exam_type=colonoscopy`
-- **AND** todos entram no pipeline normal.
+- **THEN** cada PDF cria exatamente um caso
+- **AND** cada caso possui EDA e Colonoscopia declaradas
+- **AND** não são criados casos irmãos nem duas agendas.
 
-#### Scenario: POST manipulado com tipo inválido
+#### Scenario: POST manipulado
 
-- **GIVEN** request contém tipo não suportado
-- **WHEN** backend valida o upload
-- **THEN** nenhum caso é criado para esse request.
+- **GIVEN** request contém seleção/tipo não suportado
+- **WHEN** backend valida
+- **THEN** nenhum caso ou procedimento parcial é criado.
 
 ### Requirement: Histórico é classificado como EDA sem reprocessamento
 
-A migration MUST classificar todo caso preexistente como EDA e MUST NOT inferir tipo a partir de artefatos clínicos.
+Migration MUST criar uma projeção de procedimento declarado a partir do `exam_type` atual e MUST preservar todos os demais dados.
 
-#### Scenario: Caso histórico de qualquer status
+> Nota de identidade OpenSpec: o título corresponde ao requisito canônico anterior. O comportamento modificado preserva o tipo histórico já persistido, que pode ser EDA ou Colonoscopia.
 
-- **GIVEN** caso existente antes da migration
-- **WHEN** migration é aplicada
-- **THEN** `exam_type=eda`
-- **AND** status, eventos, decisões, agenda, PDF e JSON permanecem inalterados.
+#### Scenario: Caso histórico EDA ou Colonoscopia
+
+- **GIVEN** caso anterior ao change
+- **WHEN** migration executa
+- **THEN** possui exatamente um procedimento declarado correspondente ao valor anterior
+- **AND** status, eventos, decisões, agenda, documentos e JSON permanecem inalterados
+- **AND** nenhum LLM é reexecutado.
 
 ### Requirement: Flag global bloqueia somente intake
 
-`COLONOSCOPY_INTAKE_ENABLED` MUST impedir novos uploads quando desligada e MUST NOT interromper colonoscopias já criadas.
+`COLONOSCOPY_INTAKE_ENABLED` MUST bloquear novos uploads de Colonoscopia isolada e EDA + Colonoscopia, sem interromper casos existentes.
 
-#### Scenario: Flag desligada no upload
+#### Scenario: Flag desligada
 
 - **GIVEN** flag falsa
-- **WHEN** NIR tenta POST manual com `colonoscopy`
+- **WHEN** NIR tenta Colonoscopia ou combinado
 - **THEN** backend rejeita o upload
-- **AND** EDA continua disponível.
+- **AND** EDA isolada continua disponível.
 
-#### Scenario: Caso existente com flag desligada
+#### Scenario: Combinado existente após desligamento
 
-- **GIVEN** colonoscopia criada antes de desligar a flag
-- **WHEN** worker, médico ou CHD processa o caso
-- **THEN** o fluxo continua normalmente.
+- **GIVEN** caso combinado já criado
+- **WHEN** flag é desligada
+- **THEN** pipeline, médico, CHD e NIR continuam o fluxo.
 
 ### Requirement: Colonoscopia é escopo suportado quando declarada e confirmada
 
@@ -90,29 +94,44 @@ O detector MUST distinguir solicitação atual de exame histórico.
 
 ### Requirement: Solicitações atuais mistas são bloqueadas
 
-Um PDF com EDA e colonoscopia solicitadas atualmente MUST NOT entrar na fila médica.
+Um documento com solicitações atuais de EDA e Colonoscopia MUST ser tratado como combinado quando reconciliado pelas regras de detecção.
 
-#### Scenario: EDA e colonoscopia atuais
+> Nota de identidade OpenSpec: o título corresponde ao requisito canônico anterior. O comportamento modificado aceita a combinação atual quando a reconciliação comprova ambos os procedimentos.
 
-- **GIVEN** texto solicita atualmente EDA e colonoscopia
-- **WHEN** qualquer um dos tipos é declarado
-- **THEN** resultado é revisão manual com `mixed_exam_request`
-- **AND** NIR é orientado a enviar PDFs/casos separados.
+#### Scenario: Combinado declarado e confirmado
+
+- **GIVEN** NIR declarou EDA + Colonoscopia
+- **AND** ambas são solicitações atuais detectadas
+- **WHEN** pipeline executa
+- **THEN** caso segue à avaliação médica como combinado.
+
+#### Scenario: Único declarado e combinado detectado
+
+- **GIVEN** NIR declarou somente um procedimento
+- **AND** ambos são detectados com evidência forte
+- **WHEN** reconciliação executa
+- **THEN** análise recebe upgrade automático para combinado
+- **AND** declaração original permanece auditável.
 
 ### Requirement: EDA suportada em documento com outro exame
 
-EDA suportada MUST prevalecer apenas quando a menção ao outro exame for histórica, negada ou não constituir segunda solicitação atual. Duas solicitações atuais distintas MUST ser bloqueadas.
+EDA atual MUST permanecer única quando a menção a Colonoscopia for histórica, negada ou não constituir solicitação atual.
 
-#### Scenario: Ecoendoscopia atual e colonoscopia histórica
+#### Scenario: EDA atual e Colonoscopia histórica
 
-- **GIVEN** solicitação atual de ecoendoscopia e histórico de colonoscopia realizada
-- **WHEN** scope gate executa
-- **THEN** segue o fluxo EDA.
+- **GIVEN** documento solicita EDA e relata Colonoscopia anterior
+- **WHEN** detector executa
+- **THEN** somente EDA fica detectada
+- **AND** não ocorre upgrade automático.
 
-#### Scenario: EDA e colonoscopia ambas atuais
+### Requirement: Seleção exibida é derivada dos procedimentos
 
-- **GIVEN** ambas são solicitações atuais
-- **WHEN** scope gate executa
-- **THEN** não aplica precedência EDA
-- **AND** retorna revisão manual para separação dos documentos.
+Interfaces MUST formar labels a partir do conjunto da dimensão relevante e MUST exibir `EDA + Colonoscopia` quando ambos estiverem presentes.
+
+#### Scenario: Caso combinado no acompanhamento NIR
+
+- **GIVEN** caso possui dois procedimentos declarados
+- **WHEN** NIR abre card ou detalhe
+- **THEN** vê um único caso com badge `EDA + Colonoscopia`
+- **AND** não vê dois cards do mesmo PDF.
 

@@ -740,8 +740,9 @@ ponte (Bloco A) se necessário e só retomar após nova verificação.
   automático, decisão por componente, agendamento casado, resposta final com
   solicitado/detectado/autorizado; flag não é assunto de usuário comum).
 - Monitorar por 24h conforme Passo 11 (contagens/eventos, sem texto clínico).
-- O change **não** arquiva como concluído enquanto houver item do DoD global
-  não comprovado em `openspec/changes/support-combined-eda-colonoscopy-workflow/tasks.md`.
+- O change foi arquivado somente após todos os itens do DoD global serem
+  comprovados; a evidência permanece em
+  `openspec/archive/support-combined-eda-colonoscopy-workflow/tasks.md`.
 
 ## 6. Notas operacionais
 

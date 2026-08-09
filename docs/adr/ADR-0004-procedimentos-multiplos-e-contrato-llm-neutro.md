@@ -8,7 +8,7 @@ Accepted
 
 **Supera parcialmente:** [ADR-0003 — Perfis de procedimento e tipo de exame explícito](ADR-0003-perfis-procedimento-tipo-exame-explicito.md), decisões 1, 2, 3, 5, 6, 8 e 9.
 
-**Change associado:** [`support-combined-eda-colonoscopy-workflow`](../../openspec/changes/support-combined-eda-colonoscopy-workflow/proposal.md).
+**Change associado:** [`support-combined-eda-colonoscopy-workflow`](../../openspec/archive/support-combined-eda-colonoscopy-workflow/proposal.md) (arquivado após conclusão).
 
 ## Contexto
 

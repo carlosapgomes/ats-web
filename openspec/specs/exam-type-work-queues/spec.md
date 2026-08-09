@@ -5,94 +5,77 @@ TBD - created by archiving change introduce-colonoscopy-exam-workflow. Update Pu
 ## Requirements
 ### Requirement: Médico filtra pendências sem perder a busca
 
-A aba médica `Pendentes` MUST manter o lifecycle primário e oferecer filtro secundário `Todos | EDA | Colonoscopia`.
+A aba médica `Pendentes` MUST manter lifecycle primário e filtrar por `Todos | EDA | Colonoscopia | EDA + Colonoscopia`, usando procedimentos detectados.
 
-#### Scenario: Todos como padrão
+#### Scenario: Combinado e nome compostos
 
-- **GIVEN** existem EDAs e colonoscopias pendentes
-- **WHEN** médico abre a fila sem seleção anterior
-- **THEN** todos os casos aparecem
-- **AND** cada opção mostra sua contagem.
-
-#### Scenario: Tipo e nome combinados
-
-- **GIVEN** médico digitou um nome e seleciona Colonoscopia
-- **WHEN** filtro é aplicado
-- **THEN** somente colonoscopias cujo nome/ocorrência corresponde aparecem
-- **AND** o texto digitado permanece no campo.
-
-#### Scenario: Limpeza rápida
-
-- **GIVEN** busca ativa
-- **WHEN** médico clica `Limpar`
-- **THEN** o termo é apagado
-- **AND** o resultado é atualizado imediatamente
-- **AND** o tipo selecionado permanece.
-
-#### Scenario: Polling HTMX
-
-- **GIVEN** busca e tipo ativos
-- **WHEN** conteúdo da fila é atualizado automaticamente
-- **THEN** ambos os filtros são reaplicados sem erro.
+- **GIVEN** médico digitou termo e selecionou EDA + Colonoscopia
+- **WHEN** filtro é aplicado ou polling atualiza cards
+- **THEN** somente casos com ambos detectados e termo correspondente aparecem
+- **AND** termo e seleção permanecem.
 
 ### Requirement: Decididos Hoje tem badge e filtro simples
 
-A aba médica `Decididos Hoje` MUST identificar o tipo persistido e permitir filtro client-side sem nova busca.
+A aba médica `Decididos Hoje` MUST identificar e filtrar pelo conjunto autorizado, preservando casos integralmente negados com indicação `Nenhum autorizado` quando exibidos.
 
-#### Scenario: Médico consulta decididos
+#### Scenario: Combinado parcialmente aprovado
 
-- **GIVEN** existem decisões EDA e colonoscopia no dia
-- **WHEN** médico abre `Decididos Hoje`
-- **THEN** cada card mostra o tipo
-- **AND** pode filtrar client-side com Todos como padrão.
+- **GIVEN** caso detectado combinado terminou autorizado somente para EDA
+- **WHEN** médico abre Decididos Hoje
+- **THEN** badge principal de resultado é EDA
+- **AND** transformação combinado → EDA permanece visível.
 
 ### Requirement: CHD filtra todas as pendências pelo mesmo universo do contador
 
-O filtro CHD MUST abranger todos os grupos que alimentam o contador primário de Pendentes.
+O filtro CHD MUST usar procedimentos aprovados em todos os grupos que compõem Pendentes.
 
-#### Scenario: Colonoscopia em grupos diferentes
+#### Scenario: Agendamento casado em grupos operacionais
 
-- **GIVEN** há colonoscopia em `WAIT_APPT`, notice operacional e issue operacional
-- **WHEN** CHD seleciona Colonoscopia em `Pendentes`
-- **THEN** cards dos três grupos permanecem visíveis
-- **AND** cards EDA dos três grupos são ocultados
-- **AND** a contagem por tipo soma os mesmos grupos do badge primário.
+- **GIVEN** casos combinados autorizados em grupos elegíveis
+- **WHEN** CHD seleciona EDA + Colonoscopia
+- **THEN** todos os grupos usam o mesmo predicado de ambos aprovados
+- **AND** contadores fecham com o universo primário.
 
 ### Requirement: Processados Hoje tem badge e filtro
 
-A aba CHD `Processados Hoje` MUST identificar e filtrar casos pelo tipo persistido sem alterar agenda.
+Processados Hoje MUST exibir o snapshot autorizado/agendado e permitir filtro por EDA, Colonoscopia ou combinado.
 
-#### Scenario: CHD seleciona EDA
+#### Scenario: Combinado confirmado
 
-- **GIVEN** processados EDA e colonoscopia no dia
-- **WHEN** seleciona EDA
-- **THEN** somente cards EDA aparecem
-- **AND** nenhum dado de agenda é alterado.
+- **GIVEN** CHD confirmou caso com ambos aprovados
+- **WHEN** consulta Processados Hoje
+- **THEN** vê `EDA + Colonoscopia · Agendamento casado`
+- **AND** uma única data/hora.
 
 ### Requirement: Histórico CHD combina tipo e busca
 
-A busca histórica MUST combinar tipo e termo e MUST aceitar tipo específico sem termo.
+A busca histórica MUST aceitar `all|eda|colonoscopy|eda_colonoscopy`, usar dimensão autorizada e manter limite/ordering atuais.
 
-#### Scenario: Tipo sem termo
+#### Scenario: Combinado sem termo
 
-- **GIVEN** CHD seleciona Colonoscopia e deixa busca vazia
-- **WHEN** submete o filtro
-- **THEN** vê até os últimos 50 casos históricos de colonoscopia.
-
-#### Scenario: Tipo com nome/ocorrência
-
-- **GIVEN** tipo Colonoscopia e termo válido
-- **WHEN** busca executa
-- **THEN** resultados satisfazem ambos.
+- **GIVEN** CHD seleciona EDA + Colonoscopia sem termo
+- **WHEN** submete
+- **THEN** vê até os 50 casos históricos mais recentes com ambos autorizados.
 
 ### Requirement: Tipo não muda operação
 
-EDA e colonoscopia MUST reutilizar os mesmos forms, locks, permissões e transições para o mesmo estado operacional.
+Casos únicos e combinados MUST reutilizar forms, locks, permissões e transições existentes.
 
-#### Scenario: Mesmo fluxo para ambos
+#### Scenario: Mesmo submit de agendamento
 
-- **GIVEN** EDA e colonoscopia no mesmo estado operacional
-- **WHEN** médico/CHD executa ação válida
-- **THEN** usam os mesmos forms, locks, permissões e transições
-- **AND** não existe atribuição automática por tipo.
+- **GIVEN** caso combinado em `WAIT_APPT`
+- **WHEN** CHD confirma
+- **THEN** uma transição atual é usada
+- **AND** nenhuma FSM paralela ou segundo agendamento é criado.
+
+### Requirement: Alterações ficam explícitas nas filas downstream
+
+Quando declaração, detecção e autorização diferirem, médico e CHD MUST receber comparação textual, sem depender apenas de cor.
+
+#### Scenario: Médico substituiu EDA por Colonoscopia
+
+- **GIVEN** caso detectado EDA foi autorizado como Colonoscopia
+- **WHEN** CHD abre card/detalhe
+- **THEN** vê `Detectado: EDA` e `Autorizado: Colonoscopia`
+- **AND** justificativas médicas correspondentes.
 
