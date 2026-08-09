@@ -84,7 +84,7 @@ def _declared_badge(case: Case) -> dict[str, str]:
     Templates NUNCA consultam rows ou o campo legado: recebem o label
     textual (R6) e a chave de CSS derivados do conjunto declarado.
     """
-    types = get_declared_procedure_types(case, fallback_to_bridge=False)
+    types = get_declared_procedure_types(case)
     if types:
         return {
             "declared_label": format_procedure_selection(types),
@@ -161,9 +161,9 @@ def _procedure_comparison(case: Case) -> dict[str, object]:
     caso segue para ``WAIT_DOCTOR``. ``added_by_doctor`` = aprovado sem ter
     sido detectado (inclusão médica, razão própria exigida — D9).
     """
-    declared = get_declared_procedure_types(case, fallback_to_bridge=False)
-    detected = get_detected_procedure_types(case, fallback_to_bridge=False)
-    approved = get_approved_procedure_types(case, fallback_to_bridge=False)
+    declared = get_declared_procedure_types(case)
+    detected = get_detected_procedure_types(case)
+    approved = get_approved_procedure_types(case)
 
     rows_by_type = {p.procedure_type: p for p in case.procedures.all()}
     per_procedure: list[dict[str, object]] = []
@@ -1375,7 +1375,7 @@ def exam_type_correction(request: HttpRequest, case_id: uuid.UUID) -> HttpRespon
 
     messages.success(
         request,
-        f"Tipo de exame corrigido para {format_procedure_selection(get_declared_procedure_types(case, fallback_to_bridge=False))}. "
+        f"Tipo de exame corrigido para {format_procedure_selection(get_declared_procedure_types(case))}. "
         "Caso em reprocessamento.",
     )
     return redirect("intake:case_detail", case_id=case.case_id)

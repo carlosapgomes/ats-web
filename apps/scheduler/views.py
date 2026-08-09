@@ -154,10 +154,10 @@ def _with_approved_projection(qs: QuerySet[Case]) -> QuerySet[Case]:
 def _has_approved_projection(case: Case) -> bool:
     """Checagem fail-closed em nível de instância para ações diretas (R2).
 
-    Usada por ``scheduler_confirm`` antes de adquirir lock. Fonte estrita
-    (``fallback_to_bridge=False``): sem rows aprovadas ⇒ ``False``.
+    Usada por ``scheduler_confirm`` antes de adquirir lock. Fonte única:
+    rows aprovadas; sem rows aprovadas ⇒ ``False``.
     """
-    return bool(get_approved_procedure_types(case, fallback_to_bridge=False))
+    return bool(get_approved_procedure_types(case))
 
 
 # ── Card builder ─────────────────────────────────────────────────────────
@@ -175,8 +175,8 @@ def _approved_snapshot(case: Case) -> dict[str, Any]:
     por componente (apenas presença/razão — sem texto clínico integral no
     evento).
     """
-    approved_types = get_approved_procedure_types(case, fallback_to_bridge=False)
-    detected_types = get_detected_procedure_types(case, fallback_to_bridge=False)
+    approved_types = get_approved_procedure_types(case)
+    detected_types = get_detected_procedure_types(case)
     paired = len(approved_types) == 2
     if approved_types:
         approved_label = format_procedure_selection(approved_types)
@@ -1043,7 +1043,7 @@ def scheduler_submit(request: HttpRequest, case_id: uuid.UUID) -> HttpResponse:
     # aprovação ⇒ fail-closed: libera o lock e redireciona sem efeitos
     # (nenhuma transição FSM, appointment, resposta de intercorrência ou
     # evento com ``approved_procedures=[]``).
-    approved_types = get_approved_procedure_types(case, fallback_to_bridge=False)
+    approved_types = get_approved_procedure_types(case)
     if not approved_types:
         release_lock_service(
             case_id=case.case_id,

@@ -101,7 +101,7 @@ class TestCorrectionReroutedThroughProjection:
         )
 
         reloaded = Case.objects.get(pk=case.pk)
-        assert get_declared_procedure_types(reloaded, fallback_to_bridge=False) == (ProcedureType.COLONOSCOPY,)
+        assert get_declared_procedure_types(reloaded) == (ProcedureType.COLONOSCOPY,)
         colon = CaseProcedure.objects.get(case=reloaded, procedure_type=ProcedureType.COLONOSCOPY)
         assert colon.declared_by_nir is True
         eda_row = CaseProcedure.objects.get(case=reloaded, procedure_type=ProcedureType.EDA)
@@ -123,7 +123,7 @@ class TestCorrectionReroutedThroughProjection:
         )
 
         reloaded = Case.objects.get(pk=case.pk)
-        assert get_declared_procedure_types(reloaded, fallback_to_bridge=False) == (ProcedureType.EDA,)
+        assert get_declared_procedure_types(reloaded) == (ProcedureType.EDA,)
         eda_row = CaseProcedure.objects.get(case=reloaded, procedure_type=ProcedureType.EDA)
         assert eda_row.declared_by_nir is True
         colon = CaseProcedure.objects.get(case=reloaded, procedure_type=ProcedureType.COLONOSCOPY)
@@ -167,7 +167,7 @@ class TestCorrectionReroutedThroughProjection:
         )
 
         reloaded = Case.objects.get(pk=case.pk)
-        assert get_declared_procedure_types(reloaded, fallback_to_bridge=False) == (
+        assert get_declared_procedure_types(reloaded) == (
             ProcedureType.EDA,
             ProcedureType.COLONOSCOPY,
         )
@@ -198,7 +198,7 @@ class TestCorrectionReroutedThroughProjection:
 
         reloaded = Case.objects.get(pk=case.pk)
         # projeção declarada intacta
-        assert get_declared_procedure_types(reloaded, fallback_to_bridge=False) == (ProcedureType.EDA,)
+        assert get_declared_procedure_types(reloaded) == (ProcedureType.EDA,)
         # FSM intacto
         assert reloaded.status == CaseStatus.WAIT_R1_CLEANUP_THUMBS
         # derivados NÃO foram limpos (rollback total)

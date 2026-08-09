@@ -299,7 +299,7 @@ class TestDoctorQueueFilterStatic:
 
 @pytest.mark.django_db
 class TestDoctorQueueProcedureAuthority:
-    """R1: os cards médicos usam getters estritos (``fallback_to_bridge=False``).
+    """R1: os cards médicos usam getters estritos (fonte única: rows).
 
     Um caso sem rows nunca projeta EDA/Colonoscopia; rows detectadas definem a
     seleção do card. A projeção vem somente das rows (Pendentes=detected,

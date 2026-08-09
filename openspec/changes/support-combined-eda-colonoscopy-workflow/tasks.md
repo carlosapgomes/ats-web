@@ -50,7 +50,7 @@ A ADR-0004 deve ser commitada, enviada e aprovada explicitamente antes de entreg
 - [x] Slice 011-B — Fixtures sem ponte: intake/scheduler (`slices/slice-011b-fixture-bridge-independence-intake-scheduler.md`)
 - [x] Slice 011-C0 — TestBackfillD3Table em sandbox de schema (pré-requisito do cutover com 9 arquivos) (`slices/slice-011c0-backfill-test-schema-sandbox.md`)
 - [x] Slice 011-C (revisado) — Cutover físico: migration remove Case.exam_type; classe ExamType preservada (`slices/slice-011c-authoritative-procedure-schema-cutover.md`)
-- [ ] Slice 011-D (revisado) — Remoção do kwarg fallback_to_bridge de todos os call sites (`slices/slice-011d-bridge-compat-cleanup.md`)
+- [x] Slice 011-D (revisado) — Remoção do kwarg fallback_to_bridge de todos os call sites (`slices/slice-011d-bridge-compat-cleanup.md`)
 - [ ] Slice 011-E — Encerramento simbólico: classe ExamType e parâmetro fallback_to_bridge (`slices/slice-011e-bridge-symbol-cleanup.md`)
 - [ ] Slice 012 — Operação ativa e reverte o fluxo combinado com segurança (`slices/slice-012-rollout-documentation-and-verification.md`)
 

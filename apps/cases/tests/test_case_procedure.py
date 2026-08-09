@@ -351,28 +351,25 @@ class TestDeclaredProjectionService:
     def test_getters_fail_closed_without_bridge(self, user, case_factory) -> None:
         """Slice 010 (R3) — getters sempre retornam apenas rows normalizadas.
 
-        Default e ``fallback_to_bridge=False`` são idênticos: um caso sem rows
-        devolve ``()`` em todas as três dimensões, sem o fallback global
-        ``doctor_decision=accept`` no aprovado.
+        Rows como fonte única: um caso sem rows devolve ``()`` em todas as
+        três dimensões, sem o fallback global ``doctor_decision=accept`` no
+        aprovado.
         """
         case = case_factory(user)  # sem rows
-        # Slice 010 (R3): os getters são ALWAYS fail-closed — default e
-        # ``fallback_to_bridge=False`` devolvem o mesmo conjunto de rows.
-        # Caso sem rows ⇒ () em todas as três dimensões.
+        # Slice 010 (R3): os getters são ALWAYS fail-closed — caso sem rows
+        # ⇒ () em todas as três dimensões (fonte única: rows).
         assert get_declared_procedure_types(case) == ()
         assert get_detected_procedure_types(case) == ()
         assert get_approved_procedure_types(case) == ()
-        # O parâmetro ``fallback_to_bridge`` permanece aceito (compat com
-        # consumidores já migrados), mas não altera o resultado.
-        assert get_declared_procedure_types(case, fallback_to_bridge=False) == ()
-        assert get_detected_procedure_types(case, fallback_to_bridge=False) == ()
-        assert get_approved_procedure_types(case, fallback_to_bridge=False) == ()
+        assert get_declared_procedure_types(case) == ()
+        assert get_detected_procedure_types(case) == ()
+        assert get_approved_procedure_types(case) == ()
         # Aprovado tampouco é inferido de ``doctor_decision=accept``, mesmo
         # com doctor_decision=accept (fallback global removido).
         case.doctor_decision = "accept"
         case.save(update_fields=["doctor_decision"])
         assert get_approved_procedure_types(case) == ()
-        assert get_approved_procedure_types(case, fallback_to_bridge=False) == ()
+        assert get_approved_procedure_types(case) == ()
 
 
 class TestProcedureGettersReturnOnlyRows:

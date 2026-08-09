@@ -217,15 +217,15 @@ def _build_case_card(
     """Build a dict with all display data for a case card.
 
     Slice 009-A (R1): nenhuma leitura da ponte ``Case.exam_type``. As três
-    dimensões vêm exclusivamente das rows em modo estrito
-    (``fallback_to_bridge=False``). O campo ``exam_type`` do card recebe a
+    dimensões vêm exclusivamente das rows (fonte única; ausência ⇒ ``()``).
+    O campo ``exam_type`` do card recebe a
     ``selection_key`` projetada da dimensão principal do card (Pendentes =
     detectado; Decididos = autorizado) — semântica documentada; o JS prioriza
     ``data-proc-selection`` e usa este campo só como compat legada.
     """
-    detected_types = get_detected_procedure_types(case, fallback_to_bridge=False)
-    approved_types = get_approved_procedure_types(case, fallback_to_bridge=False)
-    declared_types = get_declared_procedure_types(case, fallback_to_bridge=False)
+    detected_types = get_detected_procedure_types(case)
+    approved_types = get_approved_procedure_types(case)
+    declared_types = get_declared_procedure_types(case)
     if primary_types is None:
         primary_types = detected_types
     primary_label = format_procedure_selection(primary_types) if primary_types else ""
@@ -319,7 +319,7 @@ def _doctor_queue_context(request: HttpRequest) -> dict[str, Any]:
                 case,
                 wait_minutes,
                 user=doctor_user,
-                primary_types=get_detected_procedure_types(case, fallback_to_bridge=False),
+                primary_types=get_detected_procedure_types(case),
             )
         )
 
@@ -346,7 +346,7 @@ def _doctor_queue_context(request: HttpRequest) -> dict[str, Any]:
             _build_case_card(
                 case,
                 0,
-                primary_types=get_approved_procedure_types(case, fallback_to_bridge=False),
+                primary_types=get_approved_procedure_types(case),
             )
         )
 
@@ -611,7 +611,7 @@ def _build_decision_context(case: Case, form: DoctorDecisionForm, request: HttpR
     # ``exam_type``/``exam_type_label`` recebem a chave/label projetadas a
     # partir das rows detectadas — nunca a ponte ``Case.exam_type``. Ausência
     # de rows é neutra (classe segura ``none``), nunca default EDA/Colonoscopia.
-    detected_types = get_detected_procedure_types(case, fallback_to_bridge=False)
+    detected_types = get_detected_procedure_types(case)
 
     return {
         "case": case,

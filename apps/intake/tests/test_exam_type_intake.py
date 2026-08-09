@@ -106,7 +106,7 @@ class TestUploadRequiresExamType:
         assert response.status_code == 200
         case = Case.objects.get()
         # Slice 011-B (R3): projeção declarada via rows, sem a coluna.
-        assert get_declared_procedure_types(case, fallback_to_bridge=False) == (ProcedureType.EDA,)
+        assert get_declared_procedure_types(case) == (ProcedureType.EDA,)
 
 
 # ── R2: lote homogêneo ───────────────────────────────────────────────────
@@ -257,7 +257,7 @@ class TestAuditViaUpload:
         # Contrato que sobrevive ao cutover (011-C): status no momento da
         # criação; a projeção declarada vem das rows.
         assert event.payload.get("status") == CaseStatus.NEW
-        assert get_declared_procedure_types(case, fallback_to_bridge=False) == (ProcedureType.EDA,)
+        assert get_declared_procedure_types(case) == (ProcedureType.EDA,)
 
     @override_settings(COLONOSCOPY_INTAKE_ENABLED=True)
     def test_combined_upload_projects_exactly_two_declared_rows(self, client) -> None:
@@ -270,7 +270,7 @@ class TestAuditViaUpload:
             follow=True,
         )
         case = Case.objects.get()
-        assert get_declared_procedure_types(case, fallback_to_bridge=False) == (
+        assert get_declared_procedure_types(case) == (
             ProcedureType.EDA,
             ProcedureType.COLONOSCOPY,
         )

@@ -183,7 +183,7 @@ class TestCorrectionSetEligibility:
         assert result.case_id == original_id
         reloaded = Case.objects.get(pk=case.pk)
         assert reloaded.status == CaseStatus.LLM_STRUCT
-        assert get_declared_procedure_types(reloaded, fallback_to_bridge=False) == (ProcedureType.EDA,)
+        assert get_declared_procedure_types(reloaded) == (ProcedureType.EDA,)
         eda = CaseProcedure.objects.get(case=reloaded, procedure_type=ProcedureType.EDA)
         colon = CaseProcedure.objects.get(case=reloaded, procedure_type=ProcedureType.COLONOSCOPY)
         assert eda.declared_by_nir is True
@@ -212,7 +212,7 @@ class TestCorrectionSetEligibility:
 
         reloaded = Case.objects.get(pk=case.pk)
         assert reloaded.status == CaseStatus.LLM_STRUCT
-        assert get_declared_procedure_types(reloaded, fallback_to_bridge=False) == (
+        assert get_declared_procedure_types(reloaded) == (
             ProcedureType.EDA,
             ProcedureType.COLONOSCOPY,
         )
@@ -353,7 +353,7 @@ class TestCorrectionSetEligibility:
 
         reloaded = Case.objects.get(pk=case.pk)
         assert reloaded.status == CaseStatus.WAIT_DOCTOR
-        assert get_declared_procedure_types(reloaded, fallback_to_bridge=False) == (ProcedureType.EDA,)
+        assert get_declared_procedure_types(reloaded) == (ProcedureType.EDA,)
         # Comparação em voo continua visível no refresh (sem CTA).
         client, _ = _nir_client(client, "nir-wd-view@test.com")
         response = client.get(reverse("intake:case_detail", args=[case.case_id]))
@@ -390,7 +390,7 @@ class TestCorrectionSetEligibility:
 
         reloaded = Case.objects.get(pk=case.pk)
         assert reloaded.status == CaseStatus.WAIT_R1_CLEANUP_THUMBS
-        assert get_declared_procedure_types(reloaded, fallback_to_bridge=False) == (ProcedureType.EDA,)
+        assert get_declared_procedure_types(reloaded) == (ProcedureType.EDA,)
         assert enqueue_calls == []
 
 
