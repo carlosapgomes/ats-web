@@ -1,15 +1,20 @@
 # Deploy Runbooks
 
-Runbooks de deploy por change. Cada arquivo documenta o procedimento de
-produção (backup, build, migration, smoke tests, rollback) para uma
-entrega específica.
+Runbooks gerais e por change. Cada arquivo documenta procedimentos de
+produção como preparação de infraestrutura, backup, migration, smoke tests e
+rollback.
 
 ## Convenção de nome
 
-`<change-id>.md` — mesmo ID usado em `openspec/changes/<change-id>/`.
+Runbooks gerais usam um nome operacional descritivo. Runbooks de uma entrega
+específica usam `<change-id>.md`, o mesmo ID de
+`openspec/changes/<change-id>/`.
 
 ## Runbooks
 
+- [`shared-postgres-production.md`](./shared-postgres-production.md)
+  — Implantação e migração de produção com PostgreSQL compartilhado, redes
+    separadas de banco, ingress e egress do worker LLM, validação e rollback.
 - [`corrected-case-resubmission-linkage.md`](./corrected-case-resubmission-linkage.md)
   — Reenvio corrigido explícito NIR + visibilidade médico/NIR.
 - [`introduce-colonoscopy-exam-workflow.md`](./introduce-colonoscopy-exam-workflow.md)

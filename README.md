@@ -9,6 +9,7 @@ Sistema de triagem automatizada para EDA (Endoscopia Digestiva Alta) — reimpla
 - `ROADMAP.md` — fases de implementação
 - `docs/DOMAIN_ANALYSIS.md` — análise de domínio completa
 - `docs/adr/` — decisões arquiteturais
+- `docs/deploy/` — runbooks de implantação, migração e rollback
 - `docs/releases/README.md` — runbook de releases, prereleases e imagens GHCR
 
 ## Stack

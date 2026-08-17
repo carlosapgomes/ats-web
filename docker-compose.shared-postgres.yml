@@ -1,0 +1,146 @@
+# Produção hardened com PostgreSQL compartilhado em rede Docker externa.
+# Uso: docker compose --env-file .env -f docker-compose.shared-postgres.yml up -d
+# Migrations: docker compose --profile migration --env-file .env \
+#   -f docker-compose.shared-postgres.yml run --rm migrate
+# Este arquivo é autônomo: não combine com docker-compose.yml.
+
+name: ats-web-shared-postgres
+
+x-base-environment: &base-environment
+  DJANGO_SETTINGS_MODULE: config.settings.prod
+  DB_HOST: ${DB_HOST:?Set DB_HOST}
+  DB_PORT: ${DB_PORT:?Set DB_PORT}
+  DB_NAME: ${DB_NAME:?Set DB_NAME}
+  DB_CONN_MAX_AGE: ${DB_CONN_MAX_AGE:-600}
+  HOME: /tmp
+  UV_CACHE_DIR: /tmp/uv-cache
+  PYTHONDONTWRITEBYTECODE: "1"
+  TZ: ${TZ:-UTC}
+  DJANGO_SECRET_KEY: ${DJANGO_SECRET_KEY:?Set DJANGO_SECRET_KEY}
+
+x-runtime-environment: &runtime-environment
+  <<: *base-environment
+  DB_USER: ${DB_RUNTIME_USER:?Set DB_RUNTIME_USER}
+  DB_PASSWORD_FILE: /run/secrets/database_runtime_password
+  ALLOWED_HOSTS: ${ALLOWED_HOSTS:-localhost}
+  INTRANET_IP_RANGE: ${INTRANET_IP_RANGE:-}
+  APP_DISPLAY_NAME: ${APP_DISPLAY_NAME:-ATS Web}
+  CSRF_TRUSTED_ORIGINS: ${CSRF_TRUSTED_ORIGINS:-}
+  OPENAI_API_KEY: ${OPENAI_API_KEY:?Set OPENAI_API_KEY}
+  OPENAI_MODEL: ${OPENAI_MODEL:-gpt-4o}
+  OPENAI_BASE_URL: ${OPENAI_BASE_URL:-https://api.openai.com/v1}
+  EMAIL_BACKEND: ${EMAIL_BACKEND:-django.core.mail.backends.smtp.EmailBackend}
+  EMAIL_HOST: ${EMAIL_HOST:-smtp.example.invalid}
+  EMAIL_PORT: ${EMAIL_PORT:-587}
+  EMAIL_USE_TLS: ${EMAIL_USE_TLS:-true}
+  EMAIL_HOST_USER: ${EMAIL_HOST_USER:-}
+  EMAIL_HOST_PASSWORD: ${EMAIL_HOST_PASSWORD:-}
+  DEFAULT_FROM_EMAIL: ${DEFAULT_FROM_EMAIL:-no-reply@app.example.com}
+  PASSWORD_RESET_TIMEOUT: ${PASSWORD_RESET_TIMEOUT:-86400}
+  PUBLIC_APP_BASE_URL: ${PUBLIC_APP_BASE_URL:-https://app.example.com}
+  INTERNAL_APP_BASE_URL: ${INTERNAL_APP_BASE_URL:-http://web:8000}
+
+x-hardened-service: &hardened-service
+  image: ${ATS_WEB_IMAGE:?Set ATS_WEB_IMAGE}
+  pull_policy: always
+  read_only: true
+  security_opt:
+    - no-new-privileges:true
+  cap_drop:
+    - ALL
+  tmpfs:
+    - /tmp:size=256m,mode=1777
+  logging:
+    driver: json-file
+    options:
+      max-size: "20m"
+      max-file: "5"
+
+x-runtime-service: &runtime-service
+  <<: *hardened-service
+  environment: *runtime-environment
+  secrets:
+    - database_runtime_password
+  volumes:
+    - media_prod:/app/media
+  networks:
+    - shared_postgres
+  restart: unless-stopped
+
+services:
+  web:
+    <<: *runtime-service
+    environment:
+      <<: *runtime-environment
+      DB_APPLICATION_NAME: ats-web-web
+      COLONOSCOPY_INTAKE_ENABLED: ${COLONOSCOPY_INTAKE_ENABLED:-false}
+    ports:
+      - "127.0.0.1:${WEB_HOST_PORT:-8000}:8000"
+    networks:
+      shared_postgres:
+      edge:
+        aliases:
+          - ${WEB_DOCKER_ALIAS:-ats-web}
+
+  worker:
+    <<: *runtime-service
+    command: uv run python manage.py qcluster --settings=config.settings.prod
+    environment:
+      <<: *runtime-environment
+      DB_APPLICATION_NAME: ats-web-llm-worker
+      Q_CLUSTER_NAME: llm
+    networks:
+      - shared_postgres
+      - egress
+
+  pdf_worker:
+    <<: *runtime-service
+    command: uv run python manage.py qcluster --settings=config.settings.prod
+    environment:
+      <<: *runtime-environment
+      DB_APPLICATION_NAME: ats-web-pdf-worker
+      Q_CLUSTER_NAME: pdf
+    tmpfs:
+      - /tmp:size=512m,mode=1777
+
+  migrate:
+    <<: *hardened-service
+    profiles:
+      - migration
+    restart: "no"
+    command:
+      - uv
+      - run
+      - python
+      - manage.py
+      - migrate
+      - --settings=config.settings.prod
+    environment:
+      <<: *base-environment
+      DB_USER: ${DB_MIGRATOR_USER:?Set DB_MIGRATOR_USER}
+      DB_PASSWORD_FILE: /run/secrets/database_migrator_password
+      DB_APPLICATION_NAME: ats-web-migration
+    secrets:
+      - database_migrator_password
+    networks:
+      - shared_postgres
+
+secrets:
+  database_runtime_password:
+    file: ${DB_RUNTIME_PASSWORD_FILE:?Set DB_RUNTIME_PASSWORD_FILE}
+  database_migrator_password:
+    file: ${DB_MIGRATOR_PASSWORD_FILE:?Set DB_MIGRATOR_PASSWORD_FILE}
+
+networks:
+  shared_postgres:
+    external: true
+    name: ${POSTGRES_DOCKER_NETWORK:?Set POSTGRES_DOCKER_NETWORK}
+  edge:
+    external: true
+    name: ${EDGE_DOCKER_NETWORK:?Set EDGE_DOCKER_NETWORK}
+  egress:
+    external: true
+    name: ${EGRESS_DOCKER_NETWORK:?Set EGRESS_DOCKER_NETWORK}
+
+volumes:
+  media_prod:
