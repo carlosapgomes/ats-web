@@ -6,7 +6,8 @@ prompts/
 secrets/
 tmp/
 .tmp/
-# openspec changes are tracked; only archive is excluded
+# openspec changes are tracked; only archive is excluded (tripwire da ADR-0005:
+# use scripts/openspec-archive.sh, que move para openspec/archive/<change>)
 openspec/changes/archive/
 
 # Python / Django

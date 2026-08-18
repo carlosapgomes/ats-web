@@ -10,6 +10,7 @@ Registros de decisões arquiteturais importantes.
 | [ADR-0002](ADR-0002-emails-transacionais-autenticacao-cadastro.md) | Emails transacionais para autenticação e cadastro | Accepted | 2026-06-18 |
 | [ADR-0003](ADR-0003-perfis-procedimento-tipo-exame-explicito.md) | Perfis de procedimento e tipo de exame explícito | Accepted — parcialmente superada pela ADR-0004 | 2026-08-04 |
 | [ADR-0004](ADR-0004-procedimentos-multiplos-e-contrato-llm-neutro.md) | Procedimentos múltiplos e contrato LLM neutro | Accepted | 2026-08-06 |
+| [ADR-0005](ADR-0005-local-de-archive-openspec.md) | Local de archive dos changes OpenSpec | Accepted | 2026-08-18 |
 
 ## ADRs Deprecated/Superseded
 
