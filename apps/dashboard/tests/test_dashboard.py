@@ -4908,8 +4908,9 @@ class TestDashboardProcedureDimensionAuthority:
         _login_as(client, "manager")
         content = client.get(reverse("dashboard:index")).content.decode()
         assert "BREAKDOWN POR TIPO DE EXAME" not in content
-        # A breakdown por dimensão (Slice 006) permanece como fonte única
-        assert "PROCEDIMENTOS POR DIMENSÃO" in content
+        # O resumo compacto por dimensão (Slice 006 / change simplify) permanece
+        assert "PROCEDIMENTOS —" in content
+        assert "POR DIMENSÃO" not in content
 
     def test_singular_exam_type_query_param_is_ignored(self, client) -> None:
         """``?exam_type=eda`` não filtra mais (param ignorado; casos seguem visíveis)."""
@@ -4934,14 +4935,142 @@ class TestDashboardProcedureDimensionAuthority:
         set_declared_procedures(case=case, procedure_types=["eda"], actor=user)
         content = client.get(reverse("dashboard:index")).content.decode()
         # Badge dimensional projetado a partir das rows, na dimensão ativa default (declared).
-        assert 'title="Categoria na dimensão Declarado">EDA</span>' in content
+        assert 'title="Categoria na dimensão Solicitado (NIR)">EDA</span>' in content
         assert "CARD-1" in content
         # Sem rows declaradas o badge dimensional some (ausência ⇒ vazio/none).
         Case.objects.all().delete()
         _create_case(created_by=user, status=CaseStatus.NEW, agency_record_number="CARD-2")
         content = client.get(reverse("dashboard:index")).content.decode()
         assert "CARD-2" in content
-        assert 'title="Categoria na dimensão Declarado">EDA</span>' not in content
+        assert 'title="Categoria na dimensão Solicitado (NIR)">EDA</span>' not in content
+
+
+# ── Slice: Resumo compacto de procedimentos (simplify-dashboard-procedure-card) ──
+
+
+@pytest.mark.django_db
+class TestProcedureSummaryCard:
+    """Slice 001 — resumo compacto case-level no card de procedimentos.
+
+    R1: marcador ``.procedure-summary-card``, título compacto e exatamente
+        quatro itens case-level (EDA, Colonoscopia, EDA + Colonoscopia, Nenhum).
+    R2: labels orientados ao usuário com fonte única (Solicitado (NIR) /
+        Detectado (análise) / Autorizado (médico)) no seletor do card, no
+        ``select`` da lista e no badge dimensional.
+    R3/R5: matriz, volume, tabela técnica e explicações ausentes do HTML;
+        contexto/helper de apresentação sem consumidor.
+    R6: agendamento combinado confirmado por exceção (zero ausente, positivo único).
+    """
+
+    def _summary_card_block(self, content: str) -> str:
+        """Isola o HTML do card de resumo (do marcador até a seção seguinte)."""
+        start = content.find('class="procedure-summary-card')
+        assert start != -1, "Card deve ter marcador .procedure-summary-card"
+        end = content.find("<!-- Sub-metrics -->", start)
+        assert end != -1, "Card deve terminar antes da seção Sub-metrics"
+        return content[start:end]
+
+    def test_procedure_summary_card_has_marker_title_and_four_items(self, client) -> None:
+        """R1 — marcador, título compacto e exatamente quatro itens case-level."""
+        _login_as(client, "manager")
+        content = client.get(reverse("dashboard:index")).content.decode()
+        card = self._summary_card_block(content)
+        assert "PROCEDIMENTOS —" in card, "Título compacto sem 'POR DIMENSÃO'"
+        assert "POR DIMENSÃO" not in card
+        assert card.count("procedure-summary-item") == 4, "Exatamente quatro categorias"
+        for category in ("EDA", "Colonoscopia", "EDA + Colonoscopia", "Nenhum"):
+            assert category in card, f"Categoria {category!r} deve constar no resumo"
+
+    def test_procedure_summary_removes_advanced_comparison(self, client) -> None:
+        """R3/R5 — matriz, volume, tabela técnica e explicações ausentes do HTML."""
+        _login_as(client, "manager")
+        content = client.get(reverse("dashboard:index")).content.decode()
+        card = self._summary_card_block(content)
+        for forbidden in (
+            "BREAKDOWN POR CATEGORIA",
+            "VOLUME DE PROCEDIMENTOS",
+            "MATRIZ DE CONVERSÃO",
+            "AGENDAMENTOS CASADOS",
+            "Casos contam uma vez por categoria",
+            "Procedimentos ≠ casos",
+            "Componentes ≠ casos",
+            "procedure_analytics",
+            "procedure_volume",
+            "procedure_matrix",
+            "procedure_total_cases",
+            "procedure_category_labels",
+            "<details",
+            "display:none",
+            "hidden",
+        ):
+            assert forbidden not in card, f"{forbidden!r} não pode estar no card (nem escondido)"
+        # Nenhum bloco da comparação avançada pode existir em qualquer lugar da página
+        assert "BREAKDOWN POR CATEGORIA" not in content
+        assert "VOLUME DE PROCEDIMENTOS" not in content
+        assert "MATRIZ DE CONVERSÃO" not in content
+
+    def test_procedure_summary_dimension_labels_consistent(self, client) -> None:
+        """R2 — os três labels visíveis vêm da mesma fonte e o select não os duplica."""
+        from apps.cases.procedures import set_declared_procedures
+
+        user = _login_as(client, "manager")
+        Case.objects.all().delete()
+        case = _create_case(created_by=user, status=CaseStatus.NEW, agency_record_number="LBL-1")
+        set_declared_procedures(case=case, procedure_types=("eda",), actor=user)
+        content = client.get(reverse("dashboard:index")).content.decode()
+        for label in ("Solicitado (NIR)", "Detectado (análise)", "Autorizado (médico)"):
+            assert label in content, f"Label {label!r} deve aparecer na página"
+        # Select da lista itera a mesma coleção dos links (fonte única de labels)
+        assert '<option value="declared" selected>Solicitado (NIR)</option>' in content
+        assert '<option value="detected">Detectado (análise)</option>' in content
+        assert '<option value="approved">Autorizado (médico)</option>' in content
+        # Badge dimensional usa o label da dimensão ativa (default declared)
+        assert 'title="Categoria na dimensão Solicitado (NIR)"' in content
+        # Rótulo antigo não sobrevive como label de dimensão
+        assert "Declarado" not in content
+
+    def test_procedure_summary_paired_confirmed_zero_absent(self, client) -> None:
+        """R6 — com zero agendamentos casados, nenhum indicador é renderizado."""
+        user = _login_as(client, "manager")
+        Case.objects.all().delete()
+        _create_case(created_by=user, status=CaseStatus.NEW, agency_record_number="PZ-1")
+        content = client.get(reverse("dashboard:index")).content.decode()
+        assert "Agendamentos combinados confirmados" not in content
+
+    def test_procedure_summary_paired_confirmed_positive_single(self, client) -> None:
+        """R6 — com casados > 0, indicador único e com a contagem exata."""
+        from apps.cases.procedures import (
+            record_doctor_procedure_decisions,
+            set_declared_procedures,
+            set_detected_procedures,
+        )
+
+        user = _login_as(client, "manager")
+        Case.objects.all().delete()
+        case = _create_case(
+            created_by=user,
+            status=CaseStatus.APPT_CONFIRMED,
+            appointment_status="confirmed",
+            agency_record_number="PP-1",
+        )
+        set_declared_procedures(case=case, procedure_types=("eda", "colonoscopy"), actor=user)
+        set_detected_procedures(case=case, detected_types=("eda", "colonoscopy"), actor=user)
+        record_doctor_procedure_decisions(
+            case=case,
+            decisions=[
+                {"procedure_type": "eda", "disposition": "approved", "reason": "ok", "added_by_doctor": False},
+                {
+                    "procedure_type": "colonoscopy",
+                    "disposition": "approved",
+                    "reason": "ok",
+                    "added_by_doctor": False,
+                },
+            ],
+            actor=user,
+        )
+        content = client.get(reverse("dashboard:index")).content.decode()
+        assert content.count("Agendamentos combinados confirmados") == 1
+        assert "Agendamentos combinados confirmados: 1" in content
 
 
 # ── Slice: Escopo ativo/histórico (case_scope) ───────────────────────────

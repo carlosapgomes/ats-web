@@ -447,7 +447,7 @@ class TestDimensionTableFilter:
             reverse("dashboard:index") + "?procedure_dimension=bogus&procedure_selection=bogus&case_scope=all"
         ).content.decode()
         assert "DF-1" in content and "DF-2" in content, "Dimensão/seleção inválidas devem cair em defaults seguros"
-        assert "Declarado" in content, "Dimensão ativa padrão deve ser exibida (Declarado)"
+        assert "Solicitado (NIR)" in content, "Dimensão ativa padrão deve ser exibida (Solicitado (NIR))"
 
     def test_partial_pagination_preserves_dimension_and_selection(self, client) -> None:
         user = _login_as(client)

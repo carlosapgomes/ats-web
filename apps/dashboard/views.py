@@ -769,30 +769,6 @@ def _procedure_dimension_links(request: HttpRequest, active: str) -> list[dict[s
     return links
 
 
-def _matrix_display_rows(matrix: dict[tuple[str, str], dict[str, int]]) -> list[dict[str, Any]]:
-    """Linhas de apresentação da matriz declarado→detectado→autorizado.
-
-    Cada célula exibe a distribuição por categoria autorizada (texto compacto);
-    a soma das células fecha com o total de casos do período.
-    """
-    rows: list[dict[str, Any]] = []
-    for declared_key in CATEGORY_ORDER:
-        cells: list[dict[str, Any]] = []
-        for detected_key in CATEGORY_ORDER:
-            cell = matrix.get((declared_key, detected_key), {})
-            if cell:
-                parts = [
-                    f"{CATEGORY_LABELS[key]}: {count}"
-                    for key, count in sorted(cell.items(), key=lambda kv: CATEGORY_ORDER.index(kv[0]))
-                ]
-                text = ", ".join(parts)
-            else:
-                text = "—"
-            cells.append({"detected_key": detected_key, "text": text})
-        rows.append({"declared_key": declared_key, "cells": cells})
-    return rows
-
-
 @login_required
 @role_required("manager", "admin")
 def dashboard_index(request: HttpRequest) -> HttpResponse:
@@ -863,7 +839,7 @@ def dashboard_index(request: HttpRequest) -> HttpResponse:
     procedure_breakdown_rows = [
         {"key": key, "label": CATEGORY_LABELS[key], "count": active_breakdown[key]} for key in CATEGORY_ORDER
     ]
-    procedure_total_cases = sum(active_breakdown.values())
+    procedure_paired_confirmed = procedure_analytics["paired_confirmed"]
 
     # Labels
     period_labels = {
@@ -931,15 +907,10 @@ def dashboard_index(request: HttpRequest) -> HttpResponse:
             "metrics_period_error": metrics_period_error,
             "status_choices": CaseStatus.choices,
             "STATUS_LABELS": STATUS_LABELS,
-            "procedure_analytics": procedure_analytics,
             "procedure_breakdown_rows": procedure_breakdown_rows,
-            "procedure_total_cases": procedure_total_cases,
-            "procedure_volume": procedure_analytics["volume"][procedure_dimension],
-            "procedure_matrix_rows": _matrix_display_rows(procedure_analytics["matrix"]),
-            "procedure_matrix_detected_keys": list(CATEGORY_ORDER),
+            "procedure_paired_confirmed": procedure_paired_confirmed,
             "procedure_dimension_links": _procedure_dimension_links(request, procedure_dimension),
             "procedure_dimension_label": DIMENSION_LABELS[procedure_dimension],
-            "procedure_category_labels": CATEGORY_LABELS,
             **case_list_context,
         },
     )

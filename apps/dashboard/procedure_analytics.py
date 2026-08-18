@@ -29,9 +29,9 @@ from apps.cases.procedures import (
 DIMENSIONS: tuple[str, ...] = ("declared", "detected", "approved")
 
 DIMENSION_LABELS: dict[str, str] = {
-    "declared": "Declarado",
-    "detected": "Detectado",
-    "approved": "Autorizado",
+    "declared": "Solicitado (NIR)",
+    "detected": "Detectado (análise)",
+    "approved": "Autorizado (médico)",
 }
 
 # Seleções válidas do parâmetro ``procedure_selection`` da tabela gerencial.
