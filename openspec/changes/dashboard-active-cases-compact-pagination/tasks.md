@@ -31,6 +31,15 @@
 - [x] Relatório `/tmp/dashboard-active-cases-compact-pagination-slice-001-report.md` foi criado com evidências e handoff para terceiro LLM.
 - [x] Commit rastreável e push da branch atual foram realizados.
 
+## Revisão do planner após auditoria independente
+
+- [x] Auditor independente reexecutou testes alvo, testes de dashboard, Ruff, formatter, mypy e pytest completo.
+- [x] Resultado reproduzido: `3158 passed`, zero falhas/erros e HEAD remoto `a235ea5`.
+- [x] Exceção de escopo aceita explicitamente pelo planner: `apps/dashboard/tests/test_procedure_analytics.py` foi o sexto arquivo funcional porque fixtures históricas desse mesmo app usam `CaseStatus.CLEANED`; adicionar `case_scope=all` aos seis GETs afetados era necessário para preservar o propósito e os asserts das regressões sob o novo default ativo.
+- [x] A exceção é mínima, não altera código de produção e não autoriza ampliações semelhantes sem consulta prévia em slices futuros.
+- [x] Divergência cosmética do relatório registrada: foram adicionados 19 testes, não 23; o delta verificável é `3139 → 3158`.
+- [x] Implementação do Slice 001 aprovada sem replay.
+
 ## Regra de atualização
 
-Marque o slice e os itens da Definition of Done somente depois de todos os critérios, inspeções e gates do arquivo do slice passarem. Qualquer falha mantém este change incompleto.
+Marque o slice e os itens da Definition of Done somente depois de todos os critérios, inspeções e gates do arquivo do slice passarem. Qualquer falha mantém este change incompleto. Exceções de protocolo exigem decisão explícita e rastreável do planner, como registrado acima.
