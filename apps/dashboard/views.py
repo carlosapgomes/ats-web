@@ -636,8 +636,17 @@ def _dashboard_case_list_context(request: HttpRequest) -> dict[str, Any]:
     search_term = search_raw.strip()[:100]
     search_min_chars_help = False
 
-    # Tabela de casos — todos, sem filtro de usuario
+    # Escopo de casos: active (default) exclui CLEANED; all inclui todo o
+    # histórico. Ausente, vazio ou inválido resolve para active. A definição
+    # de "ativo" é por estado (status != CLEANED), sem restrição de data.
+    raw_case_scope = request.GET.get("case_scope", "")
+    case_scope = raw_case_scope if raw_case_scope in ("active", "all") else "active"
+
+    # Tabela de casos — todos, sem filtro de usuario; o escopo compõe por AND
+    # com atenção, busca, procedimento, status e datas antes da paginação.
     cases_qs = Case.objects.select_related("created_by").order_by("-created_at")
+    if case_scope == "active":
+        cases_qs = cases_qs.exclude(status=CaseStatus.CLEANED)
 
     # Filtro de atenção (exclui CLEANED, aplica critérios de atenção)
     if attention_filter:
@@ -684,6 +693,18 @@ def _dashboard_case_list_context(request: HttpRequest) -> dict[str, Any]:
     page_number = request.GET.get("page", 1)
     page_obj = paginator.get_page(page_number)
 
+    # Faixa elidida da API Django: janela pequena e constante, sem renderizar
+    # todos os números de página. Itens iguais a Paginator.ELLIPSIS são
+    # renderizados como reticências não clicáveis no template. Materializada
+    # como tupla para não consumir o generator na primeira renderização.
+    elided_page_range = tuple(
+        paginator.get_elided_page_range(
+            page_obj.number,
+            on_each_side=2,
+            on_ends=1,
+        )
+    )
+
     dimension_getter = DIMENSION_GETTERS[procedure_dimension]
     enriched_cases = []
     for case in page_obj:
@@ -709,6 +730,8 @@ def _dashboard_case_list_context(request: HttpRequest) -> dict[str, Any]:
     return {
         "cases": enriched_cases,
         "page_obj": page_obj,
+        "elided_page_range": elided_page_range,
+        "case_scope": case_scope,
         "status_filter": status_filter,
         "date_from": date_from,
         "date_to": date_to,

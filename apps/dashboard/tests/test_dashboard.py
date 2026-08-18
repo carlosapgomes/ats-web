@@ -1699,7 +1699,8 @@ class TestDashboardAdministrativeClosure:
             active_role="manager",
         )
 
-        response = client.get(reverse("dashboard:index"))
+        # Caso CLEANED só aparece na lista com escopo explícito case_scope=all.
+        response = client.get(reverse("dashboard:index") + "?case_scope=all")
         assert response.status_code == 200
         content = response.content.decode()
         assert "Encerrado administrativamente" in content
@@ -1736,7 +1737,8 @@ class TestDashboardPostScheduleIntercurrencePresentation:
             agency_record_number="PSI-CANCEL-LIST",
         )
 
-        response = client.get(reverse("dashboard:index"))
+        # Caso CLEANED só aparece na lista com escopo explícito case_scope=all.
+        response = client.get(reverse("dashboard:index") + "?case_scope=all")
 
         assert response.status_code == 200
         content = response.content.decode()
@@ -2818,17 +2820,17 @@ class TestDashboardCaseListFilterLayout:
         return content.find('id="case-filter-form"')
 
     def test_card_header_shows_title_before_filters(self, client) -> None:
-        """R1: Header do card com 'Todos os Casos' antes da área de filtros.
+        """R1: Header do card com 'Casos' antes da área de filtros.
 
         O título deve aparecer antes do formulário de filtros no HTML.
         """
         content = self._get_content(client)
-        title_pos = content.find("Todos os Casos")
+        title_pos = content.find(">Casos</h5>")
         form_pos = self._filter_form_start(content)
-        assert title_pos != -1, "'Todos os Casos' deve estar no HTML"
+        assert title_pos != -1, "'Casos</h5>' deve estar no HTML"
         assert form_pos != -1, "Deve haver um formulário GET de filtros"
         assert title_pos < form_pos, (
-            f"'Todos os Casos' (pos {title_pos}) deve aparecer antes do <form> da lista (pos {form_pos})"
+            f"'Casos' (pos {title_pos}) deve aparecer antes do <form> da lista (pos {form_pos})"
         )
 
     def test_attention_link_outside_form_in_header(self, client) -> None:
@@ -4940,3 +4942,339 @@ class TestDashboardProcedureDimensionAuthority:
         content = client.get(reverse("dashboard:index")).content.decode()
         assert "CARD-2" in content
         assert 'title="Categoria na dimensão Declarado">EDA</span>' not in content
+
+
+# ── Slice: Escopo ativo/histórico (case_scope) ───────────────────────────
+
+
+@pytest.mark.django_db
+class TestDashboardActiveCaseScope:
+    """Testes do escopo ativo/histórico (case_scope=active|all) na lista do dashboard.
+
+    Default canônico é ``active`` (status != CLEANED, sem restrição de data);
+    ``all`` restaura o histórico explicitamente. Escopo compõe com os filtros
+    existentes e é preservado em métricas, atenção, dimensão, paginação e
+    busca parcial.
+    """
+
+    def _create_old_active_case(self, user, *, days_ago: int = 7, agency_record_number: str = "SCOPE-OLD"):
+        """Cria caso ativo (não CLEANED) com created_at determinístico no passado."""
+        case = _create_case(
+            created_by=user,
+            status=CaseStatus.WAIT_DOCTOR,
+            agency_record_number=agency_record_number,
+        )
+        past = timezone.make_aware(
+            datetime.combine(timezone.localdate() - timedelta(days=days_ago), time(10, 0)),
+            timezone.get_current_timezone(),
+        )
+        Case.objects.filter(pk=case.pk).update(created_at=past, updated_at=past)
+        return Case.objects.get(pk=case.pk)
+
+    def _create_cleaned_case(self, user, *, agency_record_number: str = "SCOPE-CLN"):
+        return _create_case(created_by=user, status=CaseStatus.CLEANED, agency_record_number=agency_record_number)
+
+    def test_active_scope_default_includes_old_active_and_excludes_cleaned(self, client) -> None:
+        """Sem case_scope: caso antigo não CLEANED aparece; CLEANED não aparece; nenhum filtro de data."""
+        user = _login_as(client, "manager")
+        Case.objects.all().delete()
+        old_active = self._create_old_active_case(user)
+        cleaned = self._create_cleaned_case(user)
+
+        response = client.get(reverse("dashboard:index"))
+        assert response.status_code == 200
+        assert response.context["case_scope"] == "active"
+        content = response.content.decode()
+        assert old_active.agency_record_number in content
+        assert cleaned.agency_record_number not in content
+
+    def test_active_scope_all_includes_active_and_cleaned(self, client) -> None:
+        """case_scope=all torna ativos e CLEANED elegíveis sem alterar dados."""
+        user = _login_as(client, "manager")
+        Case.objects.all().delete()
+        old_active = self._create_old_active_case(user)
+        cleaned = self._create_cleaned_case(user)
+
+        response = client.get(reverse("dashboard:index") + "?case_scope=all")
+        assert response.status_code == 200
+        assert response.context["case_scope"] == "all"
+        content = response.content.decode()
+        assert old_active.agency_record_number in content
+        assert cleaned.agency_record_number in content
+
+    def test_active_scope_invalid_falls_back_to_active(self, client) -> None:
+        """Valor inválido cai para active sem erro e sem expor CLEANED."""
+        user = _login_as(client, "manager")
+        Case.objects.all().delete()
+        old_active = self._create_old_active_case(user)
+        cleaned = self._create_cleaned_case(user)
+
+        response = client.get(reverse("dashboard:index") + "?case_scope=bogus")
+        assert response.status_code == 200
+        assert response.context["case_scope"] == "active"
+        content = response.content.decode()
+        assert old_active.agency_record_number in content
+        assert cleaned.agency_record_number not in content
+
+    def test_active_scope_empty_resolves_to_active(self, client) -> None:
+        """case_scope vazio resolve para active."""
+        user = _login_as(client, "manager")
+        Case.objects.all().delete()
+        cleaned = self._create_cleaned_case(user)
+
+        response = client.get(reverse("dashboard:index") + "?case_scope=")
+        assert response.status_code == 200
+        assert response.context["case_scope"] == "active"
+        assert cleaned.agency_record_number not in response.content.decode()
+
+    def test_active_scope_with_status_cleaned_returns_empty_without_rewrite(self, client) -> None:
+        """active + status=CLEANED é vazio (predicados incompatíveis) sem rewrite mágico."""
+        user = _login_as(client, "manager")
+        Case.objects.all().delete()
+        cleaned = self._create_cleaned_case(user)
+
+        response = client.get(reverse("dashboard:index") + f"?case_scope=active&status={CaseStatus.CLEANED}")
+        assert response.status_code == 200
+        content = response.content.decode()
+        assert cleaned.agency_record_number not in content
+        assert "Nenhum caso encontrado" in content
+
+        # Prova de que status=CLEANED é filtro legítimo: com all, o mesmo caso aparece.
+        response_all = client.get(reverse("dashboard:index") + f"?case_scope=all&status={CaseStatus.CLEANED}")
+        assert response.status_code == 200
+        assert cleaned.agency_record_number in response_all.content.decode()
+
+    def test_active_scope_select_reflects_resolved_value(self, client) -> None:
+        """Select case_scope reflete o valor resolvido (active default / all selecionado)."""
+        user = _login_as(client, "manager")
+        Case.objects.all().delete()
+        _create_case(created_by=user, status=CaseStatus.NEW, agency_record_number="SCOPE-SELECT")
+
+        response_default = client.get(reverse("dashboard:index"))
+        assert response_default.status_code == 200
+        default_content = response_default.content.decode()
+        assert 'name="case_scope"' in default_content
+        assert 'value="active" selected' in default_content
+        assert 'value="all"' in default_content
+
+        response_all = client.get(reverse("dashboard:index") + "?case_scope=all")
+        assert response_all.status_code == 200
+        assert 'value="all" selected' in response_all.content.decode()
+
+    def test_active_scope_all_preserved_in_metric_period_links(self, client) -> None:
+        """Links dos presets de métricas preservam case_scope=all."""
+        _login_as(client, "manager")
+        response = client.get(reverse("dashboard:index") + "?case_scope=all")
+        assert response.status_code == 200
+        content = response.content.decode()
+        assert "metrics_period=today&case_scope=all" in content
+        assert "metrics_period=7d&case_scope=all" in content
+        assert "metrics_period=30d&case_scope=all" in content
+        assert "metrics_period=all&case_scope=all" in content
+
+    def test_active_scope_all_preserved_in_attention_link(self, client) -> None:
+        """Botão 'Atenção necessária' preserva case_scope=all."""
+        _login_as(client, "manager")
+        response = client.get(reverse("dashboard:index") + "?case_scope=all")
+        assert response.status_code == 200
+        content = response.content.decode()
+        assert "attention=1&case_scope=all" in content
+
+    def test_active_scope_all_preserved_in_pagination_links(self, client) -> None:
+        """Links de paginação SSR preservam case_scope=all."""
+        user = _login_as(client, "manager")
+        Case.objects.all().delete()
+        for i in range(25):
+            _create_case(created_by=user, status=CaseStatus.NEW, agency_record_number=f"SCOPE-PAG-{i:03d}")
+
+        response = client.get(reverse("dashboard:index") + "?case_scope=all")
+        assert response.status_code == 200
+        content = response.content.decode()
+        assert "case_scope=all" in content
+        assert "page-link" in content
+
+    def test_active_scope_all_preserved_in_dimension_links(self, client) -> None:
+        """Links de dimensão derivados de request.GET preservam case_scope=all."""
+        _login_as(client, "manager")
+        response = client.get(reverse("dashboard:index") + "?case_scope=all&procedure_dimension=detected")
+        assert response.status_code == 200
+        content = response.content.decode()
+        for key in ("declared", "detected", "approved"):
+            assert f"procedure_dimension={key}" in content
+        assert "case_scope=all" in content
+
+    def test_active_scope_form_single_control_and_no_page(self, client) -> None:
+        """Form da lista tem exatamente um name=case_scope (select) e não preserva page."""
+        import re
+
+        _login_as(client, "manager")
+        response = client.get(reverse("dashboard:index") + "?page=2&case_scope=all")
+        assert response.status_code == 200
+        content = response.content.decode()
+        case_form_match = re.search(
+            r'<form\b[^>]*id="case-filter-form"[^>]*>.*?</form>', content, re.DOTALL | re.IGNORECASE
+        )
+        assert case_form_match, "Form da lista deve existir"
+        case_form = case_form_match.group(0)
+        assert case_form.count('name="case_scope"') == 1
+        assert 'name="page"' not in case_form
+
+    def test_active_scope_list_title_is_neutral(self, client) -> None:
+        """Card da lista usa título neutro 'Casos' e não afirma 'Todos os Casos'."""
+        _login_as(client, "manager")
+        response = client.get(reverse("dashboard:index"))
+        assert response.status_code == 200
+        content = response.content.decode()
+        assert "Todos os Casos" not in content
+        assert "Casos</h5>" in content
+
+    def test_active_scope_search_js_preserves_contracts(self, client) -> None:
+        """dashboard_search.js lê/preserva case_scope sem remover contratos existentes."""
+        _login_as(client, "manager")
+        js_path = "/projects/dev/ats-web/static/js/dashboard_search.js"
+        with open(js_path) as f:
+            js_content = f.read()
+        assert "case_scope" in js_content, "JS deve referenciar case_scope"
+        assert "getFilterParams" in js_content
+        assert "AbortController" in js_content
+        assert "X-ATS-Partial" in js_content
+        assert "DASHBOARD_SEARCH_DEBOUNCE_MS" in js_content
+        assert "DASHBOARD_SEARCH_MIN_CHARS" in js_content
+
+    def test_active_scope_partial_keeps_scope_in_links(self, client) -> None:
+        """Partial com case_scope=all mantém escopo nos links e retorna só a lista."""
+        user = _login_as(client, "manager")
+        Case.objects.all().delete()
+        for i in range(25):
+            _create_case(created_by=user, status=CaseStatus.NEW, agency_record_number=f"SCOPE-PARTIAL-{i:03d}")
+
+        response = client.get(
+            reverse("dashboard:index") + "?case_scope=all",
+            headers={"X-ATS-Partial": "case-list"},
+        )
+        assert response.status_code == 200
+        content = response.content.decode()
+        assert "case_scope=all" in content  # links de paginação preservam escopo
+        assert "Visão geral" not in content  # apenas o partial
+        assert "base.html" not in content
+
+
+# ── Slice: Paginação compacta (faixa elidida) ────────────────────────────
+
+
+@pytest.mark.django_db
+class TestDashboardCompactPagination:
+    """Testes da paginação compacta (faixa elidida) e do resumo X–Y de Z."""
+
+    def _create_many_cases(self, user, count: int, prefix: str = "BULK") -> None:
+        """Cria muitos casos via bulk_create com timestamps explícitos (determinístico)."""
+        now = timezone.now()
+        Case.objects.bulk_create(
+            [
+                Case(
+                    created_by=user,
+                    agency_record_number=f"{prefix}-{i:04d}",
+                    status=CaseStatus.NEW,
+                    created_at=now,
+                    updated_at=now,
+                )
+                for i in range(count)
+            ]
+        )
+
+    def _nav_html(self, content: str) -> str:
+        """Isola o HTML do nav de paginação pelo id estável case-pagination."""
+        marker = 'id="case-pagination"'
+        start = content.find(marker)
+        assert start != -1, "Nav de paginação deve ter id='case-pagination'"
+        end = content.find("</nav>", start)
+        assert end != -1, "Nav de paginação deve fechar"
+        return content[start:end]
+
+    def test_compact_pagination_elided_range_has_first_current_last_neighbors_and_ellipsis(self, client) -> None:
+        """Página intermediária mostra primeira/atual/última/vizinhas e reticências, sem todos os números."""
+        import re
+
+        user = _login_as(client, "manager")
+        Case.objects.all().delete()
+        self._create_many_cases(user, 1000)  # 50 páginas de 20
+
+        response = client.get(reverse("dashboard:index") + "?page=25")
+        assert response.status_code == 200
+        assert response.context["case_scope"] == "active"
+
+        page_range = list(response.context["elided_page_range"])
+        assert page_range == [1, "…", 23, 24, 25, 26, 27, "…", 50], page_range
+
+        nav = self._nav_html(response.content.decode())
+        hrefs = re.findall(r'href="([^"]+)"', nav)
+        page_nums = set()
+        for href in hrefs:
+            match = re.search(r"[?&]page=(\d+)", href)
+            if match:
+                page_nums.add(int(match.group(1)))
+        assert page_nums == {1, 23, 24, 26, 27, 50}, page_nums
+        # Página atual não é link e é acessível
+        assert 'aria-current="page"' in nav
+        assert '<span class="page-link">25</span>' in nav
+        # Reticências presentes, não clicáveis
+        assert nav.count("…") == 2
+        assert '<li class="page-item disabled"><span class="page-link">…</span></li>' in nav
+        assert 'href="?page=…' not in nav and 'href="?page=&#x2026;' not in nav
+        # Anterior/Próxima preservados
+        assert "Anterior" in nav
+        assert "Próxima" in nav
+        # Wrap permitido em viewport estreita
+        assert "flex-wrap" in nav
+
+    def test_compact_pagination_page_contains_at_most_20_cases(self, client) -> None:
+        """Página materializa no máximo 20 cards (Paginator 20 mantido)."""
+        user = _login_as(client, "manager")
+        Case.objects.all().delete()
+        self._create_many_cases(user, 25)
+
+        response = client.get(reverse("dashboard:index"))
+        assert response.status_code == 200
+        assert len(response.context["cases"]) == 20
+        content = response.content.decode()
+        assert content.count("Ver detalhes") == 20
+
+    def test_compact_pagination_summary_range_shows_start_end_total(self, client) -> None:
+        """Resumo 'Exibindo X–Y de Z casos' reflete a página filtrada."""
+        user = _login_as(client, "manager")
+        Case.objects.all().delete()
+        self._create_many_cases(user, 25)
+
+        response_page1 = client.get(reverse("dashboard:index"))
+        assert "Exibindo 1–20 de 25 casos" in response_page1.content.decode()
+
+        response_page2 = client.get(reverse("dashboard:index") + "?page=2")
+        assert "Exibindo 21–25 de 25 casos" in response_page2.content.decode()
+
+    def test_compact_pagination_summary_range_reflects_filtered_queryset(self, client) -> None:
+        """Total do resumo reflete o queryset filtrado (escopo), não o banco inteiro."""
+        user = _login_as(client, "manager")
+        Case.objects.all().delete()
+        self._create_many_cases(user, 25, prefix="KEEP")
+        cleaned = _create_case(created_by=user, status=CaseStatus.CLEANED, agency_record_number="DROP-CLEAN")
+
+        response = client.get(reverse("dashboard:index"))
+        content = response.content.decode()
+        assert "de 25 casos" in content
+        assert cleaned.agency_record_number not in content
+
+        response_all = client.get(reverse("dashboard:index") + "?case_scope=all")
+        content_all = response_all.content.decode()
+        assert "de 26 casos" in content_all
+        assert cleaned.agency_record_number in content_all
+
+    def test_compact_pagination_summary_range_absent_in_empty_state(self, client) -> None:
+        """Estado vazio não mostra intervalo 0–0."""
+        _login_as(client, "manager")
+        Case.objects.all().delete()
+        response = client.get(reverse("dashboard:index"))
+        assert response.status_code == 200
+        content = response.content.decode()
+        assert "Nenhum caso encontrado" in content
+        assert "0–0" not in content
+        assert "Exibindo" not in content

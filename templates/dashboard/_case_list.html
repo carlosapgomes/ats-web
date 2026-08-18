@@ -57,6 +57,9 @@
   </div>
   {% endfor %}
 </div>
+<p class="text-muted small mt-2 mb-0 text-center">
+  Exibindo {{ page_obj.start_index }}–{{ page_obj.end_index }} de {{ page_obj.paginator.count }} casos
+</p>
 {% else %}
 <div class="text-center py-5">
   <p class="text-muted mb-3 fs-5">Nenhum caso encontrado</p>
@@ -68,29 +71,31 @@
 {% endif %}
 
 {% if page_obj.paginator.num_pages > 1 %}
-<nav class="mt-3" aria-label="Paginação">
-  <ul class="pagination pagination-sm justify-content-center mb-0">
+<nav class="mt-3" id="case-pagination" aria-label="Paginação">
+  <ul class="pagination pagination-sm justify-content-center flex-wrap mb-0">
     {% if page_obj.has_previous %}
     <li class="page-item">
-      <a class="page-link" href="?page={{ page_obj.previous_page_number }}{% if status_filter %}&status={{ status_filter }}{% endif %}{% if date_from %}&date_from={{ date_from }}{% endif %}{% if date_to %}&date_to={{ date_to }}{% endif %}{% if attention_filter %}&attention=1{% endif %}{% if metrics_period %}&metrics_period={{ metrics_period }}{% endif %}{% if metrics_date %}&metrics_date={{ metrics_date }}{% endif %}{% if metrics_start %}&metrics_start={{ metrics_start }}{% endif %}{% if metrics_end %}&metrics_end={{ metrics_end }}{% endif %}{% if search %}&search={{ search|urlencode }}{% endif %}{% if procedure_dimension and procedure_dimension != 'declared' %}&procedure_dimension={{ procedure_dimension }}{% endif %}{% if procedure_selection and procedure_selection != 'all' %}&procedure_selection={{ procedure_selection }}{% endif %}">Anterior</a>
+      <a class="page-link" href="?page={{ page_obj.previous_page_number }}{% if status_filter %}&status={{ status_filter }}{% endif %}{% if date_from %}&date_from={{ date_from }}{% endif %}{% if date_to %}&date_to={{ date_to }}{% endif %}{% if attention_filter %}&attention=1{% endif %}{% if metrics_period %}&metrics_period={{ metrics_period }}{% endif %}{% if metrics_date %}&metrics_date={{ metrics_date }}{% endif %}{% if metrics_start %}&metrics_start={{ metrics_start }}{% endif %}{% if metrics_end %}&metrics_end={{ metrics_end }}{% endif %}{% if search %}&search={{ search|urlencode }}{% endif %}{% if procedure_dimension and procedure_dimension != 'declared' %}&procedure_dimension={{ procedure_dimension }}{% endif %}{% if procedure_selection and procedure_selection != 'all' %}&procedure_selection={{ procedure_selection }}{% endif %}{% if case_scope == 'all' %}&case_scope=all{% endif %}">Anterior</a>
     </li>
     {% else %}
     <li class="page-item disabled"><span class="page-link">Anterior</span></li>
     {% endif %}
 
-    {% for i in page_obj.paginator.page_range %}
-      {% if page_obj.number == i %}
-      <li class="page-item active"><span class="page-link">{{ i }}</span></li>
+    {% for page_number in elided_page_range %}
+      {% if page_number == page_obj.paginator.ELLIPSIS %}
+      <li class="page-item disabled"><span class="page-link">…</span></li>
+      {% elif page_obj.number == page_number %}
+      <li class="page-item active" aria-current="page"><span class="page-link">{{ page_number }}</span></li>
       {% else %}
       <li class="page-item">
-        <a class="page-link" href="?page={{ i }}{% if status_filter %}&status={{ status_filter }}{% endif %}{% if date_from %}&date_from={{ date_from }}{% endif %}{% if date_to %}&date_to={{ date_to }}{% endif %}{% if attention_filter %}&attention=1{% endif %}{% if metrics_period %}&metrics_period={{ metrics_period }}{% endif %}{% if metrics_date %}&metrics_date={{ metrics_date }}{% endif %}{% if metrics_start %}&metrics_start={{ metrics_start }}{% endif %}{% if metrics_end %}&metrics_end={{ metrics_end }}{% endif %}{% if search %}&search={{ search|urlencode }}{% endif %}{% if procedure_dimension and procedure_dimension != 'declared' %}&procedure_dimension={{ procedure_dimension }}{% endif %}{% if procedure_selection and procedure_selection != 'all' %}&procedure_selection={{ procedure_selection }}{% endif %}">{{ i }}</a>
+        <a class="page-link" href="?page={{ page_number }}{% if status_filter %}&status={{ status_filter }}{% endif %}{% if date_from %}&date_from={{ date_from }}{% endif %}{% if date_to %}&date_to={{ date_to }}{% endif %}{% if attention_filter %}&attention=1{% endif %}{% if metrics_period %}&metrics_period={{ metrics_period }}{% endif %}{% if metrics_date %}&metrics_date={{ metrics_date }}{% endif %}{% if metrics_start %}&metrics_start={{ metrics_start }}{% endif %}{% if metrics_end %}&metrics_end={{ metrics_end }}{% endif %}{% if search %}&search={{ search|urlencode }}{% endif %}{% if procedure_dimension and procedure_dimension != 'declared' %}&procedure_dimension={{ procedure_dimension }}{% endif %}{% if procedure_selection and procedure_selection != 'all' %}&procedure_selection={{ procedure_selection }}{% endif %}{% if case_scope == 'all' %}&case_scope=all{% endif %}">{{ page_number }}</a>
       </li>
       {% endif %}
     {% endfor %}
 
     {% if page_obj.has_next %}
     <li class="page-item">
-      <a class="page-link" href="?page={{ page_obj.next_page_number }}{% if status_filter %}&status={{ status_filter }}{% endif %}{% if date_from %}&date_from={{ date_from }}{% endif %}{% if date_to %}&date_to={{ date_to }}{% endif %}{% if attention_filter %}&attention=1{% endif %}{% if metrics_period %}&metrics_period={{ metrics_period }}{% endif %}{% if metrics_date %}&metrics_date={{ metrics_date }}{% endif %}{% if metrics_start %}&metrics_start={{ metrics_start }}{% endif %}{% if metrics_end %}&metrics_end={{ metrics_end }}{% endif %}{% if search %}&search={{ search|urlencode }}{% endif %}{% if procedure_dimension and procedure_dimension != 'declared' %}&procedure_dimension={{ procedure_dimension }}{% endif %}{% if procedure_selection and procedure_selection != 'all' %}&procedure_selection={{ procedure_selection }}{% endif %}">Próxima</a>
+      <a class="page-link" href="?page={{ page_obj.next_page_number }}{% if status_filter %}&status={{ status_filter }}{% endif %}{% if date_from %}&date_from={{ date_from }}{% endif %}{% if date_to %}&date_to={{ date_to }}{% endif %}{% if attention_filter %}&attention=1{% endif %}{% if metrics_period %}&metrics_period={{ metrics_period }}{% endif %}{% if metrics_date %}&metrics_date={{ metrics_date }}{% endif %}{% if metrics_start %}&metrics_start={{ metrics_start }}{% endif %}{% if metrics_end %}&metrics_end={{ metrics_end }}{% endif %}{% if search %}&search={{ search|urlencode }}{% endif %}{% if procedure_dimension and procedure_dimension != 'declared' %}&procedure_dimension={{ procedure_dimension }}{% endif %}{% if procedure_selection and procedure_selection != 'all' %}&procedure_selection={{ procedure_selection }}{% endif %}{% if case_scope == 'all' %}&case_scope=all{% endif %}">Próxima</a>
     </li>
     {% else %}
     <li class="page-item disabled"><span class="page-link">Próxima</span></li>
