@@ -38,7 +38,7 @@
 
   /**
    * Retorna os parâmetros atuais do formulário de filtros como URLSearchParams.
-   * Preserva status, procedure_dimension, procedure_selection,
+   * Preserva status, procedure_dimension, procedure_selection, case_scope,
    * date_from, date_to, attention, metrics_period e campos personalizados
    * (metrics_date, metrics_start, metrics_end).
    */
@@ -47,6 +47,7 @@
     var statusSelect = document.querySelector('select[name="status"]');
     var dimensionSelect = document.querySelector('select[name="procedure_dimension"]');
     var selectionSelect = document.querySelector('select[name="procedure_selection"]');
+    var scopeSelect = document.querySelector('select[name="case_scope"]');
     var dateFromInput = document.querySelector('input[name="date_from"]');
     var dateToInput = document.querySelector('input[name="date_to"]');
     var attentionLink = document.querySelector('a[href*="attention=1"]');
@@ -70,6 +71,10 @@
     // Seleção de procedimento (Slice 006): preserva apenas quando != all
     if (selectionSelect && selectionSelect.value && selectionSelect.value !== 'all') {
       params.set('procedure_selection', selectionSelect.value);
+    }
+    // Escopo de casos: preserva apenas quando != default canônico (active)
+    if (scopeSelect && scopeSelect.value && scopeSelect.value !== 'active') {
+      params.set('case_scope', scopeSelect.value);
     }
     if (dateFromInput && dateFromInput.value) {
       params.set('date_from', dateFromInput.value);

@@ -341,18 +341,21 @@ class TestDimensionTableFilter:
         )
         _make_case(user, "TF-3", declared=("colonoscopy",), detected=("colonoscopy",), approved=())
 
-        url = reverse("dashboard:index") + "?procedure_dimension=declared&procedure_selection=eda"
+        url = reverse("dashboard:index") + "?procedure_dimension=declared&procedure_selection=eda&case_scope=all"
         content = client.get(url).content.decode()
         assert "TF-1" in content, "Seleção EDA na dimensão declarado deve mostrar TF-1"
         assert "TF-2" not in content, "Combinado não pode casar com seleção EDA"
         assert "TF-3" not in content, "Colonoscopia não pode casar com seleção EDA"
 
-        url = reverse("dashboard:index") + "?procedure_dimension=declared&procedure_selection=eda_colonoscopy"
+        url = (
+            reverse("dashboard:index")
+            + "?procedure_dimension=declared&procedure_selection=eda_colonoscopy&case_scope=all"
+        )
         content = client.get(url).content.decode()
         assert "TF-2" in content, "Seleção combinado deve mostrar TF-2"
         assert "TF-1" not in content and "TF-3" not in content
 
-        url = reverse("dashboard:index") + "?procedure_dimension=approved&procedure_selection=none"
+        url = reverse("dashboard:index") + "?procedure_dimension=approved&procedure_selection=none&case_scope=all"
         content = client.get(url).content.decode()
         assert "TF-3" in content, "Nenhum na dimensão autorizado deve mostrar TF-3"
         assert "TF-1" not in content and "TF-2" not in content
@@ -441,7 +444,7 @@ class TestDimensionTableFilter:
         _make_case(user, "DF-2", declared=("colonoscopy",))
 
         content = client.get(
-            reverse("dashboard:index") + "?procedure_dimension=bogus&procedure_selection=bogus"
+            reverse("dashboard:index") + "?procedure_dimension=bogus&procedure_selection=bogus&case_scope=all"
         ).content.decode()
         assert "DF-1" in content and "DF-2" in content, "Dimensão/seleção inválidas devem cair em defaults seguros"
         assert "Declarado" in content, "Dimensão ativa padrão deve ser exibida (Declarado)"
@@ -452,7 +455,7 @@ class TestDimensionTableFilter:
         for i in range(25):
             _make_case(user, f"PP-{i:03d}", declared=("eda",), detected=("eda",))
         response = client.get(
-            reverse("dashboard:index") + "?procedure_dimension=detected&procedure_selection=eda",
+            reverse("dashboard:index") + "?procedure_dimension=detected&procedure_selection=eda&case_scope=all",
             headers={"X-ATS-Partial": "case-list"},
         )
         content = response.content.decode()
@@ -508,11 +511,11 @@ class TestBreakdownTableConsistency:
         assert analytics["breakdown"]["detected"]["none"] == 1
         assert analytics["breakdown"]["detected"]["eda"] == 0
 
-        url_none = reverse("dashboard:index") + "?procedure_dimension=detected&procedure_selection=none"
+        url_none = reverse("dashboard:index") + "?procedure_dimension=detected&procedure_selection=none&case_scope=all"
         content_none = client.get(url_none).content.decode()
         assert "FDE-1" in content_none, "detected+none deve mostrar caso sem rows detectadas"
 
-        url_eda = reverse("dashboard:index") + "?procedure_dimension=detected&procedure_selection=eda"
+        url_eda = reverse("dashboard:index") + "?procedure_dimension=detected&procedure_selection=eda&case_scope=all"
         content_eda = client.get(url_eda).content.decode()
         assert "FDE-1" not in content_eda, "detected+eda NÃO pode mostrar caso sem rows detectadas"
 
@@ -548,10 +551,13 @@ class TestBreakdownTableConsistency:
         assert analytics["breakdown"]["declared"]["eda"] == 1
         assert analytics["breakdown"]["declared"]["eda_colonoscopy"] == 0
 
-        url_eda = reverse("dashboard:index") + "?procedure_dimension=declared&procedure_selection=eda"
+        url_eda = reverse("dashboard:index") + "?procedure_dimension=declared&procedure_selection=eda&case_scope=all"
         assert "DC-1" in client.get(url_eda).content.decode()
 
-        url_combined = reverse("dashboard:index") + "?procedure_dimension=declared&procedure_selection=eda_colonoscopy"
+        url_combined = (
+            reverse("dashboard:index")
+            + "?procedure_dimension=declared&procedure_selection=eda_colonoscopy&case_scope=all"
+        )
         assert "DC-1" not in client.get(url_combined).content.decode()
 
 
@@ -658,10 +664,10 @@ class TestProcedureDimensionAuthority:
         Case.objects.all().delete()
         _make_case(user, "SF-1", declared=("eda",))  # sem rows detectadas
 
-        none_url = reverse("dashboard:index") + "?procedure_dimension=detected&procedure_selection=none"
+        none_url = reverse("dashboard:index") + "?procedure_dimension=detected&procedure_selection=none&case_scope=all"
         assert "SF-1" in client.get(none_url).content.decode()
 
-        eda_url = reverse("dashboard:index") + "?procedure_dimension=detected&procedure_selection=eda"
+        eda_url = reverse("dashboard:index") + "?procedure_dimension=detected&procedure_selection=eda&case_scope=all"
         assert "SF-1" not in client.get(eda_url).content.decode()
 
     def test_selection_filter_approved_none_includes_case_without_approved_rows(self, client) -> None:
