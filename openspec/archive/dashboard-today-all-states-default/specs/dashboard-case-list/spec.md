@@ -2,6 +2,11 @@
 
 # dashboard-case-list Spec Delta
 
+## RENAMED Requirements
+
+- FROM: ### Requirement: Dashboard shall default the case list to active cases
+- TO: ### Requirement: Dashboard shall default the case list to cases received today in every state
+
 ## MODIFIED Requirements
 
 ### Requirement: Dashboard shall default the case list to cases received today in every state
