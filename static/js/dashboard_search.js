@@ -72,8 +72,10 @@
     if (selectionSelect && selectionSelect.value && selectionSelect.value !== 'all') {
       params.set('procedure_selection', selectionSelect.value);
     }
-    // Escopo de casos: preserva apenas quando != default canônico (active)
-    if (scopeSelect && scopeSelect.value && scopeSelect.value !== 'active') {
+    // Escopo de casos: envia sempre o valor atual do select (active ou all).
+    // Omitir active faria o backend cair no novo default all + hoje e perderia
+    // a intenção de backlog transversal durante a busca.
+    if (scopeSelect && scopeSelect.value) {
       params.set('case_scope', scopeSelect.value);
     }
     if (dateFromInput && dateFromInput.value) {

@@ -620,6 +620,37 @@ def _apply_case_search(cases_qs: QuerySet[Case], search_term: str) -> QuerySet[C
     ).filter(Q(search_arn__contains=search_lower) | Q(search_patient_name__contains=search_lower))
 
 
+def _resolve_list_defaults(request: HttpRequest) -> tuple[str, str, str]:
+    """Resolve escopo e datas efetivos da lista do dashboard.
+
+    Distingue ausência de parâmetros de uma seleção explícita:
+    - ``case_scope=active|all`` explícito é sempre respeitado;
+    - ``attention=1`` sem escopo explícito resolve para ``active`` sem datas
+      (acesso transversal ao backlog problemático);
+    - ausência/valor vazio/inválido sem atenção e sem datas resolve para
+      ``all`` + hoje/hoje (recebidos hoje em todos os estados).
+    """
+    raw_scope = request.GET.get("case_scope", "")
+    explicit_scope = raw_scope if raw_scope in ("active", "all") else ""
+    attention = request.GET.get("attention") == "1"
+
+    date_from = request.GET.get("date_from", "")
+    date_to = request.GET.get("date_to", "")
+
+    if explicit_scope:
+        case_scope = explicit_scope
+    elif attention:
+        case_scope = "active"
+    else:
+        case_scope = "all"
+
+    if not explicit_scope and not attention and not date_from and not date_to:
+        today = timezone.localdate().isoformat()
+        date_from, date_to = today, today
+
+    return case_scope, date_from, date_to
+
+
 def _dashboard_case_list_context(request: HttpRequest) -> dict[str, Any]:
     """Monta o contexto para a lista de casos do dashboard.
 
@@ -636,11 +667,11 @@ def _dashboard_case_list_context(request: HttpRequest) -> dict[str, Any]:
     search_term = search_raw.strip()[:100]
     search_min_chars_help = False
 
-    # Escopo de casos: active (default) exclui CLEANED; all inclui todo o
-    # histórico. Ausente, vazio ou inválido resolve para active. A definição
-    # de "ativo" é por estado (status != CLEANED), sem restrição de data.
-    raw_case_scope = request.GET.get("case_scope", "")
-    case_scope = raw_case_scope if raw_case_scope in ("active", "all") else "active"
+    # Escopo e datas efetivos da lista. A carga inicial resolve para all + hoje/hoje
+    # (recebidos hoje em todos os estados, inclusive CLEANED); seleções explícitas
+    # (case_scope=active|all e/ou datas) são preservadas. A definição de "ativo"
+    # permanece por estado (status != CLEANED), sem restrição de data.
+    case_scope, date_from, date_to = _resolve_list_defaults(request)
 
     # Tabela de casos — todos, sem filtro de usuario; o escopo compõe por AND
     # com atenção, busca, procedimento, status e datas antes da paginação.
@@ -672,8 +703,6 @@ def _dashboard_case_list_context(request: HttpRequest) -> dict[str, Any]:
     if status_filter:
         cases_qs = cases_qs.filter(status=status_filter)
 
-    date_from = request.GET.get("date_from", "")
-    date_to = request.GET.get("date_to", "")
     if date_from:
         cases_qs = cases_qs.filter(created_at__date__gte=date_from)
     if date_to:

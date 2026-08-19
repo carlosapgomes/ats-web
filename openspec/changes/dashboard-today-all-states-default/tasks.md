@@ -4,33 +4,33 @@
 
 ## Slice vertical
 
-- [ ] Slice 001 — Default diário completo, acesso ao backlog ativo e atenção transversal end-to-end (`slices/slice-001-today-all-active-attention.md`)
+- [x] Slice 001 — Default diário completo, acesso ao backlog ativo e atenção transversal end-to-end (`slices/slice-001-today-all-active-attention.md`)
 
 ## Definition of Done do change
 
-- [ ] `/dashboard/` resolve `case_scope=all` e data local de hoje nos dois limites da lista.
-- [ ] Casos recebidos hoje aparecem independentemente de estarem ativos ou `CLEANED`.
-- [ ] Casos antigos não aparecem na carga inicial.
-- [ ] `?case_scope=active` continua mostrando backlog ativo de qualquer data e excluindo `CLEANED`.
-- [ ] A UI oferece ação visível “Casos ativos” sem datas implícitas.
-- [ ] `?case_scope=all` sem datas continua permitindo consultar todo o histórico.
-- [ ] Datas explicitamente limpas não são repostas silenciosamente.
-- [ ] `?attention=1` sem datas alcança backlog problemático antigo.
-- [ ] Link “Atenção necessária” entra em escopo ativo e não herda o default diário.
-- [ ] Escopo e datas são preservados corretamente em SSR, paginação, links de métricas/dimensão e busca parcial.
-- [ ] Paginação de 20, faixa elidida, busca progressiva, partial leve e fallback sem JavaScript permanecem intactos.
-- [ ] Permissões manager/admin, modelos, migrations, URLs, FSM, métricas e thresholds de atenção permanecem inalterados.
-- [ ] Nenhum CSS, dependência, framework frontend ou arquivo funcional extra foi adicionado.
-- [ ] TDD RED → GREEN → REFACTOR foi comprovado no relatório.
-- [ ] Checks de inspeção obrigatórios foram executados e interpretados.
-- [ ] Quality gate completo passou:
-  - [ ] `uv run ruff check .`
-  - [ ] `uv run ruff format --check .`
-  - [ ] `uv run mypy .`
-  - [ ] `uv run pytest`
-- [ ] Pytest final registrou exit code 0, zero failures/errors e `passed_final >= passed_baseline`.
-- [ ] Relatório `/tmp/dashboard-today-all-states-default-slice-001-report.md` foi criado com RED/GREEN, snippets antes/depois, gates, rerun e handoff para terceiro LLM.
-- [ ] Commit rastreável e push da branch atual foram realizados.
+- [x] `/dashboard/` resolve `case_scope=all` e data local de hoje nos dois limites da lista.
+- [x] Casos recebidos hoje aparecem independentemente de estarem ativos ou `CLEANED`.
+- [x] Casos antigos não aparecem na carga inicial.
+- [x] `?case_scope=active` continua mostrando backlog ativo de qualquer data e excluindo `CLEANED`.
+- [x] A UI oferece ação visível “Casos ativos” sem datas implícitas.
+- [x] `?case_scope=all` sem datas continua permitindo consultar todo o histórico.
+- [x] Datas explicitamente limpas não são repostas silenciosamente.
+- [x] `?attention=1` sem datas alcança backlog problemático antigo.
+- [x] Link “Atenção necessária” entra em escopo ativo e não herda o default diário.
+- [x] Escopo e datas são preservados corretamente em SSR, paginação, links de métricas/dimensão e busca parcial.
+- [x] Paginação de 20, faixa elidida, busca progressiva, partial leve e fallback sem JavaScript permanecem intactos.
+- [x] Permissões manager/admin, modelos, migrations, URLs, FSM, métricas e thresholds de atenção permanecem inalterados.
+- [x] Nenhum CSS, dependência, framework frontend ou arquivo funcional extra foi adicionado.
+- [x] TDD RED → GREEN → REFACTOR foi comprovado no relatório.
+- [x] Checks de inspeção obrigatórios foram executados e interpretados.
+- [x] Quality gate completo passou:
+  - [x] `uv run ruff check .`
+  - [x] `uv run ruff format --check .`
+  - [x] `uv run mypy .`
+  - [x] `uv run pytest`
+- [x] Pytest final registrou exit code 0, zero failures/errors e `passed_final >= passed_baseline`.
+- [x] Relatório `/tmp/dashboard-today-all-states-default-slice-001-report.md` foi criado com RED/GREEN, snippets antes/depois, gates, rerun e handoff para terceiro LLM.
+- [x] Commit rastreável e push da branch atual foram realizados.
 
 ## Regra de atualização
 

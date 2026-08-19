@@ -40,6 +40,16 @@ def _create_case(*, created_by, status=CaseStatus.NEW, **kwargs):
     return Case.objects.create(created_by=created_by, **defaults)
 
 
+def _extract_anchors(content: str) -> list[tuple[str, str]]:
+    """Extrai pares (href, texto) de âncoras <a> do HTML renderizado."""
+    import re
+
+    return [
+        (m.group(1), re.sub(r"<[^>]+>", "", m.group(2)).strip())
+        for m in re.finditer(r'<a\b[^>]*href="([^"]*)"[^>]*>(.*?)</a>', content, re.DOTALL | re.IGNORECASE)
+    ]
+
+
 def _advance_case_to(case: Case, target: str) -> Case:
     """Avança um Case pelas transições FSM até atingir o status alvo."""
     path: dict[str, list[str]] = {
@@ -4419,7 +4429,10 @@ class TestDashboardBadgeCompactoProximoPasso:
         expected_local = timezone.localtime(fixed_utc).strftime("%d/%m/%Y %H:%M")
         assert expected_local == "25/07/2026 21:37"
 
-        response = client.get("/dashboard/")
+        # created_at é de 25/07 (antigo): o default hoje/all não o listaria; o
+        # propósito aqui é provar a renderização de data/hora, então pedimos
+        # histórico explícito.
+        response = client.get("/dashboard/?case_scope=all")
         assert response.status_code == 200
         content = response.content.decode()
         assert expected_local in content
@@ -5078,12 +5091,13 @@ class TestProcedureSummaryCard:
 
 @pytest.mark.django_db
 class TestDashboardActiveCaseScope:
-    """Testes do escopo ativo/histórico (case_scope=active|all) na lista do dashboard.
+    """Testes do escopo explícito (case_scope=active|all) na lista do dashboard.
 
-    Default canônico é ``active`` (status != CLEANED, sem restrição de data);
-    ``all`` restaura o histórico explicitamente. Escopo compõe com os filtros
-    existentes e é preservado em métricas, atenção, dimensão, paginação e
-    busca parcial.
+    O default da carga inicial é hoje/all (ver TestDashboardTodayAllStatesDefault);
+    aqui a cobertura foca os modos explícitos: ``active`` (status != CLEANED, sem
+    restrição de data) e ``all`` (histórico completo). Escopo compõe com os filtros
+    existentes e é preservado em métricas, atenção, dimensão, paginação e busca
+    parcial.
     """
 
     def _create_old_active_case(self, user, *, days_ago: int = 7, agency_record_number: str = "SCOPE-OLD"):
@@ -5103,20 +5117,6 @@ class TestDashboardActiveCaseScope:
     def _create_cleaned_case(self, user, *, agency_record_number: str = "SCOPE-CLN"):
         return _create_case(created_by=user, status=CaseStatus.CLEANED, agency_record_number=agency_record_number)
 
-    def test_active_scope_default_includes_old_active_and_excludes_cleaned(self, client) -> None:
-        """Sem case_scope: caso antigo não CLEANED aparece; CLEANED não aparece; nenhum filtro de data."""
-        user = _login_as(client, "manager")
-        Case.objects.all().delete()
-        old_active = self._create_old_active_case(user)
-        cleaned = self._create_cleaned_case(user)
-
-        response = client.get(reverse("dashboard:index"))
-        assert response.status_code == 200
-        assert response.context["case_scope"] == "active"
-        content = response.content.decode()
-        assert old_active.agency_record_number in content
-        assert cleaned.agency_record_number not in content
-
     def test_active_scope_all_includes_active_and_cleaned(self, client) -> None:
         """case_scope=all torna ativos e CLEANED elegíveis sem alterar dados."""
         user = _login_as(client, "manager")
@@ -5131,30 +5131,32 @@ class TestDashboardActiveCaseScope:
         assert old_active.agency_record_number in content
         assert cleaned.agency_record_number in content
 
-    def test_active_scope_invalid_falls_back_to_active(self, client) -> None:
-        """Valor inválido cai para active sem erro e sem expor CLEANED."""
+    def test_active_scope_invalid_falls_back_to_today_all(self, client) -> None:
+        """Valor inválido cai para all + hoje sem erro e sem expor histórico antigo."""
         user = _login_as(client, "manager")
         Case.objects.all().delete()
-        old_active = self._create_old_active_case(user)
-        cleaned = self._create_cleaned_case(user)
+        today_cleaned = self._create_cleaned_case(user, agency_record_number="SCOPE-TDY-C")
+        old_active = self._create_old_active_case(user, agency_record_number="SCOPE-OLD-INV")
 
         response = client.get(reverse("dashboard:index") + "?case_scope=bogus")
         assert response.status_code == 200
-        assert response.context["case_scope"] == "active"
+        assert response.context["case_scope"] == "all"
+        assert response.context["date_from"] == timezone.localdate().isoformat()
         content = response.content.decode()
-        assert old_active.agency_record_number in content
-        assert cleaned.agency_record_number not in content
+        assert today_cleaned.agency_record_number in content
+        assert old_active.agency_record_number not in content
 
-    def test_active_scope_empty_resolves_to_active(self, client) -> None:
-        """case_scope vazio resolve para active."""
+    def test_active_scope_empty_resolves_to_today_all(self, client) -> None:
+        """case_scope vazio resolve para all + hoje."""
         user = _login_as(client, "manager")
         Case.objects.all().delete()
-        cleaned = self._create_cleaned_case(user)
+        today_cleaned = self._create_cleaned_case(user, agency_record_number="SCOPE-EMPTY")
 
         response = client.get(reverse("dashboard:index") + "?case_scope=")
         assert response.status_code == 200
-        assert response.context["case_scope"] == "active"
-        assert cleaned.agency_record_number not in response.content.decode()
+        assert response.context["case_scope"] == "all"
+        assert response.context["date_from"] == timezone.localdate().isoformat()
+        assert today_cleaned.agency_record_number in response.content.decode()
 
     def test_active_scope_with_status_cleaned_returns_empty_without_rewrite(self, client) -> None:
         """active + status=CLEANED é vazio (predicados incompatíveis) sem rewrite mágico."""
@@ -5174,7 +5176,7 @@ class TestDashboardActiveCaseScope:
         assert cleaned.agency_record_number in response_all.content.decode()
 
     def test_active_scope_select_reflects_resolved_value(self, client) -> None:
-        """Select case_scope reflete o valor resolvido (active default / all selecionado)."""
+        """Select case_scope reflete o valor resolvido (all default / active|all explícitos)."""
         user = _login_as(client, "manager")
         Case.objects.all().delete()
         _create_case(created_by=user, status=CaseStatus.NEW, agency_record_number="SCOPE-SELECT")
@@ -5183,8 +5185,12 @@ class TestDashboardActiveCaseScope:
         assert response_default.status_code == 200
         default_content = response_default.content.decode()
         assert 'name="case_scope"' in default_content
-        assert 'value="active" selected' in default_content
-        assert 'value="all"' in default_content
+        assert 'value="all" selected' in default_content
+        assert 'value="active"' in default_content
+
+        response_active = client.get(reverse("dashboard:index") + "?case_scope=active")
+        assert response_active.status_code == 200
+        assert 'value="active" selected' in response_active.content.decode()
 
         response_all = client.get(reverse("dashboard:index") + "?case_scope=all")
         assert response_all.status_code == 200
@@ -5201,13 +5207,13 @@ class TestDashboardActiveCaseScope:
         assert "metrics_period=30d&case_scope=all" in content
         assert "metrics_period=all&case_scope=all" in content
 
-    def test_active_scope_all_preserved_in_attention_link(self, client) -> None:
-        """Botão 'Atenção necessária' preserva case_scope=all."""
+    def test_active_scope_attention_link_uses_active_canonical(self, client) -> None:
+        """Botão 'Atenção necessária' entra no modo ativo transversal (case_scope=active)."""
         _login_as(client, "manager")
         response = client.get(reverse("dashboard:index") + "?case_scope=all")
         assert response.status_code == 200
         content = response.content.decode()
-        assert "attention=1&case_scope=all" in content
+        assert "attention=1&case_scope=active" in content
 
     def test_active_scope_all_preserved_in_pagination_links(self, client) -> None:
         """Links de paginação SSR preservam case_scope=all."""
@@ -5288,6 +5294,269 @@ class TestDashboardActiveCaseScope:
         assert "base.html" not in content
 
 
+@pytest.mark.django_db
+class TestDashboardTodayAllStatesDefault:
+    """Default diário completo: recebidos hoje em todos os estados.
+
+    `/dashboard/` resolve ``case_scope=all`` + ``date_from=date_to=timezone.localdate()``;
+    lista casos ativos e CLEANED recebidos hoje e exclui os antigos. Acesso
+    transversal ao backlog ativo via ação 'Casos ativos' e atenção sem datas.
+    """
+
+    def _create_case_on(self, user, *, day, status, agency_record_number):
+        """Cria caso com created_at determinístico no dia local informado."""
+        case = _create_case(created_by=user, status=status, agency_record_number=agency_record_number)
+        aware = timezone.make_aware(datetime.combine(day, time(10, 0)), timezone.get_current_timezone())
+        Case.objects.filter(pk=case.pk).update(created_at=aware, updated_at=aware)
+        return Case.objects.get(pk=case.pk)
+
+    def test_today_all_states_default_lists_today_active_and_cleaned_but_not_old(self, client) -> None:
+        """R8.1: default mostra hoje ativo e hoje CLEANED; não mostra antigos."""
+        user = _login_as(client, "manager")
+        Case.objects.all().delete()
+        today = timezone.localdate()
+
+        today_active = self._create_case_on(user, day=today, status=CaseStatus.NEW, agency_record_number="TODAY-ACTIVE")
+        today_cleaned = self._create_case_on(
+            user, day=today, status=CaseStatus.CLEANED, agency_record_number="TODAY-CLEAN"
+        )
+        old_active = self._create_case_on(
+            user,
+            day=today - timedelta(days=7),
+            status=CaseStatus.WAIT_DOCTOR,
+            agency_record_number="OLD-ACTIVE",
+        )
+        old_cleaned = self._create_case_on(
+            user,
+            day=today - timedelta(days=7),
+            status=CaseStatus.CLEANED,
+            agency_record_number="OLD-CLEANED",
+        )
+
+        response = client.get(reverse("dashboard:index"))
+        assert response.status_code == 200
+        content = response.content.decode()
+        assert today_active.agency_record_number in content
+        assert today_cleaned.agency_record_number in content
+        assert old_active.agency_record_number not in content
+        assert old_cleaned.agency_record_number not in content
+
+    def test_today_all_states_default_context_resolves_all_and_today_dates(self, client) -> None:
+        """R8.2: contexto default contém case_scope == 'all' e datas = hoje."""
+        _login_as(client, "manager")
+        response = client.get(reverse("dashboard:index"))
+        assert response.status_code == 200
+        today = timezone.localdate().isoformat()
+        assert response.context["case_scope"] == "all"
+        assert response.context["date_from"] == today
+        assert response.context["date_to"] == today
+
+    def test_today_all_states_default_fallback_empty_or_invalid_scope(self, client) -> None:
+        """R8.3: vazio/inválido sem datas usa hoje/all sem erro nem histórico completo."""
+        user = _login_as(client, "manager")
+        Case.objects.all().delete()
+        today = timezone.localdate()
+        today_cleaned = self._create_case_on(
+            user, day=today, status=CaseStatus.CLEANED, agency_record_number="FBK-TODAY"
+        )
+        old_active = self._create_case_on(
+            user,
+            day=today - timedelta(days=3),
+            status=CaseStatus.NEW,
+            agency_record_number="FBK-OLD",
+        )
+
+        for query in ("?case_scope=", "?case_scope=bogus"):
+            response = client.get(reverse("dashboard:index") + query)
+            assert response.status_code == 200
+            assert response.context["case_scope"] == "all"
+            assert response.context["date_from"] == today.isoformat()
+            content = response.content.decode()
+            assert today_cleaned.agency_record_number in content
+            assert old_active.agency_record_number not in content
+
+    def test_explicit_all_without_dates_keeps_active_backlog_history(self, client) -> None:
+        """R8.4: ?case_scope=all sem datas restaura histórico ativo + CLEANED."""
+        user = _login_as(client, "manager")
+        Case.objects.all().delete()
+        old_active = self._create_case_on(
+            user,
+            day=timezone.localdate() - timedelta(days=30),
+            status=CaseStatus.NEW,
+            agency_record_number="HIST-ACTIVE",
+        )
+        old_cleaned = self._create_case_on(
+            user,
+            day=timezone.localdate() - timedelta(days=30),
+            status=CaseStatus.CLEANED,
+            agency_record_number="HIST-CLEANED",
+        )
+
+        response = client.get(reverse("dashboard:index") + "?case_scope=all")
+        assert response.status_code == 200
+        assert response.context["case_scope"] == "all"
+        assert response.context["date_from"] == ""
+        assert response.context["date_to"] == ""
+        content = response.content.decode()
+        assert old_active.agency_record_number in content
+        assert old_cleaned.agency_record_number in content
+
+    def test_today_all_states_explicitly_empty_dates_do_not_reapply_today(self, client) -> None:
+        """R8.5: datas explicitamente vazias não reaplicam hoje."""
+        user = _login_as(client, "manager")
+        Case.objects.all().delete()
+        old_active = self._create_case_on(
+            user,
+            day=timezone.localdate() - timedelta(days=5),
+            status=CaseStatus.NEW,
+            agency_record_number="EMPTY-OLD",
+        )
+
+        response = client.get(reverse("dashboard:index") + "?case_scope=all&date_from=&date_to=")
+        assert response.status_code == 200
+        assert response.context["date_from"] == ""
+        assert response.context["date_to"] == ""
+        assert old_active.agency_record_number in response.content.decode()
+
+    def test_explicit_active_backlog_includes_old_active_excludes_cleaned(self, client) -> None:
+        """R8.6: ?case_scope=active inclui ativo antigo, exclui CLEANED e deixa datas vazias."""
+        user = _login_as(client, "manager")
+        Case.objects.all().delete()
+        old_active = self._create_case_on(
+            user,
+            day=timezone.localdate() - timedelta(days=9),
+            status=CaseStatus.WAIT_DOCTOR,
+            agency_record_number="ACTIVE-OLD",
+        )
+        old_cleaned = self._create_case_on(
+            user,
+            day=timezone.localdate() - timedelta(days=9),
+            status=CaseStatus.CLEANED,
+            agency_record_number="ACTIVE-OLD-CLEAN",
+        )
+
+        response = client.get(reverse("dashboard:index") + "?case_scope=active")
+        assert response.status_code == 200
+        assert response.context["case_scope"] == "active"
+        assert response.context["date_from"] == ""
+        assert response.context["date_to"] == ""
+        content = response.content.decode()
+        assert old_active.agency_record_number in content
+        assert old_cleaned.agency_record_number not in content
+
+    def test_visible_casos_ativos_action_active_backlog_without_dates(self, client) -> None:
+        """R8.7: ação visível 'Casos ativos' aponta para active sem datas."""
+        _login_as(client, "manager")
+        response = client.get(reverse("dashboard:index"))
+        assert response.status_code == 200
+        content = response.content.decode()
+        anchors = [m for m in _extract_anchors(content) if "Casos ativos" in m[1]]
+        assert anchors, "Deve existir âncora visível com texto 'Casos ativos'"
+        href = anchors[0][0]
+        assert "case_scope=active" in href
+        assert "date_from" not in href
+        assert "date_to" not in href
+
+    def test_attention_transversal_reaches_old_problematic_case(self, client) -> None:
+        """R8.8: ?attention=1 inclui caso problemático antigo, resolve active e datas vazias."""
+        user = _login_as(client, "manager")
+        Case.objects.all().delete()
+        old_failed = self._create_case_on(
+            user,
+            day=timezone.localdate() - timedelta(days=10),
+            status=CaseStatus.FAILED,
+            agency_record_number="ATT-OLD-FAIL",
+        )
+        old_cleaned = self._create_case_on(
+            user,
+            day=timezone.localdate() - timedelta(days=10),
+            status=CaseStatus.CLEANED,
+            agency_record_number="ATT-OLD-CLN",
+        )
+
+        response = client.get(reverse("dashboard:index") + "?attention=1")
+        assert response.status_code == 200
+        assert response.context["case_scope"] == "active"
+        assert response.context["date_from"] == ""
+        assert response.context["date_to"] == ""
+        content = response.content.decode()
+        assert old_failed.agency_record_number in content
+        assert old_cleaned.agency_record_number not in content
+
+    def test_attention_transversal_link_uses_active_without_default_dates(self, client) -> None:
+        """R8.9: link de atenção contém active e não contém datas do default."""
+        _login_as(client, "manager")
+        response = client.get(reverse("dashboard:index"))
+        assert response.status_code == 200
+        content = response.content.decode()
+        anchors = [m for m in _extract_anchors(content) if "Atenção necessária" in m[1]]
+        assert anchors, "Deve existir âncora 'Atenção necessária'"
+        href = anchors[0][0]
+        assert "attention=1" in href
+        assert "case_scope=active" in href
+        assert "date_from" not in href
+        assert "date_to" not in href
+
+    def test_attention_transversal_composes_with_explicit_dates(self, client) -> None:
+        """R8.10: atenção com datas explícitas respeita o intervalo."""
+        user = _login_as(client, "manager")
+        Case.objects.all().delete()
+        yesterday = timezone.localdate() - timedelta(days=1)
+        two_days_ago = timezone.localdate() - timedelta(days=2)
+        failed_yesterday = self._create_case_on(
+            user, day=yesterday, status=CaseStatus.FAILED, agency_record_number="ATT-YEST"
+        )
+        failed_two_days = self._create_case_on(
+            user, day=two_days_ago, status=CaseStatus.FAILED, agency_record_number="ATT-DATE-2D"
+        )
+
+        response = client.get(
+            reverse("dashboard:index")
+            + f"?attention=1&date_from={yesterday.isoformat()}&date_to={yesterday.isoformat()}"
+        )
+        assert response.status_code == 200
+        content = response.content.decode()
+        assert failed_yesterday.agency_record_number in content
+        assert failed_two_days.agency_record_number not in content
+
+    def test_active_backlog_scope_preserved_in_pagination_and_partial(self, client) -> None:
+        """R8.11: paginação e partial preservam active e all explicitamente."""
+        user = _login_as(client, "manager")
+        Case.objects.all().delete()
+        for i in range(25):
+            _create_case(created_by=user, status=CaseStatus.NEW, agency_record_number=f"SCOPE-PRES-{i:03d}")
+
+        response_active = client.get(reverse("dashboard:index") + "?case_scope=active")
+        assert response_active.status_code == 200
+        content_active = response_active.content.decode()
+        assert "case_scope=active" in content_active
+
+        response_all = client.get(reverse("dashboard:index") + "?case_scope=all")
+        assert response_all.status_code == 200
+        content_all = response_all.content.decode()
+        assert "case_scope=all" in content_all
+
+        partial_active = client.get(
+            reverse("dashboard:index") + "?case_scope=active",
+            headers={"X-ATS-Partial": "case-list"},
+        )
+        assert partial_active.status_code == 200
+        assert "case_scope=active" in partial_active.content.decode()
+
+    def test_js_sends_both_scopes_today_all_states_contracts(self, client) -> None:
+        """R8.12: JS envia ambos os escopos e mantém debounce/cancelamento/header."""
+        _login_as(client, "manager")
+        js_path = "/projects/dev/ats-web/static/js/dashboard_search.js"
+        with open(js_path) as f:
+            js_content = f.read()
+        assert "params.set('case_scope', scopeSelect.value)" in js_content
+        assert "scopeSelect.value !== 'active'" not in js_content
+        assert "AbortController" in js_content
+        assert "X-ATS-Partial" in js_content
+        assert "DASHBOARD_SEARCH_DEBOUNCE_MS" in js_content
+        assert "DASHBOARD_SEARCH_MIN_CHARS" in js_content
+
+
 # ── Slice: Paginação compacta (faixa elidida) ────────────────────────────
 
 
@@ -5330,7 +5599,7 @@ class TestDashboardCompactPagination:
 
         response = client.get(reverse("dashboard:index") + "?page=25")
         assert response.status_code == 200
-        assert response.context["case_scope"] == "active"
+        assert response.context["case_scope"] == "all"
 
         page_range = list(response.context["elided_page_range"])
         assert page_range == [1, "…", 23, 24, 25, 26, 27, "…", 50], page_range
@@ -5381,21 +5650,23 @@ class TestDashboardCompactPagination:
         assert "Exibindo 21–25 de 25 casos" in response_page2.content.decode()
 
     def test_compact_pagination_summary_range_reflects_filtered_queryset(self, client) -> None:
-        """Total do resumo reflete o queryset filtrado (escopo), não o banco inteiro."""
+        """Total do resumo reflete o queryset filtrado (escopo+datas), não o banco inteiro."""
         user = _login_as(client, "manager")
         Case.objects.all().delete()
         self._create_many_cases(user, 25, prefix="KEEP")
         cleaned = _create_case(created_by=user, status=CaseStatus.CLEANED, agency_record_number="DROP-CLEAN")
 
+        # Default hoje/all: inclui o CLEANED de hoje (criado agora).
         response = client.get(reverse("dashboard:index"))
         content = response.content.decode()
-        assert "de 25 casos" in content
-        assert cleaned.agency_record_number not in content
+        assert "de 26 casos" in content
+        assert cleaned.agency_record_number in content
 
-        response_all = client.get(reverse("dashboard:index") + "?case_scope=all")
-        content_all = response_all.content.decode()
-        assert "de 26 casos" in content_all
-        assert cleaned.agency_record_number in content_all
+        # Escopo explícito active: exclui CLEANED de qualquer data.
+        response_active = client.get(reverse("dashboard:index") + "?case_scope=active")
+        content_active = response_active.content.decode()
+        assert "de 25 casos" in content_active
+        assert cleaned.agency_record_number not in content_active
 
     def test_compact_pagination_summary_range_absent_in_empty_state(self, client) -> None:
         """Estado vazio não mostra intervalo 0–0."""
