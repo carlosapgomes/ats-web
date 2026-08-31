@@ -209,9 +209,10 @@ def _run_v2_pipeline(
     llm2_system_prompt: str | None,
     llm2_user_template: str | None,
 ) -> None:
-    """Pipeline procedure-neutral 2.0 (uma chamada por estágio).
+    """Pipeline procedure-neutral 2.0 (uma análise conjunta por estágio).
 
-    Fluxo entregue (R1–R8): LLM1 v2 (história comum + requested_procedures) →
+    O LLM2 pode usar retries corretivos limitados sem dividir a análise por
+    procedimento. Fluxo entregue (R1–R8): LLM1 v2 (história comum + requested_procedures) →
     detecção/reconciliação D7 → projeção atômica → policy por componente →
     prior context por componente (D10) → LLM2 v2 (conjunto exato) → suporte
     global mais restritivo → WAIT_DOCTOR com relatório neutro legível. Gates de

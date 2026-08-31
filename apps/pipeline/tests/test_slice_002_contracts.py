@@ -3,7 +3,8 @@
 RED 1 (R1): Llm1ResponseV2 aceita EDA, Colon e ambos; rejeita vazio,
 duplicata, outro tipo e evidence inválida.
 RED 2 (R6): Llm2ResponseV2 exige um item por tipo detectado; igualdade exata
-do conjunto; suporte global mais restritivo; uma chamada por estágio.
+do conjunto; suporte global mais restritivo; uma análise conjunta por caso,
+com retries corretivos limitados.
 """
 
 from __future__ import annotations
@@ -235,7 +236,7 @@ class TestLlm1ServiceV2SingleCall:
             )
 
 
-# ── RED 2: LLM2 v2 — uma chamada + igualdade exata + suporte máximo ────────
+# ── RED 2: LLM2 v2 — análise conjunta + conjunto exato + suporte máximo ────
 
 
 def _llm2_v2_payload(
