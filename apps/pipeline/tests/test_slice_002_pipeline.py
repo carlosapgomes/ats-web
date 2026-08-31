@@ -9,12 +9,13 @@ RED 8 (R5): policy executa uma vez por componente; foreign-body não vaza.
 from __future__ import annotations
 
 import json
-from typing import Any
+from typing import Any, cast
 
 import pytest
 
 from apps.cases.models import Case, CaseEvent, CaseProcedure, CaseStatus, DetectionStatus
 from apps.pipeline.llm import RecordingLlmClient
+from apps.pipeline.tests.test_slice_002_contracts import _prompt_closed_list
 
 # ── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -506,6 +507,38 @@ def _reload(case: Case) -> Case:
     return Case.objects.get(case_id=case.case_id)
 
 
+def _single_procedure_recommendation(procedure_type: str, *, suggestion: str = "accept") -> list[dict[str, Any]]:
+    """Recomendação única para o procedimento dado (contrato v2)."""
+    return [
+        {
+            "procedure_type": procedure_type,
+            "suggestion": suggestion,
+            "support_recommendation": "none",
+            "rationale": {
+                "short_reason": "OK.",
+                "details": ["1", "2"],
+                "missing_info_questions": [],
+            },
+            "policy_alignment": {
+                "excluded_request": False,
+                "labs_ok": "yes",
+                "ecg_ok": "yes",
+                "pediatric_flag": False,
+                "notes": None,
+            },
+            "confidence": "alta",
+        }
+    ]
+
+
+def _extract_llm1_json_from_prompt(prompt: str) -> dict[str, Any]:
+    """Faz parse do bloco “Dados extraídos” do prompt capturado (assert não frágil)."""
+    marker = "Dados extraídos (JSON LLM1 v2):\n"
+    start = prompt.index(marker) + len(marker)
+    payload, _ = json.JSONDecoder().raw_decode(prompt[start:])
+    return cast("dict[str, Any]", payload)
+
+
 # ── RED 13: combinado chega WAIT_DOCTOR com duas recomendações ─────────────
 
 
@@ -636,6 +669,126 @@ class TestCombinedHappyPath:
         assert payload.get("detected_procedures") == ["eda", "colonoscopy"]
         serialized = json.dumps(payload)
         assert "Motivo da Solicitacao" not in serialized
+
+
+# ── fix-llm2-reconciled-procedure-set: contexto canônico reconciliado ──────
+
+
+@pytest.mark.django_db
+class TestReconciledProcedureContext:
+    """A visão do LLM2 segue o conjunto reconciliado; o artefato LLM1 fica íntegro."""
+
+    def test_reconciled_procedure_context_eda_only_reaches_wait_doctor(self, django_user_model) -> None:
+        case = _make_v2_case(
+            django_user_model.objects.create_user(username="nir_rc1", password="pw"),
+            exam_type="eda",
+            extracted_text="Solicito EDA. Colonoscopia realizada em 2024.",
+        )
+        client = RecordingLlmClient(
+            responses=[
+                _llm1_v2_json(procedures=[_eda_procedure(), _colon_procedure()]),
+                _llm2_v2_json(str(case.case_id), recommendations=_single_procedure_recommendation("eda")),
+            ]
+        )
+        from apps.pipeline.orchestrator import run_pipeline
+
+        run_pipeline(
+            case.case_id,
+            llm_client=client,
+            llm1_system_prompt="sp1",
+            llm1_user_template="ut1",
+            llm2_system_prompt="sp2",
+            llm2_user_template="ut2",
+        )
+
+        case = _reload(case)
+        assert case.status == CaseStatus.WAIT_DOCTOR
+        assert len(client.calls) == 2  # LLM1 + uma LLM2, sem mismatch
+        llm2_prompt = client.calls[1]["user_prompt"]
+        extracted = _extract_llm1_json_from_prompt(llm2_prompt)
+        assert [item["procedure_type"] for item in extracted["requested_procedures"]] == ["eda"]
+        assert _prompt_closed_list(llm2_prompt) == ["eda"]
+        assert case.suggested_action is not None
+        recs = case.suggested_action["procedure_recommendations"]
+        assert [r["procedure_type"] for r in recs] == ["eda"]
+        # Artefato LLM1 original permanece íntegro para auditoria.
+        persisted = case.structured_data
+        assert persisted is not None
+        assert [item["procedure_type"] for item in persisted["requested_procedures"]] == ["eda", "colonoscopy"]
+
+    def test_reconciled_procedure_context_colonoscopy_only_reaches_wait_doctor(self, django_user_model) -> None:
+        case = _make_v2_case(
+            django_user_model.objects.create_user(username="nir_rc2", password="pw"),
+            exam_type="colonoscopy",
+            extracted_text="Solicito colonoscopia para rastreamento. EDA realizada em 2024.",
+        )
+        client = RecordingLlmClient(
+            responses=[
+                _llm1_v2_json(procedures=[_eda_procedure(), _colon_procedure()]),
+                _llm2_v2_json(str(case.case_id), recommendations=_single_procedure_recommendation("colonoscopy")),
+            ]
+        )
+        from apps.pipeline.orchestrator import run_pipeline
+
+        run_pipeline(
+            case.case_id,
+            llm_client=client,
+            llm1_system_prompt="sp1",
+            llm1_user_template="ut1",
+            llm2_system_prompt="sp2",
+            llm2_user_template="ut2",
+        )
+
+        case = _reload(case)
+        assert case.status == CaseStatus.WAIT_DOCTOR
+        assert len(client.calls) == 2
+        llm2_prompt = client.calls[1]["user_prompt"]
+        extracted = _extract_llm1_json_from_prompt(llm2_prompt)
+        assert [item["procedure_type"] for item in extracted["requested_procedures"]] == ["colonoscopy"]
+        assert _prompt_closed_list(llm2_prompt) == ["colonoscopy"]
+        assert case.suggested_action is not None
+        recs = case.suggested_action["procedure_recommendations"]
+        assert [r["procedure_type"] for r in recs] == ["colonoscopy"]
+        persisted = case.structured_data
+        assert persisted is not None
+        assert [item["procedure_type"] for item in persisted["requested_procedures"]] == ["eda", "colonoscopy"]
+
+    def test_reconciled_procedure_context_combined_keeps_both(self, django_user_model) -> None:
+        case = _make_v2_case(
+            django_user_model.objects.create_user(username="nir_rc3", password="pw"),
+            exam_type="eda_colonoscopy",
+            extracted_text="Motivo da Solicitacao: EDA e colonoscopia para rastreamento",
+        )
+        client = RecordingLlmClient(
+            responses=[
+                _llm1_v2_json(procedures=[_eda_procedure(), _colon_procedure()]),
+                _llm2_v2_json(str(case.case_id)),
+            ]
+        )
+        from apps.pipeline.orchestrator import run_pipeline
+
+        run_pipeline(
+            case.case_id,
+            llm_client=client,
+            llm1_system_prompt="sp1",
+            llm1_user_template="ut1",
+            llm2_system_prompt="sp2",
+            llm2_user_template="ut2",
+        )
+
+        case = _reload(case)
+        assert case.status == CaseStatus.WAIT_DOCTOR
+        assert len(client.calls) == 2  # sem retry desnecessário
+        llm2_prompt = client.calls[1]["user_prompt"]
+        extracted = _extract_llm1_json_from_prompt(llm2_prompt)
+        assert [item["procedure_type"] for item in extracted["requested_procedures"]] == ["eda", "colonoscopy"]
+        assert _prompt_closed_list(llm2_prompt) == ["eda", "colonoscopy"]
+        assert case.suggested_action is not None
+        recs = case.suggested_action["procedure_recommendations"]
+        assert [r["procedure_type"] for r in recs] == ["eda", "colonoscopy"]
+        persisted = case.structured_data
+        assert persisted is not None
+        assert [item["procedure_type"] for item in persisted["requested_procedures"]] == ["eda", "colonoscopy"]
 
 
 # ── RED 7: combined→single e mismatch não chegam médico/LLM2 ───────────────
@@ -837,18 +990,21 @@ class TestSimpleAndFailurePaths:
         assert case.structured_data is None
         assert case.suggested_action is None
 
-    def test_invalid_llm2_set_fails_without_partial_suggestion(self, django_user_model) -> None:
+    def test_persistent_procedure_set_mismatch_fails_closed_after_three_calls(self, django_user_model) -> None:
+        """MISMATCH persistente: inicial + o único retry de conjunto → fail-closed."""
         case = _make_v2_case(
             django_user_model.objects.create_user(username="nir_f2", password="pw"),
             exam_type="eda",
             extracted_text="Solicito EDA.",
         )
-        responses = [
-            _llm1_v2_json(procedures=[_eda_procedure()]),
-            # LLM2 devolve dois itens para um único detectado → inválido.
-            _llm2_v2_json(str(case.case_id)),
-        ]
-        client = RecordingLlmClient(responses=responses)
+        divergent = _llm2_v2_json(str(case.case_id))  # ambos os tipos para conjunto EDA-only
+        client = RecordingLlmClient(
+            responses=[
+                _llm1_v2_json(procedures=[_eda_procedure()]),
+                divergent,
+                divergent,
+            ]
+        )
         from apps.pipeline.orchestrator import run_pipeline
 
         run_pipeline(
@@ -863,6 +1019,11 @@ class TestSimpleAndFailurePaths:
         case = _reload(case)
         assert case.status == CaseStatus.FAILED
         assert case.suggested_action is None
+        assert len(client.calls) == 3  # LLM1 + tentativa LLM2 + o único retry de conjunto
+        failure = CaseEvent.objects.filter(case=case, event_type="PIPELINE_FAILED").latest("timestamp")
+        assert "procedure set mismatch" in json.dumps(failure.payload)
+        assert not CaseEvent.objects.filter(case=case, event_type="LLM2_OK").exists()
+        assert not CaseEvent.objects.filter(case=case, event_type="CASE_READY_FOR_DOCTOR").exists()
 
     def test_flag_off_after_creation_does_not_block_pipeline(self, django_user_model, settings) -> None:
         settings.COLONOSCOPY_INTAKE_ENABLED = False
@@ -1000,26 +1161,7 @@ class TestLegacy11Render:
 
 def _single_eda_recommendation(*, suggestion: str = "accept") -> list[dict[str, Any]]:
     """Recomendação única EDA para casos simples (aceita no contrato v2)."""
-    return [
-        {
-            "procedure_type": "eda",
-            "suggestion": suggestion,
-            "support_recommendation": "none",
-            "rationale": {
-                "short_reason": "OK.",
-                "details": ["1", "2"],
-                "missing_info_questions": [],
-            },
-            "policy_alignment": {
-                "excluded_request": False,
-                "labs_ok": "yes",
-                "ecg_ok": "yes",
-                "pediatric_flag": False,
-                "notes": None,
-            },
-            "confidence": "alta",
-        }
-    ]
+    return _single_procedure_recommendation("eda", suggestion=suggestion)
 
 
 @pytest.mark.django_db

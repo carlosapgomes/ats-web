@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import json
 from datetime import UTC, datetime, timedelta
-from typing import Any
+from typing import Any, cast
 
 import pytest
 from django.core.management import call_command
@@ -296,6 +296,37 @@ def _llm2_v2_payload(
     )
 
 
+def _single_recommendation(procedure_type: str, *, short_reason: str = "Criterios atendidos.") -> list[dict[str, Any]]:
+    """Recomendação única para um procedimento (payload LLM2 v2 mínimo válido)."""
+    return [
+        {
+            "procedure_type": procedure_type,
+            "suggestion": "accept",
+            "support_recommendation": "none",
+            "rationale": {
+                "short_reason": short_reason,
+                "details": ["Sem contraindicacao.", "Exames compativeis."],
+                "missing_info_questions": [],
+            },
+            "policy_alignment": {
+                "excluded_request": False,
+                "labs_ok": "yes",
+                "ecg_ok": "yes",
+                "pediatric_flag": False,
+                "notes": None,
+            },
+            "confidence": "alta",
+        }
+    ]
+
+
+def _prompt_closed_list(prompt: str) -> list[str]:
+    """Extrai e faz parse da lista fechada declarada no envelope do prompt."""
+    marker = "Procedimentos canônicos reconciliados (lista fechada): "
+    start = prompt.index(marker) + len(marker)
+    return cast("list[str]", json.loads(prompt[start:].split("\n", 1)[0]))
+
+
 @pytest.mark.django_db
 class TestLlm2ServiceV2:
     def test_one_call_exact_set_equal(self) -> None:
@@ -402,6 +433,168 @@ class TestLlm2ServiceV2:
         assert (
             GLOBAL_SUPPORT_ORDER["none"] < GLOBAL_SUPPORT_ORDER["anesthesist"] < GLOBAL_SUPPORT_ORDER["anesthesist_icu"]
         )
+
+
+# ── fix-llm2-reconciled-procedure-set: conjunto canônico + retry fail-closed ──
+
+
+class TestLlm2ReconciledProcedureContext:
+    """Lista fechada no prompt, retry único de mismatch tipado e budgets finitos."""
+
+    def test_prompt_declares_reconciled_procedure_context_closed_list(self) -> None:
+        from apps.pipeline.llm2_service_v2 import Llm2ServiceV2
+
+        client = RecordingLlmClient(responses=[_llm2_v2_payload(recommendations=_single_recommendation("eda"))])
+        service = Llm2ServiceV2(client)
+        service.run(
+            case_id="case-1",
+            agency_record_number="12345",
+            llm1_structured_data=_llm1_v2_payload(procedures=[_eda_procedure()]),
+            detected_procedure_types=("eda",),
+            policy_results={},
+            prior_contexts={},
+            system_prompt="sp2",
+            user_prompt_template="ut2",
+        )
+        prompt = client.calls[0]["user_prompt"]
+        assert _prompt_closed_list(prompt) == ["eda"]
+        assert "exatamente um item em procedure_recommendations" in prompt
+
+    def test_procedure_set_retry_recovers_with_exactly_one_extra_call(self) -> None:
+        from apps.pipeline.llm2_service_v2 import Llm2ServiceV2
+
+        client = RecordingLlmClient(
+            responses=[
+                _llm2_v2_payload(),  # 1ª resposta: conjunto divergente (eda + colonoscopy)
+                _llm2_v2_payload(recommendations=_single_recommendation("eda")),
+            ]
+        )
+        service = Llm2ServiceV2(client)
+        result = service.run(
+            case_id="case-1",
+            agency_record_number="12345",
+            llm1_structured_data=_llm1_v2_payload(procedures=[_eda_procedure()]),
+            detected_procedure_types=("eda",),
+            policy_results={},
+            prior_contexts={},
+            system_prompt="sp2",
+            user_prompt_template="ut2",
+        )
+        assert len(client.calls) == 2
+        retry_prompt = client.calls[1]["user_prompt"]
+        assert _prompt_closed_list(retry_prompt) == ["eda"]
+        assert "resposta anterior" in retry_prompt
+        assert {r["procedure_type"] for r in result.procedure_recommendations} == {"eda"}
+
+    def test_persistent_procedure_set_mismatch_raises_after_two_llm2_calls(self) -> None:
+        from apps.pipeline.llm2_service_v2 import Llm2ServiceV2, Llm2V2ValidationError
+
+        divergent = _llm2_v2_payload()
+        client = RecordingLlmClient(responses=[divergent, divergent])
+        service = Llm2ServiceV2(client)
+        with pytest.raises(Llm2V2ValidationError) as excinfo:
+            service.run(
+                case_id="case-1",
+                agency_record_number="12345",
+                llm1_structured_data=_llm1_v2_payload(procedures=[_eda_procedure()]),
+                detected_procedure_types=("eda",),
+                policy_results={},
+                prior_contexts={},
+                system_prompt="sp2",
+                user_prompt_template="ut2",
+            )
+        assert len(client.calls) == 2  # tentativa inicial + o único retry de conjunto
+        # Erro tipado (subclasse dedicada); o controle de retry não faz matching textual.
+        assert type(excinfo.value).__name__ == "Llm2V2ProcedureSetMismatchError"
+        assert isinstance(excinfo.value, Llm2V2ValidationError)
+        assert "procedure set mismatch" in str(excinfo.value)
+
+    def test_non_set_validation_error_does_not_trigger_procedure_set_retry(self) -> None:
+        from apps.pipeline.llm2_service_v2 import Llm2ServiceV2, Llm2V2ValidationError
+
+        client = RecordingLlmClient(responses=[_llm2_v2_payload(case_id="case-999")])
+        service = Llm2ServiceV2(client)
+        with pytest.raises(Llm2V2ValidationError) as excinfo:
+            service.run(
+                case_id="case-1",
+                agency_record_number="12345",
+                llm1_structured_data=_llm1_v2_payload(procedures=[_eda_procedure()]),
+                detected_procedure_types=("eda",),
+                policy_results={},
+                prior_contexts={},
+                system_prompt="sp2",
+                user_prompt_template="ut2",
+            )
+        assert len(client.calls) == 1  # erro de ID não consome retry de conjunto
+        assert type(excinfo.value).__name__ != "Llm2V2ProcedureSetMismatchError"
+
+    def test_language_retry_remains_functional_and_one_shot(self) -> None:
+        from apps.pipeline.llm2_service_v2 import Llm2ServiceV2
+
+        client = RecordingLlmClient(
+            responses=[
+                _llm2_v2_payload(recommendations=_single_recommendation("eda", short_reason="Patient liberado.")),
+                _llm2_v2_payload(recommendations=_single_recommendation("eda")),
+            ]
+        )
+        service = Llm2ServiceV2(client)
+        result = service.run(
+            case_id="case-1",
+            agency_record_number="12345",
+            llm1_structured_data=_llm1_v2_payload(procedures=[_eda_procedure()]),
+            detected_procedure_types=("eda",),
+            policy_results={},
+            prior_contexts={},
+            system_prompt="sp2",
+            user_prompt_template="ut2",
+        )
+        assert len(client.calls) == 2
+        assert "portugues brasileiro" in client.calls[1]["user_prompt"]
+        assert {r["procedure_type"] for r in result.procedure_recommendations} == {"eda"}
+
+    def test_language_retry_exhausts_budget_after_two_llm2_calls(self) -> None:
+        from apps.pipeline.llm2_service_v2 import Llm2ServiceV2, Llm2V2ValidationError
+
+        forbidden = _llm2_v2_payload(recommendations=_single_recommendation("eda", short_reason="Patient liberado."))
+        client = RecordingLlmClient(responses=[forbidden, forbidden])
+        service = Llm2ServiceV2(client)
+        with pytest.raises(Llm2V2ValidationError, match="non-ptbr"):
+            service.run(
+                case_id="case-1",
+                agency_record_number="12345",
+                llm1_structured_data=_llm1_v2_payload(procedures=[_eda_procedure()]),
+                detected_procedure_types=("eda",),
+                policy_results={},
+                prior_contexts={},
+                system_prompt="sp2",
+                user_prompt_template="ut2",
+            )
+        assert len(client.calls) == 2
+
+    def test_language_retry_and_procedure_set_retry_combine_within_three_calls(self) -> None:
+        from apps.pipeline.llm2_service_v2 import Llm2ServiceV2
+
+        client = RecordingLlmClient(
+            responses=[
+                _llm2_v2_payload(),  # conjunto divergente
+                # Conjunto correto + narrativo em inglês → consome o retry de idioma.
+                _llm2_v2_payload(recommendations=_single_recommendation("eda", short_reason="Patient liberado.")),
+                _llm2_v2_payload(recommendations=_single_recommendation("eda")),
+            ]
+        )
+        service = Llm2ServiceV2(client)
+        result = service.run(
+            case_id="case-1",
+            agency_record_number="12345",
+            llm1_structured_data=_llm1_v2_payload(procedures=[_eda_procedure()]),
+            detected_procedure_types=("eda",),
+            policy_results={},
+            prior_contexts={},
+            system_prompt="sp2",
+            user_prompt_template="ut2",
+        )
+        assert len(client.calls) == 3  # máximo físico: inicial + retry de conjunto + retry de idioma
+        assert {r["procedure_type"] for r in result.procedure_recommendations} == {"eda"}
 
 
 # ── Prompts neutros e prior-case por procedimento (D10) ─────────────────────

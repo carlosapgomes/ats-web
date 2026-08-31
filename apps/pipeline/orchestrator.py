@@ -14,6 +14,7 @@ de modo explícito/auditável (R1), nunca caem em perfil singular/EDA.
 
 from __future__ import annotations
 
+import copy
 import logging
 import uuid
 
@@ -170,6 +171,32 @@ def _collect_v2_evidence_spans(structured_data: dict[str, object]) -> list[dict[
             if isinstance(raw_spans, list):
                 spans.extend(item for item in raw_spans if isinstance(item, dict))
     return spans
+
+
+def _build_llm2_structured_data_view(
+    *,
+    llm1_structured_data: dict[str, object],
+    detected_procedure_types: tuple[str, ...],
+) -> dict[str, object]:
+    """Visão efêmera do LLM1 para o LLM2 (D1/ADR-0004).
+
+    Cópia profunda com ``requested_procedures`` restrito ao conjunto
+    reconciliado, na ordem canônica recebida e reaproveitando somente itens
+    originais. Não muta o artefato persistido e nunca sintetiza item clínico
+    ausente; campos comuns, summary e evidências são preservados.
+    """
+    view = copy.deepcopy(llm1_structured_data)
+    original_items = view.get("requested_procedures")
+    if not isinstance(original_items, list):
+        return view
+    items_by_type: dict[str, dict[str, object]] = {}
+    for item in original_items:
+        if isinstance(item, dict) and isinstance(item.get("procedure_type"), str):
+            items_by_type.setdefault(item["procedure_type"], item)
+    view["requested_procedures"] = [
+        items_by_type[procedure_type] for procedure_type in detected_procedure_types if procedure_type in items_by_type
+    ]
+    return view
 
 
 def _run_v2_pipeline(
@@ -344,7 +371,7 @@ def _run_v2_pipeline(
             )
             case.save()
 
-    # ── 9. LLM2 v2 — uma chamada com conjunto exato (R6) ──────────────
+    # ── 9. LLM2 v2 — análise conjunta com conjunto exato (R6) ──────────
     if llm2_system_prompt is not None:
         sp2, sp2_version = llm2_system_prompt, 0
     else:
@@ -355,10 +382,14 @@ def _run_v2_pipeline(
         ut2, ut2_version = _resolve_prompt("exam_llm2_user")
 
     service2 = Llm2ServiceV2(client_llm2)
+    llm2_structured_data_view = _build_llm2_structured_data_view(
+        llm1_structured_data=result1.structured_data,
+        detected_procedure_types=reconciliation.detected_procedure_types,
+    )
     result2 = service2.run(
         case_id=str(case.case_id),
         agency_record_number=case.agency_record_number,
-        llm1_structured_data=result1.structured_data,
+        llm1_structured_data=llm2_structured_data_view,
         detected_procedure_types=reconciliation.detected_procedure_types,
         policy_results=policy_results,
         prior_contexts=prior_contexts,

@@ -1,10 +1,13 @@
-"""LLM2 Service v2 — sugestão por procedimento em uma única chamada.
+"""LLM2 Service v2 — sugestão por procedimento em uma única análise conjunta.
 
 Schema 2.0 (R6/D8): recebe exatamente o conjunto detectado e os resultados de
-policy, valida igualdade exata de conjuntos (sem omissão/duplicata/adição),
-aplica retry de idioma e devolve itens normalizados. A reconciliação
-determinística por item e o suporte global mais restritivo são aplicados pelo
-orchestrator; este serviço garante o contrato e a chamada única.
+policy, valida igualdade exata de conjuntos (sem omissão/duplicata/adição) e
+devolve itens normalizados. Cada tentativa recebe no prompt a lista fechada do
+conjunto reconciliado. Correções são exceções limitadas: um orçamento one-shot
+para mismatch de conjunto (erro tipado) e um para idioma pt-BR, com revalidação
+integral a cada resposta. A reconciliação determinística por item e o suporte
+global mais restritivo são aplicados pelo orchestrator; este serviço garante o
+contrato e a análise conjunta por caso.
 """
 
 from __future__ import annotations
@@ -69,6 +72,14 @@ class Llm2V2ValidationError(RuntimeError):
     """Resposta LLM2 v2 falhou validação de schema/igualdade de conjuntos."""
 
 
+class Llm2V2ProcedureSetMismatchError(Llm2V2ValidationError):
+    """Resposta schema-válida divergiu do conjunto reconciliado (omissão/adição).
+
+    Subclasse dedicada: o retry corretivo captura somente este tipo — erros de
+    JSON, schema, duplicata ou IDs falham imediatamente, sem retry de conjunto.
+    """
+
+
 @dataclass
 class Llm2V2Result:
     """Itens de recomendação validados (igualdade exata garantida)."""
@@ -78,7 +89,7 @@ class Llm2V2Result:
 
 
 class Llm2ServiceV2:
-    """Executa a chamada LLM2 v2 (uma por caso) com contrato estrito."""
+    """Executa a análise LLM2 v2 conjunta por caso, com contrato estrito."""
 
     def __init__(self, client: LlmClient) -> None:
         self._client = client
@@ -95,6 +106,12 @@ class Llm2ServiceV2:
         system_prompt: str,
         user_prompt_template: str,
     ) -> Llm2V2Result:
+        """Executa a análise LLM2 conjunta com orçamentos finitos de correção.
+
+        Cada resposta (inclusive retries) repassa integralmente parse, schema,
+        IDs, igualdade de conjunto e idioma. Cada orçamento (mismatch de
+        conjunto; idioma pt-BR) é one-shot — máximo físico de três chamadas.
+        """
         user_prompt = _render_user_prompt(
             template=user_prompt_template,
             case_id=case_id,
@@ -102,29 +119,42 @@ class Llm2ServiceV2:
             llm1_structured_data=llm1_structured_data,
             policy_results=policy_results,
             prior_contexts=prior_contexts,
-        )
-        raw_response = self._client.complete(system_prompt=system_prompt, user_prompt=user_prompt)
-        validated = _decode_and_validate(
-            raw_response=raw_response,
-            case_id=case_id,
-            agency_record_number=agency_record_number,
             detected_procedure_types=detected_procedure_types,
         )
+        raw_response = self._client.complete(system_prompt=system_prompt, user_prompt=user_prompt)
+        procedure_set_retry_used = False
+        language_retry_used = False
+        while True:
+            try:
+                validated = _decode_and_validate(
+                    raw_response=raw_response,
+                    case_id=case_id,
+                    agency_record_number=agency_record_number,
+                    detected_procedure_types=detected_procedure_types,
+                )
+            except Llm2V2ProcedureSetMismatchError:
+                # Orçamento one-shot de conjunto: um segundo mismatch propaga
+                # imediatamente (fail-closed), sem nova chance nem retorno parcial.
+                if procedure_set_retry_used:
+                    raise
+                procedure_set_retry_used = True
+                raw_response = self._client.complete(
+                    system_prompt=system_prompt,
+                    user_prompt=f"{user_prompt}\n\n{_procedure_set_retry_instruction(detected_procedure_types)}",
+                )
+                continue
 
-        forbidden_terms = _collect_v2_forbidden_terms(validated=validated)
-        if forbidden_terms:
-            retry_user_prompt = f"{user_prompt}\n\n{_LANGUAGE_RETRY_INSTRUCTION}"
-            retry_response = self._client.complete(system_prompt=system_prompt, user_prompt=retry_user_prompt)
-            validated = _decode_and_validate(
-                raw_response=retry_response,
-                case_id=case_id,
-                agency_record_number=agency_record_number,
-                detected_procedure_types=detected_procedure_types,
-            )
             forbidden_terms = _collect_v2_forbidden_terms(validated=validated)
-            if forbidden_terms:
+            if not forbidden_terms:
+                break
+            if language_retry_used:
                 joined = ", ".join(forbidden_terms)
                 raise Llm2V2ValidationError(f"LLM2 v2 output contains non-ptbr narrative terms after retry: {joined}")
+            language_retry_used = True
+            raw_response = self._client.complete(
+                system_prompt=system_prompt,
+                user_prompt=f"{user_prompt}\n\n{_LANGUAGE_RETRY_INSTRUCTION}",
+            )
 
         recommendations = [item.model_dump(mode="json") for item in validated.procedure_recommendations]
         return Llm2V2Result(
@@ -141,6 +171,28 @@ class Llm2ServiceV2:
 # ── Helpers ─────────────────────────────────────────────────────────────────
 
 
+def _closed_list_declaration(detected_procedure_types: tuple[str, ...]) -> str:
+    """Declara a lista fechada do conjunto reconciliado (D2) — único ponto que
+    serializa a lista canônica, reutilizado na tentativa inicial e nos retries."""
+    canonical_json = json.dumps(list(detected_procedure_types), ensure_ascii=False)
+    return (
+        f"Procedimentos canônicos reconciliados (lista fechada): {canonical_json}\n"
+        "Produza exatamente um item em procedure_recommendations para cada item "
+        "dessa lista e nenhum outro: não omita, não duplique e não adicione "
+        "procedimento."
+    )
+
+
+def _procedure_set_retry_instruction(detected_procedure_types: tuple[str, ...]) -> str:
+    """Instrução corretiva de conjunto; repete a mesma lista fechada (D4).
+
+    Não devolve a resposta inválida ao modelo nem inclui dados novos.
+    """
+    return "Correcao obrigatoria: sua resposta anterior omitiu ou adicionou procedimento.\n" + _closed_list_declaration(
+        detected_procedure_types
+    )
+
+
 def _render_user_prompt(
     *,
     template: str,
@@ -149,6 +201,7 @@ def _render_user_prompt(
     llm1_structured_data: dict[str, object],
     policy_results: dict[str, dict[str, object]],
     prior_contexts: dict[str, dict[str, object]],
+    detected_procedure_types: tuple[str, ...],
 ) -> str:
     llm1_json = json.dumps(llm1_structured_data, ensure_ascii=False)
     policy_json = json.dumps(policy_results, ensure_ascii=False, default=str)
@@ -160,6 +213,7 @@ def _render_user_prompt(
         f"Dados extraídos (JSON LLM1 v2):\n{llm1_json}\n\n"
         f"Resultados da política pré-operatória por procedimento:\n{policy_json}\n\n"
         f"Casos anteriores por procedimento:\n{prior_json}\n\n"
+        f"{_closed_list_declaration(detected_procedure_types)}\n\n"
         "Retorne JSON schema_version 2.0 com um item por procedimento detectado "
         "e global_support_recommendation mais restritivo.\n"
         "Todos os campos narrativos devem estar em português brasileiro (pt-BR).\n"
@@ -189,10 +243,11 @@ def _decode_and_validate(
         raise Llm2V2ValidationError(f"LLM2 v2 agency_record_number mismatch: expected {agency_record_number!r}")
 
     # Igualdade exata de conjuntos: sem omissão, duplicata ou adição (R6).
+    # Levanta a subclasse dedicada: é o único erro elegível ao retry corretivo.
     returned = {item.procedure_type for item in validated.procedure_recommendations}
     expected = set(detected_procedure_types)
     if returned != expected:
-        raise Llm2V2ValidationError(
+        raise Llm2V2ProcedureSetMismatchError(
             f"LLM2 v2 procedure set mismatch: expected {sorted(expected)}, got {sorted(returned)}"
         )
     return validated
