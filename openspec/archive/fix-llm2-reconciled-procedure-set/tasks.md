@@ -36,7 +36,7 @@
 
 ## Pós-aprovação do slice — operação (não executar durante implementação)
 
-- [ ] Release/deploy realizado sem migration.
+- [x] Release/deploy realizado sem migration (`v0.5.2`, digest OCI verificado; smoke técnico verde).
 - [ ] Smoke EDA-only, Colonoscopia-only e combinado concluído com chegada a `WAIT_DOCTOR`.
 - [ ] Ocorrências `5025447`, `5027759` e `5028231` reapresentadas uma única vez após o deploy.
 - [ ] Registros antigos em `FAILED` preservados sem edição/reabertura.
