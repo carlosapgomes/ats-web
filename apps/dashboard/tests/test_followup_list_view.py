@@ -330,15 +330,6 @@ class TestFollowUpListCardBadges:
         assert case.agency_record_number in content
         assert ADMISSION_FLOW_MAP["immediate"] in content
 
-    def test_cards_do_not_link_to_followup_form_in_this_slice(self, client) -> None:
-        """R5: sem link para o formulário — rota followup_form só existe no Slice 003."""
-        user = _login_as(client, "manager")
-        _create_scheduled_case(user, arn="NO-LINK-001", name="Sem Link", when=_local_dt(day_offset=0))
-
-        response = client.get(reverse("dashboard:followup_list"))
-        assert response.status_code == 200
-        assert "followup_form" not in response.content.decode()
-
 
 # ── R6: pill Follow-up na navegação do dashboard ────────────────────────
 

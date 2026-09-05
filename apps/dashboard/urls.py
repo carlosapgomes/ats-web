@@ -8,6 +8,7 @@ urlpatterns = [
     path("", views.dashboard_index, name="index"),
     path("summaries/", views.dashboard_summaries, name="summaries"),
     path("follow-ups/", views.followup_list, name="followup_list"),
+    path("follow-ups/cases/<uuid:case_id>/", views.followup_form, name="followup_form"),
     path("<uuid:case_id>/attachments/<uuid:attachment_id>/", views.dashboard_case_attachment, name="case_attachment"),
     path(
         "<uuid:case_id>/attachments/<uuid:attachment_id>/pdf-viewer/",

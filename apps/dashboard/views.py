@@ -1,5 +1,6 @@
 """Views do dashboard de monitoramento para manager e admin."""
 
+import re
 import uuid
 from datetime import date, datetime, timedelta
 from typing import Any
@@ -10,7 +11,7 @@ from django.core.paginator import Paginator
 from django.db.models import Avg, DateTimeField, DurationField, ExpressionWrapper, F, OuterRef, Q, QuerySet, Subquery
 from django.db.models.fields.json import KeyTextTransform
 from django.db.models.functions import Coalesce, Lower
-from django.http import FileResponse, Http404, HttpRequest, HttpResponse, HttpResponseBase
+from django.http import FileResponse, Http404, HttpRequest, HttpResponse, HttpResponseBase, QueryDict
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
 from django.utils import timezone
@@ -26,14 +27,28 @@ from apps.cases.admission import (
     is_operational_notice_flow,
     is_scheduled_admission_flow,
 )
-from apps.cases.followup import is_followup_eligible
-from apps.cases.models import Case, CaseAttachment, CaseEvent, CaseFollowUp, CaseStatus, SupervisorSummary
+from apps.cases.followup import (
+    ProcedureOutcomeInput,
+    get_current_follow_up,
+    is_followup_eligible,
+    record_case_follow_up,
+)
+from apps.cases.models import (
+    Case,
+    CaseAttachment,
+    CaseEvent,
+    CaseFollowUp,
+    CaseProcedure,
+    CaseStatus,
+    SupervisorSummary,
+)
 from apps.cases.navigation import resolve_safe_next_url
 from apps.cases.services import (
     ADMINISTRATIVE_CLOSURE_REASON_CHOICES,
     administratively_close_case,
     local_day_bounds,
 )
+from apps.dashboard.forms import FollowUpAdmissionForm, FollowUpForm
 from apps.dashboard.procedure_analytics import (
     CATEGORY_LABELS,
     CATEGORY_ORDER,
@@ -1470,4 +1485,157 @@ def followup_list(request: HttpRequest) -> HttpResponse:
             "date_value": date_value,
             "total_cases": total_cases,
         },
+    )
+
+
+# ── Formulário de follow-up (Slice 003) ─────────────────────────────────
+
+_FOREIGN_PROCEDURE_KEY_RE = re.compile(r"^proc_(\d+)-")
+
+
+def _followup_patient_name(case: Case) -> str:
+    """Nome do paciente a partir do ``structured_data`` (convenção da listagem)."""
+    if not isinstance(case.structured_data, dict):
+        return ""
+    patient = case.structured_data.get("patient")
+    if not isinstance(patient, dict):
+        return ""
+    return str(patient.get("name") or "")
+
+
+def _followup_history(case: Case) -> list[dict[str, Any]]:
+    """Histórico compacto (ascendente) das versões de follow-up do caso."""
+    rows: list[dict[str, Any]] = []
+    versions = case.follow_ups.select_related("recorded_by").prefetch_related("procedure_outcomes").order_by("version")
+    for version in versions:
+        author = version.recorded_by
+        rows.append(
+            {
+                "version": version.version,
+                "recorded_at": version.recorded_at,
+                "author_label": (author.get_full_name() or author.username) if author else "—",
+                "patient_admitted": version.patient_admitted,
+                "outcomes_count": len(version.procedure_outcomes.all()),
+            }
+        )
+    return rows
+
+
+def _foreign_procedure_ids(post: QueryDict, procedures: list[CaseProcedure]) -> list[int]:
+    """IDs de procedimento recebidos no POST que não pertencem ao caso."""
+    known_ids = {procedure.id for procedure in procedures}
+    foreign: list[int] = []
+    for key in post:
+        match = _FOREIGN_PROCEDURE_KEY_RE.match(key)
+        if match and int(match.group(1)) not in known_ids:
+            foreign.append(int(match.group(1)))
+    return sorted(set(foreign))
+
+
+def _followup_form_context(
+    *,
+    case: Case,
+    admission_form: FollowUpAdmissionForm,
+    blocks: list[dict[str, Any]],
+) -> dict[str, Any]:
+    """Contexto de renderização do formulário de follow-up (GET e POST inválido).
+
+    ``blocks`` carrega um par ``{"procedure", "form"}`` por ``CaseProcedure``;
+    lista vazia indica caso elegível sem procedimentos (aviso, sem campos).
+
+    ``is_immediate`` segue a precedência de ramo de ``is_followup_eligible``:
+    agendamento confirmado com horário apresenta o caso como AGENDADO; a vinda
+    imediata (fluxo operacional com decisão) só conta quando o ramo agendado
+    não é válido (design D4, regressão P1-2).
+    """
+    is_immediate = (
+        not (case.appointment_status == "confirmed" and case.appointment_at is not None)
+        and is_operational_notice_flow(case.doctor_admission_flow)
+        and case.doctor_decided_at is not None
+    )
+    return {
+        "case": case,
+        "patient_name": _followup_patient_name(case),
+        "is_immediate": is_immediate,
+        "admission_flow_label": (
+            ADMISSION_FLOW_MAP.get(case.doctor_admission_flow, case.doctor_admission_flow) if is_immediate else ""
+        ),
+        "current_follow_up": get_current_follow_up(case),
+        "history": _followup_history(case),
+        "blocks": blocks,
+        "admission_form": admission_form,
+    }
+
+
+@login_required
+@role_required("manager", "admin")
+def followup_form(request: HttpRequest, case_id: uuid.UUID) -> HttpResponse:
+    """Formulário de follow-up: desfecho por procedimento + internação (D6).
+
+    Revalida ``is_followup_eligible`` no GET e no POST (design D4): caso
+    inelegível ou inexistente nunca expõe o formulário (404). POST válido
+    grava uma nova versão via ``record_case_follow_up`` e retorna à lista com
+    ``messages.success``; POST inválido re-renderiza com erros por campo e
+    nada persiste.
+    """
+    case = get_object_or_404(Case, case_id=case_id)
+    if not is_followup_eligible(case):
+        raise Http404("Caso não está elegível para follow-up.")
+
+    procedures = list(case.procedures.order_by("procedure_type"))
+    is_post = request.method == "POST"
+    post_data: QueryDict | None = request.POST if is_post else None
+    blocks: list[dict[str, Any]] = [
+        {"procedure": procedure, "form": FollowUpForm(post_data, prefix=f"proc_{procedure.id}")}
+        for procedure in procedures
+    ]
+
+    if is_post:
+        admission_form = FollowUpAdmissionForm(request.POST)
+        foreign_ids = _foreign_procedure_ids(request.POST, procedures)
+        forms_valid = admission_form.is_valid() and all(block["form"].is_valid() for block in blocks)
+        if foreign_ids or not forms_valid:
+            if foreign_ids:
+                admission_form.add_error(None, "Procedimento informado não pertence ao caso.")
+            return render(
+                request,
+                "dashboard/followup_form.html",
+                _followup_form_context(case=case, admission_form=admission_form, blocks=blocks),
+            )
+
+        procedure_outcomes = [
+            ProcedureOutcomeInput(
+                procedure_id=procedure.id,
+                performed=block["form"].cleaned_data["performed"] == "yes",
+                non_performance_reason=str(block["form"].cleaned_data.get("non_performance_reason") or ""),
+                resource_shortage_detail=str(block["form"].cleaned_data.get("resource_shortage_detail") or ""),
+                other_reason=str(block["form"].cleaned_data.get("other_reason") or ""),
+            )
+            for procedure, block in zip(procedures, blocks, strict=True)
+        ]
+        try:
+            recorded = record_case_follow_up(
+                case=case,
+                performed_by=request.user,
+                patient_admitted=admission_form.cleaned_data["patient_admitted"] == "yes",
+                procedure_outcomes=procedure_outcomes,
+            )
+        except ValueError as exc:
+            admission_form.add_error(None, str(exc))
+            return render(
+                request,
+                "dashboard/followup_form.html",
+                _followup_form_context(case=case, admission_form=admission_form, blocks=blocks),
+            )
+        messages.success(
+            request,
+            f"Follow-up registrado (versão {recorded.version}) para o caso "
+            f"{case.agency_record_number or case.case_id}.",
+        )
+        return redirect("dashboard:followup_list")
+
+    return render(
+        request,
+        "dashboard/followup_form.html",
+        _followup_form_context(case=case, admission_form=FollowUpAdmissionForm(), blocks=blocks),
     )

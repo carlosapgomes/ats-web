@@ -4,7 +4,7 @@
 
 - [x] Slice 001 — Domínio: models versionados + service de registro + `CaseEvent` (`slices/slice-001-followup-domain-model.md`)
 - [x] Slice 002 — Aba de listagem do supervisor (`slices/slice-002-followup-tab-list.md`) — inclui `is_followup_eligible` (R7)
-- [ ] Slice 003 — Formulário de follow-up (`slices/slice-003-followup-form.md`) — inclui revalidação de elegibilidade e link na listagem (R6)
+- [x] Slice 003 — Formulário de follow-up (`slices/slice-003-followup-form.md`) — inclui revalidação de elegibilidade e link na listagem (R6)
 
 ## Ciclo de review
 
