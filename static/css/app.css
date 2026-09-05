@@ -778,6 +778,36 @@ body.hospital-shell h6 {
   color: var(--hospital-danger);
 }
 
+/* ---------- Botão "Atenção necessária" (dashboard) ---------- */
+/* Contraste WCAG AA >= 4.5:1 com o âmbar hospitalar, substituindo
+   btn-warning/btn-outline-warning (#ffc107, ~1.9:1 em fundo branco). */
+
+.btn-attention {
+  background-color: var(--hospital-warning);
+  border-color: var(--hospital-warning);
+  color: #ffffff;
+}
+
+.btn-attention:hover,
+.btn-attention:focus {
+  background-color: #93490a;
+  border-color: #93490a;
+  color: #ffffff;
+}
+
+.btn-attention-outline {
+  background-color: transparent;
+  border-color: var(--hospital-warning);
+  color: var(--hospital-warning);
+}
+
+.btn-attention-outline:hover,
+.btn-attention-outline:focus {
+  background-color: #93490a;
+  border-color: #93490a;
+  color: #ffffff;
+}
+
 /* ---------- Timeline (case detail) ---------- */
 
 .timeline-event {

@@ -2951,11 +2951,52 @@ class TestDashboardCaseListFilterLayout:
         )
 
     def test_attention_link_has_btn_class(self, client) -> None:
-        """Link de atenção tem classe btn (btn-sm btn-warning ou btn-outline-warning)."""
-        content = self._get_content(client)
-        assert "btn-warning" in content or "btn-outline-warning" in content, (
-            "Link de atenção deve ter classe btn-warning ou btn-outline-warning"
-        )
+        """Link de atenção usa classes acessíveis btn-attention/btn-attention-outline.
+
+        Contrato de contraste WCAG AA (slice quick-ui-attention-button-contrast):
+        as classes Bootstrap btn-warning/btn-outline-warning (#ffc107, ~1.9:1)
+        são proibidas no link; o estado ativo usa btn-attention e o inativo
+        btn-attention-outline, ambos estilizados com --hospital-warning.
+        """
+        # (query, classes esperadas no link)
+        estados = [
+            ("", {"btn", "btn-sm", "btn-attention-outline"}),  # inativo
+            ("attention=1", {"btn", "btn-sm", "btn-attention"}),  # ativo
+        ]
+        _login_as(client, "manager")
+        base_url = reverse("dashboard:index")
+        for query, classes_esperadas in estados:
+            url = base_url + ("?" + query if query else "")
+            response = client.get(url)
+            assert response.status_code == 200
+            content = str(response.content, encoding="utf-8")
+            link_start = content.find("⚠ Atenção necessária")
+            assert link_start != -1, "Link de atenção deve estar presente"
+            tag_start = content.rfind("<a ", 0, link_start)
+            tag_end = content.find(">", tag_start)
+            tag_html = content[tag_start : tag_end + 1]
+            class_marker = 'class="'
+            class_start = tag_html.find(class_marker)
+            assert class_start != -1, "Link de atenção deve ter atributo class"
+            class_start += len(class_marker)
+            class_end = tag_html.find('"', class_start)
+            classes = set(tag_html[class_start:class_end].split())
+            for classe in classes_esperadas:
+                assert classe in classes, (
+                    f"Link de atenção (query={query!r}) deve ter a classe {classe!r}; "
+                    f"classes renderizadas: {sorted(classes)}"
+                )
+            for classe_proibida in ("btn-warning", "btn-outline-warning"):
+                assert classe_proibida not in classes, (
+                    f"Link de atenção (query={query!r}) não deve usar {classe_proibida!r}; "
+                    f"classes renderizadas: {sorted(classes)}"
+                )
+            classe_do_outro_estado = (
+                "btn-attention" if "btn-attention-outline" in classes_esperadas else "btn-attention-outline"
+            )
+            assert classe_do_outro_estado not in classes, (
+                f"Link de atenção (query={query!r}) não deve ter a classe do outro estado {classe_do_outro_estado!r}"
+            )
 
     def test_dashboard_case_list_id_and_data_attr(self, client) -> None:
         """Preserva id='dashboard-case-list' e data-dashboard-search-target."""
