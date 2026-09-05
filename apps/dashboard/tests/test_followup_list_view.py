@@ -431,3 +431,25 @@ class TestFollowUpListHybridCase:
         content = response.content.decode()
         assert case.agency_record_number in content
         assert _group_dates(response) == [timezone.localdate()]
+
+    def test_confirmed_hybrid_card_shows_appointment_date_not_flow_label(self, client) -> None:
+        """Card híbrido renderiza 📅 data do agendamento, nunca ⚡ label do fluxo."""
+        user = _login_as(client, "manager")
+        when = _local_dt(day_offset=0, hour=14, minute=30)
+        case = _create_hybrid_case(
+            user,
+            arn="HB-CARD-0001",
+            name="Híbrido Card",
+            appointment_status="confirmed",
+            appointment_at=when,
+            decided_at=_local_dt(day_offset=-1, hour=9),
+        )
+
+        response = client.get(reverse("dashboard:followup_list"))
+        assert response.status_code == 200
+        content = response.content.decode()
+        assert case.agency_record_number in content
+        expected_time = timezone.localtime(when).strftime("%d/%m/%Y %H:%M")
+        assert expected_time in content
+        assert "Agendamento confirmado" in content
+        assert ADMISSION_FLOW_MAP["immediate"] not in content

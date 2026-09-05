@@ -1413,14 +1413,24 @@ def _current_follow_up_map(cases: list[Case]) -> dict[Any, CaseFollowUp]:
 
 
 def _enrich_followup_item(case: Case, current_follow_up: CaseFollowUp | None) -> dict[str, Any]:
-    """Monta o dict de apresentação de um card da listagem de follow-up."""
+    """Monta o dict de apresentação de um card da listagem de follow-up.
+
+    ``is_immediate`` segue a precedência de ramo de ``is_followup_eligible``:
+    agendamento confirmado com horário apresenta o card como AGENDADO (📅); a
+    vinda imediata (fluxo operacional com decisão) só conta quando o ramo
+    agendado não é válido (design D4).
+    """
     patient_name = ""
     if isinstance(case.structured_data, dict):
         patient = case.structured_data.get("patient", {})
         if isinstance(patient, dict):
             patient_name = str(patient.get("name") or "")
 
-    is_immediate = is_operational_notice_flow(case.doctor_admission_flow)
+    is_immediate = (
+        not (case.appointment_status == "confirmed" and case.appointment_at is not None)
+        and is_operational_notice_flow(case.doctor_admission_flow)
+        and case.doctor_decided_at is not None
+    )
     return {
         "case": case,
         "patient_name": patient_name,
@@ -1446,8 +1456,7 @@ def followup_list(request: HttpRequest) -> HttpResponse:
     da data, por nome do paciente e horário. ?date=YYYY-MM-DD válido (R3)
     restringe a um dia; inválido/ausente cai no default. ?q= (R4) busca por
     ocorrência/nome sobre a população elegível de qualquer data, limite 50,
-    ignorando ?date=. Os cards não linkam para o formulário neste slice (R5) —
-    a rota followup_form chega no Slice 003.
+    ignorando ?date=. Cada card linka para o formulário de follow-up do caso.
     """
     today = timezone.localdate()
     search_term = request.GET.get("q", "").strip()
