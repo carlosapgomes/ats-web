@@ -3,8 +3,13 @@
 ## Slices verticais (ordem executável)
 
 - [x] Slice 001 — Domínio: models versionados + service de registro + `CaseEvent` (`slices/slice-001-followup-domain-model.md`)
-- [ ] Slice 002 — Aba de listagem do supervisor (`slices/slice-002-followup-tab-list.md`)
-- [ ] Slice 003 — Formulário de follow-up (`slices/slice-003-followup-form.md`)
+- [ ] Slice 002 — Aba de listagem do supervisor (`slices/slice-002-followup-tab-list.md`) — inclui `is_followup_eligible` (R7)
+- [ ] Slice 003 — Formulário de follow-up (`slices/slice-003-followup-form.md`) — inclui revalidação de elegibilidade e link na listagem (R6)
+
+## Ciclo de review
+
+- [x] Review independente (reviewer, contexto fresco) do change + Slice 001 — verdict inicial: BLOCK
+- [x] Correções P1/P2 incorporadas (ver `design.md` § Registro de review); revalidação pendente de novo ciclo do reviewer
 
 ## Preflight (uma vez, antes do Slice 001)
 

@@ -103,8 +103,12 @@ def get_current_follow_up(case: Case) -> CaseFollowUp | None: ...
 
 ## Critérios de aceitação
 
-- [ ] R1: versão 1 + outcomes + evento com snapshot corretos.
-- [ ] R2: versão 2 criada, v1 imutável, `get_current_follow_up` correto, evento `FOLLOWUP_UPDATED`.
-- [ ] R3: 5 validações falham com `ValueError` e não persistem rows.
-- [ ] R4: constraints ativas na migration (unique ×2 + checks condicionais).
-- [ ] Verificações locais do slice passam; nenhum arquivo fora do blast radius.
+- [x] R1: versão 1 + outcomes + evento com snapshot corretos.
+- [x] R2: versão 2 criada, v1 imutável, `get_current_follow_up` correto, evento `FOLLOWUP_UPDATED`.
+- [x] R3: validações falham com `ValueError` e não persistem rows (expandidas no ciclo de review: valores de choices e combinações incompatíveis).
+- [x] R4: constraints ativas na migration (unique ×2 + checks condicionais) — cobertura completa dos 6 checks após review.
+- [x] Verificações locais do slice passam; nenhum arquivo fora do blast radius.
+
+## Registro de execução
+
+- Implementado em commit `0d004b6` (base `f95b38f`). RED: coleção falhou por `ImportError` (motivo esperado). 12 testes → **21 testes** após correções do review (ver `design.md` § Registro de review): service valida submotivo fora das choices e combinações incompatíveis; TestConstraints reescrito (um teste não era coletado por falta do prefixo `test_`; colisão de UNIQUE eliminada usando rows diretas). Checks: pytest focado, regressão `apps/cases`, ruff, mypy — verdes.

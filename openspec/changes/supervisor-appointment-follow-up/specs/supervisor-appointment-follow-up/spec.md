@@ -21,6 +21,13 @@ O sistema SHALL permitir que papéis `manager` e `admin` registrem, por caso, o 
 - **THEN** a gravação é rejeitada com erro de validação específico
 - **AND** nenhuma row de follow-up é criada
 
+#### Scenario: Causa com valor ou combinação inválida
+
+- **GIVEN** um procedimento marcado como não realizado
+- **WHEN** o submotivo informado está fora das opções previstas, ou um motivo diferente de `resource_shortage` vem acompanhado de submotivo, ou um motivo diferente de `other` vem acompanhado de texto
+- **THEN** a gravação é rejeitada com erro de validação amigável (`ValueError`)
+- **AND** nenhuma row é gravada e nenhum `IntegrityError` é exposto
+
 ### Requirement: O follow-up SHALL preservar histórico versionado append-only
 
 Cada atualização de follow-up SHALL criar nova versão (nova row) preservando as anteriores com autor e timestamp, e SHALL registrar `CaseEvent` `FOLLOWUP_UPDATED` com snapshot. A versão corrente SHALL ser a de maior número.
@@ -50,6 +57,19 @@ A aba SHALL listar, para o dia local corrente e o dia anterior (default), os cas
 - **WHEN** o supervisor seleciona `?date=YYYY-MM-DD` válido
 - **THEN** somente os elegíveis da data informada são listados
 
+#### Scenario: Caso reagendado aparece na data vigente
+
+- **GIVEN** um caso com agendamento confirmado originalmente para hoje, reagendado via fluxo de intercorrência para a próxima semana
+- **WHEN** o supervisor lista hoje e a semana seguinte
+- **THEN** o caso não aparece na listagem de hoje
+- **AND** aparece na listagem do dia da nova data de `appointment_at`
+
+#### Scenario: Vinda imediata sem timestamp de decisão fica fora
+
+- **GIVEN** um caso com `doctor_admission_flow` operacional e `doctor_decided_at` nulo (inexistente no fluxo atual)
+- **WHEN** qualquer listagem de follow-up é calculada
+- **THEN** o caso não é incluído (sem fallback para `created_at`)
+
 #### Scenario: Busca por ocorrência ou nome
 
 - **GIVEN** casos elegíveis em qualquer data
@@ -66,3 +86,10 @@ As rotas de follow-up SHALL exigir autenticação e papel ativo `manager` ou `ad
 - **GIVEN** um usuário autenticado com papel ativo `scheduler`
 - **WHEN** ele acessa `/dashboard/follow-ups/`
 - **THEN** é redirecionado com mensagem de erro e nenhum dado de follow-up é exposto
+
+#### Scenario: Acesso direto por URL a caso inelegível
+
+- **GIVEN** um caso sem agendamento confirmado e sem fluxo de vinda imediata
+- **WHEN** `manager` ou `admin` abre o formulário de follow-up desse caso diretamente pela URL
+- **THEN** recebe resposta 404 com mensagem explicativa
+- **AND** nenhum formulário é renderizado e nenhuma gravação é aceita

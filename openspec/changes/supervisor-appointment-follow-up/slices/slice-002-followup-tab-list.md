@@ -19,8 +19,9 @@ Comportamento observável: `manager`/`admin` abrem `/dashboard/follow-ups/`, vee
 - **R2** — Default: casos com `appointment_status="confirmed"`, `appointment_at` não nulo e `localdate(appointment_at)` ∈ {hoje, ontem} **mais** casos com `doctor_admission_flow ∈ OPERATIONAL_NOTICE_FLOWS`, `doctor_decided_at` não nulo e `localdate(doctor_decided_at)` ∈ {hoje, ontem}; agrupados por data ascendente; dentro da data, ordenados por nome do paciente e depois horário.
 - **R3** — `?date=YYYY-MM-DD` válido lista só aquela data; ausente/inválida → default hoje+ontem.
 - **R4** — `?q=` busca (icontains ocorrência OU nome) sobre elegíveis de **qualquer** data, limite 50, ignorando `?date` quando preenchida.
-- **R5** — Cada card exibe: ocorrência (`agency_record_number`), nome do paciente, data/hora agendada (ou label do fluxo de admissão p/ imediatos), badge "Follow-up registrado" (com versão/atualização) ou "Follow-up pendente", e link para `dashboard:followup_form`.
+- **R5** — Cada card exibe: ocorrência (`agency_record_number`), nome do paciente, data/hora agendada (ou label do fluxo de admissão p/ imediatos), badge "Follow-up registrado" (com versão/atualização) ou "Follow-up pendente". **Sem link para o formulário neste slice** (a rota só passa a existir no Slice 003, que adiciona o link).
 - **R6** — Pill "Follow-up" visível em `templates/dashboard/_nav.html` apontando para a rota.
+- **R7** — Predicado de elegibilidade `is_followup_eligible(case)` em `apps/cases/followup.py` (agendado confirmado com `appointment_at`, ou fluxo operacional com `doctor_decided_at` — sem fallback), com testes unitários; a listagem o consome.
 
 ## Matriz requisito → arquivo → teste/check
 
@@ -32,6 +33,7 @@ Comportamento observável: `manager`/`admin` abrem `/dashboard/follow-ups/`, vee
 | R4 | idem | `pytest ... -k search` |
 | R5 | template + view | `pytest ... -k card_badges` |
 | R6 | `templates/dashboard/_nav.html` | `pytest ... -k nav` (assert contém url) |
+| R7 | `apps/cases/followup.py` + `apps/cases/tests/test_followup_eligibility.py` | `pytest apps/cases/tests/test_followup_eligibility.py` |
 
 ## Escopo e expected blast radius
 
@@ -42,12 +44,14 @@ expected_files:
   - templates/dashboard/_nav.html          # +pill
   - templates/dashboard/followup_list.html # novo
   - apps/dashboard/tests/test_followup_list_view.py  # novo
+  - apps/cases/followup.py                 # +is_followup_eligible
+  - apps/cases/tests/test_followup_eligibility.py    # novo
 
 allowed_incidental_files: []
 
 out_of_scope:
-  - formulário/POST (Slice 003), rota do form pode ser registrada mas sem view de POST
-  - apps/cases (nada a mudar), FSM, signals
+  - formulário/POST e rota followup_form (Slice 003; a listagem NÃO linka para ela)
+  - FSM, signals
   - paginação, exportação, métricas
 ```
 
@@ -57,28 +61,31 @@ out_of_scope:
 
 ### RED
 
+Escreva primeiro `apps/cases/tests/test_followup_eligibility.py` e `apps/dashboard/tests/test_followup_list_view.py` (importando a view/rota novas). Depois:
+
 ```bash
-uv run pytest apps/dashboard/tests/test_followup_list_view.py -q
+uv run pytest apps/cases/tests/test_followup_eligibility.py apps/dashboard/tests/test_followup_list_view.py -q
 ```
 
-Falha esperada: 404/`ImportError` — rota/view não existem. Testes criam usuário+role (`Role.objects.get_or_create`), setam `client.session["active_role"]`, criam `Case` com `appointment_at=timezone.now()` (e variante ontem via `timezone.make_aware(datetime)`), `CaseProcedure` e follow-up via `record_case_follow_up` para o badge.
+Falha esperada: erro de coleção/import — `is_followup_eligible`, view e rota não existem. Testes criam usuário+role (`Role.objects.get_or_create`), setam `client.session["active_role"]`, criam `Case` com `appointment_at=timezone.now()` (e variante ontem via `timezone.make_aware(datetime)`), `CaseProcedure` e follow-up via `record_case_follow_up` para o badge.
 
 ### GREEN
 
 ```bash
-uv run pytest apps/dashboard/tests/test_followup_list_view.py -q
+uv run pytest apps/cases/tests/test_followup_eligibility.py apps/dashboard/tests/test_followup_list_view.py -q
 ```
 
 ### Verificação do slice
 
 ```bash
 uv run pytest apps/dashboard/tests apps/cases/tests -q   # regressão das duas áreas
-uv run ruff check apps/dashboard && uv run ruff format --check apps/dashboard
-uv run mypy apps/dashboard
+uv run ruff check apps/dashboard apps/cases && uv run ruff format --check apps/dashboard apps/cases
+uv run mypy apps/dashboard apps/cases
 ```
 
 ## Critérios de aceitação
 
-- [ ] R1–R6 verdes nos testes focados.
+- [ ] R1–R7 verdes nos testes focados.
 - [ ] Filtro de data usa `timezone.localdate` (sem `date.today()` — checar por `rg "date.today" apps/dashboard/views.py` → vazio no código novo).
+- [ ] Card NÃO renderiza link para `dashboard:followup_form` (`rg "followup_form" templates/dashboard/followup_list.html` → vazio).
 - [ ] Nenhum arquivo fora do blast radius; suite de dashboard/cases sem regressão.

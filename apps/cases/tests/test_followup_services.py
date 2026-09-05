@@ -211,6 +211,30 @@ class TestValidacoes:
         case = _case_with_procedures(case_factory, user)
         self._assert_rejeitado(case, user, [_outcome(case, performed=False, reason="other")])
 
+    def test_submotivo_fora_das_opcoes_rejeitado(self, user, case_factory) -> None:
+        case = _case_with_procedures(case_factory, user)
+        self._assert_rejeitado(
+            case,
+            user,
+            [_outcome(case, performed=False, reason="resource_shortage", detail="motivo_inexistente")],
+        )
+
+    def test_submotivo_com_causa_diferente_de_falta_de_recursos_rejeitado(self, user, case_factory) -> None:
+        case = _case_with_procedures(case_factory, user)
+        self._assert_rejeitado(
+            case,
+            user,
+            [_outcome(case, performed=False, reason="absenteeism", detail="emergency_occupied")],
+        )
+
+    def test_texto_de_outras_causas_com_causa_diferente_rejeitado(self, user, case_factory) -> None:
+        case = _case_with_procedures(case_factory, user)
+        self._assert_rejeitado(
+            case,
+            user,
+            [_outcome(case, performed=False, reason="resource_shortage", detail="insufficient_time", other="x")],
+        )
+
     def test_performed_normaliza_campos_de_motivo(self, user, case_factory) -> None:
         case = _case_with_procedures(case_factory, user)
         record_case_follow_up(
@@ -231,6 +255,9 @@ class TestValidacoes:
 
 
 class TestConstraints:
+    def _make_follow_up(self, case: Case, version: int) -> CaseFollowUp:
+        return CaseFollowUp.objects.create(case=case, version=version, patient_admitted=False)
+
     def test_unique_case_version(self, user, case_factory) -> None:
         case = _case_with_procedures(case_factory, user)
         record_case_follow_up(
@@ -256,14 +283,9 @@ class TestConstraints:
             with transaction.atomic():
                 ProcedureFollowUp.objects.create(follow_up=follow_up, procedure=procedure, performed=True)
 
-    def check_constraint_rejeita_nao_realizado_sem_motivo(self, user, case_factory) -> None:
+    def test_check_nao_realizado_exige_motivo(self, user, case_factory) -> None:
         case = _case_with_procedures(case_factory, user)
-        follow_up = record_case_follow_up(
-            case=case,
-            performed_by=user,
-            patient_admitted=False,
-            procedure_outcomes=[_outcome(case, performed=True)],
-        )
+        follow_up = self._make_follow_up(case, version=1)
         with pytest.raises(IntegrityError):
             with transaction.atomic():
                 ProcedureFollowUp.objects.create(
@@ -271,4 +293,68 @@ class TestConstraints:
                     procedure=case.procedures.get(),
                     performed=False,
                     non_performance_reason="",
+                )
+
+    def test_check_realizado_nao_carrega_motivo(self, user, case_factory) -> None:
+        case = _case_with_procedures(case_factory, user)
+        follow_up = self._make_follow_up(case, version=1)
+        with pytest.raises(IntegrityError):
+            with transaction.atomic():
+                ProcedureFollowUp.objects.create(
+                    follow_up=follow_up,
+                    procedure=case.procedures.get(),
+                    performed=True,
+                    non_performance_reason="absenteeism",
+                )
+
+    def test_check_submotivo_exigido_quando_falta_de_recursos(self, user, case_factory) -> None:
+        case = _case_with_procedures(case_factory, user)
+        follow_up = self._make_follow_up(case, version=1)
+        with pytest.raises(IntegrityError):
+            with transaction.atomic():
+                ProcedureFollowUp.objects.create(
+                    follow_up=follow_up,
+                    procedure=case.procedures.get(),
+                    performed=False,
+                    non_performance_reason="resource_shortage",
+                    resource_shortage_detail="",
+                )
+
+    def test_check_submotivo_proibido_sem_falta_de_recursos(self, user, case_factory) -> None:
+        case = _case_with_procedures(case_factory, user)
+        follow_up = self._make_follow_up(case, version=1)
+        with pytest.raises(IntegrityError):
+            with transaction.atomic():
+                ProcedureFollowUp.objects.create(
+                    follow_up=follow_up,
+                    procedure=case.procedures.get(),
+                    performed=False,
+                    non_performance_reason="absenteeism",
+                    resource_shortage_detail="emergency_occupied",
+                )
+
+    def test_check_texto_exigido_quando_outras_causas(self, user, case_factory) -> None:
+        case = _case_with_procedures(case_factory, user)
+        follow_up = self._make_follow_up(case, version=1)
+        with pytest.raises(IntegrityError):
+            with transaction.atomic():
+                ProcedureFollowUp.objects.create(
+                    follow_up=follow_up,
+                    procedure=case.procedures.get(),
+                    performed=False,
+                    non_performance_reason="other",
+                    other_reason="",
+                )
+
+    def test_check_texto_proibido_sem_outras_causas(self, user, case_factory) -> None:
+        case = _case_with_procedures(case_factory, user)
+        follow_up = self._make_follow_up(case, version=1)
+        with pytest.raises(IntegrityError):
+            with transaction.atomic():
+                ProcedureFollowUp.objects.create(
+                    follow_up=follow_up,
+                    procedure=case.procedures.get(),
+                    performed=False,
+                    non_performance_reason="absenteeism",
+                    other_reason="texto indevido",
                 )

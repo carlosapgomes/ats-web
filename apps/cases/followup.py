@@ -20,6 +20,7 @@ from apps.cases.models import (
     CaseEvent,
     CaseFollowUp,
     FollowUpNonPerformanceReason,
+    FollowUpResourceShortageDetail,
     ProcedureFollowUp,
 )
 
@@ -67,10 +68,18 @@ def _validate_outcomes(case: Case, outcomes: Sequence[ProcedureOutcomeInput]) ->
         reason = outcome.non_performance_reason
         if reason not in FollowUpNonPerformanceReason.values:
             raise ValueError("Informe a causa do procedimento não realizado.")
-        if reason == FollowUpNonPerformanceReason.RESOURCE_SHORTAGE and not outcome.resource_shortage_detail:
-            raise ValueError("Informe o submotivo da falta de recursos.")
-        if reason == FollowUpNonPerformanceReason.OTHER and not outcome.other_reason.strip():
-            raise ValueError("Descreva a outra causa da não realização.")
+        if reason == FollowUpNonPerformanceReason.RESOURCE_SHORTAGE:
+            if not outcome.resource_shortage_detail:
+                raise ValueError("Informe o submotivo da falta de recursos.")
+            if outcome.resource_shortage_detail not in FollowUpResourceShortageDetail.values:
+                raise ValueError("Submotivo de falta de recursos inválido.")
+        elif outcome.resource_shortage_detail:
+            raise ValueError("Submotivo só deve ser informado quando a causa é falta de recursos.")
+        if reason == FollowUpNonPerformanceReason.OTHER:
+            if not outcome.other_reason.strip():
+                raise ValueError("Descreva a outra causa da não realização.")
+        elif outcome.other_reason.strip():
+            raise ValueError("Texto de outras causas só deve ser informado quando a causa é 'Outras causas'.")
 
     return procedures_by_id
 

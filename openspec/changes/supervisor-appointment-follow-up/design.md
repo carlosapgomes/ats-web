@@ -41,7 +41,7 @@ ProcedureFollowUp               (desfecho por procedimento, dentro da versão)
 - `FollowUpResourceShortageDetail`: `emergency_occupied` (Urgências que ocuparam o horário), `insufficient_time` (Falta de tempo hábil), `equipment_unavailable` (Equipamento quebrado/não disponível).
 - **Versão atual** = maior `version` do caso. Atualizar = gravar nova versão; nada é editado/apagado (rastreabilidade de dados anteriores + autor por construção).
 - Desfecho **por procedimento** (decisão do owner): EDA realizada + colonoscopia suspensa no mesmo ato é cenário real. Internação é **por caso** e o campo aparece **sempre** (paciente pode ser internado por causa da suspensão).
-- Integridade condicional (motivo exigido quando não realizado; submotivo só em `resource_shortage`; texto só em `other`; campos zerados caso contrário) validada no service com `ValueError` amigável **e** respaldada por `CheckConstraint`s.
+- Integridade condicional (motivo exigido quando não realizado; submotivo só em `resource_shortage`; texto só em `other`; campos zerados caso contrário) validada no service com `ValueError` amigável **e** respaldada por `CheckConstraint`s. O service também valida **valores** de `resource_shortage_detail` contra as choices e **rejeita combinações incompatíveis** (ex.: `absenteeism` com submotivo) com `ValueError` — o usuário nunca vê `IntegrityError`.
 
 ### D3. Auditoria unificada em `CaseEvent`
 
@@ -51,12 +51,14 @@ Cada gravação cria um evento direto (padrão dos services):
 - `payload` snapshot: `{"version", "patient_admitted", "outcomes": [{procedure_id, procedure_type, performed, non_performance_reason, resource_shortage_detail, other_reason}]}`.
 - NÃO adicionar os tipos a `OPERATIONAL_NOTICE_EVENT_TYPES`/`SUPPORTED_SYSTEM_NOTICE_EVENT_TYPES`: follow-up não gera mensagem operacional nem notificação.
 
-### D4. Elegibilidade e listagem — por campos imutáveis, não por status FSM
+### D4. Elegibilidade e listagem — por campos atuais do agendamento, não por status FSM
 
-População elegível da aba (lição de `scheduler-processed-today-tab` D3):
+População elegível da aba (lição de `scheduler-processed-today-tab` D3), sempre via **campos atuais** do `Case` — que refletem reagendamentos: um caso reagendado aparece na data para a qual está agendado agora, não na data antiga (não há snapshot histórico de data; o histórico operacional da troca fica nos eventos de intercorrência):
 
 - **Grupo agendado**: `appointment_status="confirmed"` AND `appointment_at IS NOT NULL` AND `localdate(appointment_at) == data`.
-- **Grupo vinda imediata**: `doctor_admission_flow ∈ OPERATIONAL_NOTICE_FLOWS` AND `doctor_decided_at IS NOT NULL` AND `localdate(doctor_decided_at) == data`.
+- **Grupo vinda imediata**: `doctor_admission_flow ∈ OPERATIONAL_NOTICE_FLOWS` AND `doctor_decided_at IS NOT NULL` AND `localdate(doctor_decided_at) == data`. **Sem fallback para `created_at`** (diferente da fila de ciência do scheduler, que exibe `doctor_decided_at or created_at`): caso operacional sem timestamp de decisão não existe no fluxo atual e, se existir, fica conservadoramente fora do follow-up.
+- O predicado combinado vive em **`is_followup_eligible(case)`/queryset helper em `apps/cases/followup.py`**, usado pela listagem e **revalidado no GET e no POST do formulário** (acesso direto por URL a caso inelegível → 404 com mensagem; nunca expor formulário).
+- Caso elegível sem rows `CaseProcedure` (defensivo; não deve ocorrer — decisão médica cria as rows): o service rejeita a gravação (`ValueError`) e o formulário exibe aviso orientando correção do caso, sem campos.
 - **Default** (sem `?date=`): hoje + ontem locais, agrupados por data; **`?date=YYYY-MM-DD`**: somente a data informada; inválida → default.
 - **Ordenação**: data asc, depois nome do paciente (annotate `KeyTextTransform("name", "structured_data__patient")`), depois horário.
 - **Sem paginação** na visão diária (volume diário limitado); busca limitada a 50 resultados (padrão intake).
@@ -85,3 +87,8 @@ Todo filtro por dia usa `timezone.localdate()`/`timezone.localtime` (`TIME_ZONE=
 
 - Dupla contagem cancelamentos (follow-up vs. intercorrência): aceita e desejada — dimensões distintas (registro de desfecho vs. ação operacional). Documentado no manual em change futuro.
 - Casos `APPT_DENIED` (CHD recusou agendar) NÃO entram na aba: nunca houve procedimento marcado.
+- `appointment_at`/`appointment_status` são alteráveis por reagendamento (`apps/cases/services.py`, fluxo de intercorrência): a listagem usa o valor vigente de propósito — o follow-up acompanha a data real do procedimento.
+
+## Registro de review (ciclo 1 — reviewer independente, verdict BLOCK)
+
+Correções incorporadas: (1) elegibilidade revalidada no GET/POST do formulário via `is_followup_eligible` (D4, spec, slices 002/003); (2) D4 reescrito — "campos atuais", fallback `created_at` explicitamente descartado, semântica de reagendamento documentada; (3) navegação entre slices — link do card para o formulário movido do Slice 002 para o Slice 003 (a rota só existe a partir de então); (4) service valida valores de choices e combinações incompatíveis com `ValueError` (implementado) — antes, `absenteeism` com submotivo vazaria como `IntegrityError`; (5) cobertura real das 6 CheckConstraints nos testes (um teste não era coletado por falta do prefixo `test_`); (6) cenários de spec para reagendamento, vinda imediata sem timestamp, combinação inválida de causa e acesso direto a inelegível.
