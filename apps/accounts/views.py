@@ -112,9 +112,15 @@ def home_view(request):  # type: ignore[no-untyped-def]
 
 @login_required
 def notifications_list(request):  # type: ignore[no-untyped-def]
-    """Exibe a lista de notificações do usuário autenticado."""
-    notifications = UserNotification.objects.filter(recipient=request.user).select_related(
-        "case", "communication_message", "triggered_by"
+    """Exibe a lista de notificações do usuário autenticado.
+
+    Aplica a janela de visibilidade: não lidas + leituras dentro de
+    NOTIFICATION_READ_RETENTION_HOURS (default 48h). Nada é apagado.
+    """
+    notifications = (
+        UserNotification.objects.visible_for_list()
+        .filter(recipient=request.user)
+        .select_related("case", "communication_message", "triggered_by")
     )
     return render(
         request,

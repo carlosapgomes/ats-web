@@ -1,6 +1,7 @@
 """User and Role models for the ATS Web system."""
 
 import uuid
+from datetime import datetime, timedelta
 
 from django.conf import settings
 from django.contrib.auth.models import AbstractUser, AnonymousUser
@@ -78,12 +79,49 @@ class User(AbstractUser):
         return self.account_status == "active" and self.is_active
 
 
+class UserNotificationQuerySet(models.QuerySet["UserNotification"]):
+    """QuerySet de ``UserNotification`` com predicados de visibilidade nomeados."""
+
+    def visible_for_list(self, *, now: datetime | None = None) -> "UserNotificationQuerySet":
+        """Filtra a janela de visibilidade da lista de notificações.
+
+        Retorna apenas notificações não lidas (``read_at IS NULL``) ou lidas
+        dentro da janela de retenção (``read_at >= cutoff``). Oculta somente
+        as lidas antes do corte — o ``exclude`` nunca remove não lidas porque
+        ``read_at < cutoff`` avalia NULL para elas.
+        """
+        from django.utils import timezone
+
+        cutoff = (now or timezone.now()) - timedelta(hours=getattr(settings, "NOTIFICATION_READ_RETENTION_HOURS", 48))
+        return self.exclude(read_at__lt=cutoff)
+
+
+class UserNotificationManager(models.Manager["UserNotification"]):
+    """Manager padrão de ``UserNotification`` expondo ``visible_for_list``.
+
+    A instância usada em ``objects`` é derivada com ``from_queryset`` (abaixo,
+    no model) para copiar os métodos públicos de ``UserNotificationQuerySet``;
+    as assinaturas ficam declaradas aqui para o type checker, que não enxerga
+    métodos copiados dinamicamente pelo django-stubs.
+    """
+
+    def get_queryset(self) -> "UserNotificationQuerySet":
+        return UserNotificationQuerySet(self.model, using=self._db)
+
+    def visible_for_list(self, *, now: datetime | None = None) -> "UserNotificationQuerySet":
+        return self.get_queryset().visible_for_list(now=now)
+
+
 class UserNotification(models.Model):
     """Notificação in-app para um usuário destinatário.
 
     Criada quando uma menção (@role ou @username) é detectada
     em uma mensagem de comunicação operacional (CaseCommunicationMessage).
     """
+
+    # Manager construído com from_queryset: preserva a API de Manager
+    # (filter/create) e expõe o QuerySet customizado no runtime.
+    objects = UserNotificationManager.from_queryset(UserNotificationQuerySet)()
 
     notification_id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     recipient = models.ForeignKey(

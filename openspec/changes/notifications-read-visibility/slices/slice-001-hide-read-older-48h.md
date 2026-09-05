@@ -132,11 +132,15 @@ Pytest final: exit code 0, zero failures/errors, `passed_final >= passed_baselin
 
 ## Critérios de aceitação
 
-- [ ] R1: `visible_for_list` NULL-safe com 4 casos de teste unitário passando.
-- [ ] R2: lista da view não renderiza lidas há 49h; mantém lidas há 1h e não lidas.
-- [ ] R3: `NOTIFICATION_READ_RETENTION_HOURS` definido e consumido (teste com override).
-- [ ] R4: diff limitado aos 4 arquivos previstos; zero mutação de dados.
-- [ ] RED/GREEN comprovados no relatório; gate final completo verde.
+- [x] R1: `visible_for_list` NULL-safe com 4 casos de teste unitário passando.
+- [x] R2: lista da view não renderiza lidas há 49h; mantém lidas há 1h e não lidas.
+- [x] R3: `NOTIFICATION_READ_RETENTION_HOURS` definido e consumido (teste com override).
+- [x] R4: diff limitado aos 4 arquivos previstos; zero mutação de dados.
+- [x] RED/GREEN comprovados no relatório; gate final completo verde.
+
+> Loop parent-controlled concluído em 2026-09-05: reviewer `Merge verdict: OK
+> with notes` (0 P0/P1; 1 P2 report-only). Conclusão (tasks.md, relatório,
+> commit) executada pelo parent.
 
 ## Conclusão controlada
 

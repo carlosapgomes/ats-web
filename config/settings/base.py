@@ -193,6 +193,11 @@ CASE_LOCK_LEASE_SECONDS_DOCTOR = 60 * 60
 CASE_LOCK_HEARTBEAT_SECONDS = 60
 CASE_LOCK_ACTIVITY_GRACE_SECONDS = 4 * 60
 
+# Notification inbox visibility — retention window for read notifications
+# Read notifications older than this window (hours) are hidden from the list
+# (never deleted). Unread notifications are always visible. Measured from read_at.
+NOTIFICATION_READ_RETENTION_HOURS = 48
+
 # Password reset timeout (seconds, default 24h)
 PASSWORD_RESET_TIMEOUT = int(os.environ.get("PASSWORD_RESET_TIMEOUT", "86400"))
 

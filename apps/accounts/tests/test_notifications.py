@@ -1058,3 +1058,240 @@ class TestNotificationJsHardening:
         # Não deve conter endpoints de caso (token "unread-count" refere-se
         # apenas ao endpoint de contagem, não à thread).
         assert "/cases/" not in js_content
+
+
+# ── Read visibility: hide read notifications older than the retention window ─
+
+
+def _create_notification_row(
+    recipient: Any,
+    case: Any,
+    *,
+    title: str,
+    body_preview: str,
+    created_at: Any = None,
+    read_at: Any = None,
+) -> Any:
+    """Cria uma UserNotification com created_at/read_at opcionais escritos direto.
+
+    ``created_at`` é ``auto_now_add``: precisa de um save explícito com
+    ``update_fields`` para sobrescrever o valor inserido. ``read_at`` segue a
+    escrita direta usada nos testes existentes deste arquivo.
+    """
+    from apps.accounts.models import UserNotification
+
+    notif = UserNotification.objects.create(
+        recipient=recipient,
+        case=case,
+        communication_message=None,
+        title=title,
+        body_preview=body_preview,
+    )
+    update_fields: list[str] = []
+    if created_at is not None:
+        notif.created_at = created_at
+        update_fields.append("created_at")
+    if read_at is not None:
+        notif.read_at = read_at
+        update_fields.append("read_at")
+    if update_fields:
+        notif.save(update_fields=update_fields)
+    return notif
+
+
+class TestUserNotificationQuerySetReadVisibility:
+    """R1: UserNotificationQuerySet.visible_for_list() oculta lidas antigas e preserva não lidas."""
+
+    def test_read_visibility_hides_notification_read_49_hours_ago(
+        self, db: Any, case_factory: Any, user: Any, user_doctor: Any
+    ) -> None:
+        """Lida há 49h fica fora da janela; a linha continua existindo no banco."""
+        from datetime import timedelta
+
+        from django.utils import timezone
+
+        from apps.accounts.models import UserNotification
+
+        now = timezone.now()
+        case = case_factory(user)
+        notif = _create_notification_row(
+            user_doctor,
+            case,
+            title="Lida ha 49h",
+            body_preview="antiga lida 49h",
+            created_at=now - timedelta(hours=50),
+            read_at=now - timedelta(hours=49),
+        )
+
+        visible_ids = set(UserNotification.objects.visible_for_list(now=now).values_list("notification_id", flat=True))
+        assert notif.notification_id not in visible_ids
+        assert UserNotification.objects.filter(pk=notif.pk).exists()
+
+    def test_read_visibility_keeps_notification_read_1_hour_ago(
+        self, db: Any, case_factory: Any, user: Any, user_doctor: Any
+    ) -> None:
+        """Lida há 1h permanece visível (dentro da janela de 48h)."""
+        from datetime import timedelta
+
+        from django.utils import timezone
+
+        from apps.accounts.models import UserNotification
+
+        now = timezone.now()
+        case = case_factory(user)
+        notif = _create_notification_row(
+            user_doctor,
+            case,
+            title="Lida ha 1h",
+            body_preview="lida recente 1h",
+            created_at=now - timedelta(hours=1),
+            read_at=now - timedelta(hours=1),
+        )
+
+        visible_ids = set(UserNotification.objects.visible_for_list(now=now).values_list("notification_id", flat=True))
+        assert notif.notification_id in visible_ids
+
+    def test_read_visibility_never_hides_unread_notification_created_30_days_ago(
+        self, db: Any, case_factory: Any, user: Any, user_doctor: Any
+    ) -> None:
+        """Não lida (read_at NULL) criada há 30 dias nunca é excluída pelo predicado."""
+        from datetime import timedelta
+
+        from django.utils import timezone
+
+        from apps.accounts.models import UserNotification
+
+        now = timezone.now()
+        case = case_factory(user)
+        notif = _create_notification_row(
+            user_doctor,
+            case,
+            title="Nao lida antiga",
+            body_preview="criada ha 30 dias",
+            created_at=now - timedelta(days=30),
+            read_at=None,
+        )
+
+        visible_ids = set(UserNotification.objects.visible_for_list(now=now).values_list("notification_id", flat=True))
+        assert notif.notification_id in visible_ids
+
+    def test_read_visibility_measures_window_from_read_at_not_created_at(
+        self, db: Any, case_factory: Any, user: Any, user_doctor: Any
+    ) -> None:
+        """Janela medida por read_at: criada há 100h e lida há 1h visível; criada há 1h e lida há 100h oculta."""
+        from datetime import timedelta
+
+        from django.utils import timezone
+
+        from apps.accounts.models import UserNotification
+
+        now = timezone.now()
+        case1 = case_factory(user)
+        created_100h_read_1h = _create_notification_row(
+            user_doctor,
+            case1,
+            title="Criada ha 100h e lida ha 1h",
+            body_preview="leitura recente",
+            created_at=now - timedelta(hours=100),
+            read_at=now - timedelta(hours=1),
+        )
+        case2 = case_factory(user)
+        created_1h_read_100h = _create_notification_row(
+            user_doctor,
+            case2,
+            title="Criada ha 1h e lida ha 100h",
+            body_preview="leitura antiga",
+            created_at=now - timedelta(hours=1),
+            read_at=now - timedelta(hours=100),
+        )
+
+        visible_ids = set(UserNotification.objects.visible_for_list(now=now).values_list("notification_id", flat=True))
+        assert created_100h_read_1h.notification_id in visible_ids
+        assert created_1h_read_100h.notification_id not in visible_ids
+
+    def test_read_visibility_retention_hours_zero_hides_every_read_notification(
+        self, db: Any, case_factory: Any, user: Any, user_doctor: Any
+    ) -> None:
+        """R3: NOTIFICATION_READ_RETENTION_HOURS=0 zera a janela — toda lida some, não lida permanece."""
+        from datetime import timedelta
+
+        from django.test import override_settings
+        from django.utils import timezone
+
+        from apps.accounts.models import UserNotification
+
+        now = timezone.now()
+        case1 = case_factory(user)
+        read_1h = _create_notification_row(
+            user_doctor,
+            case1,
+            title="Lida ha 1h",
+            body_preview="lida com janela zero",
+            read_at=now - timedelta(hours=1),
+        )
+        case2 = case_factory(user)
+        unread = _create_notification_row(
+            user_doctor,
+            case2,
+            title="Nao lida",
+            body_preview="nao lida com janela zero",
+            read_at=None,
+        )
+
+        with override_settings(NOTIFICATION_READ_RETENTION_HOURS=0):
+            visible_ids = set(
+                UserNotification.objects.visible_for_list(now=now).values_list("notification_id", flat=True)
+            )
+        assert read_1h.notification_id not in visible_ids
+        assert unread.notification_id in visible_ids
+
+
+class TestNotificationsListReadVisibility:
+    """R2: notifications_list renderiza somente não lidas + leituras dentro da janela."""
+
+    def test_read_visibility_list_hides_49h_old_read_and_keeps_recent_read_and_old_unread(
+        self, db: Any, client: Any, case_factory: Any, user: Any, user_doctor: Any
+    ) -> None:
+        """Lida há 49h ausente do HTML; lida há 1h e não lida antiga presentes."""
+        from datetime import timedelta
+
+        from django.utils import timezone
+
+        now = timezone.now()
+        case1 = case_factory(user)
+        _create_notification_row(
+            user_doctor,
+            case1,
+            title="Lida ha 49 horas",
+            body_preview="preview antiga lida 49h",
+            read_at=now - timedelta(hours=49),
+        )
+        case2 = case_factory(user)
+        _create_notification_row(
+            user_doctor,
+            case2,
+            title="Lida recentemente",
+            body_preview="preview lida recente",
+            read_at=now - timedelta(hours=1),
+        )
+        case3 = case_factory(user)
+        _create_notification_row(
+            user_doctor,
+            case3,
+            title="Nao lida antiga",
+            body_preview="preview nao lida antiga",
+            created_at=now - timedelta(days=30),
+            read_at=None,
+        )
+
+        client.force_login(user_doctor)
+        session = client.session
+        session["active_role"] = "doctor"
+        session.save()
+
+        response = client.get(reverse("notifications"))
+        assert response.status_code == 200
+        content = response.content.decode()
+        assert "preview antiga lida 49h" not in content
+        assert "preview lida recente" in content
+        assert "preview nao lida antiga" in content
