@@ -20,16 +20,17 @@
 
 ## Definition of Done do change
 
-- [ ] `CaseFollowUp`/`ProcedureFollowUp` versionados, append-only, com constraints e `CaseEvent` espelho.
-- [ ] `/dashboard/follow-ups/` lista elegíveis (agendados confirmados + vinda imediata) de hoje+ontem, com seletor de data e busca por ocorrência/nome, ordenação data→nome.
-- [ ] Formulário registra desfecho por procedimento + internação por caso; atualização cria nova versão; histórico visível na página.
-- [ ] Acesso restrito a `manager`/`admin`; FSM, filas e fluxos operacionais inalterados.
-- [ ] Testes novos cobrindo os requisitos; suite existente sem regressão.
-- [ ] Quality gate final do AGENTS.md:
-  - [ ] `uv run ruff check .`
-  - [ ] `uv run ruff format --check .`
-  - [ ] `uv run mypy .`
-  - [ ] `uv run pytest`
-- [ ] Relatório por slice em markdown temporário (`REPORT_PATH` para o planner).
-- [ ] Commit (e push) por slice com mensagem rastreável.
+- [x] `CaseFollowUp`/`ProcedureFollowUp` versionados, append-only, com constraints e `CaseEvent` espelho.
+- [x] `/dashboard/follow-ups/` lista elegíveis (agendados confirmados + vinda imediata) de hoje+ontem, com seletor de data e busca por ocorrência/nome, ordenação data→nome.
+- [x] Formulário registra desfecho por procedimento + internação por caso; atualização cria nova versão; histórico visível na página.
+- [x] Acesso restrito a `manager`/`admin`; FSM, filas e fluxos operacionais inalterados.
+- [x] Testes novos cobrindo os requisitos; suite existente sem regressão (baseline 3197 → final 3283 passed).
+- [x] Quality gate final do AGENTS.md (executado uma vez pelo controller após todos os slices):
+  - [x] `uv run ruff check .`
+  - [x] `uv run ruff format --check .`
+  - [x] `uv run mypy .`
+  - [x] `uv run pytest`
+  - [x] `openspec validate supervisor-appointment-follow-up`
+- [x] Relatório por slice em markdown temporário (`REPORT_PATH` para o planner).
+- [x] Commit por slice com mensagem rastreável (push: apenas Slices 001–002 anteriores ao comando slice-loop; `8ece663` e `bc07f99` ficam SEM push até instrução explícita).
 - [ ] `openspec archive` após aprovação humana do change.
