@@ -15,6 +15,7 @@ from typing import Any
 
 from django.db import models, transaction
 
+from apps.cases.admission import is_operational_notice_flow
 from apps.cases.models import (
     Case,
     CaseEvent,
@@ -39,6 +40,23 @@ class ProcedureOutcomeInput:
 def get_current_follow_up(case: Case) -> CaseFollowUp | None:
     """Versão corrente do follow-up do caso (maior ``version``) ou ``None``."""
     return case.follow_ups.order_by("-version").first()
+
+
+def is_followup_eligible(case: Case) -> bool:
+    """Predicado combinado de elegibilidade para follow-up (design D4).
+
+    Grupo agendado: ``appointment_status="confirmed"`` com ``appointment_at``
+    presente. Grupo vinda imediata (fluxo operacional): ``doctor_admission_flow``
+    em ``OPERATIONAL_NOTICE_FLOWS`` com ``doctor_decided_at`` presente. Sem
+    fallback para ``created_at``: caso operacional sem timestamp de decisão
+    permanece conservadoramente fora do follow-up.
+
+    Independe da data — a listagem combina o predicado com o dia local dos
+    timestamps relevantes; o formulário (Slice 003) o revalida por caso.
+    """
+    if case.appointment_status == "confirmed" and case.appointment_at is not None:
+        return True
+    return is_operational_notice_flow(case.doctor_admission_flow) and case.doctor_decided_at is not None
 
 
 def _validate_outcomes(case: Case, outcomes: Sequence[ProcedureOutcomeInput]) -> dict[int, Any]:

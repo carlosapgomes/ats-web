@@ -85,7 +85,13 @@ uv run mypy apps/dashboard apps/cases
 
 ## Critérios de aceitação
 
-- [ ] R1–R7 verdes nos testes focados.
-- [ ] Filtro de data usa `timezone.localdate` (sem `date.today()` — checar por `rg "date.today" apps/dashboard/views.py` → vazio no código novo).
-- [ ] Card NÃO renderiza link para `dashboard:followup_form` (`rg "followup_form" templates/dashboard/followup_list.html` → vazio).
-- [ ] Nenhum arquivo fora do blast radius; suite de dashboard/cases sem regressão.
+- [x] R1–R7 verdes nos testes focados.
+- [x] Filtro de data usa `timezone.localdate` (sem `date.today()` — checar por `rg "date.today" apps/dashboard/views.py` → vazio no código novo).
+- [x] Card NÃO renderiza link para `dashboard:followup_form` (`rg "followup_form" templates/dashboard/followup_list.html` → vazio).
+- [x] Nenhum arquivo fora do blast radius; suite de dashboard/cases sem regressão.
+
+## Registro de execução
+
+- 2 rodadas de review. Rodada 1: BLOCK com 1×P1 (caso híbrido elegível sumia da lista — agrupamento priorizava ramo operacional divergindo de `is_followup_eligible`); corrigido com precedência unificada (ramo agendado válido vence) + `TestFollowUpListHybridCase` (3 testes). Rodada 2: **OK with notes**.
+- P2s diferidos (não bloqueiam; report-only): (a) card híbrido confirmado exibe coluna de decisão do fluxo operacional (`is_immediate` só olha o fluxo — precedência de apresentação diverge da de agrupamento); (b) `agency_record_number` truncado em 12 chars (convenção herdada do dashboard); (c) pill Follow-up sem estado ativo (`_nav.html` do dashboard não gerencia aba ativa).
+- Validação focada: 37 passed (testes do slice), 920 passed (apps/dashboard + apps/cases), ruff/format/mypy verdes.

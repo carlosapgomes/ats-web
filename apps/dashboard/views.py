@@ -26,7 +26,8 @@ from apps.cases.admission import (
     is_operational_notice_flow,
     is_scheduled_admission_flow,
 )
-from apps.cases.models import Case, CaseAttachment, CaseEvent, CaseStatus, SupervisorSummary
+from apps.cases.followup import is_followup_eligible
+from apps.cases.models import Case, CaseAttachment, CaseEvent, CaseFollowUp, CaseStatus, SupervisorSummary
 from apps.cases.navigation import resolve_safe_next_url
 from apps.cases.services import (
     ADMINISTRATIVE_CLOSURE_REASON_CHOICES,
@@ -1305,5 +1306,168 @@ def dashboard_summaries(request: HttpRequest) -> HttpResponse:
         {
             "page_obj": page_obj,
             "summaries": page_obj,
+        },
+    )
+
+
+# ── Follow-up de agendamentos (Slice 002) ───────────────────────────────
+
+
+def _followup_group_date(case: Case, days: frozenset[date] | None) -> date | None:
+    """Dia local em que um caso elegível entra na listagem de follow-up.
+
+    Consome ``is_followup_eligible`` (fonte única do predicado, R7) e replica
+    a precedência de ramo do predicado: agendamento confirmado com horário
+    resolve o dia pelo agendamento; senão, vinda imediata (fluxo operacional)
+    com decisão registrada resolve pela decisão (design D4). ``days=None``
+    aceita qualquer dia (busca).
+    """
+    if not is_followup_eligible(case):
+        return None
+    if case.appointment_status == "confirmed" and case.appointment_at is not None:
+        group_day = timezone.localdate(case.appointment_at)
+    elif is_operational_notice_flow(case.doctor_admission_flow) and case.doctor_decided_at is not None:
+        group_day = timezone.localdate(case.doctor_decided_at)
+    else:
+        return None
+    if days is not None and group_day not in days:
+        return None
+    return group_day
+
+
+def _followup_event_time(case: Case) -> datetime | None:
+    """Instante de referência para ordenação dentro da data (agendado/imediato).
+
+    Replica a precedência de ramo de ``is_followup_eligible``: horário do
+    agendamento quando o ramo agendado é válido; senão, timestamp da decisão
+    da vinda imediata; senão ``None`` (inelegível — não deve ser ordenado).
+    """
+    if case.appointment_status == "confirmed" and case.appointment_at is not None:
+        return case.appointment_at
+    if is_operational_notice_flow(case.doctor_admission_flow) and case.doctor_decided_at is not None:
+        return case.doctor_decided_at
+    return None
+
+
+def _date_mode_followup_cases(days: list[date]) -> list[tuple[date, Case]]:
+    """Casos elegíveis cujo follow-up cai em um dos dias informados (default ou ?date=).
+
+    A janela ORM sobre os dois timestamps (``appointment_at``/``doctor_decided_at``)
+    apenas reduz os candidatos por dia; o predicado de elegibilidade e a escolha do
+    timestamp de grupo ficam em ``_followup_group_date``.
+    """
+    days = sorted(days)
+    day_set = frozenset(days)
+    start = local_day_bounds(days[0])[0]
+    end = start + timedelta(days=len(days))
+    candidates = Case.objects.filter(
+        Q(appointment_at__gte=start, appointment_at__lt=end)
+        | Q(doctor_decided_at__gte=start, doctor_decided_at__lt=end)
+    )
+    result: list[tuple[date, Case]] = []
+    for case in candidates:
+        group_day = _followup_group_date(case, day_set)
+        if group_day is not None:
+            result.append((group_day, case))
+    return result
+
+
+def _search_followup_cases(search_term: str) -> list[tuple[date, Case]]:
+    """Busca ?q= por ocorrência/nome sobre elegíveis de qualquer data (limite 50)."""
+    matches = Case.objects.filter(
+        Q(agency_record_number__icontains=search_term) | Q(structured_data__patient__name__icontains=search_term)
+    ).order_by("-created_at")
+    result: list[tuple[date, Case]] = []
+    for case in matches.iterator():
+        group_day = _followup_group_date(case, None)
+        if group_day is not None:
+            result.append((group_day, case))
+            if len(result) == 50:
+                break
+    return result
+
+
+def _current_follow_up_map(cases: list[Case]) -> dict[Any, CaseFollowUp]:
+    """Mapa ``case_id -> versão atual`` de follow-up em uma única query (sem N+1)."""
+    case_ids = [case.case_id for case in cases]
+    rows = CaseFollowUp.objects.filter(case_id__in=case_ids).order_by("case_id", "-version")
+    current: dict[Any, CaseFollowUp] = {}
+    for row in rows:
+        current.setdefault(row.case_id, row)
+    return current
+
+
+def _enrich_followup_item(case: Case, current_follow_up: CaseFollowUp | None) -> dict[str, Any]:
+    """Monta o dict de apresentação de um card da listagem de follow-up."""
+    patient_name = ""
+    if isinstance(case.structured_data, dict):
+        patient = case.structured_data.get("patient", {})
+        if isinstance(patient, dict):
+            patient_name = str(patient.get("name") or "")
+
+    is_immediate = is_operational_notice_flow(case.doctor_admission_flow)
+    return {
+        "case": case,
+        "patient_name": patient_name,
+        "is_immediate": is_immediate,
+        "admission_flow_label": (
+            ADMISSION_FLOW_MAP.get(case.doctor_admission_flow, case.doctor_admission_flow) if is_immediate else ""
+        ),
+        "follow_up": current_follow_up,
+    }
+
+
+def _followup_item_sort_key(item: dict[str, Any]) -> tuple[str, datetime | None]:
+    """Chave de ordenação: nome do paciente e depois horário (design D4)."""
+    return (item["patient_name"].casefold(), _followup_event_time(item["case"]))
+
+
+@login_required
+@role_required("manager", "admin")
+def followup_list(request: HttpRequest) -> HttpResponse:
+    """Aba Follow-up do supervisor: desfechos elegíveis de hoje+ontem ou ?date=/busca.
+
+    Default (R2): hoje e ontem locais, agrupados por data ascendente e, dentro
+    da data, por nome do paciente e horário. ?date=YYYY-MM-DD válido (R3)
+    restringe a um dia; inválido/ausente cai no default. ?q= (R4) busca por
+    ocorrência/nome sobre a população elegível de qualquer data, limite 50,
+    ignorando ?date=. Os cards não linkam para o formulário neste slice (R5) —
+    a rota followup_form chega no Slice 003.
+    """
+    today = timezone.localdate()
+    search_term = request.GET.get("q", "").strip()
+    selected_date = _parse_iso_date(request.GET.get("date", ""))
+
+    if search_term:
+        eligible = _search_followup_cases(search_term)
+        date_value = ""
+    elif selected_date is not None:
+        eligible = _date_mode_followup_cases([selected_date])
+        date_value = selected_date.isoformat()
+    else:
+        eligible = _date_mode_followup_cases([today - timedelta(days=1), today])
+        date_value = ""
+
+    current_follow_ups = _current_follow_up_map([case for _, case in eligible])
+    by_day: dict[date, list[dict[str, Any]]] = {}
+    for day, case in eligible:
+        item = _enrich_followup_item(case, current_follow_ups.get(case.case_id))
+        by_day.setdefault(day, []).append(item)
+
+    groups: list[dict[str, Any]] = []
+    total_cases = 0
+    for day, items in sorted(by_day.items()):
+        items.sort(key=_followup_item_sort_key)
+        groups.append({"date": day, "cases": items})
+        total_cases += len(items)
+
+    return render(
+        request,
+        "dashboard/followup_list.html",
+        {
+            "groups": groups,
+            "q": search_term,
+            "date_value": date_value,
+            "total_cases": total_cases,
         },
     )
