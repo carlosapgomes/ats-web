@@ -8,6 +8,12 @@ O foco principal está nos três papéis operacionais:
 2. **Médico** — avaliar os casos e decidir se aceita ou nega a regulação.
 3. **CHD/Agendador** — confirmar, negar ou ajustar o agendamento quando o caso aceito precisar ser agendado.
 
+Além dos três papéis operacionais, o sistema também tem o papel de
+**Supervisor** (perfis de gerência e administração, exibidos no sistema como
+**Supervisor** e **Administrador**). O Supervisor não conduz o caso no dia a
+dia, mas registra o **desfecho dos exames** depois que o dia do procedimento
+passou — o chamado **follow-up de agendamento** (seção 6).
+
 Neste manual, vamos usar principalmente o termo **CHD**, porque é o nome mais usado pela equipe. Quando aparecer **Agendador**, considere que estamos falando do mesmo papel no sistema.
 
 > Observação: se o usuário estiver habilitado para exercer mais de um papel/perfil no sistema, ele deve conferir se está usando o **perfil ativo correto** antes de iniciar o trabalho.
@@ -1022,9 +1028,117 @@ médicas e a comunicação operacional com o médico/NIR.
 
 ---
 
-# 6. Boas práticas para todos os usuários
+# 6. Ações do usuário Supervisor
 
-## 6.1 Antes de concluir uma ação
+O papel de **Supervisor** corresponde aos perfis de gerência e administração
+do sistema. O Supervisor não conduz o caso no dia a dia: ele acompanha o
+**desfecho do dia do exame**. A aba **Follow-up**, no Dashboard, permite
+registrar, para cada caso com exame no dia, o que aconteceu — se o
+procedimento foi realizado, a causa quando não foi e se o paciente foi
+internado.
+
+Esse registro é apenas informativo, de acompanhamento e de métrica. Ele
+**não** altera o estado do caso, **não** abre intercorrência, **não** cancela
+e **não** reagenda exames.
+
+## 6.1 Registrar follow-up de agendamento
+
+### Quando usar
+
+Registre o follow-up quando o dia do exame já passou e o desfecho é
+conhecido:
+
+- o exame foi **realizado** normalmente;
+- o exame **não foi realizado** — registrar a causa;
+- o paciente **foi internado** ou não.
+
+Atenção: o follow-up **não substitui** os fluxos de intercorrência e
+reagendamento. Se um exame não realizado precisar de nova data, use o fluxo
+de reagendamento do CHD (seção 5.5); se houve mudança após o aceite, use a
+intercorrência pós-aceitação do NIR (seção 3.8). O follow-up apenas registra
+o desfecho.
+
+### Como abrir a aba Follow-up
+
+1. entrar no sistema com o perfil ativo **Supervisor** ou **Administrador**;
+2. acessar o **Dashboard**;
+3. clicar na aba **Follow-up** no menu do dashboard.
+
+### O que a lista mostra
+
+A lista abre mostrando os casos elegíveis de **hoje e ontem** (dias locais):
+
+- casos com **agendamento confirmado** cujo dia do exame está na data
+  listada;
+- casos de **vinda imediata autorizada** (fluxos sem agendamento, como vinda
+  imediata, pré-UTI ou enfermaria + retaguarda UTI) com decisão médica
+  registrada na data listada.
+
+Cada card mostra o nome do paciente, o número da ocorrência/registro, o
+horário do agendamento (ou o fluxo e a data/hora da decisão, na vinda
+imediata) e o estado do follow-up:
+
+- badge **Follow-up registrado** — o caso já tem follow-up; a versão (v1,
+  v2, ...), a data/hora e o autor aparecem logo abaixo do badge;
+- badge **Follow-up pendente** — ainda não há follow-up registrado para o
+  caso.
+
+Também é possível refinar a lista:
+
+- escolher uma **data específica** no seletor de data para ver apenas os
+  casos daquele dia;
+- buscar por **número da ocorrência** ou **nome do paciente** — a busca cobre
+  qualquer data e devolve no máximo **50 casos**.
+
+Atenção: caso **reagendado** aparece na lista apenas na data vigente do novo
+agendamento, não na data antiga.
+
+### Como preencher o follow-up
+
+1. localizar o caso na lista e clicar em **Registrar follow-up** (ou
+   **Atualizar follow-up**, quando o caso já tiver registro);
+2. para **cada procedimento** do caso (EDA, Colonoscopia ou os dois),
+   informar o desfecho:
+   - **Realizado** — o exame foi realizado;
+   - **Não realizado** — informar a causa:
+     - **Absenteísmo** — o paciente não compareceu;
+     - **Cancelamento por falta de recursos no dia** — informar o submotivo:
+       urgências que ocuparam o horário, falta de tempo hábil ou equipamento
+       quebrado/não disponível;
+     - **Outras causas** — descrever a causa no campo de texto;
+3. responder se **o paciente foi internado** — a pergunta é sempre exibida e
+   é obrigatória em todos os casos;
+4. clicar em **Registrar follow-up**.
+
+Regras do formulário:
+
+- procedimento **realizado** dispensa causa;
+- procedimento **não realizado** exige a causa — sem causa, o envio é
+  bloqueado;
+- **Cancelamento por falta de recursos no dia** exige um dos submotivos;
+- **Outras causas** exige a descrição (obrigatória).
+
+### Versões do follow-up
+
+Cada gravação cria uma **nova versão** do follow-up do caso:
+
+- a primeira gravação cria a **versão 1**;
+- gravar novamente (correção ou complemento) cria a **versão seguinte**;
+- as versões anteriores **nunca são editadas nem apagadas** — cada versão
+  fica preservada com o **autor** e a **data/hora** do registro;
+- a versão de número maior é a **versão atual**, usada na lista para o badge
+  **Follow-up registrado**.
+
+Na tela do formulário, o painel **Versões do follow-up** mostra a versão
+atual e o histórico completo das versões preservadas. Para corrigir um
+follow-up já registrado, basta salvar novamente: o sistema cria uma versão
+nova e mantém a anterior no histórico com autor e data originais.
+
+---
+
+# 7. Boas práticas para todos os usuários
+
+## 7.1 Antes de concluir uma ação
 
 Sempre confira:
 
@@ -1034,7 +1148,7 @@ Sempre confira:
 - se a decisão escolhida corresponde ao fluxo desejado;
 - se os campos obrigatórios foram preenchidos corretamente.
 
-## 6.2 Use os botões formais para decisões formais
+## 7.2 Use os botões formais para decisões formais
 
 | Necessidade | Onde fazer |
 |---|---|
@@ -1051,7 +1165,7 @@ Sempre confira:
 | Encerrar caso após resultado | **Confirmar Recebimento** |
 | Corrigir caso anterior | **Reenviar caso corrigido** |
 
-## 6.3 Quando usar comunicação operacional
+## 7.3 Quando usar comunicação operacional
 
 Use comunicação operacional para mensagens entre equipes.
 
@@ -1066,7 +1180,7 @@ Não use comunicação operacional para substituir:
 - reenvio corrigido;
 - comunicação histórica do CHD ao NIR quando houver formulário próprio.
 
-## 6.4 O que acontece quando o caso é concluído
+## 7.4 O que acontece quando o caso é concluído
 
 Quando o NIR confirma o recebimento do resultado final, o caso sai das filas operacionais.
 
@@ -1074,9 +1188,9 @@ Ele continua registrado para auditoria e pode ser localizado em **Casos Encerrad
 
 ---
 
-# 7. Observações finais
+# 8. Observações finais
 
-## 7.1 Padronização de termos
+## 8.1 Padronização de termos
 
 Neste manual:
 
@@ -1084,7 +1198,7 @@ Neste manual:
 - usamos `@medico` e `@chd` como menções preferenciais;
 - as menções devem ser digitadas sem acento.
 
-## 7.2 Ativação da colonoscopia e do combinado é assunto da operação
+## 8.2 Ativação da colonoscopia e do combinado é assunto da operação
 
 A disponibilidade da **Colonoscopia** e da seleção **EDA + Colonoscopia** no
 upload é controlada pela operação (flag de configuração). Esse controle não é
