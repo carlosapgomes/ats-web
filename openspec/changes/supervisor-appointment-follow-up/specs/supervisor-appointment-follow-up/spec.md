@@ -93,3 +93,10 @@ As rotas de follow-up SHALL exigir autenticação e papel ativo `manager` ou `ad
 - **WHEN** `manager` ou `admin` abre o formulário de follow-up desse caso diretamente pela URL
 - **THEN** recebe resposta 404 com mensagem explicativa
 - **AND** nenhum formulário é renderizado e nenhuma gravação é aceita
+
+#### Scenario: Caso elegível sem procedimentos declarados
+
+- **GIVEN** um caso elegível sem rows `CaseProcedure` (situação defensiva; não deve ocorrer no fluxo atual)
+- **WHEN** `manager` abre o formulário de follow-up desse caso
+- **THEN** a página exibe aviso orientando a correção do caso, sem campos de gravação
+- **AND** qualquer tentativa de POST é rejeitada sem criar rows nem eventos

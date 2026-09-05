@@ -9,7 +9,8 @@
 ## Ciclo de review
 
 - [x] Review independente (reviewer, contexto fresco) do change + Slice 001 — verdict inicial: BLOCK
-- [x] Correções P1/P2 incorporadas (ver `design.md` § Registro de review); revalidação pendente de novo ciclo do reviewer
+- [x] Correções P1/P2 incorporadas (ver `design.md` § Registro de review)
+- [x] Re-review (ciclo 2, reviewer contexto fresco): 6/6 findings RESOLVIDOS, nenhum finding novo — **Merge verdict: OK**
 
 ## Preflight (uma vez, antes do Slice 001)
 

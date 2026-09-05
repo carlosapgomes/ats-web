@@ -2,7 +2,7 @@
 
 ## Objetivo
 
-Comportamento observável: `manager`/`admin` abrem `/dashboard/follow-ups/`, veem os casos elegíveis de hoje+ontem (ou de uma data escolhida, ou resultado de busca), ordenados por data e nome, cada um com badge pendente/registrado e link para o formulário (rota já reservada; o form em si é o Slice 003). Papéis demais são barrados.
+Comportamento observável: `manager`/`admin` abrem `/dashboard/follow-ups/`, veem os casos elegíveis de hoje+ontem (ou de uma data escolhida, ou resultado de busca), ordenados por data e nome, cada um com badge pendente/registrado. **Os cards NÃO linkam para o formulário neste slice** — rota `followup_form` e link do card chegam no Slice 003 (evita navegação quebrada entre slices). Papéis demais são barrados.
 
 ## Contexto necessário (ler antes de editar)
 
