@@ -10,7 +10,7 @@ import uuid
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass
 from datetime import date, datetime, time, timedelta
-from typing import Any
+from typing import Any, cast
 
 from django.conf import settings
 from django.core.files.uploadedfile import UploadedFile
@@ -39,10 +39,22 @@ class CaseLockResult:
     locked_until: datetime | None = None
 
 
-def _get_lease_seconds(override: int | None = None) -> int:
-    """Return the lease duration in seconds."""
+_CONTEXT_LEASE_SETTINGS: dict[str, str] = {
+    "doctor_decision": "CASE_LOCK_LEASE_SECONDS_DOCTOR",
+}
+
+
+def _get_lease_seconds(override: int | None = None, context: str | None = None) -> int:
+    """Return the lease duration in seconds.
+
+    Precedence: explicit override > per-context setting > CASE_LOCK_LEASE_SECONDS.
+    """
     if override is not None:
         return override
+    if context is not None:
+        setting_name = _CONTEXT_LEASE_SETTINGS.get(context)
+        if setting_name is not None:
+            return cast(int, getattr(settings, setting_name))
     return getattr(settings, "CASE_LOCK_LEASE_SECONDS", 300)
 
 
@@ -94,7 +106,7 @@ def claim_case_lock(
     Returns:
         CaseLockResult with acquired flag and token if successful.
     """
-    seconds = _get_lease_seconds(lease_seconds)
+    seconds = _get_lease_seconds(lease_seconds, context=context)
     now = timezone.now()
     token = uuid.uuid4()
     locked_until = now + timedelta(seconds=seconds)
@@ -331,7 +343,7 @@ def renew_case_lock(
     Returns:
         CaseLockResult with acquired=True and new locked_until if successful.
     """
-    seconds = _get_lease_seconds(lease_seconds)
+    seconds = _get_lease_seconds(lease_seconds, context=context)
     now = timezone.now()
     locked_until = now + timedelta(seconds=seconds)
 

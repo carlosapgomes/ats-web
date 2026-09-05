@@ -132,11 +132,14 @@ Pytest final: exit code 0, zero failures/errors, `passed_final >= passed_baselin
 
 ## Critérios de aceitação
 
-- [ ] R1: precedência override > contexto > global comprovada nos 4 cenários de claim.
-- [ ] R2: renew médico estende ≈ 1h; renovar expirado continua falhando; takeover com `lease_seconds=0` verde.
-- [ ] R3: GET da decisão médica deixa `locked_until` em [3500, 3600]s.
-- [ ] R4: diff limitado aos 4 arquivos; JS/views intocados.
-- [ ] RED/GREEN comprovados no relatório; gate final completo verde.
+- [x] R1: precedência override > contexto > global comprovada nos 4 cenários de claim.
+- [x] R2: renew médico estende ≈ 1h; renovar expirado continua falhando; takeover com `lease_seconds=0` verde.
+- [x] R3: GET da decisão médica deixa `locked_until` em [3500, 3600]s.
+- [x] R4: diff limitado aos 4 arquivos; JS/views intocados.
+- [x] RED/GREEN comprovados no relatório; gate final completo verde.
+
+> Loop parent-controlled concluído em 2026-09-05: reviewer `Merge verdict: OK`
+> (0 findings). Conclusão (tasks.md, relatório, commit) executada pelo parent.
 
 ## Conclusão controlada
 

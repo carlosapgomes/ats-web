@@ -1097,6 +1097,22 @@ class TestDoctorDecisionView:
         response = client.get(f"/doctor/{case.case_id}/")
         assert response.status_code == 200
 
+    def test_decision_get_claims_doctor_lock_with_one_hour_lease(self, client) -> None:
+        """R3: GET decision page claims doctor_decision lock with ~1h lease."""
+        case = self._create_case_in_status(CaseStatus.WAIT_DOCTOR)
+        case.structured_data = {"patient": {"name": "Lock Lease", "age": 40, "gender": "Masculino"}}
+        case.save()
+        self._login_as(client, "doctor")
+        response = client.get(f"/doctor/{case.case_id}/")
+        assert response.status_code == 200
+
+        case = Case.objects.get(pk=case.case_id)
+        assert case.locked_by is not None
+        assert case.lock_context == "doctor_decision"
+        assert case.locked_until is not None
+        remaining = case.locked_until - timezone.now()
+        assert timedelta(seconds=3500) <= remaining <= timedelta(seconds=3600)
+
     def test_decision_page_without_errors_has_no_error_banner(self, client) -> None:
         """Initial decision page carries no error banner."""
         case = self._create_case_in_status(CaseStatus.WAIT_DOCTOR)

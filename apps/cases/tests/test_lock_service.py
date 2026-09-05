@@ -5,6 +5,7 @@ from datetime import timedelta
 
 import pytest
 from django.contrib.auth import get_user_model
+from django.test import override_settings
 from django.utils import timezone
 
 from apps.cases.models import Case, CaseEvent, CaseStatus
@@ -812,3 +813,141 @@ class TestExpireStaleLocks:
 
         case = Case.objects.get(pk=case.case_id)
         assert case.locked_by == user
+
+
+@pytest.mark.django_db
+class TestContextLeaseResolution:
+    """R1/R2: lease duration resolves per context.
+
+    Precedence: explicit lease_seconds > per-context setting > global
+    CASE_LOCK_LEASE_SECONDS. Second-level tolerance via timedelta only
+    (no exact clock equality).
+    """
+
+    def _doctor_user(self):
+        user = User.objects.create_user(username="doctor_ctx_lease@test.com", password="testpass123")
+        user.roles.add(_create_role("doctor"))
+        return user
+
+    def _make_case_wait_doctor(self, user) -> Case:
+        case = Case.objects.create(created_by=user)
+        return _advance_to(case, CaseStatus.WAIT_DOCTOR)
+
+    @staticmethod
+    def _assert_remaining_about(case: Case, expected_seconds: int, tolerance: int = 10) -> None:
+        """Assert locked_until is about now + expected_seconds (within tolerance)."""
+        assert case.locked_until is not None
+        remaining = case.locked_until - timezone.now()
+        lower = timedelta(seconds=expected_seconds - tolerance)
+        upper = timedelta(seconds=expected_seconds + tolerance)
+        assert lower <= remaining <= upper
+
+    @override_settings(CASE_LOCK_LEASE_SECONDS_DOCTOR=3600)
+    def test_claim_doctor_decision_context_lease_is_one_hour(self):
+        """doctor_decision claim resolves CASE_LOCK_LEASE_SECONDS_DOCTOR (3600s)."""
+        from apps.cases.services import claim_case_lock
+
+        user = self._doctor_user()
+        case = self._make_case_wait_doctor(user)
+
+        result = claim_case_lock(
+            case_id=case.case_id,
+            user=user,
+            expected_status=CaseStatus.WAIT_DOCTOR,
+            context="doctor_decision",
+            role="doctor",
+        )
+
+        assert result.acquired is True
+        case = Case.objects.get(pk=case.case_id)
+        self._assert_remaining_about(case, expected_seconds=3600)
+
+    @override_settings(CASE_LOCK_LEASE_SECONDS_DOCTOR=3600)
+    def test_claim_nir_receipt_context_lease_keeps_global_300(self):
+        """nir_receipt claim keeps the global CASE_LOCK_LEASE_SECONDS (300s)."""
+        from apps.cases.services import claim_case_lock
+
+        user = self._doctor_user()
+        case = self._make_case_wait_doctor(user)
+
+        result = claim_case_lock(
+            case_id=case.case_id,
+            user=user,
+            expected_status=CaseStatus.WAIT_DOCTOR,
+            context="nir_receipt",
+            role="nir",
+        )
+
+        assert result.acquired is True
+        case = Case.objects.get(pk=case.case_id)
+        self._assert_remaining_about(case, expected_seconds=300)
+
+    @override_settings(CASE_LOCK_LEASE_SECONDS_DOCTOR=3600)
+    def test_claim_scheduler_confirm_context_lease_keeps_global_300(self):
+        """scheduler_confirm claim keeps the global CASE_LOCK_LEASE_SECONDS (300s)."""
+        from apps.cases.services import claim_case_lock
+
+        user = self._doctor_user()
+        case = self._make_case_wait_doctor(user)
+
+        result = claim_case_lock(
+            case_id=case.case_id,
+            user=user,
+            expected_status=CaseStatus.WAIT_DOCTOR,
+            context="scheduler_confirm",
+            role="scheduler",
+        )
+
+        assert result.acquired is True
+        case = Case.objects.get(pk=case.case_id)
+        self._assert_remaining_about(case, expected_seconds=300)
+
+    @override_settings(CASE_LOCK_LEASE_SECONDS_DOCTOR=3600)
+    def test_claim_explicit_lease_seconds_context_lease_override_wins(self):
+        """Explicit lease_seconds beats the per-context setting (120s wins over 3600s)."""
+        from apps.cases.services import claim_case_lock
+
+        user = self._doctor_user()
+        case = self._make_case_wait_doctor(user)
+
+        result = claim_case_lock(
+            case_id=case.case_id,
+            user=user,
+            expected_status=CaseStatus.WAIT_DOCTOR,
+            context="doctor_decision",
+            role="doctor",
+            lease_seconds=120,
+        )
+
+        assert result.acquired is True
+        case = Case.objects.get(pk=case.case_id)
+        self._assert_remaining_about(case, expected_seconds=120)
+
+    @override_settings(CASE_LOCK_LEASE_SECONDS_DOCTOR=3600)
+    def test_renew_doctor_decision_context_lease_extends_one_hour(self):
+        """Renew of an active doctor_decision lock extends to ~now + 3600s."""
+        from apps.cases.services import claim_case_lock, renew_case_lock
+
+        user = self._doctor_user()
+        case = self._make_case_wait_doctor(user)
+
+        result = claim_case_lock(
+            case_id=case.case_id,
+            user=user,
+            expected_status=CaseStatus.WAIT_DOCTOR,
+            context="doctor_decision",
+            role="doctor",
+        )
+        assert result.acquired is True
+        assert result.token is not None
+
+        renew_result = renew_case_lock(
+            case_id=case.case_id,
+            user=user,
+            token=result.token,
+            context="doctor_decision",
+        )
+
+        assert renew_result.acquired is True
+        case = Case.objects.get(pk=case.case_id)
+        self._assert_remaining_about(case, expected_seconds=3600)
