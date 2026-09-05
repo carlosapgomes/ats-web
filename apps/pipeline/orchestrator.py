@@ -477,8 +477,6 @@ def _run_v2_pipeline(
     case.save()
     case.ready_for_doctor()
     case.save()
-    case._record_event("CASE_READY_FOR_DOCTOR")
-    case.save()
 
 
 def _build_v2_llm1_ok_payload(case: Case, result1: Llm1V2Result) -> dict[str, object]:

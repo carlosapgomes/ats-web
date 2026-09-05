@@ -310,6 +310,17 @@ class TestPipelineGeneratesEvents:
         assert "LLM2_OK" in event_types
         assert "CASE_READY_FOR_DOCTOR" in event_types
 
+    def test_ready_for_doctor_single_event(self, django_user_model) -> None:
+        """QUICK bugfix: transição FSM já registra o evento; não duplicar."""
+        user = django_user_model.objects.create_user(username="nir5b", password="pw")
+        case = _make_case(user)
+
+        client = RecordingLlmClient(responses=[_eda_llm1_response(), _llm2_v2(str(case.case_id))])
+
+        run_pipeline(case.case_id, llm_client=client, llm1_system_prompt="sp1", llm1_user_template="ut1")
+
+        assert CaseEvent.objects.filter(case=case, event_type="CASE_READY_FOR_DOCTOR").count() == 1
+
 
 @pytest.mark.django_db
 class TestPipelineLlm1Failure:
