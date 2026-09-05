@@ -199,6 +199,24 @@ class TestFollowUpFormGet:
         assert 'name="patient_admitted"' in content
         assert "cria nova versão" in content
 
+    def test_get_renders_reason_section_fieldset_per_procedure_block(self, client) -> None:
+        """Cada bloco de procedimento renderiza o fieldset data-followup-reason-section.
+
+        A seção de causa (radios de non_performance_reason + grupos condicionais)
+        é envolvida por um <fieldset> desabilitável nativamente; o teste garante um
+        fieldset por bloco de procedimento (R4/R1 do slice 001).
+        """
+        user = _login_as(client, "manager")
+        case = _create_case(user, arn="RSN-SEC-001", name="Causa Section")
+        _add_procedure(case, "eda")
+        _add_procedure(case, "colonoscopy")
+
+        response = client.get(_form_url(case))
+        assert response.status_code == 200
+        content = response.content.decode()
+        assert content.count("data-followup-reason-section") == 2
+        assert content.count('<fieldset class="mb-2" data-followup-reason-section>') == 2
+
     def test_get_immediate_case_shows_admission_flow(self, client) -> None:
         user = _login_as(client, "manager")
         case = Case.objects.create(

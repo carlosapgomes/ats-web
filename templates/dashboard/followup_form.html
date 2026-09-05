@@ -126,7 +126,7 @@
             {% endfor %}
           </div>
 
-          <div class="mb-2">
+          <fieldset class="mb-2" data-followup-reason-section>
             <span class="form-label d-block">{{ form.non_performance_reason.label }}</span>
             {% for radio in form.non_performance_reason %}
             <div class="form-check">
@@ -158,7 +158,7 @@
               <div class="invalid-feedback d-block">{{ error }}</div>
               {% endfor %}
             </div>
-          </div>
+          </fieldset>
         </div>
         {% endwith %}
         {% endfor %}
