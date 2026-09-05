@@ -815,3 +815,120 @@ class CaseCommunicationMessage(models.Model):
                 raise ValidationError("Mensagens manuais (message_type='user') exigem author_role.")
         if self.message_type not in ("user", "system"):
             raise ValidationError(f"message_type inválido: '{self.message_type}'. Use 'user' ou 'system'.")
+
+
+class FollowUpNonPerformanceReason(models.TextChoices):
+    """Causa estruturada de procedimento não realizado (follow-up)."""
+
+    ABSENTEEISM = "absenteeism", "Absenteísmo"
+    RESOURCE_SHORTAGE = "resource_shortage", "Cancelamento por falta de recursos no dia"
+    OTHER = "other", "Outras causas"
+
+
+class FollowUpResourceShortageDetail(models.TextChoices):
+    """Submotivo de cancelamento por falta de recursos no dia agendado."""
+
+    EMERGENCY_OCCUPIED = "emergency_occupied", "Urgências que ocuparam o horário"
+    INSUFFICIENT_TIME = "insufficient_time", "Falta de tempo hábil"
+    EQUIPMENT_UNAVAILABLE = "equipment_unavailable", "Equipamento quebrado/não disponível"
+
+
+class CaseFollowUp(models.Model):
+    """Versão append-only do follow-up de desfecho de um caso.
+
+    Cada gravação cria uma nova row (versão); a versão corrente é a de maior
+    ``version``. Nada é editado ou apagado: dados anteriores, autor e
+    instante ficam preservados por construção. Cada gravação é espelhada em
+    ``CaseEvent`` (``FOLLOWUP_RECORDED``/``FOLLOWUP_UPDATED``) — registro
+    puro de desfecho: não altera a FSM nem dispara fluxos operacionais.
+    """
+
+    case = models.ForeignKey("Case", on_delete=models.CASCADE, related_name="follow_ups")
+    version = models.PositiveIntegerField(default=1)
+    patient_admitted = models.BooleanField(default=False)
+    recorded_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="follow_ups_recorded",
+    )
+    recorded_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(fields=["case", "version"], name="unique_followup_version_per_case"),
+        ]
+        ordering = ["-version"]
+
+    def __str__(self) -> str:
+        return f"CaseFollowUp v{self.version} ({self.case_id})"
+
+
+class ProcedureFollowUp(models.Model):
+    """Desfecho de um ``CaseProcedure`` dentro de uma versão de follow-up.
+
+    Integridade condicional (motivo exigido quando não realizado, submotivo
+    só em ``resource_shortage``, texto só em ``other`` e campos zerados
+    quando realizado) é validada no service e respaldada por checks no banco.
+    """
+
+    follow_up = models.ForeignKey(
+        CaseFollowUp,
+        on_delete=models.CASCADE,
+        related_name="procedure_outcomes",
+    )
+    procedure = models.ForeignKey(
+        CaseProcedure,
+        on_delete=models.CASCADE,
+        related_name="follow_up_outcomes",
+    )
+    performed = models.BooleanField(default=False)
+    non_performance_reason = models.CharField(
+        max_length=30,
+        choices=FollowUpNonPerformanceReason.choices,
+        blank=True,
+    )
+    resource_shortage_detail = models.CharField(
+        max_length=30,
+        choices=FollowUpResourceShortageDetail.choices,
+        blank=True,
+    )
+    other_reason = models.TextField(blank=True)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=["follow_up", "procedure"],
+                name="unique_procedure_per_followup_version",
+            ),
+            models.CheckConstraint(
+                condition=~models.Q(performed=False, non_performance_reason=""),
+                name="followup_reason_required_when_not_performed",
+            ),
+            models.CheckConstraint(
+                condition=models.Q(performed=False) | models.Q(non_performance_reason=""),
+                name="followup_reason_empty_when_performed",
+            ),
+            models.CheckConstraint(
+                condition=~models.Q(non_performance_reason="resource_shortage", resource_shortage_detail=""),
+                name="followup_detail_required_when_resource_shortage",
+            ),
+            models.CheckConstraint(
+                condition=models.Q(non_performance_reason="resource_shortage") | models.Q(resource_shortage_detail=""),
+                name="followup_detail_empty_without_resource_shortage",
+            ),
+            models.CheckConstraint(
+                condition=~models.Q(non_performance_reason="other", other_reason=""),
+                name="followup_other_text_required",
+            ),
+            models.CheckConstraint(
+                condition=models.Q(non_performance_reason="other") | models.Q(other_reason=""),
+                name="followup_other_text_only_for_other",
+            ),
+        ]
+
+    def __str__(self) -> str:
+        if self.performed:
+            return f"ProcedureFollowUp {self.procedure_id}: realizado"
+        return f"ProcedureFollowUp {self.procedure_id}: {self.non_performance_reason}"
