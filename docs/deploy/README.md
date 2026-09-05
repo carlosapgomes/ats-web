@@ -17,6 +17,8 @@ específica usam `<change-id>.md`, o mesmo ID de
     separadas de banco, ingress e egress do worker LLM, validação e rollback.
 - [`corrected-case-resubmission-linkage.md`](./corrected-case-resubmission-linkage.md)
   — Reenvio corrigido explícito NIR + visibilidade médico/NIR.
+- [`supervisor-appointment-follow-up.md`](./supervisor-appointment-follow-up.md)
+  — Registro de desfecho pós-exame (follow-up) na aba Follow-up do supervisor.
 - [`introduce-colonoscopy-exam-workflow.md`](./introduce-colonoscopy-exam-workflow.md)
   — Tipo de exame explícito EDA/Colonoscopia (8 slices, arquivado).
 - [`support-combined-eda-colonoscopy-workflow.md`](./support-combined-eda-colonoscopy-workflow.md)
