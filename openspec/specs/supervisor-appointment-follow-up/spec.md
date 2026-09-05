@@ -1,6 +1,9 @@
-# supervisor-appointment-follow-up Spec Delta
+# supervisor-appointment-follow-up Specification
 
-## ADDED Requirements
+## Purpose
+Registro de desfecho pós-exame pelo Supervisor: permitir que `manager`/`admin` informem, por caso agendado (confirmado) ou de vinda imediata autorizada, se cada exame/procedimento foi realizado — e, quando não realizado, a causa estruturada (absenteísmo, falta de recursos no dia com submotivo, outras causas) — além da ocorrência de internação. Follow-up é registro puro e versionado append-only (autor e instante por versão, espelho em `CaseEvent`); não altera FSM nem dispara intercorrências/reagendamento.
+
+## Requirements
 
 ### Requirement: O sistema SHALL registrar o desfecho por procedimento de casos agendados e de vinda imediata
 
