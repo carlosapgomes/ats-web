@@ -1,5 +1,7 @@
-"""Testes da página Histórico & Exportação de follow-ups (Slice 001, R1–R8)."""
+"""Testes da página Histórico & Exportação de follow-ups (Slice 001 R1–R8; Slice 002 R1–R7)."""
 
+import csv
+import io
 from datetime import date, datetime, time, timedelta
 
 import pytest
@@ -8,7 +10,7 @@ from django.urls import reverse
 from django.utils import timezone
 
 from apps.cases.followup import ProcedureOutcomeInput, record_case_follow_up
-from apps.cases.models import Case, CaseFollowUp, CaseProcedure
+from apps.cases.models import Case, CaseEvent, CaseFollowUp, CaseProcedure
 
 pytestmark = pytest.mark.django_db
 
@@ -16,6 +18,25 @@ User = get_user_model()
 
 HISTORY_URL = reverse("dashboard:followup_history")
 LIST_URL = reverse("dashboard:followup_list")
+EXPORT_URL = reverse("dashboard:followup_history_export")
+
+# Header PT-BR fixo do CSV (design D5 / R2) — ordem exata das 13 colunas.
+CSV_HEADER = [
+    "Case ID",
+    "Ocorrência",
+    "Paciente",
+    "Data",
+    "Procedimento",
+    "Desfecho",
+    "Causa",
+    "Submotivo",
+    "Outra causa (texto)",
+    "Internação",
+    "Versão",
+    "Registrado por",
+    "Registrado em",
+]
+CSV_COL = {name: index for index, name in enumerate(CSV_HEADER)}
 
 
 # ── Helpers ──────────────────────────────────────────────────────────────
@@ -132,6 +153,18 @@ def _default_window() -> tuple[date, date]:
 def _window_header(start, end) -> str:
     """Texto do header da página com a janela ativa (dd/mm/yyyy)."""
     return f"Janela: {start.strftime('%d/%m/%Y')} a {end.strftime('%d/%m/%Y')}"
+
+
+def _export_csv(client, **params) -> list[list[str]]:
+    """Baixa o CSV e re-parseia com csv.reader (delimiter ';'), BOM removido.
+
+    Re-parse obrigatório para conteúdos escapados: nunca assert de string crua
+    quando a célula contém ';', aspas ou quebras (R4).
+    """
+    response = client.get(EXPORT_URL, params or None)
+    assert response.status_code == 200
+    body = response.content.decode("utf-8-sig")  # remove o BOM \ufeff
+    return list(csv.reader(io.StringIO(body), delimiter=";"))
 
 
 # ── R8: acesso e guard ──────────────────────────────────────────────────
@@ -485,3 +518,303 @@ class TestHistoryTable:
 
         second = client.get(HISTORY_URL, {"page": 2})
         assert len(second.context["page_obj"].object_list) == 1
+
+
+# ── R1/R7: rota de exportação, content-type, filename e guard ───────────
+
+
+class TestHistoryExportAccess:
+    """GET /dashboard/follow-ups/history/export/ exige manager/admin."""
+
+    def test_export_content_type_disposition_e_bom(self, client) -> None:
+        user = _login_as(client, "manager")
+        case = _create_scheduled_case(user, arn="CSV-HEAD", name="Header Export", when=_local_dt(day_offset=0))
+        _record(case, user)
+
+        response = client.get(EXPORT_URL)
+        assert response.status_code == 200
+        assert response["Content-Type"] == "text/csv; charset=utf-8"
+        window_start, window_end = _default_window()
+        expected = f'attachment; filename="followups_{window_start:%Y%m%d}_{window_end:%Y%m%d}.csv"'
+        assert response["Content-Disposition"] == expected
+        assert response.content.startswith("\ufeff".encode("utf-8"))
+
+    def test_export_filename_usa_janela_custom(self, client) -> None:
+        user = _login_as(client, "manager")
+        start_day = timezone.localdate() - timedelta(days=3)
+        end_day = timezone.localdate() + timedelta(days=1)
+        case = _create_scheduled_case(
+            user, arn="CSV-JANELA", name="Janela Custom", when=_local_dt(day_offset=0, hour=9)
+        )
+        _record(case, user)
+
+        params = {"start": start_day.isoformat(), "end": end_day.isoformat()}
+        response = client.get(EXPORT_URL, params)
+        assert response.status_code == 200
+        expected = f'attachment; filename="followups_{start_day:%Y%m%d}_{end_day:%Y%m%d}.csv"'
+        assert response["Content-Disposition"] == expected
+
+    def test_export_janela_invalida_cai_no_default_no_filename(self, client) -> None:
+        user = _login_as(client, "manager")
+        hoje = _create_scheduled_case(user, arn="CSV-FALLBACK", name="Fallback", when=_local_dt(day_offset=0))
+        _record(hoje, user)
+
+        response = client.get(EXPORT_URL, {"start": "nao-e-data", "end": "2020-01-01"})
+        assert response.status_code == 200
+        window_start, window_end = _default_window()
+        expected = f'attachment; filename="followups_{window_start:%Y%m%d}_{window_end:%Y%m%d}.csv"'
+        assert response["Content-Disposition"] == expected
+
+    @pytest.mark.parametrize("role_name", ["manager", "admin"])
+    def test_export_roles_permitidos_200(self, client, role_name: str) -> None:
+        user = _login_as(client, role_name)
+        case = _create_scheduled_case(user, arn="CSV-ROLE", name=f"Role {role_name}", when=_local_dt(day_offset=0))
+        _record(case, user)
+        assert client.get(EXPORT_URL).status_code == 200
+
+    def test_export_anonimo_redirecionado(self, client) -> None:
+        response = client.get(EXPORT_URL)
+        assert response.status_code == 302
+        assert "/login/" in response.url
+
+    @pytest.mark.parametrize("role_name", ["nir", "scheduler", "doctor"])
+    def test_export_papeis_sem_acesso_bloqueados_sem_conteudo(self, client, role_name: str) -> None:
+        # Dados existem, mas não podem vazar para papéis sem acesso.
+        data_user = User.objects.create_user(username=f"export-data-{role_name}@test", password="testpass123")
+        case = _create_scheduled_case(
+            data_user, arn="CSV-SECRET", name="Paciente Secreto", when=_local_dt(day_offset=0)
+        )
+        _record(case, data_user)
+
+        _login_as(client, role_name)
+        response = client.get(EXPORT_URL)
+        assert response.status_code == 302
+        assert "CSV-SECRET" not in response.content.decode()
+        assert "Paciente Secreto" not in response.content.decode()
+
+
+# ── R2: header fixo PT-BR de 13 colunas ────────────────────────────────
+
+
+class TestHistoryExportHeader:
+    """Corpo: BOM + header único com as 13 colunas exatas na ordem fixada."""
+
+    def test_header_exato(self, client) -> None:
+        user = _login_as(client, "manager")
+        case = _create_scheduled_case(user, arn="CSV-HEADER", name="Header", when=_local_dt(day_offset=0))
+        _record(case, user)
+
+        records = _export_csv(client)
+        assert records[0] == CSV_HEADER
+        assert len(records[0]) == 13
+
+
+# ── R3: 1 linha por desfecho da versão corrente, labels humanos ─────────
+
+
+class TestHistoryExportRows:
+    """MESMA composição da página (versão corrente, janela, busca), todas as linhas."""
+
+    def test_uma_linha_por_desfecho_da_versao_corrente_com_labels(self, client) -> None:
+        user = _login_as(client, "manager")
+        when = _local_dt(day_offset=0, hour=9, minute=30)
+        case = _create_scheduled_case(user, arn="CSV-001", name="Maria Export", when=when)
+        _record(case, user, performed=False, reason="other", other="Equipe indisponível")  # v1 — fora da população
+
+        procedure_eda, _ = CaseProcedure.objects.get_or_create(case=case, procedure_type="eda")
+        procedure_colo, _ = CaseProcedure.objects.get_or_create(case=case, procedure_type="colonoscopy")
+        v2 = record_case_follow_up(
+            case=case,
+            performed_by=user,
+            patient_admitted=True,
+            procedure_outcomes=[
+                ProcedureOutcomeInput(procedure_id=procedure_eda.id, performed=True),
+                ProcedureOutcomeInput(
+                    procedure_id=procedure_colo.id,
+                    performed=False,
+                    non_performance_reason="resource_shortage",
+                    resource_shortage_detail="equipment_unavailable",
+                ),
+            ],
+        )
+
+        records = _export_csv(client)
+        data_rows = records[1:]
+        assert len(data_rows) == 2  # 1 por desfecho, apenas v2
+
+        by_procedure = {row[CSV_COL["Procedimento"]]: row for row in data_rows}
+        assert set(by_procedure) == {"EDA", "Colonoscopia"}
+        assert "Equipe indisponível" not in " ".join(" ".join(row) for row in data_rows)
+
+        shared = {
+            "Case ID": str(case.case_id),
+            "Ocorrência": "CSV-001",
+            "Paciente": "Maria Export",
+            "Data": _local_day(0).strftime("%d/%m/%Y"),
+            "Internação": "Sim",
+            "Versão": "2",
+            "Registrado por": user.username,
+            "Registrado em": timezone.localtime(v2.recorded_at).strftime("%d/%m/%Y %H:%M"),
+        }
+        for row in data_rows:
+            for column, expected in shared.items():
+                assert row[CSV_COL[column]] == expected, f"coluna {column} divergiu: {row}"
+
+        performed_row = by_procedure["EDA"]
+        assert performed_row[CSV_COL["Desfecho"]] == "Realizado"
+        assert performed_row[CSV_COL["Causa"]] == ""
+        assert performed_row[CSV_COL["Submotivo"]] == ""
+        assert performed_row[CSV_COL["Outra causa (texto)"]] == ""
+
+        not_performed_row = by_procedure["Colonoscopia"]
+        assert not_performed_row[CSV_COL["Desfecho"]] == "Não realizado"
+        assert not_performed_row[CSV_COL["Causa"]] == "Cancelamento por falta de recursos no dia"
+        assert not_performed_row[CSV_COL["Submotivo"]] == "Equipamento quebrado/não disponível"
+        assert not_performed_row[CSV_COL["Outra causa (texto)"]] == ""
+
+    def test_outra_causa_texto_e_nao_realizado_nao_internado(self, client) -> None:
+        user = _login_as(client, "manager")
+        case = _create_scheduled_case(user, arn="CSV-002", name="Outra Causa", when=_local_dt(day_offset=0, hour=9))
+        _record(case, user, performed=False, reason="other", other="Paciente recusou o exame")
+
+        records = _export_csv(client)
+        (row,) = records[1:]
+        assert row[CSV_COL["Desfecho"]] == "Não realizado"
+        assert row[CSV_COL["Causa"]] == "Outras causas"
+        assert row[CSV_COL["Submotivo"]] == ""
+        assert row[CSV_COL["Outra causa (texto)"]] == "Paciente recusou o exame"
+        assert row[CSV_COL["Internação"]] == "Não"
+        assert row[CSV_COL["Versão"]] == "1"
+
+    def test_export_ignora_paginacao(self, client) -> None:
+        user = _login_as(client, "manager")
+        for i in range(26):
+            case = _create_scheduled_case(
+                user, arn=f"PAGE-CSV-{i:02d}", name=f"Export {i:02d}", when=_local_dt(day_offset=0)
+            )
+            _record(case, user)
+
+        records = _export_csv(client)
+        assert len(records) == 1 + 26  # header + TODAS as linhas (>25)
+
+        records_page2 = _export_csv(client, page="2")
+        assert records_page2 == records  # ?page= da tabela não afeta o CSV
+
+    def test_export_mesma_populacao_e_ordem_da_pagina(self, client) -> None:
+        user = _login_as(client, "manager")
+        cases = (
+            ("EXP-ALFA", "Alfa", 8),
+            ("EXP-BETA", "Beta", 10),
+            ("EXP-ANA", "Ana", 9),
+            ("EXP-ZE", "Zé", 11),
+        )
+        for arn, name, hour in cases:
+            case = _create_scheduled_case(user, arn=arn, name=name, when=_local_dt(day_offset=0, hour=hour))
+            _record(case, user)
+
+        page = client.get(HISTORY_URL)
+        assert page.status_code == 200
+        page_arns = _history_arns(page)
+        assert len(page_arns) == 4
+
+        records = _export_csv(client)
+        csv_arns = [row[CSV_COL["Ocorrência"]] for row in records[1:]]
+        assert csv_arns == page_arns
+
+
+# ── R3 (filtros): janela e busca idênticas à página ────────────────────
+
+
+class TestHistoryExportFilters:
+    """Export respeita a janela ativa e a busca ?q= da página."""
+
+    def test_export_respeita_janela_custom(self, client) -> None:
+        user = _login_as(client, "manager")
+        start_day = timezone.localdate() - timedelta(days=2)
+        end_day = timezone.localdate() + timedelta(days=2)
+        casos = (
+            ("CSV-INI", start_day, 9),
+            ("CSV-FIM", end_day, 11),
+            ("CSV-FORA", end_day + timedelta(days=1), 9),
+        )
+        for arn, day, hour in casos:
+            when = timezone.make_aware(datetime.combine(day, time(hour)), timezone.get_current_timezone())
+            case = _create_scheduled_case(user, arn=arn, name=f"Paciente {arn}", when=when)
+            _record(case, user)
+
+        params = {"start": start_day.isoformat(), "end": end_day.isoformat()}
+        records = _export_csv(client, **params)
+        csv_arns = [row[CSV_COL["Ocorrência"]] for row in records[1:]]
+        assert sorted(csv_arns) == ["CSV-FIM", "CSV-INI"]
+
+    def test_export_respeita_busca_dentro_da_janela(self, client) -> None:
+        user = _login_as(client, "manager")
+        alvo = _create_scheduled_case(user, arn="CSV-ABC", name="Maria Alvo", when=_local_dt(day_offset=0))
+        _record(alvo, user)
+        outro = _create_scheduled_case(user, arn="CSV-XYZ", name="João Souza", when=_local_dt(day_offset=0, hour=15))
+        _record(outro, user)
+        fora = _create_scheduled_case(user, arn="CSV-ABC-FORA", name="Maria Alvo", when=_local_dt(day_offset=-20))
+        _record(fora, user)
+
+        records = _export_csv(client, q="maria alvo")
+        csv_arns = [row[CSV_COL["Ocorrência"]] for row in records[1:]]
+        assert csv_arns == ["CSV-ABC"]  # busca dentro da janela default (fora excluído)
+
+
+# ── R4: escaping automático do módulo csv ───────────────────────────────
+
+
+class TestHistoryExportEscaping:
+    """Campo com ';', aspas e quebra de linha permanece em UMA célula parseável."""
+
+    def test_campo_com_separador_aspas_e_quebra_fica_em_uma_celula(self, client) -> None:
+        user = _login_as(client, "manager")
+        other = 'Equipe ausente; "sem substituto"\nsegunda linha do motivo'
+        case = _create_scheduled_case(
+            user, arn="CSV-ESC", name="Paciente Escaping", when=_local_dt(day_offset=0, hour=9)
+        )
+        _record(case, user, performed=False, reason="other", other=other)
+
+        records = _export_csv(client)
+        assert len(records) == 2  # header + 1 linha: ';' e quebra não fragmentam o registro
+        (row,) = records[1:]
+        assert len(row) == 13
+        assert row[CSV_COL["Outra causa (texto)"]] == other
+        assert row[CSV_COL["Causa"]] == "Outras causas"
+        assert row[CSV_COL["Paciente"]] == "Paciente Escaping"
+
+
+# ── R5: exportação é leitura pura (nenhum CaseEvent) ────────────────────
+
+
+class TestHistoryExportNoEvents:
+    """Exportar não grava auditoria nem altera estado."""
+
+    def test_export_nao_cria_case_events(self, client) -> None:
+        user = _login_as(client, "manager")
+        case = _create_scheduled_case(user, arn="CSV-EVENTOS", name="Sem Eventos", when=_local_dt(day_offset=0))
+        _record(case, user)
+
+        before = CaseEvent.objects.count()
+        response = client.get(EXPORT_URL)
+        assert response.status_code == 200
+        assert CaseEvent.objects.count() == before
+
+
+# ── R6: botão Exportar CSV no form de filtros da página ─────────────────
+
+
+class TestHistoryExportButton:
+    """Botão dentro do form de filtros, herda a querystring, sem JS."""
+
+    def test_botao_exportar_csv_no_form_de_filtros(self, client) -> None:
+        _login_as(client, "manager")
+        content = client.get(HISTORY_URL).content.decode()
+        assert "Exportar CSV" in content
+        assert EXPORT_URL in content
+        assert 'class="btn btn-sm btn-outline-primary"' in content
+        # Form de filtros da página (method="get"); o botão fica dentro dele e,
+        # via formaction, herda q/start/end ao exportar.
+        filter_form_start = content.index('<form method="get"')
+        filter_form_end = content.index("</form>", filter_form_start)
+        assert filter_form_start < content.index("Exportar CSV") < filter_form_end

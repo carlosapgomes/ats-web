@@ -1,5 +1,7 @@
 """Views do dashboard de monitoramento para manager e admin."""
 
+import csv
+import io
 import re
 import uuid
 from datetime import date, datetime, timedelta
@@ -1556,16 +1558,24 @@ def _followup_history_rows(
         author_label = (author.get_full_name() or author.username) if author else "—"
         for outcome in follow_up.procedure_outcomes.all():
             if outcome.performed:
-                reason = reason_code = reason_label = detail_label = ""
+                reason = reason_code = reason_label = ""
+                submotivo_label = other_reason_text = detail_label = ""
             else:
                 reason = outcome.non_performance_reason
                 reason_label = _FOLLOWUP_REASON_LABELS.get(reason, "")
                 reason_code = outcome.resource_shortage_detail
-                detail_label = (
-                    _FOLLOWUP_DETAIL_LABELS.get(outcome.resource_shortage_detail, "")
-                    if outcome.resource_shortage_detail
-                    else outcome.other_reason.strip()
-                )
+                # Submotivo existe só para resource_shortage; texto só para other
+                # (CheckConstraints do model) — campos granulares também servem ao CSV.
+                if reason == FollowUpNonPerformanceReason.RESOURCE_SHORTAGE:
+                    submotivo_label = _FOLLOWUP_DETAIL_LABELS.get(outcome.resource_shortage_detail, "")
+                    other_reason_text = ""
+                elif reason == FollowUpNonPerformanceReason.OTHER:
+                    submotivo_label = ""
+                    other_reason_text = outcome.other_reason.strip()
+                else:  # absenteeism
+                    submotivo_label = ""
+                    other_reason_text = ""
+                detail_label = submotivo_label or other_reason_text
             rows.append(
                 {
                     "case": case,
@@ -1579,6 +1589,8 @@ def _followup_history_rows(
                     "detail_code": reason_code,
                     "reason_label": reason_label,
                     "detail_label": detail_label,
+                    "submotivo_label": submotivo_label,
+                    "other_reason_text": other_reason_text,
                     "admitted": follow_up.patient_admitted,
                     "admitted_label": "Sim" if follow_up.patient_admitted else "Não",
                     "version": follow_up.version,
@@ -1693,6 +1705,75 @@ def followup_history(request: HttpRequest) -> HttpResponse:
             "pagination_qs": urlencode(pagination_params),
         },
     )
+
+
+# ── Exportação CSV do histórico (Slice 002) ─────────────────────────────
+
+_FOLLOWUP_CSV_HEADER = [
+    "Case ID",
+    "Ocorrência",
+    "Paciente",
+    "Data",
+    "Procedimento",
+    "Desfecho",
+    "Causa",
+    "Submotivo",
+    "Outra causa (texto)",
+    "Internação",
+    "Versão",
+    "Registrado por",
+    "Registrado em",
+]
+
+
+@login_required
+@role_required("manager", "admin")
+def followup_history_export(request: HttpRequest) -> HttpResponse:
+    """Exporta o histórico em CSV pt-BR (mesma população/filtros da página).
+
+    Reaproveita ``_followup_history_rows`` (janela ativa por data de grupo,
+    versão corrente, ``?q=``) e emite TODAS as linhas da população filtrada —
+    ``?page=`` da tabela é ignorado (design D5). Leitura pura: nenhum
+    ``CaseEvent`` é criado.
+    """
+    today = timezone.localdate()
+    window_start, window_end, _, _ = _active_followup_window(
+        start_raw=request.GET.get("start", ""),
+        end_raw=request.GET.get("end", ""),
+        today=today,
+    )
+    rows = _followup_history_rows(
+        window_start=window_start,
+        window_end=window_end,
+        search_term=request.GET.get("q", "").strip(),
+    )
+
+    buffer = io.StringIO()
+    writer = csv.writer(buffer, delimiter=";")
+    writer.writerow(_FOLLOWUP_CSV_HEADER)
+    for row in rows:
+        writer.writerow(
+            [
+                str(row["case"].case_id),
+                row["case"].agency_record_number,
+                row["patient_name"],
+                row["group_day"].strftime("%d/%m/%Y"),
+                row["procedure_label"],
+                "Realizado" if row["performed"] else "Não realizado",
+                row["reason_label"],
+                row["submotivo_label"],
+                row["other_reason_text"],
+                row["admitted_label"],
+                str(row["version"]),
+                row["author_label"],
+                timezone.localtime(row["recorded_at"]).strftime("%d/%m/%Y %H:%M"),
+            ]
+        )
+
+    filename = f"followups_{window_start:%Y%m%d}_{window_end:%Y%m%d}.csv"
+    response = HttpResponse("\ufeff" + buffer.getvalue(), content_type="text/csv; charset=utf-8")
+    response["Content-Disposition"] = f'attachment; filename="{filename}"'
+    return response
 
 
 # ── Formulário de follow-up (Slice 003) ─────────────────────────────────

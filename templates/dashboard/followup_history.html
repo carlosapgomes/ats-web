@@ -37,6 +37,8 @@
     </div>
     <div class="col-12 col-lg-3 d-flex gap-1">
       <button type="submit" class="btn btn-sm btn-hospital-outline">Filtrar</button>
+      <button type="submit" formaction="{% url 'dashboard:followup_history_export' %}"
+              class="btn btn-sm btn-outline-primary">Exportar CSV</button>
       <a href="{% url 'dashboard:followup_history' %}" class="btn btn-sm btn-outline-secondary">Limpar</a>
     </div>
   </form>
