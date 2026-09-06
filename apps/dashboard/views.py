@@ -1512,6 +1512,42 @@ _FOLLOWUP_DETAIL_LABELS = {value: label for value, label in FollowUpResourceShor
 _FOLLOWUP_REASON_ORDER = {value: index for index, (value, _) in enumerate(FollowUpNonPerformanceReason.choices)}
 _FOLLOWUP_DETAIL_ORDER = {value: index for index, (value, _) in enumerate(FollowUpResourceShortageDetail.choices)}
 
+# Filtros de linha (Slice 003, design D4): performed/reason filtram desfechos
+# (linhas); admitted filtra casos inteiros. Valores inválidos equivalem a "Todos".
+_FOLLOWUP_REASON_OPTIONS = [{"value": value, "label": label} for value, label in FollowUpNonPerformanceReason.choices]
+_FOLLOWUP_REASON_VALUES = frozenset(FollowUpNonPerformanceReason.values)
+
+
+def _parse_yes_no_filter(raw: str) -> bool | None:
+    """'yes' → True, 'no' → False; qualquer outro valor (inclusive vazio) → None.
+
+    None equivale a "Todos" (filtro inativo) — valores inválidos são ignorados,
+    consistente com a UX de janela/busca já existente (design D4).
+    """
+    if raw == "yes":
+        return True
+    if raw == "no":
+        return False
+    return None
+
+
+def _parse_reason_filter(raw: str) -> str | None:
+    """Retorna o código da causa apenas para values válidas das choices; senão None."""
+    return raw if raw in _FOLLOWUP_REASON_VALUES else None
+
+
+def _resolve_line_filters(request: HttpRequest) -> dict[str, Any]:
+    """Valores ativos dos filtros de linha a partir da querystring.
+
+    Página e exportação resolvem aqui (fonte única de parsing); ``performed``/
+    ``reason`` filtram desfechos e ``admitted`` casos (design D4).
+    """
+    return {
+        "performed": _parse_yes_no_filter(request.GET.get("performed", "")),
+        "reason": _parse_reason_filter(request.GET.get("reason", "")),
+        "admitted": _parse_yes_no_filter(request.GET.get("admitted", "")),
+    }
+
 
 def _active_followup_window(*, start_raw: str, end_raw: str, today: date) -> tuple[date, date, str, str]:
     """Janela ativa do histórico: (início, fim, início_echo, fim_echo).
@@ -1604,6 +1640,36 @@ def _followup_history_rows(
     return rows
 
 
+def _apply_line_filters(
+    rows: list[dict[str, Any]],
+    *,
+    performed: bool | None,
+    reason: str | None,
+    admitted: bool | None,
+) -> list[dict[str, Any]]:
+    """Aplica os filtros de linha às linhas já compostas (janela + busca).
+
+    Design D4: ``performed``/``reason`` atuam no desfecho (linha); ``admitted``
+    atua no caso (remove todas as linhas do caso juntas). É o passo compartilhado
+    pela tabela da página e pela exportação CSV — ambos filtram a MESMA base de
+    ``_followup_history_rows``, portanto concordam por construção. Os cards
+    (``_followup_history_summary``) NÃO passam por aqui (R4): continuam resumindo
+    janela + busca.
+    """
+    if performed is None and reason is None and admitted is None:
+        return rows
+    filtered: list[dict[str, Any]] = []
+    for row in rows:
+        if admitted is not None and row["admitted"] != admitted:
+            continue
+        if performed is not None and row["performed"] != performed:
+            continue
+        if reason is not None and row["reason"] != reason:
+            continue
+        filtered.append(row)
+    return filtered
+
+
 def _followup_history_summary(rows: list[dict[str, Any]]) -> dict[str, Any]:
     """Cards-resumo do período (janela + busca) derivados das linhas correntes."""
     case_ids = {row["case"].case_id for row in rows}
@@ -1667,7 +1733,10 @@ def followup_history(request: HttpRequest) -> HttpResponse:
     A população é a versão corrente de cada caso com follow-up dentro da janela
     (design D2/D3); ``?q=`` filtra por ocorrência/nome dentro da janela. A
     tabela pagina 25 linhas (1 por desfecho); os cards resumem o período
-    completo (janela + busca). A exportação CSV fica para o próximo slice.
+    completo (janela + busca). Filtros de linha (design D4): ``?performed=``/
+    ``?reason=`` filtram desfechos e ``?admitted=`` casos inteiros na tabela,
+    SEM alterar os cards; valores inválidos equivalem a "Todos". A exportação
+    CSV reaproveita a mesma composição (mesmos params).
     """
     today = timezone.localdate()
     search_term = request.GET.get("q", "").strip()
@@ -1681,7 +1750,10 @@ def followup_history(request: HttpRequest) -> HttpResponse:
         window_end=window_end,
         search_term=search_term,
     )
-    page_obj = Paginator(rows, _HISTORY_PAGE_SIZE).get_page(request.GET.get("page", 1))
+    line_filters = _resolve_line_filters(request)
+    summary = _followup_history_summary(rows)  # cards: sempre janela+busca (R4)
+    filtered_rows = _apply_line_filters(rows, **line_filters)
+    page_obj = Paginator(filtered_rows, _HISTORY_PAGE_SIZE).get_page(request.GET.get("page", 1))
 
     pagination_params: dict[str, str] = {}
     if search_term:
@@ -1689,6 +1761,15 @@ def followup_history(request: HttpRequest) -> HttpResponse:
     if start_value and end_value:
         pagination_params["start"] = start_value
         pagination_params["end"] = end_value
+    if line_filters["performed"] is not None:
+        pagination_params["performed"] = "yes" if line_filters["performed"] else "no"
+    if line_filters["reason"] is not None:
+        pagination_params["reason"] = line_filters["reason"]
+    if line_filters["admitted"] is not None:
+        pagination_params["admitted"] = "yes" if line_filters["admitted"] else "no"
+
+    def _echo(value: bool | None, yes_raw: str = "yes", no_raw: str = "no") -> str:
+        return yes_raw if value is True else no_raw if value is False else ""
 
     return render(
         request,
@@ -1699,10 +1780,14 @@ def followup_history(request: HttpRequest) -> HttpResponse:
             "start_value": start_value,
             "end_value": end_value,
             "q": search_term,
-            "summary": _followup_history_summary(rows),
+            "summary": summary,
             "page_obj": page_obj,
-            "rows_total": len(rows),
+            "rows_total": len(filtered_rows),
             "pagination_qs": urlencode(pagination_params),
+            "performed_value": _echo(line_filters["performed"]),
+            "reason_value": line_filters["reason"] or "",
+            "admitted_value": _echo(line_filters["admitted"]),
+            "reason_options": _FOLLOWUP_REASON_OPTIONS,
         },
     )
 
@@ -1732,9 +1817,11 @@ def followup_history_export(request: HttpRequest) -> HttpResponse:
     """Exporta o histórico em CSV pt-BR (mesma população/filtros da página).
 
     Reaproveita ``_followup_history_rows`` (janela ativa por data de grupo,
-    versão corrente, ``?q=``) e emite TODAS as linhas da população filtrada —
-    ``?page=`` da tabela é ignorado (design D5). Leitura pura: nenhum
-    ``CaseEvent`` é criado.
+    versão corrente, ``?q=``) e ``_apply_line_filters`` (filtros de linha da
+    página, design D4) — a exportação herda a querystring inteira
+    (``start/end/q/performed/reason/admitted``) e emite TODAS as linhas da
+    população filtrada — ``?page=`` da tabela é ignorado (design D5). Leitura
+    pura: nenhum ``CaseEvent`` é criado.
     """
     today = timezone.localdate()
     window_start, window_end, _, _ = _active_followup_window(
@@ -1747,6 +1834,7 @@ def followup_history_export(request: HttpRequest) -> HttpResponse:
         window_end=window_end,
         search_term=request.GET.get("q", "").strip(),
     )
+    rows = _apply_line_filters(rows, **_resolve_line_filters(request))
 
     buffer = io.StringIO()
     writer = csv.writer(buffer, delimiter=";")

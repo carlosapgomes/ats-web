@@ -41,6 +41,33 @@
               class="btn btn-sm btn-outline-primary">Exportar CSV</button>
       <a href="{% url 'dashboard:followup_history' %}" class="btn btn-sm btn-outline-secondary">Limpar</a>
     </div>
+
+    <!-- Filtros de linha (design D4): alteram a tabela e o CSV, nunca os cards -->
+    <div class="col-6 col-lg-3">
+      <label for="history-performed" class="form-label small text-muted mb-1">Desfecho</label>
+      <select name="performed" id="history-performed" class="form-select form-select-sm">
+        <option value="">Todos</option>
+        <option value="yes"{% if performed_value == "yes" %} selected{% endif %}>Realizado</option>
+        <option value="no"{% if performed_value == "no" %} selected{% endif %}>Não realizado</option>
+      </select>
+    </div>
+    <div class="col-6 col-lg-3">
+      <label for="history-reason" class="form-label small text-muted mb-1">Causa</label>
+      <select name="reason" id="history-reason" class="form-select form-select-sm">
+        <option value="">Todos</option>
+        {% for option in reason_options %}
+        <option value="{{ option.value }}"{% if reason_value == option.value %} selected{% endif %}>{{ option.label }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <div class="col-6 col-lg-3">
+      <label for="history-admitted" class="form-label small text-muted mb-1">Internação</label>
+      <select name="admitted" id="history-admitted" class="form-select form-select-sm">
+        <option value="">Todos</option>
+        <option value="yes"{% if admitted_value == "yes" %} selected{% endif %}>Sim</option>
+        <option value="no"{% if admitted_value == "no" %} selected{% endif %}>Não</option>
+      </select>
+    </div>
   </form>
 
   <!-- Cards-resumo do período (janela + busca) -->

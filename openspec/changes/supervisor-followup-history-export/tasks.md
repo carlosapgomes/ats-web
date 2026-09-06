@@ -4,7 +4,7 @@
 
 - [x] Slice 001 — Página Histórico: sub-abas, janela de datas, versão corrente, cards, tabela e busca (`slices/slice-001-history-page.md`)
 - [x] Slice 002 — Exportação CSV da mesma população e filtros (`slices/slice-002-csv-export.md`)
-- [ ] Slice 003 — Filtros de linha (desfecho/causa/internação) na tabela e no CSV (`slices/slice-003-table-filters.md`)
+- [x] Slice 003 — Filtros de linha (desfecho/causa/internação) na tabela e no CSV (`slices/slice-003-table-filters.md`)
 
 ## Preflight (uma vez por change)
 
@@ -33,6 +33,12 @@ parciais não observáveis. Slices 002/003 retornam ao padrão (≤4 arquivos).
 - Worker: RED (NoReverseMatch da rota) → GREEN; 4 arquivos exatamente no blast radius; 43 passed no arquivo focado; ruff/format OK.
 - Decisão do controller em execução (semânticas de célula CSV, dentro de D5): Case ID=UUID completo; Ocorrência=ARN (vazio se ausente); Versão=numérica; Causa vazia quando realizado; Submotivo só em resource_shortage; Outra causa (texto)=other_reason.
 - Review: 1 rodada — `Merge verdict: OK with notes`; P2 diferida: teste anônimo do export criar dados e afirmar ausência de conteúdo (ARN/paciente) no corpo.
+
+
+### Slice 003
+- Worker: RED (18 failed em `-k filter`) → GREEN; 3 arquivos exatamente no blast radius; +21 testes (64 no arquivo, 422 no app); ruff/format/mypy direcionados OK. 1 teste pré-existente ajustado (select "Causa" agora sempre renderiza options; intenção v1-fora-da-população preservada via count==1 + option).
+- Nota: `rows_total` ("N desfechos no período") passa a refletir a tabela FILTRADA (coerente com D4: contador acompanha a tabela; cards não mudam).
+- Review: 1 rodada — `Merge verdict: OK with notes`; P2 diferida: teste de concordância tabela↔CSV comparar chaves canônicas completas como conjuntos (Counter/sets), não só ARNs ordenados.
 
 ## Gate final (uma vez após todos os slices)
 

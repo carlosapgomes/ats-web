@@ -167,6 +167,41 @@ def _export_csv(client, **params) -> list[list[str]]:
     return list(csv.reader(io.StringIO(body), delimiter=";"))
 
 
+def _filter_scenario(client) -> dict[str, Case]:
+    """Cenário do Slice 003: 4 casos na janela default com desfechos variados.
+
+    - FILT-MIX (Misto): internado, v2 com EDA realizada e colonoscopia não
+      realizada por absentismo (2 linhas — o caso mistura desfechos para
+      provar que performed/reason filtram LINHA e não caso);
+    - FILT-RS (Recurso): não internado, EDA não realizada por falta de recursos;
+    - FILT-OK (Realizado): não internado, EDA realizada;
+    - FILT-OT (Outra Causa): não internado, EDA não realizada por "outras causas".
+
+    População default = 5 linhas de desfecho em 4 casos; 1 internação.
+    """
+    user = _login_as(client, "manager")
+    when = _local_dt(day_offset=0, hour=9)
+    misto = _create_scheduled_case(user, arn="FILT-MIX", name="Misto", when=when)
+    eda, _ = CaseProcedure.objects.get_or_create(case=misto, procedure_type="eda")
+    colonoscopia, _ = CaseProcedure.objects.get_or_create(case=misto, procedure_type="colonoscopy")
+    record_case_follow_up(
+        case=misto,
+        performed_by=user,
+        patient_admitted=True,
+        procedure_outcomes=[
+            ProcedureOutcomeInput(procedure_id=eda.id, performed=True),
+            ProcedureOutcomeInput(procedure_id=colonoscopia.id, performed=False, non_performance_reason="absenteeism"),
+        ],
+    )
+    recurso = _create_scheduled_case(user, arn="FILT-RS", name="Recurso", when=when)
+    _record(recurso, user, performed=False, reason="resource_shortage", detail="emergency_occupied")
+    realizado = _create_scheduled_case(user, arn="FILT-OK", name="Realizado", when=when)
+    _record(realizado, user, performed=True)
+    outra = _create_scheduled_case(user, arn="FILT-OT", name="Outra Causa", when=when)
+    _record(outra, user, performed=False, reason="other", other="Paciente recusou o exame")
+    return {"misto": misto, "recurso": recurso, "realizado": realizado, "outra": outra}
+
+
 # ── R8: acesso e guard ──────────────────────────────────────────────────
 
 
@@ -254,7 +289,10 @@ class TestHistoryPopulation:
         content = response.content.decode()
         assert content.count("VERSAO-001") == 1
         assert "v2" in content
-        assert "Absenteísmo" not in content
+        # Dados da v1 (absentismo) fora da população: a linha/cards não exibem a causa;
+        # o label "Absenteísmo" só pode vir do controle de filtro de linha (Slice 003).
+        assert content.count("Absenteísmo") == 1
+        assert '<option value="absenteeism">Absenteísmo</option>' in content
 
 
 # ── R4/R4b: janela por data de grupo (nunca recorded_at) ────────────────
@@ -818,3 +856,292 @@ class TestHistoryExportButton:
         filter_form_start = content.index('<form method="get"')
         filter_form_end = content.index("</form>", filter_form_start)
         assert filter_form_start < content.index("Exportar CSV") < filter_form_end
+
+
+# ── R1–R3: filtros de linha performed/reason/admitted (Slice 003) ───────
+
+
+class TestHistoryLineFilters:
+    """R1–R3: performed/reason filtram linhas; admitted remove casos inteiros."""
+
+    def test_filter_performed_yes_seleciona_linhas_realizadas(self, client) -> None:
+        _filter_scenario(client)
+        response = client.get(HISTORY_URL, {"performed": "yes"})
+        rows = list(response.context["page_obj"].object_list)
+        assert len(rows) == 2
+        assert sorted(_history_arns(response)) == ["FILT-MIX", "FILT-OK"]
+        assert all(row["performed"] is True for row in rows)
+
+    def test_filter_performed_no_seleciona_linhas_nao_realizadas(self, client) -> None:
+        _filter_scenario(client)
+        response = client.get(HISTORY_URL, {"performed": "no"})
+        rows = list(response.context["page_obj"].object_list)
+        assert len(rows) == 3
+        assert sorted(_history_arns(response)) == ["FILT-MIX", "FILT-OT", "FILT-RS"]
+        assert all(row["performed"] is False for row in rows)
+
+    def test_filter_performed_actua_na_linha_e_nao_no_caso(self, client) -> None:
+        """R1: o caso misto permanece, mas só com a linha que casa o desfecho."""
+        _filter_scenario(client)
+        yes = client.get(HISTORY_URL, {"performed": "yes"})
+        mix_rows = [r for r in yes.context["page_obj"].object_list if r["case"].agency_record_number == "FILT-MIX"]
+        assert [r["procedure_label"] for r in mix_rows] == ["EDA"]
+
+        no = client.get(HISTORY_URL, {"performed": "no"})
+        mix_rows = [r for r in no.context["page_obj"].object_list if r["case"].agency_record_number == "FILT-MIX"]
+        assert [r["procedure_label"] for r in mix_rows] == ["Colonoscopia"]
+
+    @pytest.mark.parametrize(
+        ("reason", "expected_arn", "expected_label"),
+        [
+            ("absenteeism", "FILT-MIX", "Absenteísmo"),
+            ("resource_shortage", "FILT-RS", "Cancelamento por falta de recursos no dia"),
+            ("other", "FILT-OT", "Outras causas"),
+        ],
+    )
+    def test_filter_reason_filtra_por_causa(self, client, reason: str, expected_arn: str, expected_label: str) -> None:
+        _filter_scenario(client)
+        response = client.get(HISTORY_URL, {"reason": reason})
+        (row,) = response.context["page_obj"].object_list
+        assert row["case"].agency_record_number == expected_arn
+        assert row["reason"] == reason
+        assert row["reason_label"] == expected_label
+
+    def test_filter_reason_exclui_linhas_realizadas_e_outras_causas(self, client) -> None:
+        _filter_scenario(client)
+        response = client.get(HISTORY_URL, {"reason": "absenteeism"})
+        rows = list(response.context["page_obj"].object_list)
+        assert len(rows) == 1  # só a colonoscopia do FILT-MIX; EDA realizada não tem causa
+        assert rows[0]["procedure_label"] == "Colonoscopia"
+        assert rows[0]["performed"] is False
+
+    def test_filter_admitted_yes_mantem_todas_as_linhas_do_caso_internado(self, client) -> None:
+        """R3: admitted remove/adiciona CASOS inteiros (todas as linhas do caso)."""
+        _filter_scenario(client)
+        response = client.get(HISTORY_URL, {"admitted": "yes"})
+        rows = list(response.context["page_obj"].object_list)
+        assert len(rows) == 2  # EDA + colonoscopia do mesmo caso internado
+        assert sorted(_history_arns(response)) == ["FILT-MIX", "FILT-MIX"]
+        assert {r["procedure_label"] for r in rows} == {"Colonoscopia", "EDA"}
+        assert all(r["admitted_label"] == "Sim" for r in rows)
+
+    def test_filter_admitted_no_remove_casos_internados_por_inteiro(self, client) -> None:
+        _filter_scenario(client)
+        response = client.get(HISTORY_URL, {"admitted": "no"})
+        rows = list(response.context["page_obj"].object_list)
+        assert sorted(_history_arns(response)) == ["FILT-OK", "FILT-OT", "FILT-RS"]
+        assert all(r["admitted"] is False for r in rows)
+
+    @pytest.mark.parametrize(
+        "params",
+        [{"performed": "banana"}, {"reason": "xyz"}, {"admitted": "talvez"}],
+    )
+    def test_filter_invalid_values_sao_ignorados(self, client, params: dict[str, str]) -> None:
+        """Valores inválidos equivalem a "todos": tabela, cards e CSV idênticos."""
+        _filter_scenario(client)
+        base = client.get(HISTORY_URL)
+        response = client.get(HISTORY_URL, params)
+        assert base.status_code == response.status_code == 200
+
+        def row_key(r):
+            return (r["case"].agency_record_number, r["procedure_label"], r["performed"], r["reason"], r["admitted"])
+
+        assert {row_key(r) for r in response.context["page_obj"].object_list} == {
+            row_key(r) for r in base.context["page_obj"].object_list
+        }
+        assert response.context["summary"] == base.context["summary"]
+        assert response.context["rows_total"] == base.context["rows_total"]
+        base_csv = _export_csv(client)
+        invalid_csv = _export_csv(client, **params)
+        assert sorted(map(tuple, invalid_csv)) == sorted(map(tuple, base_csv))
+
+    def test_filter_keeps_cards_resumo_sempre_janela_e_busca(self, client) -> None:
+        """R4: cards NÃO mudam com filtros de linha (permanecem janela+busca)."""
+        _filter_scenario(client)
+        base = client.get(HISTORY_URL)
+        base_summary = base.context["summary"]
+        combos = (
+            {"performed": "yes"},
+            {"performed": "no"},
+            {"reason": "absenteeism"},
+            {"admitted": "yes"},
+            {"performed": "no", "reason": "absenteeism", "admitted": "yes"},
+        )
+        for params in combos:
+            response = client.get(HISTORY_URL, params)
+            assert response.status_code == 200
+            assert response.context["summary"] == base_summary, f"cards mudaram com {params}"
+        assert base_summary["cases"] == 4
+        assert base_summary["admissions"] == 1
+        assert base_summary["not_performed"] == 3
+
+
+class TestHistoryLineFilterControls:
+    """R5: selects no form GET com labels humanos, opção "Todos" e estado persistido."""
+
+    @staticmethod
+    def _form_snippet(content: str) -> str:
+        start = content.index('<form method="get"')
+        return content[start : content.index("</form>", start)]
+
+    @staticmethod
+    def _select_snippet(content: str, name: str) -> str:
+        start = content.index(f'<select name="{name}"')
+        return content[start : content.index("</select>", start)]
+
+    def test_filter_controls_presentes_no_form_com_labels_e_todos(self, client) -> None:
+        _login_as(client, "manager")
+        content = client.get(HISTORY_URL).content.decode()
+        form = self._form_snippet(content)
+        for name in ("performed", "reason", "admitted"):
+            assert f'<select name="{name}"' in form, f"select {name} fora do form de filtros"
+
+        performed = self._select_snippet(form, "performed")
+        assert '<option value="">Todos</option>' in performed
+        assert '<option value="yes">Realizado</option>' in performed
+        assert '<option value="no">Não realizado</option>' in performed
+
+        reason = self._select_snippet(form, "reason")
+        assert '<option value="">Todos</option>' in reason
+        assert 'value="absenteeism"' in reason and "Absenteísmo" in reason
+        assert 'value="resource_shortage"' in reason and "Cancelamento por falta de recursos no dia" in reason
+        assert 'value="other"' in reason and "Outras causas" in reason
+
+        admitted = self._select_snippet(form, "admitted")
+        assert '<option value="">Todos</option>' in admitted
+        assert '<option value="yes">Sim</option>' in admitted
+        assert '<option value="no">Não</option>' in admitted
+
+        for name in ("performed", "reason", "admitted"):
+            assert 'class="form-select form-select-sm"' in self._select_snippet(form, name)
+
+    def test_filter_persist_estado_selecionado_e_demais_params_mantidos(self, client) -> None:
+        _login_as(client, "manager")
+        start_day = timezone.localdate() - timedelta(days=2)
+        end_day = timezone.localdate()
+        params = {
+            "start": start_day.isoformat(),
+            "end": end_day.isoformat(),
+            "q": "misto",
+            "performed": "no",
+            "reason": "absenteeism",
+            "admitted": "yes",
+        }
+        content = client.get(HISTORY_URL, params).content.decode()
+        assert '<option value="no" selected>Não realizado</option>' in self._select_snippet(content, "performed")
+        assert '<option value="absenteeism" selected>Absenteísmo</option>' in self._select_snippet(content, "reason")
+        assert '<option value="yes" selected>Sim</option>' in self._select_snippet(content, "admitted")
+        # submeter mantém janela e busca (GET no mesmo form)
+        assert f'value="{start_day.isoformat()}"' in content
+        assert f'value="{end_day.isoformat()}"' in content
+        assert 'value="misto"' in content
+
+
+class TestHistoryFilterCombo:
+    """R6: filtros compõem entre si e com janela/busca; tabela e CSV concordam."""
+
+    @staticmethod
+    def _page_and_csv(client, params: dict[str, str]):
+        page = client.get(HISTORY_URL, params)
+        assert page.status_code == 200
+        records = _export_csv(client, **params)
+        csv_arns = [row[CSV_COL["Ocorrência"]] for row in records[1:]]
+        return _history_arns(page), csv_arns, records
+
+    def test_filter_combo_performed_e_reason_filtram_a_mesma_linha(self, client) -> None:
+        _filter_scenario(client)
+        page_arns, csv_arns, records = self._page_and_csv(client, {"performed": "no", "reason": "absenteeism"})
+        assert page_arns == ["FILT-MIX"]
+        assert csv_arns == page_arns
+        (row,) = records[1:]
+        assert row[CSV_COL["Procedimento"]] == "Colonoscopia"
+        assert row[CSV_COL["Desfecho"]] == "Não realizado"
+        assert row[CSV_COL["Causa"]] == "Absenteísmo"
+        assert row[CSV_COL["Internação"]] == "Sim"
+
+    def test_filter_combo_admitted_remove_caso_e_performed_filtra_linha(self, client) -> None:
+        _filter_scenario(client)
+        page_arns, csv_arns, records = self._page_and_csv(client, {"performed": "no", "admitted": "yes"})
+        # só o caso internado (FILT-MIX) resta; entre as linhas dele, apenas a não realizada.
+        assert page_arns == ["FILT-MIX"]
+        assert csv_arns == page_arns
+        (row,) = records[1:]
+        assert row[CSV_COL["Ocorrência"]] == "FILT-MIX"
+        assert row[CSV_COL["Procedimento"]] == "Colonoscopia"
+
+    def test_filter_combo_com_janela_e_busca_na_mesma_querystring(self, client) -> None:
+        _filter_scenario(client)
+        user = User.objects.get(username="followup-history-manager@test")
+        antigo = _create_scheduled_case(user, arn="FILT-ANTIGO", name="Antigo", when=_local_dt(day_offset=-20, hour=9))
+        _record(antigo, user, performed=False, reason="absenteeism")
+
+        start_day = timezone.localdate() - timedelta(days=1)
+        end_day = timezone.localdate() + timedelta(days=1)
+        params = {
+            "start": start_day.isoformat(),
+            "end": end_day.isoformat(),
+            "q": "filt",
+            "performed": "no",
+            "reason": "absenteeism",
+        }
+        page_arns, csv_arns, records = self._page_and_csv(client, params)
+        assert page_arns == ["FILT-MIX"]
+        assert csv_arns == page_arns
+        assert len(records) == 2  # header + 1 linha
+        # O caso antigo (fora da janela) tem os mesmos q/filtros mas não entra.
+        antigo_arns, _, antigo_records = self._page_and_csv(
+            client,
+            {
+                "start": "2020-01-01",
+                "end": "2020-01-05",
+                "q": "filt",
+                "performed": "no",
+                "reason": "absenteeism",
+            },
+        )
+        assert antigo_arns == []
+        assert antigo_records == [CSV_HEADER]
+
+    def test_filter_combo_export_paginacao_nao_trunca_csv(self, client) -> None:
+        _filter_scenario(client)
+        records_no_page = _export_csv(client, performed="no", reason="absenteeism")
+        records_page_1 = _export_csv(client, performed="no", reason="absenteeism", page="2")
+        assert records_no_page == records_page_1
+
+    def test_filter_combo_paginacao_preserva_filtros(self, client) -> None:
+        """?page= da tabela preserva os filtros ativos na querystring."""
+        user = _login_as(client, "manager")
+        for i in range(26):
+            when = _local_dt(day_offset=0, hour=10)
+            case = _create_scheduled_case(user, arn=f"PG-FILT-{i:02d}", name=f"Filler {i:02d}", when=when)
+            _record(case, user, performed=False, reason="absenteeism")
+
+        params = {"performed": "no", "reason": "absenteeism"}
+        response = client.get(HISTORY_URL, params)
+        page_obj = response.context["page_obj"]
+        assert len(page_obj.object_list) == 25
+        assert response.context["rows_total"] == 26
+        content = response.content.decode()
+        assert "performed=no" in content
+        assert "reason=absenteeism" in content
+
+        second = client.get(HISTORY_URL, dict(params, page="2"))
+        second_rows = list(second.context["page_obj"].object_list)
+        assert len(second_rows) == 1
+        assert all(r["reason"] == "absenteeism" and r["performed"] is False for r in second_rows)
+        assert second_rows[0]["case"].agency_record_number == "PG-FILT-25"
+
+    def test_export_filters_concordam_com_a_tabela(self, client) -> None:
+        _filter_scenario(client)
+        for params in (
+            {"performed": "yes"},
+            {"performed": "no"},
+            {"reason": "absenteeism"},
+            {"admitted": "yes"},
+            {"performed": "no", "admitted": "no"},
+            {"performed": "yes", "reason": "absenteeism"},
+        ):
+            page = client.get(HISTORY_URL, params)
+            records = _export_csv(client, **params)
+            csv_arns = [row[CSV_COL["Ocorrência"]] for row in records[1:]]
+            assert csv_arns == _history_arns(page), f"tabela e CSV divergiram com {params}"
