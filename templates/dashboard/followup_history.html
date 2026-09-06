@@ -1,0 +1,205 @@
+{% extends "base.html" %}
+{% load static %}
+
+{% block title %}Histórico & Exportação — {{ app_display_name }}{% endblock %}
+{% block page_title %}<h1 class="page-title">Follow-up · Histórico &amp; Exportação</h1>{% endblock %}
+
+{% block nav %}
+{% include "dashboard/_nav.html" %}
+{% endblock %}
+
+{% block content %}
+
+{% include "dashboard/_followup_tabs.html" %}
+
+<div class="card p-4">
+  <!-- Header: título + janela ativa -->
+  <div class="d-flex justify-content-between align-items-center mb-3 flex-wrap gap-2">
+    <h5 class="mb-0">Histórico de desfechos registrados</h5>
+    <span class="text-muted small">Janela: {{ window_start|date:"d/m/Y" }} a {{ window_end|date:"d/m/Y" }}</span>
+  </div>
+
+  <form method="get" class="row g-2 g-md-3 align-items-end mb-4">
+    <div class="col-12 col-lg-3">
+      <label for="history-q" class="form-label small text-muted mb-1">Buscar por ocorrência ou paciente</label>
+      <input type="search" name="q" id="history-q" class="form-control form-control-sm"
+             value="{{ q }}" placeholder="Ocorrência ou nome do paciente">
+    </div>
+    <div class="col-6 col-lg-3">
+      <label for="history-start" class="form-label small text-muted mb-1">De</label>
+      <input type="date" name="start" id="history-start" class="form-control form-control-sm"
+             value="{{ start_value }}">
+    </div>
+    <div class="col-6 col-lg-3">
+      <label for="history-end" class="form-label small text-muted mb-1">Até</label>
+      <input type="date" name="end" id="history-end" class="form-control form-control-sm"
+             value="{{ end_value }}">
+    </div>
+    <div class="col-12 col-lg-3 d-flex gap-1">
+      <button type="submit" class="btn btn-sm btn-hospital-outline">Filtrar</button>
+      <a href="{% url 'dashboard:followup_history' %}" class="btn btn-sm btn-outline-secondary">Limpar</a>
+    </div>
+  </form>
+
+  <!-- Cards-resumo do período (janela + busca) -->
+  <h6 class="small text-muted text-uppercase mb-2">Resumo do período</h6>
+  <div class="row g-3 mb-4">
+    <div class="col-6 col-lg-3">
+      <div class="summary-box">
+        <span class="summary-label">Casos com follow-up no período</span>
+        <span class="summary-value">{{ summary.cases }}</span>
+      </div>
+    </div>
+    <div class="col-6 col-lg-3">
+      <div class="summary-box">
+        <span class="summary-label">Internações no período</span>
+        <span class="summary-value">{{ summary.admissions }}</span>
+      </div>
+    </div>
+  </div>
+
+  <div class="row g-4 mb-4">
+    <div class="col-lg-6">
+      <h6 class="small text-muted text-uppercase mb-2">Taxa de realização por procedimento</h6>
+      {% for proc in summary.procedures %}
+      <div class="mb-2">
+        <div class="d-flex justify-content-between small mb-1">
+          <span>{{ proc.label }}</span>
+          <span>{{ proc.performed }} de {{ proc.total }} realizados ({{ proc.percent }}%)</span>
+        </div>
+        <div class="progress" style="height: 8px;">
+          <div class="progress-bar bg-success" role="progressbar" style="width: {{ proc.percent }}%;"
+               aria-valuenow="{{ proc.percent }}" aria-valuemin="0" aria-valuemax="100"></div>
+        </div>
+      </div>
+      {% empty %}
+      <p class="text-muted small mb-0">Nenhum desfecho no período.</p>
+      {% endfor %}
+    </div>
+    <div class="col-lg-6">
+      <h6 class="small text-muted text-uppercase mb-2">Causas de não realização</h6>
+      {% for reason in summary.reasons %}
+      <div class="mb-2">
+        <div class="d-flex justify-content-between small mb-1">
+          <span>{{ reason.label }}</span>
+          <span>{{ reason.count }}</span>
+        </div>
+        <div class="progress" style="height: 8px;">
+          <div class="progress-bar bg-warning" role="progressbar" style="width: {{ reason.percent }}%;"
+               aria-valuenow="{{ reason.percent }}" aria-valuemin="0" aria-valuemax="100"></div>
+        </div>
+        {% if reason.details %}
+        <ul class="list-unstyled small text-muted ms-4 mt-2 mb-0">
+          {% for detail in reason.details %}
+          <li>
+            {{ detail.label }} — {{ detail.count }}
+            <div class="progress mt-1" style="height: 4px;">
+              <div class="progress-bar bg-warning-subtle" role="progressbar" style="width: {{ detail.percent }}%;"
+                   aria-valuenow="{{ detail.percent }}" aria-valuemin="0" aria-valuemax="100"></div>
+            </div>
+          </li>
+          {% endfor %}
+        </ul>
+        {% endif %}
+      </div>
+      {% empty %}
+      <p class="text-muted small mb-0">Nenhuma não realização no período.</p>
+      {% endfor %}
+    </div>
+  </div>
+
+  <!-- Tabela: 1 linha por desfecho de procedimento (versão corrente) -->
+  <h6 class="small text-muted text-uppercase mb-2">Desfechos no período</h6>
+  <div class="table-responsive mb-2">
+    <table class="table table-sm align-middle">
+      <thead class="table-light">
+        <tr>
+          <th scope="col">Ocorrência</th>
+          <th scope="col">Paciente</th>
+          <th scope="col">Data do grupo</th>
+          <th scope="col">Procedimento</th>
+          <th scope="col">Desfecho</th>
+          <th scope="col">Causa / submotivo / texto</th>
+          <th scope="col">Internação</th>
+          <th scope="col">Versão</th>
+          <th scope="col">Registrado por</th>
+          <th scope="col">Registrado em</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for row in page_obj %}
+        <tr>
+          <td>{{ row.case.agency_record_number|default:row.case.case_id|truncatechars:12 }}</td>
+          <td>{{ row.patient_name }}</td>
+          <td>{{ row.group_day|date:"d/m/Y" }}</td>
+          <td>{{ row.procedure_label }}</td>
+          <td>
+            {% if row.performed %}
+            <span class="badge bg-success">Realizado</span>
+            {% else %}
+            <span class="badge bg-danger">Não realizado</span>
+            {% endif %}
+          </td>
+          <td>
+            {% if row.performed %}
+            —
+            {% else %}
+            {{ row.reason_label }}
+            {% if row.detail_label %}<div class="small text-muted">{{ row.detail_label }}</div>{% endif %}
+            {% endif %}
+          </td>
+          <td>{{ row.admitted_label }}</td>
+          <td>v{{ row.version }}</td>
+          <td>{{ row.author_label }}</td>
+          <td>{{ row.recorded_at|date:"d/m/Y H:i" }}</td>
+        </tr>
+        {% empty %}
+        <tr>
+          <td colspan="10" class="text-center text-muted py-4">
+            Nenhum desfecho no período para os filtros informados.
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+
+  <div class="d-flex justify-content-between align-items-center flex-wrap gap-2">
+    <p class="text-muted small mb-0">{{ rows_total }} desfecho{{ rows_total|pluralize }} no período</p>
+
+    <!-- Paginação (25/página) preservando a janela e a busca -->
+    {% if page_obj.paginator.num_pages > 1 %}
+    <nav aria-label="Paginação">
+      <ul class="pagination pagination-sm justify-content-end mb-0">
+        {% if page_obj.has_previous %}
+        <li class="page-item">
+          <a class="page-link" href="?{% if pagination_qs %}{{ pagination_qs }}&{% endif %}page={{ page_obj.previous_page_number }}">Anterior</a>
+        </li>
+        {% else %}
+        <li class="page-item disabled"><span class="page-link">Anterior</span></li>
+        {% endif %}
+
+        {% for i in page_obj.paginator.page_range %}
+          {% if page_obj.number == i %}
+          <li class="page-item active"><span class="page-link">{{ i }}</span></li>
+          {% else %}
+          <li class="page-item">
+            <a class="page-link" href="?{% if pagination_qs %}{{ pagination_qs }}&{% endif %}page={{ i }}">{{ i }}</a>
+          </li>
+          {% endif %}
+        {% endfor %}
+
+        {% if page_obj.has_next %}
+        <li class="page-item">
+          <a class="page-link" href="?{% if pagination_qs %}{{ pagination_qs }}&{% endif %}page={{ page_obj.next_page_number }}">Próxima</a>
+        </li>
+        {% else %}
+        <li class="page-item disabled"><span class="page-link">Próxima</span></li>
+        {% endif %}
+      </ul>
+    </nav>
+    {% endif %}
+  </div>
+</div>
+
+{% endblock %}

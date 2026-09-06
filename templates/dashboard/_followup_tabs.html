@@ -1,0 +1,15 @@
+{% comment %}
+Sub-abas do pill Follow-up: Registrar | Histórico & Exportação.
+
+A aba ativa é resolvida pelo nome da URL corrente (request.resolver_match),
+sem contexto extra. Inclua no topo do conteúdo das duas páginas:
+  {% include "dashboard/_followup_tabs.html" %}
+{% endcomment %}
+<ul class="nav nav-tabs gap-2 mb-3" role="tablist" aria-label="Sub-abas de follow-up">
+  <li class="nav-item" role="presentation">
+    <a class="nav-link {% if request.resolver_match.url_name == 'followup_list' %}active{% endif %}" href="{% url 'dashboard:followup_list' %}">Registrar</a>
+  </li>
+  <li class="nav-item" role="presentation">
+    <a class="nav-link {% if request.resolver_match.url_name == 'followup_history' %}active{% endif %}" href="{% url 'dashboard:followup_history' %}">Histórico &amp; Exportação</a>
+  </li>
+</ul>

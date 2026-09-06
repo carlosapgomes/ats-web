@@ -4,6 +4,7 @@ import re
 import uuid
 from datetime import date, datetime, timedelta
 from typing import Any
+from urllib.parse import urlencode
 
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
@@ -29,6 +30,7 @@ from apps.cases.admission import (
 )
 from apps.cases.followup import (
     ProcedureOutcomeInput,
+    current_follow_ups,
     get_current_follow_up,
     is_followup_eligible,
     record_case_follow_up,
@@ -40,6 +42,8 @@ from apps.cases.models import (
     CaseFollowUp,
     CaseProcedure,
     CaseStatus,
+    FollowUpNonPerformanceReason,
+    FollowUpResourceShortageDetail,
     SupervisorSummary,
 )
 from apps.cases.navigation import resolve_safe_next_url
@@ -1493,6 +1497,200 @@ def followup_list(request: HttpRequest) -> HttpResponse:
             "q": search_term,
             "date_value": date_value,
             "total_cases": total_cases,
+        },
+    )
+
+
+# ── Histórico & exportação de follow-ups (Slice 001) ─────────────────────
+
+_HISTORY_PAGE_SIZE = 25
+
+_FOLLOWUP_REASON_LABELS = {value: label for value, label in FollowUpNonPerformanceReason.choices}
+_FOLLOWUP_DETAIL_LABELS = {value: label for value, label in FollowUpResourceShortageDetail.choices}
+_FOLLOWUP_REASON_ORDER = {value: index for index, (value, _) in enumerate(FollowUpNonPerformanceReason.choices)}
+_FOLLOWUP_DETAIL_ORDER = {value: index for index, (value, _) in enumerate(FollowUpResourceShortageDetail.choices)}
+
+
+def _active_followup_window(*, start_raw: str, end_raw: str, today: date) -> tuple[date, date, str, str]:
+    """Janela ativa do histórico: (início, fim, início_echo, fim_echo).
+
+    ``?start``/``?end`` ISO válidos com ``start <= end`` e período ≤ 31 dias
+    são respeitados e ecoados nos inputs; qualquer inconsistência cai no
+    default (últimos 7 dias incluindo hoje) com inputs limpos (design D3).
+    """
+    custom_start = _parse_iso_date(start_raw)
+    custom_end = _parse_iso_date(end_raw)
+    if (
+        custom_start is not None
+        and custom_end is not None
+        and custom_start <= custom_end
+        and (custom_end - custom_start).days <= 30
+    ):
+        return custom_start, custom_end, custom_start.isoformat(), custom_end.isoformat()
+    return today - timedelta(days=6), today, "", ""
+
+
+def _followup_history_rows(
+    *,
+    window_start: date,
+    window_end: date,
+    search_term: str,
+) -> list[dict[str, Any]]:
+    """Linhas do histórico: 1 por desfecho (ProcedureFollowUp) da versão corrente.
+
+    População = ``current_follow_ups()``; a janela filtra pela data de grupo
+    (``_followup_group_date``, nunca ``recorded_at``) e ``?q=`` por ocorrência
+    ou nome do paciente (contains case-insensitive) dentro da janela.
+    """
+    needle = search_term.casefold() if search_term else ""
+    rows: list[dict[str, Any]] = []
+    for follow_up in current_follow_ups():
+        case = follow_up.case
+        group_day = _followup_group_date(case, None)
+        if group_day is None or not (window_start <= group_day <= window_end):
+            continue
+        patient_name = _followup_patient_name(case)
+        if needle and needle not in f"{case.agency_record_number or ''} {patient_name}".casefold():
+            continue
+        author = follow_up.recorded_by
+        author_label = (author.get_full_name() or author.username) if author else "—"
+        for outcome in follow_up.procedure_outcomes.all():
+            if outcome.performed:
+                reason = reason_code = reason_label = detail_label = ""
+            else:
+                reason = outcome.non_performance_reason
+                reason_label = _FOLLOWUP_REASON_LABELS.get(reason, "")
+                reason_code = outcome.resource_shortage_detail
+                detail_label = (
+                    _FOLLOWUP_DETAIL_LABELS.get(outcome.resource_shortage_detail, "")
+                    if outcome.resource_shortage_detail
+                    else outcome.other_reason.strip()
+                )
+            rows.append(
+                {
+                    "case": case,
+                    "patient_name": patient_name or "Paciente",
+                    "group_day": group_day,
+                    "event_time": _followup_event_time(case),
+                    "procedure_type": outcome.procedure.procedure_type,
+                    "procedure_label": outcome.procedure.get_procedure_type_display(),
+                    "performed": outcome.performed,
+                    "reason": reason,
+                    "detail_code": reason_code,
+                    "reason_label": reason_label,
+                    "detail_label": detail_label,
+                    "admitted": follow_up.patient_admitted,
+                    "admitted_label": "Sim" if follow_up.patient_admitted else "Não",
+                    "version": follow_up.version,
+                    "author_label": author_label,
+                    "recorded_at": follow_up.recorded_at,
+                }
+            )
+    # Ordenação: data de grupo desc e, dentro dela, paciente/horário (aba Registrar).
+    rows.sort(key=lambda row: (row["patient_name"].casefold(), row["event_time"] or datetime.min))
+    rows.sort(key=lambda row: row["group_day"], reverse=True)
+    return rows
+
+
+def _followup_history_summary(rows: list[dict[str, Any]]) -> dict[str, Any]:
+    """Cards-resumo do período (janela + busca) derivados das linhas correntes."""
+    case_ids = {row["case"].case_id for row in rows}
+    admitted_ids = {row["case"].case_id for row in rows if row["admitted"]}
+    not_performed = 0
+
+    procedures: list[dict[str, Any]] = []
+    procedures_by_type: dict[str, dict[str, Any]] = {}
+    reasons_by_code: dict[str, dict[str, Any]] = {}
+    for row in rows:
+        procedure_type = row["procedure_type"]
+        proc = procedures_by_type.get(procedure_type)
+        if proc is None:
+            proc = {"label": row["procedure_label"], "total": 0, "performed": 0}
+            procedures_by_type[procedure_type] = proc
+            procedures.append(proc)
+        proc["total"] += 1
+        proc["performed"] += 1 if row["performed"] else 0
+
+        if row["performed"]:
+            continue
+        not_performed += 1
+        reason_code = row["reason"]
+        reason = reasons_by_code.get(reason_code)
+        if reason is None:
+            reason = {"reason": reason_code, "label": row["reason_label"], "count": 0, "details": []}
+            reasons_by_code[reason_code] = reason
+        reason["count"] += 1
+        detail_code = row["detail_code"]
+        if reason_code == FollowUpNonPerformanceReason.RESOURCE_SHORTAGE and detail_code:
+            details_by_code = {item["code"]: item for item in reason["details"]}
+            detail = details_by_code.get(detail_code)
+            if detail is None:
+                detail = {"code": detail_code, "label": row["detail_label"], "count": 0}
+                reason["details"].append(detail)
+            detail["count"] += 1
+
+    procedures.sort(key=lambda proc: proc["label"])
+    for proc in procedures:
+        proc["percent"] = round(proc["performed"] / proc["total"] * 100)
+    reasons = sorted(reasons_by_code.values(), key=lambda item: _FOLLOWUP_REASON_ORDER.get(item["reason"], 99))
+    for reason in reasons:
+        reason["percent"] = round(reason["count"] / not_performed * 100) if not_performed else 0
+        reason["details"].sort(key=lambda item: _FOLLOWUP_DETAIL_ORDER.get(item["code"], 99))
+        for detail in reason["details"]:
+            detail["percent"] = round(detail["count"] / reason["count"] * 100)
+    return {
+        "cases": len(case_ids),
+        "admissions": len(admitted_ids),
+        "not_performed": not_performed,
+        "procedures": procedures,
+        "reasons": reasons,
+    }
+
+
+@login_required
+@role_required("manager", "admin")
+def followup_history(request: HttpRequest) -> HttpResponse:
+    """Histórico de desfechos: janela por data de grupo, cards e tabela paginada.
+
+    A população é a versão corrente de cada caso com follow-up dentro da janela
+    (design D2/D3); ``?q=`` filtra por ocorrência/nome dentro da janela. A
+    tabela pagina 25 linhas (1 por desfecho); os cards resumem o período
+    completo (janela + busca). A exportação CSV fica para o próximo slice.
+    """
+    today = timezone.localdate()
+    search_term = request.GET.get("q", "").strip()
+    window_start, window_end, start_value, end_value = _active_followup_window(
+        start_raw=request.GET.get("start", ""),
+        end_raw=request.GET.get("end", ""),
+        today=today,
+    )
+    rows = _followup_history_rows(
+        window_start=window_start,
+        window_end=window_end,
+        search_term=search_term,
+    )
+    page_obj = Paginator(rows, _HISTORY_PAGE_SIZE).get_page(request.GET.get("page", 1))
+
+    pagination_params: dict[str, str] = {}
+    if search_term:
+        pagination_params["q"] = search_term
+    if start_value and end_value:
+        pagination_params["start"] = start_value
+        pagination_params["end"] = end_value
+
+    return render(
+        request,
+        "dashboard/followup_history.html",
+        {
+            "window_start": window_start,
+            "window_end": window_end,
+            "start_value": start_value,
+            "end_value": end_value,
+            "q": search_term,
+            "summary": _followup_history_summary(rows),
+            "page_obj": page_obj,
+            "rows_total": len(rows),
+            "pagination_qs": urlencode(pagination_params),
         },
     )
 

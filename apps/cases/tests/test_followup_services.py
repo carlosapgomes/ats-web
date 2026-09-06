@@ -6,10 +6,12 @@ from collections.abc import Callable
 from typing import Any
 
 import pytest
-from django.db import IntegrityError, transaction
+from django.db import IntegrityError, connection, transaction
+from django.test.utils import CaptureQueriesContext
 
 from apps.cases.followup import (
     ProcedureOutcomeInput,
+    current_follow_ups,
     get_current_follow_up,
     record_case_follow_up,
 )
@@ -164,6 +166,74 @@ class TestVersionamento:
     def test_get_current_sem_followup_retorna_none(self, user, case_factory) -> None:
         case = case_factory(user)
         assert get_current_follow_up(case) is None
+
+
+# ── R2b: current_follow_ups() — versão corrente por caso (histórico do supervisor) ──
+
+
+class TestCurrentFollowUps:
+    """``current_follow_ups()`` entrega 1 row por caso, na versão máxima (R1)."""
+
+    def test_current_follow_ups_uma_linha_por_caso_na_versao_maxima(self, user, case_factory) -> None:
+        case_a = _case_with_procedures(case_factory, user)
+        case_b = _case_with_procedures(case_factory, user)
+        sem_followup = case_factory(user)
+
+        record_case_follow_up(
+            case=case_a,
+            performed_by=user,
+            patient_admitted=False,
+            procedure_outcomes=[_outcome(case_a, performed=True)],
+        )
+        record_case_follow_up(
+            case=case_b,
+            performed_by=user,
+            patient_admitted=False,
+            procedure_outcomes=[_outcome(case_b, performed=True)],
+        )
+        record_case_follow_up(
+            case=case_b,
+            performed_by=user,
+            patient_admitted=True,
+            procedure_outcomes=[_outcome(case_b, performed=False, reason="absenteeism")],
+        )
+
+        rows = list(current_follow_ups())
+        by_case = {row.case_id: row for row in rows}
+        assert set(by_case) == {case_a.case_id, case_b.case_id}
+        assert sem_followup.case_id not in by_case
+        assert by_case[case_a.case_id].version == 1
+        assert by_case[case_b.case_id].version == 2
+        assert by_case[case_b.case_id].patient_admitted is True
+
+    def test_current_follow_ups_preloads_caso_autor_e_desfechos_sem_n1(self, user, case_factory) -> None:
+        """select_related + prefetch: acesso a case/recorded_by/outcomes não gera N+1."""
+        case = _case_with_procedures(case_factory, user, types=("eda", "colonoscopy"))
+        eda_id, col_id = _procedure_ids(case)
+        record_case_follow_up(
+            case=case,
+            performed_by=user,
+            patient_admitted=False,
+            procedure_outcomes=[
+                ProcedureOutcomeInput(procedure_id=eda_id, performed=True),
+                ProcedureOutcomeInput(
+                    procedure_id=col_id,
+                    performed=False,
+                    non_performance_reason="resource_shortage",
+                    resource_shortage_detail="emergency_occupied",
+                ),
+            ],
+        )
+
+        with CaptureQueriesContext(connection) as ctx:
+            rows = list(current_follow_ups())
+            for follow_up in rows:
+                follow_up.case.agency_record_number
+                follow_up.recorded_by.username
+                for outcome in follow_up.procedure_outcomes.all():
+                    outcome.procedure.procedure_type
+        # Principal + prefetch de desfechos + prefetch dos procedimentos.
+        assert len(ctx) == 3
 
 
 # ── R3: validações ───────────────────────────────────────────────────────

@@ -14,6 +14,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from django.db import models, transaction
+from django.db.models import OuterRef, Subquery
 
 from apps.cases.admission import is_operational_notice_flow
 from apps.cases.models import (
@@ -40,6 +41,21 @@ class ProcedureOutcomeInput:
 def get_current_follow_up(case: Case) -> CaseFollowUp | None:
     """Versão corrente do follow-up do caso (maior ``version``) ou ``None``."""
     return case.follow_ups.order_by("-version").first()
+
+
+def current_follow_ups() -> models.QuerySet[CaseFollowUp]:
+    """Versões correntes de follow-up: 1 row por caso com follow-up (maior ``version``).
+
+    Traz ``select_related("case", "recorded_by")`` e
+    ``prefetch_related("procedure_outcomes__procedure")`` para leitura sem
+    N+1 na página de histórico e nos agregados do período (design D2).
+    """
+    latest_by_case = CaseFollowUp.objects.filter(case=OuterRef("case")).order_by("-version").values("pk")[:1]
+    return (
+        CaseFollowUp.objects.filter(pk=Subquery(latest_by_case))
+        .select_related("case", "recorded_by")
+        .prefetch_related("procedure_outcomes__procedure")
+    )
 
 
 def is_followup_eligible(case: Case) -> bool:
