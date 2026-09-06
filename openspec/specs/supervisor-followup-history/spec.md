@@ -1,6 +1,9 @@
-# supervisor-followup-history Spec Delta
+# supervisor-followup-history Specification
 
-## ADDED Requirements
+## Purpose
+TBD - created by archiving change supervisor-followup-history-export. Update Purpose after archive.
+
+## Requirements
 
 ### Requirement: A aba Follow-up SHALL organizar-se em sub-abas Registrar e Histórico
 
