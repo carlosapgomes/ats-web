@@ -42,9 +42,9 @@ parciais não observáveis. Slices 002/003 retornam ao padrão (≤4 arquivos).
 
 ## Gate final (uma vez após todos os slices)
 
-- [ ] `uv run ruff check . && uv run ruff format --check .` (exit 0)
-- [ ] `uv run mypy .` (exit 0)
-- [ ] `uv run pytest` (exit 0, sem regressões vs baseline 3285)
+- [x] `uv run ruff check . && uv run ruff format --check .` (exit 0 — All checks passed! / 239 files formatted)
+- [x] `uv run mypy .` (exit 0 — 265 files; 1 erro de tipagem em teste do Slice 001 corrigido na reabertura mínima do gate, commit `b414891`)
+- [x] `uv run pytest` (exit 0 — 3351 passed vs baseline 3285; +54 testes do change)
 - [x] `openspec validate supervisor-followup-history-export` OK; specs/archive conforme ADR-0005 no fechamento
 
 ## Definition of Done
