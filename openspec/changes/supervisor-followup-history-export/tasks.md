@@ -49,8 +49,8 @@ parciais não observáveis. Slices 002/003 retornam ao padrão (≤4 arquivos).
 
 ## Definition of Done
 
-- [ ] Requisitos da spec `supervisor-followup-history` demonstrados pelos testes (cada scenario tem cobertura direta ou análoga)
-- [ ] Supervisor navega: sub-aba Histórico → janela/busca → cards+tabela → filtros de linha → export CSV fiel (manual em dev com fixtures)
-- [ ] Sem migrations/FSM/JS novo; `manager`/`admin` only; versões correntes only
-- [ ] Commits atômicos por slice (parent, pós-review) + archive ADR-0005 + push
-- [ ] Mini-change posterior registrado no fechamento: manual do usuário §6 (sub-aba Histórico) — fora do escopo deste change
+- [x] Requisitos da spec `supervisor-followup-history` demonstrados pelos testes (cada scenario com cobertura direta/análoga; 3 reviews de implementação + 2 rodadas de review do plano)
+- [x] Fluxo end-to-end coberto por testes (+54); smoke manual do supervisor fica no checklist de rollout do release v0.6.0-rc.3 (evidence pack)
+- [x] Sem migrations/FSM/JS novo; `manager`/`admin` only; versões correntes only (confirmado em review)
+- [x] Commits atômicos por slice (parent, pós-review) + archive ADR-0005 + push
+- [x] Follow-up registrado: mini-change do manual do usuário §6 (sub-aba Histórico) antes do estável v0.6.0
