@@ -229,6 +229,7 @@ class TestCurrentFollowUps:
             rows = list(current_follow_ups())
             for follow_up in rows:
                 follow_up.case.agency_record_number
+                assert follow_up.recorded_by is not None
                 follow_up.recorded_by.username
                 for outcome in follow_up.procedure_outcomes.all():
                     outcome.procedure.procedure_type
