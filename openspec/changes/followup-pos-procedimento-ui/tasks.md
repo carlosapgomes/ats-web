@@ -7,10 +7,10 @@
 
 ## Preflight (uma vez por change)
 
-- [ ] **Dependência**: `followup-chd-access-guard` executado E arquivado (deltas encadeados + manual §6 dependem do guard; ordem inversa quebra os MODIFIED)
-- [ ] Working tree limpa em `main` (BASE_REF = HEAD do fechamento de `followup-chd-access-guard`)
-- [ ] Baseline verde conhecida do último gate — não repetir por slice
-- [ ] `openspec validate followup-pos-procedimento-ui` OK
+- [x] **Dependência**: `followup-chd-access-guard` executado E arquivado — verificado no preflight (archive `2026-09-07-followup-chd-access-guard` @ BASE_REF `ab9971d`)
+- [x] Working tree limpa em `main` @ `ab9971d` (BASE_REF = HEAD do fechamento do guard)
+- [x] Baseline verde conhecida (gate do guard: 3389 passed) — não repetida por slice
+- [x] `openspec validate followup-pos-procedimento-ui` OK (preflight e gate final)
 
 
 ## Registro de execução
@@ -29,10 +29,10 @@
 
 ## Gate final (uma vez após todos os slices)
 
-- [ ] `uv run ruff check . && uv run ruff format --check .` (exit 0)
-- [ ] `uv run mypy .` (exit 0)
-- [ ] `uv run pytest` (exit 0, sem regressões vs baseline)
-- [ ] `openspec validate followup-pos-procedimento-ui` OK; specs/archive conforme ADR-0005 no fechamento
+- [x] `uv run ruff check . && uv run ruff format --check .` (exit 0 — All checks passed! / 240 files)
+- [x] `uv run mypy .` (exit 0 — 266 files)
+- [x] `uv run pytest` (exit 0 — 3399 passed vs baseline 3389; +10 líquidos)
+- [x] `openspec validate followup-pos-procedimento-ui` OK; archive ADR-0005 fica para o fechamento pós-revisão humana
 
 ## Definition of Done
 
