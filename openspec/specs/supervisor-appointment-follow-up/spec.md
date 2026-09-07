@@ -42,9 +42,9 @@ Cada atualização de follow-up SHALL criar nova versão (nova row) preservando 
 - **THEN** existe versão 2 com `recorded_by` = B e a versão 1 permanece imutável com `recorded_by` = A
 - **AND** um `CaseEvent` `FOLLOWUP_UPDATED` é criado com o snapshot da versão 2
 
-### Requirement: A aba Follow-up SHALL listar elegíveis por data com ordenação e busca previsíveis
+### Requirement: A aba Pós-Procedimento SHALL listar elegíveis por data com ordenação e busca previsíveis
 
-A aba SHALL listar, para o dia local corrente e o dia anterior (default), os casos com agendamento confirmado (`appointment_at` local na data) e os casos de vinda imediata autorizada (`doctor_admission_flow` operacional com `doctor_decided_at` local na data), ordenados por data e nome do paciente, SHALL permitir selecionar data específica e SHALL permitir busca por número da ocorrência ou nome do paciente sobre a população elegível. Cada item SHALL indicar se há follow-up registrado.
+A aba SHALL listar, para o dia local corrente e o dia anterior (default), os casos com agendamento confirmado (`appointment_at` local na data) e os casos de vinda imediata autorizada (`doctor_admission_flow` operacional com `doctor_decided_at` local na data), ordenados por data e nome do paciente, SHALL permitir selecionar data específica e SHALL permitir busca por número da ocorrência ou nome do paciente sobre a população elegível. Cada item SHALL indicar se há follow-up registrado (badge "Pós-procedimento registrado" / "Pós-procedimento pendente").
 
 #### Scenario: Default hoje e ontem ordenado
 
@@ -52,7 +52,7 @@ A aba SHALL listar, para o dia local corrente e o dia anterior (default), os cas
 - **WHEN** o supervisor abre `/dashboard/follow-ups/` sem parâmetros
 - **THEN** os casos de hoje e ontem aparecem agrupados por data ascendente
 - **AND** dentro de cada data, ordenados por nome do paciente
-- **AND** cada card indica "Follow-up pendente" ou "Follow-up registrado"
+- **AND** cada card indica "Pós-procedimento pendente" ou "Pós-procedimento registrado"
 
 #### Scenario: Seleção de data específica
 
