@@ -87,7 +87,8 @@ Seção "6. Ações do usuário Supervisor" passa a cobrir, com o rótulo novo:
 - **Timeline**: assert direto sobre os valores de `EVENT_LABELS` de
   `apps/intake/views.py` (nenhum valor contém "follow-up") — mais
   determinístico que renderizar a timeline.
-- Slice 001 (UI): 4 asserts existentes convertem para o rótulo novo;
+- Slice 001 (UI): 5 asserts existentes convertem para o rótulo novo
+  (incl. o card do Histórico em `test_followup_history.py:450`);
   docstrings/comentários dos testes acompanham o rename (higiene); fixture
   renomeada conforme acima.
 - Slice 002 (manual): estender `tests/test_user_manual_artifacts.py` — §6
