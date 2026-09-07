@@ -1,8 +1,9 @@
 """Services for transactional email flows (Slice 003) and mention/notification services (Slice 001).
 
 Centralized helpers for sending account-related transactional emails
-as defined by ADR-0002, and for parsing mention tokens in case communication
-messages and creating in-app notifications.
+as defined by ADR-0002, for parsing mention tokens in case communication
+messages and creating in-app notifications, and for the CHD follow-up
+access policy (manager+scheduler / admin exempt).
 """
 
 from __future__ import annotations
@@ -21,6 +22,8 @@ from django.utils.encoding import force_bytes
 from django.utils.http import urlsafe_base64_encode
 
 if TYPE_CHECKING:
+    from django.contrib.auth.models import AnonymousUser
+
     from apps.accounts.models import User
     from apps.cases.models import CaseCommunicationMessage
 
@@ -325,3 +328,32 @@ def send_user_invitation_email(user: User) -> None:
     )
     msg.attach_alternative(body, "text/html")
     msg.send(fail_silently=False)
+
+
+# ── Política de acesso CHD (follow-up) ───────────────────────────────────
+
+
+def can_access_followup(user: User | AnonymousUser, active_role: str) -> bool:
+    """Aba Follow-up é operação do supervisor do CHD.
+
+    Papel ativo manager exige posse do papel scheduler (CHD);
+    papel ativo admin é isento (emergência/suporte); anônimo e usuário
+    inativo nunca acessam — a isenção do admin vale apenas para usuário
+    autenticado e ativo.
+    Fonte única consumida pelo decorator ``followup_access_required`` e pelo
+    context processor ``role_context`` (design D1/D3).
+    """
+    # Guarda de identidade antes de qualquer verificação de papel: anônimo e
+    # usuário inativo → False (sem query de roles para anônimo).
+    if not user.is_authenticated or not user.is_active:
+        return False
+    if active_role not in {"manager", "admin"}:
+        return False
+    if active_role == "admin":
+        return True
+    # active_role == "manager" → exige vínculo CHD (posse do papel scheduler).
+    from apps.accounts.models import User as UserModel
+
+    if not isinstance(user, UserModel):
+        return False
+    return user.roles.filter(name="scheduler").exists()

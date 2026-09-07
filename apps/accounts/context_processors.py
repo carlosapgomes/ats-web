@@ -3,6 +3,7 @@
 from django.conf import settings
 
 from apps.accounts.models import get_unread_notification_count
+from apps.accounts.services import can_access_followup
 from apps.cases.models import Case, CaseStatus
 from apps.cases.services import (
     unacknowledged_operational_issue_qs,
@@ -19,11 +20,16 @@ ROLE_DISPLAY_NAMES = {
 
 
 def role_context(request):  # type: ignore[no-untyped-def]
-    """Adiciona active_role_display ao contexto de todos os templates."""
+    """Adiciona active_role_display, active_role e can_access_followup ao contexto.
+
+    ``can_access_followup`` é a política CHD (D1); anônimo → False.
+    """
     active_role = request.session.get("active_role", "")
+    can_access = can_access_followup(request.user, active_role)
     return {
         "active_role_display": ROLE_DISPLAY_NAMES.get(active_role, active_role),
         "active_role": active_role,
+        "can_access_followup": can_access,
     }
 
 

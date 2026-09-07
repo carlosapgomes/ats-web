@@ -2,7 +2,7 @@
 
 ## Slices verticais (ordem executável)
 
-- [ ] Slice 001 — Política de acesso CHD em accounts: helper `can_access_followup` + decorator `followup_access_required` + variável de contexto (`slices/slice-001-chd-policy.md`)
+- [x] Slice 001 — Política de acesso CHD em accounts: helper `can_access_followup` + decorator `followup_access_required` + variável de contexto (`slices/slice-001-chd-policy.md`)
 - [ ] Slice 002 — Aplicação no dashboard: guard nas 4 views + pill condicional na nav + matriz de acesso (`slices/slice-002-dashboard-guard.md`)
 
 ## Preflight (uma vez por change)
@@ -10,6 +10,14 @@
 - [ ] Working tree limpa em `main` @ `1382bdb` (BASE_REF; rc.3 deployada em produção)
 - [ ] Baseline verde conhecida: gate da rc.3 (ruff/format/mypy OK · 3351 passed) — não repetir por slice
 - [ ] `openspec validate followup-chd-access-guard` OK
+
+
+## Registro de execução
+
+### Slice 001
+- Worker: RED (ImportError) → GREEN; 4 arquivos exatamente no blast radius; +24 testes em `test_access_policy.py` (235 passed no app); ruff/format/mypy direcionados OK.
+- Review r1: BLOCK — P1: política concedia acesso a anônimo com `active_role="admin"` e a inativos (guard de identidade ausente); P2: processor reimplementava False de anônimo. Fix round aplicou guard `is_authenticated`+`is_active` primeiro e delegation incondicional; +casos anônimo(incl. admin)/inativos parametrizados.
+- Review r2: `Merge verdict: OK with notes` (nota: gates confirmados pelo parent — 235 passed, ruff/format/mypy OK).
 
 ## Gate final (uma vez após todos os slices)
 
