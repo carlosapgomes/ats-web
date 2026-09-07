@@ -12,7 +12,7 @@ Além dos três papéis operacionais, o sistema também tem o papel de
 **Supervisor** (perfis de gerência e administração, exibidos no sistema como
 **Supervisor** e **Administrador**). O Supervisor não conduz o caso no dia a
 dia, mas registra o **desfecho dos exames** depois que o dia do procedimento
-passou — o chamado **follow-up de agendamento** (seção 6).
+passou — o chamado **pós-procedimento** (seção 6).
 
 Neste manual, vamos usar principalmente o termo **CHD**, porque é o nome mais usado pela equipe. Quando aparecer **Agendador**, considere que estamos falando do mesmo papel no sistema.
 
@@ -1032,8 +1032,8 @@ médicas e a comunicação operacional com o médico/NIR.
 
 O papel de **Supervisor** corresponde aos perfis de gerência e administração
 do sistema. O Supervisor não conduz o caso no dia a dia: ele acompanha o
-**desfecho do dia do exame**. A aba **Follow-up**, no Dashboard, permite
-registrar, para cada caso com exame no dia, o que aconteceu — se o
+**desfecho do dia do exame**. A aba **Pós-Procedimento**, no Dashboard,
+permite registrar, para cada caso com exame no dia, o que aconteceu — se o
 procedimento foi realizado, a causa quando não foi e se o paciente foi
 internado.
 
@@ -1041,28 +1041,52 @@ Esse registro é apenas informativo, de acompanhamento e de métrica. Ele
 **não** altera o estado do caso, **não** abre intercorrência, **não** cancela
 e **não** reagenda exames.
 
-## 6.1 Registrar follow-up de agendamento
+### Quem acessa a aba Pós-Procedimento
+
+A aba **Pós-Procedimento** é restrita aos supervisores do **CHD** e aos
+Administradores:
+
+- supervisores do CHD: usuários com os perfis **Supervisor** e
+  **CHD/Agendador**, com o papel ativo **Supervisor**;
+- Administradores: usuários com o papel ativo **Administrador** — o acesso
+  não depende de vínculo com o CHD.
+
+Supervisores sem o perfil **CHD/Agendador** **não veem a aba** no menu do
+Dashboard — por exemplo, supervisores que também atuam com perfil **Médico**
+ou **NIR**. Quem tentar abrir o endereço diretamente é redirecionado para a
+página inicial com uma mensagem de erro.
+
+A aba **Pós-Procedimento** tem duas sub-abas:
+
+- **Registrar** — os casos elegíveis do dia e o formulário de desfecho
+  (seção 6.1);
+- **Histórico & Exportação** — a consulta e a exportação dos desfechos
+  registrados (seção 6.2).
+
+## 6.1 Registrar o pós-procedimento
 
 ### Quando usar
 
-Registre o follow-up quando o dia do exame já passou e o desfecho é
+Registre o pós-procedimento quando o dia do exame já passou e o desfecho é
 conhecido:
 
 - o exame foi **realizado** normalmente;
 - o exame **não foi realizado** — registrar a causa;
 - o paciente **foi internado** ou não.
 
-Atenção: o follow-up **não substitui** os fluxos de intercorrência e
-reagendamento. Se um exame não realizado precisar de nova data, use o fluxo
-de reagendamento do CHD (seção 5.5); se houve mudança após o aceite, use a
-intercorrência pós-aceitação do NIR (seção 3.8). O follow-up apenas registra
-o desfecho.
+Atenção: o registro do pós-procedimento **não substitui** os fluxos de
+intercorrência e reagendamento. Se um exame não realizado precisar de nova
+data, use o fluxo de reagendamento do CHD (seção 5.5); se houve mudança após
+o aceite, use a intercorrência pós-aceitação do NIR (seção 3.8). O
+pós-procedimento apenas registra o desfecho.
 
-### Como abrir a aba Follow-up
+### Como abrir a sub-aba Registrar
 
-1. entrar no sistema com o perfil ativo **Supervisor** ou **Administrador**;
+1. entrar no sistema com o papel ativo **Supervisor** (supervisor do CHD) ou
+   **Administrador**;
 2. acessar o **Dashboard**;
-3. clicar na aba **Follow-up** no menu do dashboard.
+3. clicar na aba **Pós-Procedimento** no menu do dashboard — a sub-aba
+   **Registrar** abre por padrão.
 
 ### O que a lista mostra
 
@@ -1076,12 +1100,11 @@ A lista abre mostrando os casos elegíveis de **hoje e ontem** (dias locais):
 
 Cada card mostra o nome do paciente, o número da ocorrência/registro, o
 horário do agendamento (ou o fluxo e a data/hora da decisão, na vinda
-imediata) e o estado do follow-up:
+imediata) e a situação do pós-procedimento:
 
-- badge **Follow-up registrado** — o caso já tem follow-up; a versão (v1,
-  v2, ...), a data/hora e o autor aparecem logo abaixo do badge;
-- badge **Follow-up pendente** — ainda não há follow-up registrado para o
-  caso.
+- badge **Pós-procedimento registrado** — o caso já tem registro; a versão
+  (v1, v2, ...), a data/hora e o autor aparecem logo abaixo do badge;
+- badge **Pós-procedimento pendente** — ainda não há registro para o caso.
 
 Também é possível refinar a lista:
 
@@ -1093,10 +1116,10 @@ Também é possível refinar a lista:
 Atenção: caso **reagendado** aparece na lista apenas na data vigente do novo
 agendamento, não na data antiga.
 
-### Como preencher o follow-up
+### Como preencher o formulário
 
-1. localizar o caso na lista e clicar em **Registrar follow-up** (ou
-   **Atualizar follow-up**, quando o caso já tiver registro);
+1. localizar o caso na lista e clicar em **Registrar pós-procedimento** (ou
+   **Atualizar pós-procedimento**, quando o caso já tiver registro);
 2. para **cada procedimento** do caso (EDA, Colonoscopia ou os dois),
    informar o desfecho:
    - **Realizado** — o exame foi realizado;
@@ -1108,7 +1131,7 @@ agendamento, não na data antiga.
      - **Outras causas** — descrever a causa no campo de texto;
 3. responder se **o paciente foi internado** — a pergunta é sempre exibida e
    é obrigatória em todos os casos;
-4. clicar em **Registrar follow-up**.
+4. clicar em **Registrar pós-procedimento**.
 
 Regras do formulário:
 
@@ -1118,21 +1141,76 @@ Regras do formulário:
 - **Cancelamento por falta de recursos no dia** exige um dos submotivos;
 - **Outras causas** exige a descrição (obrigatória).
 
-### Versões do follow-up
+### Versões do pós-procedimento
 
-Cada gravação cria uma **nova versão** do follow-up do caso:
+Cada gravação cria uma **nova versão** do pós-procedimento do caso:
 
 - a primeira gravação cria a **versão 1**;
 - gravar novamente (correção ou complemento) cria a **versão seguinte**;
 - as versões anteriores **nunca são editadas nem apagadas** — cada versão
   fica preservada com o **autor** e a **data/hora** do registro;
 - a versão de número maior é a **versão atual**, usada na lista para o badge
-  **Follow-up registrado**.
+  **Pós-procedimento registrado** e no Histórico & Exportação.
 
-Na tela do formulário, o painel **Versões do follow-up** mostra a versão
-atual e o histórico completo das versões preservadas. Para corrigir um
-follow-up já registrado, basta salvar novamente: o sistema cria uma versão
-nova e mantém a anterior no histórico com autor e data originais.
+Na tela do formulário, o painel **Versões do pós-procedimento** mostra a
+versão atual e o histórico completo das versões preservadas. Para corrigir um
+registro já feito, basta salvar novamente: o sistema cria uma versão nova e
+mantém a anterior no histórico com autor e data originais.
+
+## 6.2 Histórico & Exportação
+
+A sub-aba **Histórico & Exportação** permite consultar e exportar os
+desfechos já registrados. Cada caso aparece **uma única vez**, com os dados
+da **versão corrente** (a de número maior) — versões antigas não aparecem na
+listagem.
+
+O eixo da consulta é a **data de grupo do caso**: o dia do exame do
+agendamento confirmado ou a data da decisão, nos casos de vinda imediata.
+Não é a data em que o registro foi feito.
+
+### Janela por data de grupo
+
+- por padrão, a janela cobre os **últimos 7 dias, incluindo hoje**;
+- é possível informar um período próprio de até **31 dias**;
+- datas inválidas, período invertido (fim antes do início) ou acima do limite
+  fazem o sistema voltar ao padrão de 7 dias.
+
+### Busca e resumo do período
+
+- a busca por **número da ocorrência** ou **nome do paciente** restringe a
+  consulta dentro da janela;
+- os **cards-resumo do período** mostram os casos com pós-procedimento, as
+  internações, a taxa de realização por procedimento e as causas de não
+  realização, com o detalhe dos submotivos;
+- os cards refletem a janela e a busca informadas.
+
+### Tabela de desfechos e filtros de linha
+
+A tabela lista **uma linha por desfecho de procedimento** — ocorrência,
+paciente, data do grupo, procedimento, desfecho, causa (com submotivo ou
+texto), internação, versão, autor e data/hora do registro. A tabela é
+paginada, com **25 linhas por página**.
+
+Os filtros **Desfecho**, **Causa** e **Internação** refinam as linhas:
+
+- **Desfecho** e **Causa** filtram as linhas de desfecho de procedimento;
+- **Internação** filtra casos inteiros — um caso internado permanece com
+  todas as suas linhas;
+- valores inválidos são ignorados, como se o filtro estivesse em **Todos**;
+- os **cards-resumo não mudam** com esses filtros: continuam refletindo a
+  janela e a busca completas.
+
+### Exportar CSV
+
+O botão **Exportar CSV** baixa um arquivo com o mesmo recorte exibido na
+tela:
+
+- abre no **Excel** em português: arquivo em UTF-8, separador ponto e
+  vírgula e cabeçalho em português;
+- inclui **todas** as linhas do recorte — a exportação **ignora a paginação**
+  da tabela;
+- a exportação apenas gera o arquivo: não altera registros nem cria eventos
+  de auditoria.
 
 ---
 

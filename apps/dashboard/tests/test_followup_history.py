@@ -22,7 +22,7 @@ EXPORT_URL = reverse("dashboard:followup_history_export")
 
 # Header PT-BR fixo do CSV (design D5 / R2) — ordem exata das 13 colunas.
 CSV_HEADER = [
-    "Case ID",
+    "ID do caso",
     "Ocorrência",
     "Paciente",
     "Data",
@@ -757,7 +757,7 @@ class TestHistoryExportRows:
         assert "Equipe indisponível" not in " ".join(" ".join(row) for row in data_rows)
 
         shared = {
-            "Case ID": str(case.case_id),
+            "ID do caso": str(case.case_id),
             "Ocorrência": "CSV-001",
             "Paciente": "Maria Export",
             "Data": _local_day(0).strftime("%d/%m/%Y"),

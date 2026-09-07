@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -178,3 +179,43 @@ class TestBuildUserManualPdf:
         assert "Índice" in text, "PDF does not contain an 'Índice' section"
         # At least one known section title should be listed in the TOC
         assert "Ações do usuário NIR" in text
+
+
+# ── R3: Manual §6 Supervisor (Slice 002 — Pós-Procedimento) ──────────────
+
+
+class TestUserManualSection6Supervisor:
+    """Slice 002: §6 documenta a aba Pós-Procedimento (CHD) e Histórico & Exportação."""
+
+    @staticmethod
+    def _manual() -> str:
+        return MANUAL_PATH.read_text(encoding="utf-8")
+
+    def _section6(self) -> str:
+        content = self._manual()
+        start = content.index("# 6. Ações do usuário Supervisor")
+        end = content.index("# 7. ", start)
+        return content[start:end]
+
+    def test_section6_documents_pos_procedimento_tab_and_subtabs(self) -> None:
+        """§6 usa o rótulo novo e documenta as duas sub-abas (Registrar e Histórico & Exportação)."""
+        section = self._section6()
+        assert "Pós-Procedimento" in section
+        assert "Histórico & Exportação" in section
+        assert "Registrar pós-procedimento" in section
+        assert "Exportar CSV" in section
+
+    def test_section6_documents_chd_access_rule(self) -> None:
+        """§6 documenta o acesso restrito: supervisores do CHD e Administradores."""
+        section = self._section6()
+        assert "CHD/Agendador" in section
+        assert "Administrador" in section
+        # Supervisores sem vínculo com o CHD (ex.: Médico/NIR) não veem a aba
+        assert "não veem a aba" in section
+
+    def test_manual_is_free_of_followup_anglicism(self) -> None:
+        """O manual inteiro não usa 'follow-up'/'follow up' (case-insensitive)."""
+        content = self._manual()
+        assert re.search(r"follow.?up", content, flags=re.IGNORECASE) is None, (
+            "Manual ainda contém o anglicismo 'follow-up'"
+        )

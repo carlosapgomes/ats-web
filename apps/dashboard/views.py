@@ -1797,7 +1797,7 @@ def followup_history(request: HttpRequest) -> HttpResponse:
 # ── Exportação CSV do histórico (Slice 002) ─────────────────────────────
 
 _FOLLOWUP_CSV_HEADER = [
-    "Case ID",
+    "ID do caso",
     "Ocorrência",
     "Paciente",
     "Data",
