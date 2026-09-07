@@ -1,4 +1,4 @@
-"""Testes da página Histórico & Exportação de follow-ups (Slice 001 R1–R8; Slice 002 R1–R7)."""
+"""Testes da página Histórico & Exportação de pós-procedimentos (Slice 001 R1–R8; Slice 002 R1–R7)."""
 
 import csv
 import io
@@ -140,7 +140,7 @@ def _record(
     detail: str = "",
     other: str = "",
 ) -> CaseFollowUp:
-    """Grava uma nova versão do follow-up do caso."""
+    """Grava uma nova versão do pós-procedimento do caso."""
     return record_case_follow_up(
         case=case,
         performed_by=user,
@@ -291,7 +291,7 @@ class TestHistoryAccess:
 
 
 class TestFollowupTabs:
-    """Sub-abas via partial sob o pill Follow-up, ativa conforme a página."""
+    """Sub-abas via partial sob o pill Pós-Procedimento, ativa conforme a página."""
 
     def test_list_page_shows_tabs_with_registrar_active(self, client) -> None:
         _login_as(client, "manager")
@@ -312,17 +312,17 @@ class TestFollowupTabs:
         assert f'class="nav-link " href="{LIST_URL}"' in content
 
 
-# ── R3: população = casos com follow-up, versão corrente ────────────────
+# ── R3: população = casos com pós-procedimento, versão corrente ────────
 
 
 class TestHistoryPopulation:
-    """Só casos com follow-up entram; cada caso 1x pela versão corrente."""
+    """Só casos com pós-procedimento entram; cada caso 1x pela versão corrente."""
 
     def test_casos_elegiveis_sem_followup_nao_aparecem(self, client) -> None:
         user = _login_as(client, "manager")
-        com_followup = _create_scheduled_case(user, arn="COM-FU", name="Com Follow-up", when=_local_dt(day_offset=0))
+        com_followup = _create_scheduled_case(user, arn="COM-FU", name="Com registro", when=_local_dt(day_offset=0))
         _record(com_followup, user)
-        _create_scheduled_case(user, arn="SEM-FU", name="Elegível sem follow-up", when=_local_dt(day_offset=0, hour=15))
+        _create_scheduled_case(user, arn="SEM-FU", name="Elegível sem registro", when=_local_dt(day_offset=0, hour=15))
 
         response = client.get(HISTORY_URL)
         assert _history_arns(response) == ["COM-FU"]
@@ -504,7 +504,7 @@ class TestHistoryCards:
         assert response.status_code == 200
         content = response.content.decode()
         assert "Resumo do período" in content
-        assert "Casos com follow-up no período" in content
+        assert "Casos com pós-procedimento no período" in content
         assert "Internações no período" in content
         assert "Taxa de realização por procedimento" in content
         assert "Causas de não realização" in content

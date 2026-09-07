@@ -1960,7 +1960,7 @@ def followup_form(request: HttpRequest, case_id: uuid.UUID) -> HttpResponse:
     """
     case = get_object_or_404(Case, case_id=case_id)
     if not is_followup_eligible(case):
-        raise Http404("Caso não está elegível para follow-up.")
+        raise Http404("Caso não está elegível para pós-procedimento.")
 
     procedures = list(case.procedures.order_by("procedure_type"))
     is_post = request.method == "POST"
@@ -2009,7 +2009,7 @@ def followup_form(request: HttpRequest, case_id: uuid.UUID) -> HttpResponse:
             )
         messages.success(
             request,
-            f"Follow-up registrado (versão {recorded.version}) para o caso "
+            f"Pós-procedimento registrado (versão {recorded.version}) para o caso "
             f"{case.agency_record_number or case.case_id}.",
         )
         return redirect("dashboard:followup_list")

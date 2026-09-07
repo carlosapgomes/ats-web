@@ -340,8 +340,8 @@ EVENT_LABELS: dict[str, str] = {
     # ── Comunicação operacional ───────────────────────────────
     "CASE_COMMUNICATION_MESSAGE_POSTED": "Mensagem operacional registrada",
     # ── Follow-up de desfecho do supervisor ────────────────────
-    "FOLLOWUP_RECORDED": "Follow-up registrado",
-    "FOLLOWUP_UPDATED": "Follow-up atualizado",
+    "FOLLOWUP_RECORDED": "Pós-procedimento registrado",
+    "FOLLOWUP_UPDATED": "Pós-procedimento atualizado",
 }
 
 # Cores do dot da timeline por event_type

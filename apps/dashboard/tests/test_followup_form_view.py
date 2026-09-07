@@ -1,4 +1,4 @@
-"""Testes do formulário de follow-up do supervisor (Slice 003, R1–R6)."""
+"""Testes do formulário de pós-procedimento do supervisor (Slice 003, R1–R6)."""
 
 import uuid
 from datetime import datetime, time, timedelta
@@ -440,7 +440,7 @@ class TestFollowUpFormPostValid:
 
         # Volta à lista com messages.success.
         list_page = client.get(response.url)
-        assert "Follow-up registrado" in list_page.content.decode()
+        assert "Pós-procedimento registrado" in list_page.content.decode()
 
     def test_post_valid_not_performed_with_reason(self, client) -> None:
         user = _login_as(client, "manager")

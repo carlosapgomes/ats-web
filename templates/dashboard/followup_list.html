@@ -1,8 +1,8 @@
 {% extends "base.html" %}
 {% load static %}
 
-{% block title %}Follow-up — {{ app_display_name }}{% endblock %}
-{% block page_title %}<h1 class="page-title">Follow-up de desfecho de agendamentos</h1>{% endblock %}
+{% block title %}Pós-Procedimento — {{ app_display_name }}{% endblock %}
+{% block page_title %}<h1 class="page-title">Pós-Procedimento de desfecho de agendamentos</h1>{% endblock %}
 
 {% block nav %}
 {% include "dashboard/_nav.html" %}
@@ -15,7 +15,7 @@
 <div class="card p-4">
   <!-- Header: título + filtros -->
   <div class="d-flex justify-content-between align-items-center mb-3 flex-wrap gap-2">
-    <h5 class="mb-0">Casos elegíveis para follow-up</h5>
+    <h5 class="mb-0">Casos elegíveis para pós-procedimento</h5>
     <div class="d-flex gap-2 flex-wrap align-items-center">
       <a href="{% url 'dashboard:followup_list' %}" class="btn btn-sm btn-outline-secondary">Hoje + ontem</a>
     </div>
@@ -64,17 +64,17 @@
               </div>
               <div class="col-12 col-lg-4 text-lg-end">
                 {% if item.follow_up %}
-                <span class="badge bg-success">Follow-up registrado</span>
+                <span class="badge bg-success">Pós-procedimento registrado</span>
                 <small class="text-muted d-block">
                   v{{ item.follow_up.version }} · {{ item.follow_up.recorded_at|date:"d/m/Y H:i" }}
                   {% if item.follow_up.recorded_by %} · {{ item.follow_up.recorded_by.get_full_name|default:item.follow_up.recorded_by.username }}{% endif %}
                 </small>
                 {% else %}
-                <span class="badge bg-warning text-dark">Follow-up pendente</span>
+                <span class="badge bg-warning text-dark">Pós-procedimento pendente</span>
                 {% endif %}
                 <div class="mt-1">
                   <a href="{% url 'dashboard:followup_form' item.case.case_id %}" class="btn btn-sm btn-hospital-outline">
-                    {% if item.follow_up %}Atualizar follow-up{% else %}Registrar follow-up{% endif %}
+                    {% if item.follow_up %}Atualizar pós-procedimento{% else %}Registrar pós-procedimento{% endif %}
                   </a>
                 </div>
               </div>

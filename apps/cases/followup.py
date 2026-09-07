@@ -82,19 +82,19 @@ def _validate_outcomes(case: Case, outcomes: Sequence[ProcedureOutcomeInput]) ->
     """
     procedures_by_id = {procedure.id: procedure for procedure in case.procedures.all()}
     if not procedures_by_id:
-        raise ValueError("Caso não possui procedimentos declarados para follow-up.")
+        raise ValueError("Caso não possui procedimentos declarados para pós-procedimento.")
 
     seen: set[int] = set()
     for outcome in outcomes:
         if outcome.procedure_id not in procedures_by_id:
             raise ValueError("Procedimento informado não pertence ao caso.")
         if outcome.procedure_id in seen:
-            raise ValueError("Procedimento duplicado no follow-up.")
+            raise ValueError("Procedimento duplicado no pós-procedimento.")
         seen.add(outcome.procedure_id)
 
     missing = set(procedures_by_id) - seen
     if missing:
-        raise ValueError("O follow-up deve cobrir todos os procedimentos do caso.")
+        raise ValueError("O pós-procedimento deve cobrir todos os procedimentos do caso.")
 
     for outcome in outcomes:
         if outcome.performed:

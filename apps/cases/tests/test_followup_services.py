@@ -261,6 +261,55 @@ class TestValidacoes:
             [ProcedureOutcomeInput(procedure_id=col_id, performed=True)],
         )
 
+    @pytest.mark.parametrize(
+        ("case_types", "outcomes", "expected_message"),
+        [
+            pytest.param(
+                (),
+                lambda case: [],
+                "Caso não possui procedimentos declarados para pós-procedimento.",
+                id="sem-procedimentos-declarados",
+            ),
+            pytest.param(
+                ("eda",),
+                lambda case: [_outcome(case, performed=True), _outcome(case, performed=True)],
+                "Procedimento duplicado no pós-procedimento.",
+                id="procedimento-duplicado",
+            ),
+            pytest.param(
+                ("eda", "colonoscopy"),
+                lambda case: [ProcedureOutcomeInput(procedure_id=_procedure_ids(case)[1], performed=True)],
+                "O pós-procedimento deve cobrir todos os procedimentos do caso.",
+                id="cobertura-incompleta",
+            ),
+        ],
+    )
+    def test_mensagens_de_validacao_usam_pos_procedimento(
+        self,
+        user,
+        case_factory,
+        case_types: tuple[str, ...],
+        outcomes: Callable[[Case], list[Any]],
+        expected_message: str,
+    ) -> None:
+        """ValueErrors de estrutura usam "pós-procedimento" (D1), nunca "follow-up".
+
+        São exatamente as mensagens que ``followup_form`` renderiza como erro
+        de formulário (``add_error(None, str(exc))`` em views.py), então o
+        termo visível precisa ser o novo; o anglicismo não pode regredir.
+        """
+        case = _case_with_procedures(case_factory, user, types=case_types)
+        with pytest.raises(ValueError) as exc:
+            record_case_follow_up(
+                case=case,
+                performed_by=user,
+                patient_admitted=False,
+                procedure_outcomes=outcomes(case),
+            )
+        assert str(exc.value) == expected_message
+        assert not CaseFollowUp.objects.filter(case=case).exists()
+        assert not CaseEvent.objects.filter(case=case, event_type__startswith="FOLLOWUP").exists()
+
     def test_procedimento_estranho_rejeitado(self, user, case_factory) -> None:
         case = _case_with_procedures(case_factory, user)
         outro = _case_with_procedures(case_factory, user)

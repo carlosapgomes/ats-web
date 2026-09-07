@@ -1,11 +1,13 @@
-"""Testes da aba de listagem Follow-up do supervisor (Slice 002, R1–R6)."""
+"""Testes da aba de listagem Pós-Procedimento do supervisor (Slice 002, R1–R6)."""
 
+import re
 from datetime import datetime, time, timedelta
 
 import pytest
 from django.contrib.auth import get_user_model
 from django.urls import reverse
 from django.utils import timezone
+from django.utils.html import strip_tags
 
 from apps.cases.admission import ADMISSION_FLOW_MAP
 from apps.cases.followup import ProcedureOutcomeInput, record_case_follow_up
@@ -130,7 +132,7 @@ class TestFollowUpListAccess:
         assert response.redirect_chain[0] == ("/", 302)
         content = response.content.decode()
         assert "Você não tem permissão para acessar esta página." in content
-        assert "Casos elegíveis para follow-up" not in content
+        assert "Casos elegíveis para pós-procedimento" not in content
 
     def test_admin_sem_chd_allowed(self, client) -> None:
         """admin ativo sem scheduler → 200 (isenção D4, emergência/suporte)."""
@@ -334,7 +336,7 @@ class TestFollowUpListSearch:
 
 
 class TestFollowUpListCardBadges:
-    """Cards exibem ocorrência, nome, data/hora ou fluxo, e badge de follow-up."""
+    """Cards exibem ocorrência, nome, data/hora ou fluxo, e badge de pós-procedimento."""
 
     def _record_follow_up(self, case: Case, user) -> None:
         procedure = CaseProcedure.objects.create(case=case, procedure_type="eda")
@@ -356,9 +358,9 @@ class TestFollowUpListCardBadges:
         response = client.get(reverse("dashboard:followup_list"))
         assert response.status_code == 200
         content = response.content.decode()
-        assert "Follow-up registrado" in content
+        assert "Pós-procedimento registrado" in content
         assert "v1" in content
-        assert "Follow-up pendente" in content
+        assert "Pós-procedimento pendente" in content
 
     def test_card_shows_occurrence_name_and_scheduled_datetime(self, client) -> None:
         user = _login_as(client, "manager")
@@ -388,11 +390,11 @@ class TestFollowUpListCardBadges:
         assert ADMISSION_FLOW_MAP["immediate"] in content
 
 
-# ── R6: pill Follow-up na navegação do dashboard ────────────────────────
+# ── R6: pill Pós-Procedimento na navegação do dashboard ────────────────
 
 
 class TestFollowUpListNav:
-    """Pill "Follow-up" visível apontando para a rota da listagem."""
+    """Pill "Pós-Procedimento" visível apontando para a rota da listagem."""
 
     def test_nav_shows_followup_pill_with_url(self, client) -> None:
         _login_as(client, "manager")
@@ -400,10 +402,10 @@ class TestFollowUpListNav:
         assert response.status_code == 200
         content = response.content.decode()
         assert reverse("dashboard:followup_list") in content
-        assert "Follow-up" in content
+        assert "Pós-Procedimento" in content
 
 
-# ── R3: pill Follow-up no dashboard só com can_access_followup ────────────
+# ── R3: pill Pós-Procedimento no dashboard só com can_access_followup ───
 
 
 class TestDashboardFollowUpNavPill:
@@ -414,21 +416,21 @@ class TestDashboardFollowUpNavPill:
         _login_as(client, "manager")
         content = client.get(reverse("dashboard:index")).content.decode()
         assert reverse("dashboard:followup_list") in content
-        assert "Follow-up" in content
+        assert "Pós-Procedimento" in content
 
     def test_nav_pill_oculta_para_manager_sem_chd(self, client) -> None:
         """manager sem o papel scheduler NÃO vê o pill no dashboard."""
         _login_as_plain_manager(client)
         content = client.get(reverse("dashboard:index")).content.decode()
         assert reverse("dashboard:followup_list") not in content
-        assert "Follow-up" not in content
+        assert "Pós-Procedimento" not in content
 
     def test_nav_pill_visivel_para_admin(self, client) -> None:
         """admin (isento D4) vê o pill mesmo sem scheduler."""
         _login_as(client, "admin")
         content = client.get(reverse("dashboard:index")).content.decode()
         assert reverse("dashboard:followup_list") in content
-        assert "Follow-up" in content
+        assert "Pós-Procedimento" in content
 
     def test_nav_pill_visivel_para_admin_com_scheduler_ativo_manager(self, client) -> None:
         """admin + scheduler com papel ativo manager vê o pill (matriz D6)."""
@@ -442,7 +444,7 @@ class TestDashboardFollowUpNavPill:
         session.save()
         content = client.get(reverse("dashboard:index")).content.decode()
         assert reverse("dashboard:followup_list") in content
-        assert "Follow-up" in content
+        assert "Pós-Procedimento" in content
 
 
 # ── Regressão P1: caso híbrido (agendamento confirmado + fluxo operacional) ──
@@ -552,3 +554,82 @@ class TestFollowUpListHybridCase:
         assert expected_time in content
         assert "Agendamento confirmado" in content
         assert ADMISSION_FLOW_MAP["immediate"] not in content
+
+
+# ── R4 (design D5): varredura anti-anglicismo sobre TEXTO VISÍVEL ───────
+# Nenhuma string "follow-up"/"Follow-up" pode aparecer em texto visível das
+# páginas-chave (list com e sem follow-up, form, history). ``strip_tags``
+# remove as tags INTEIRAS (incluindo valores de atributos como href e
+# aria-label), preservando apenas os text nodes — dados de usuário nos
+# fixtures não podem conter o termo (nomes neutros).
+
+
+def _visible_text(html: str) -> str:
+    """Text nodes visíveis do HTML: strip_tags + normalização de espaços."""
+    return re.sub(r"\s+", " ", strip_tags(html))
+
+
+class TestNoFollowupAnglicismVisible:
+    """Páginas-chave do Pós-Procedimento sem o anglicismo no texto visível."""
+
+    def _record_follow_up(self, case: Case, user) -> None:
+        procedure = CaseProcedure.objects.create(case=case, procedure_type="eda")
+        record_case_follow_up(
+            case=case,
+            performed_by=user,
+            patient_admitted=False,
+            procedure_outcomes=[ProcedureOutcomeInput(procedure_id=procedure.id, performed=True)],
+        )
+
+    def _assert_no_visible_followup(self, response) -> None:
+        assert response.status_code == 200
+        text = _visible_text(response.content.decode())
+        assert "follow-up" not in text.lower()
+
+    def test_no_followup_anglicism_visible_list(self, client) -> None:
+        """Lista sem e com pós-procedimento registrado (cards pendente + registrado)."""
+        user = _login_as(client, "manager")
+        case = _create_scheduled_case(
+            user, arn="SCAN-LIST-001", name="Paciente Varredura", when=_local_dt(day_offset=0)
+        )
+
+        # Sem pós-procedimento registrado: badge pendente + botão "Registrar...".
+        response = client.get(reverse("dashboard:followup_list"))
+        self._assert_no_visible_followup(response)
+
+        # Com pós-procedimento registrado: badge registrado + botão "Atualizar...".
+        self._record_follow_up(case, user)
+        response = client.get(reverse("dashboard:followup_list"))
+        self._assert_no_visible_followup(response)
+
+    def test_no_followup_anglicism_visible_form(self, client) -> None:
+        """Formulário com versão registrada (painel de versões + botão submit)."""
+        user = _login_as(client, "manager")
+        case = _create_scheduled_case(
+            user, arn="SCAN-FORM-001", name="Paciente Formulário", when=_local_dt(day_offset=0)
+        )
+        self._record_follow_up(case, user)
+
+        response = client.get(reverse("dashboard:followup_form", args=[str(case.case_id)]))
+        self._assert_no_visible_followup(response)
+
+    def test_no_followup_anglicism_visible_history(self, client) -> None:
+        """Histórico & Exportação com caso no período (cards + tabela)."""
+        user = _login_as(client, "manager")
+        case = _create_scheduled_case(
+            user, arn="SCAN-HIST-001", name="Paciente Histórico", when=_local_dt(day_offset=0)
+        )
+        self._record_follow_up(case, user)
+
+        response = client.get(reverse("dashboard:followup_history"))
+        self._assert_no_visible_followup(response)
+
+
+class TestEventLabelsSemAnglicismo:
+    """R4 (design D5): nenhum valor de EVENT_LABELS contém "follow-up"."""
+
+    def test_event_labels_sem_anglicismo(self) -> None:
+        from apps.intake.views import EVENT_LABELS
+
+        for value in EVENT_LABELS.values():
+            assert "follow-up" not in value.lower(), value
