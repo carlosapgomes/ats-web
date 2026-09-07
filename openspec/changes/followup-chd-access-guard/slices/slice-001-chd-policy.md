@@ -4,7 +4,7 @@
 
 Criar a política de acesso composto (papel ativo + posse de papel) como
 unidades testáveis em `apps/accounts`: função `can_access_followup`,
-decorator `role_membership_required` e variável de contexto
+decorator `followup_access_required` e variável de contexto
 `can_access_followup`. Nenhuma view/template consome ainda (slice 002);
 o comportamento entregue é a política correta comprovada por testes.
 
@@ -22,9 +22,10 @@ o comportamento entregue é a política correta comprovada por testes.
 - R1 `can_access_followup(user, active_role)` implementa exatamente a matriz D6
   (7 linhas: manager+scheduler/manager/admin/admin+scheduler ativo manager/
   scheduler ativo/doctor/nir/anônimo).
-- R2 `role_membership_required(membership_role, exempt_active_roles=())`:
-  sem posse e sem isenção → `messages.error` + `redirect("/")` (mesma UX/texto
-  do `role_required`); com posse ou com isenção → executa a view.
+- R2 `followup_access_required` (decorator específico que CONSOME R1; ver
+  design D2 — não há segunda implementação da composição): sem acesso →
+  `messages.error` + `redirect("/")` (mesma UX/texto do `role_required`);
+  com acesso → executa a view.
 - R3 `role_context` expõe `can_access_followup` chamando R1 (anônimo → `False`).
 - R4 Tipagem mypy estrita (decorator preserva assinatura via `wraps`).
 
@@ -33,7 +34,7 @@ o comportamento entregue é a política correta comprovada por testes.
 | Requisito | Arquivo(s) esperado(s) | Teste/check |
 | --- | --- | --- |
 | R1 | `apps/accounts/services.py` | `test_can_access_followup_*` (matriz 7 casos) |
-| R2 | `apps/accounts/decorators.py` | `test_role_membership_required_*` (bloqueia/isenta/pass) em view dummy |
+| R2 | `apps/accounts/decorators.py` | `test_followup_access_required_*` (bloqueia/pass) em view dummy |
 | R3 | `apps/accounts/context_processors.py` | `test_can_access_followup_context_*` |
 | R4 | idem | `uv run mypy apps/accounts` |
 
@@ -57,7 +58,7 @@ out_of_scope:
 
 - comando: `uv run pytest apps/accounts/tests/test_access_policy.py -q`
 - falha esperada: `ImportError`/`AttributeError` — `can_access_followup`,
-  `role_membership_required` e a variável de contexto não existem.
+  `followup_access_required` e a variável de contexto não existem.
 
 ### GREEN / verificação local
 
@@ -69,6 +70,6 @@ out_of_scope:
 ## Critérios de aceitação
 
 - [ ] Matriz D6 integral coberta por testes de R1
-- [ ] Decorator bloqueia/isenta conforme R2 com flash e redirect exatos
+- [ ] Decorator bloqueia/pass conforme R2 consumindo a política única (D1/D2)
 - [ ] Context processor expõe o bool correto (incl. anônimo)
 - [ ] Blast radius = 4 arquivos previstos; gates locais verdes

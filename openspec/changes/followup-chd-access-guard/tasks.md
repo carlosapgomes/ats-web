@@ -2,7 +2,7 @@
 
 ## Slices verticais (ordem executável)
 
-- [ ] Slice 001 — Política de acesso CHD em accounts: helper `can_access_followup` + decorator `role_membership_required` + variável de contexto (`slices/slice-001-chd-policy.md`)
+- [ ] Slice 001 — Política de acesso CHD em accounts: helper `can_access_followup` + decorator `followup_access_required` + variável de contexto (`slices/slice-001-chd-policy.md`)
 - [ ] Slice 002 — Aplicação no dashboard: guard nas 4 views + pill condicional na nav + matriz de acesso (`slices/slice-002-dashboard-guard.md`)
 
 ## Preflight (uma vez por change)

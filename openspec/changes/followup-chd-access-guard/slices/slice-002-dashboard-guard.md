@@ -17,27 +17,33 @@ exigir posse de `scheduler` para `manager` ativo (admin isento), e o pill
   helpers `_login_as(role)` criam usuários de papel único; classes
   `TestFollowUp*Access` com `test_manager_allowed`/`test_other_roles_redirected`.
 - `apps/dashboard/tests/test_dashboard.py` — testes do index (nav renderizada).
-- Slice 001 mergeado: `role_membership_required` + `can_access_followup` no
+- Slice 001 mergeado: `followup_access_required` + `can_access_followup` no
   contexto. Design: D3, D6 e D7 de `design.md` do change.
+- Helpers `_login_as` dos 3 arquivos (linhas ~20-31/20-31/45-58): estratégia D6 —
+  `_login_as("manager")` passa a criar `manager`+`scheduler` (supervisor do
+  CHD); helper novo `_login_as_plain_manager` para os bloqueios.
 
 ## Requisitos verificáveis
 
-- R1 As 4 views recebem `@role_membership_required("scheduler", exempt_active_roles=("admin",))`
-  empilhado após `@role_required("manager", "admin")`.
+- R1 As 4 views recebem `@followup_access_required` empilhado após
+  `@role_required("manager", "admin")` (decorator que consome `can_access_followup`).
 - R2 Matriz D6 coluna "4 rotas": manager sem CHD → 302 `/` + flash e sem
   conteúdo; manager com CHD → comportamento atual (200/render); admin sem CHD →
-  200; scheduler ativo e demais papéis → como hoje.
+  200; admin+scheduler com ativo `manager` → 200 (teste explícito);
+  scheduler ativo e demais papéis → como hoje.
 - R3 Pill "Follow-up" ausente no HTML do dashboard para manager sem CHD e
   demais papéis sem acesso; presente para manager+CHD e admin.
-- R4 Helpers de teste: novo login de supervisor CHD (papéis `manager`+`scheduler`);
-  testes `test_manager_allowed` existentes convertidos; novos testes de bloqueio.
+- R4 Helpers conforme D6: `_login_as("manager")` cria `manager`+`scheduler`
+  (testes de comportamento existentes seguem passando sem edição individual);
+  `_login_as_plain_manager` novo para bloqueios; `test_manager_allowed`
+  converte para o helper CHD e assere posse dos dois papéis.
 
 ## Matriz requisito -> arquivo -> teste/check
 
 | Requisito | Arquivo(s) esperado(s) | Teste/check |
 | --- | --- | --- |
-| R1 | `apps/dashboard/views.py` | `rg -n "role_membership_required" apps/dashboard/views.py` (4 views) + R2 |
-| R2 | `apps/dashboard/views.py` | `test_manager_sem_chd_redirecionado_*`, `test_chd_manager_allowed`, `test_admin_sem_chd_allowed` (nos 3 arquivos de teste) |
+| R1 | `apps/dashboard/views.py` | `rg -n "followup_access_required" apps/dashboard/views.py` (4 views) + R2 |
+| R2 | `apps/dashboard/views.py` | `test_manager_sem_chd_redirecionado_*`, `test_chd_manager_allowed`, `test_admin_sem_chd_allowed`, `test_admin_com_scheduler_ativo_manager` (nos 3 arquivos de teste) |
 | R3 | `templates/dashboard/_nav.html` | `test_nav_pill_*` via `dashboard:index` (em `test_dashboard.py` ou arquivo de teste de followup) |
 | R4 | 3 arquivos de teste | helpers + parametrizações atualizadas |
 
@@ -70,7 +76,7 @@ out_of_scope:
 ### GREEN / verificação local
 
 - `uv run pytest apps/dashboard/tests -k "chd or followup" -q` — exit 0
-- `uv run pytest apps/dashboard/tests -q` — exit 0 (matriz completa + sem regressão)
+- `uv run pytest apps/dashboard/tests -q` — exit 0 (matriz completa + todos os testes de comportamento existentes com helper CHD)
 - `uv run pytest apps/accounts/tests -q` — exit 0 (política intacta)
 - `uv run ruff check apps/dashboard && uv run ruff format --check apps/dashboard` — exit 0
 - `uv run mypy apps/dashboard apps/accounts` — exit 0

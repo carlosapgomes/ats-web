@@ -40,11 +40,13 @@ para capturar eventuais ocorrências novas desde o mapeamento (data do scout:
 - `supervisor-followup-history`: header "A aba Follow-up SHALL organizar-se…"
   (linha ~8) e o texto "A superfície Follow-up SHALL apresentar…" → rótulo
   "Pós-Procedimento"/"superfície Pós-Procedimento"; URLs citadas permanecem.
-- Nota: se `followup-chd-access-guard` ainda não estiver arquivado quando este
-  change for implementado, o delta dele (MODIFIED do mesmo requisito de
-  `supervisor-followup-history`) coexiste — este change altera apenas a
-  redação do rótulo, sem tocar cláusulas de acesso. Ordem preferida:
-  CHD-guard primeiro (dependência do manual, não das specs).
+- Nota: este change DEPENDE de `followup-chd-access-guard` — além do manual
+  (acesso CHD), os deltas são encadeados no requisito das sub-abas de
+  `supervisor-followup-history`: o RENAMED FROM deste change referencia o
+  header vigente (que o guard NÃO renomeia) e o MODIFIED carrega o cenário
+  "Manager sem vínculo CHD não vê a aba" introduzido pelo guard. Executar e
+  ARQUIVAR o guard primeiro é obrigatório; em ordem inversa os deltas deixam
+  de casar (review P1).
 
 ## D4 — Manual §6 (slice 002): estrutura do rewrite
 
@@ -80,7 +82,7 @@ Seção "6. Ações do usuário Supervisor" passa a cobrir, com o rótulo novo:
 
 - Substituição mecânica ampla: mitigada pelo inventário D2 + grep de
   verificação como critério de aceite (nenhum "follow-up" visível).
-- Dependência do change `followup-chd-access-guard` apenas para o MANUAL
-  (texto de acesso CHD); specs e templates são independentes. Se necessário,
-  slice 002 pode ser implementado após o guard sem reordenar o slice 001.
+- Dependência OBRIGATÓRIA de `followup-chd-access-guard` (ver D3): manual
+  (acesso CHD) E deltas encadeados no requisito das sub-abas. O guard deve
+  estar arquivado antes do preflight deste change.
 - Zero risco de dados/FSM/migrations: change puramente textual.

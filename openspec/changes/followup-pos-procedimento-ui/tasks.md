@@ -7,7 +7,8 @@
 
 ## Preflight (uma vez por change)
 
-- [ ] Working tree limpa em `main` (BASE_REF = HEAD do fechamento de `followup-chd-access-guard` se já executado; senão `1382bdb`)
+- [ ] **Dependência**: `followup-chd-access-guard` executado E arquivado (deltas encadeados + manual §6 dependem do guard; ordem inversa quebra os MODIFIED)
+- [ ] Working tree limpa em `main` (BASE_REF = HEAD do fechamento de `followup-chd-access-guard`)
 - [ ] Baseline verde conhecida do último gate — não repetir por slice
 - [ ] `openspec validate followup-pos-procedimento-ui` OK
 
