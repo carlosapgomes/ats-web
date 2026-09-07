@@ -37,6 +37,7 @@ def _render(rf: RequestFactory, authenticated: bool = True, multi_role: bool = T
 
     class StubUser:
         is_authenticated: bool = authenticated
+        is_active: bool = True
         username: str = "jose.silva"
 
         def get_full_name(self) -> str:

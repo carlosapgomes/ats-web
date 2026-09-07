@@ -43,6 +43,7 @@ def _render(
 
     class StubUser:
         is_authenticated: bool = authenticated
+        is_active: bool = True
         username: str = "jose.silva"
 
         def get_full_name(self) -> str:
