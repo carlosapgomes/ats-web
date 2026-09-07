@@ -46,10 +46,10 @@ Rótulo na UI: **"Pós-Procedimento"** — título/pill em Title Case
 - Manual `docs/manual/manual-usuarios.md`: §6 completo + referência de
   introdução (~linha 15) + termos dispersos na seção.
 - Deltas de spec (MODIFIED/RENAMED) renomeando o rótulo nas duas capabilities.
-- Atualização dos asserts de texto nos testes afetados (4 asserts em
-  `apps/dashboard/tests/`) + testes do manual
-  (`tests/test_user_manual_artifacts.py`); demais ocorrências (docstrings,
-  comentários, fixture) tratadas conforme design D5.
+- Atualização dos asserts de texto nos testes afetados (5 asserts em
+  `apps/dashboard/tests/` — incl. `test_followup_history.py:450`) + testes do
+  manual (`tests/test_user_manual_artifacts.py`); demais ocorrências
+  (docstrings, comentários, fixtures) tratadas conforme design D5.
 
 ## Não-goals
 

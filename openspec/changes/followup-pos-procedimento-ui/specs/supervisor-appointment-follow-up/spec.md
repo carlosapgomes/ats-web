@@ -12,7 +12,7 @@ A aba SHALL listar, para o dia local corrente e o dia anterior (default), os cas
 #### Scenario: Default hoje e ontem ordenado
 
 - **GIVEN** casos elegíveis hoje e ontem com pacientes de nomes variados
-- **WHEN** o supervisor do CHD abre `/dashboard/follow-ups/` sem parâmetros
+- **WHEN** o supervisor abre `/dashboard/follow-ups/` sem parâmetros
 - **THEN** os casos de hoje e ontem aparecem agrupados por data ascendente
 - **AND** dentro de cada data, ordenados por nome do paciente
 - **AND** cada card indica "Pós-procedimento pendente" ou "Pós-procedimento registrado"

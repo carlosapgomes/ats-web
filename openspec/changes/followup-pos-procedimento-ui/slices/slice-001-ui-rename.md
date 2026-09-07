@@ -19,9 +19,11 @@ texto visível.
   render-time na timeline de `case_detail` (template compartilhado com o
   dashboard). Sem migration: `CaseEvent` armazena `event_type`; eventos
   antigos passam a exibir o rótulo novo.
-- Testes: 4 asserts com "Follow-up" (`test_followup_list_view.py:302,304,346`,
-  `test_followup_form_view.py:381`) + docstrings/comentários (higiene) + a
-  fixture `"Com Follow-up"` (`test_followup_history.py:266`, renomear — ver D5).
+- Testes: 5 asserts com "Follow-up" (`test_followup_list_view.py:302,304,346`,
+  `test_followup_form_view.py:381`, `test_followup_history.py:450`) +
+  docstrings/comentários (higiene) + as DUAS fixtures com o termo
+  (`test_followup_history.py:266` `"Com Follow-up"` e `:268` `"Elegível sem
+  follow-up"` — renomear para nomes neutros, ver D5).
 - **Não renomear**: URLs (`/dashboard/follow-ups/`), names de rotas, ids/classes
   CSS, `data-*` attributes, nomes de arquivos de template, filename do CSV
   (`followups_*.csv`), comentários de código.
@@ -32,8 +34,9 @@ texto visível.
   contexto (Title Case em título/pill; minúsculo no meio de frase), incluindo
   os 2 labels da timeline em `apps/intake/views.py`.
 - R2 Flash message usa "Pós-procedimento registrado (versão {n})…".
-- R3 Os 4 asserts existentes convertidos; docstrings/comentários dos testes
-  acompanham o rename; fixture `"Com Follow-up"` renomeada para nome neutro.
+- R3 Os 5 asserts existentes convertidos (incl. `:450` "Casos com follow-up no
+  período"); docstrings/comentários dos testes acompanham o rename; as duas
+  fixtures (`:266`/`:268`) renomeadas para nomes neutros.
 - R4 Varredura anti-regresso (metodologia D5): para as páginas-chave (list com
   e sem follow-up, form, history), `strip_tags` no HTML → texto normalizado →
   "follow-up" (case-insensitive) ausente; e assert direto de que nenhum valor
@@ -45,6 +48,7 @@ texto visível.
 | --- | --- | --- |
 | R1 | 5 templates + `apps/intake/views.py` (D2) | R4 + inspeção do grep classificado (D5) |
 | R2 | `apps/dashboard/views.py` | assert existente da flash convertida (`test_followup_form_view.py:381`) |
+| — | `templates/dashboard/followup_history.html:78` | assert existente do card convertido (`test_followup_history.py:450`) |
 | R3 | 3 arquivos de teste | suíte focada verde |
 | R4 | `apps/dashboard/tests/test_followup_list_view.py` (ou arquivo mais adequado) | `test_no_followup_anglicism_visible_*` + `test_event_labels_sem_anglicismo` |
 

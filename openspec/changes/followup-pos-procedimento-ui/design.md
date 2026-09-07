@@ -25,7 +25,7 @@
 | `templates/dashboard/followup_history.html:5,78` | h1 "Follow-up · Histórico…", card "Casos com follow-up no período" |
 | `apps/dashboard/views.py:~2008` | flash "Follow-up registrado (versão {n})…" |
 | `apps/intake/views.py:343-344` | `EVENT_LABELS["FOLLOWUP_RECORDED"]/"FOLLOWUP_UPDATED"]` → "Pós-procedimento registrado/atualizado" (labels render-time exibidos na timeline do `case_detail` — template compartilhado com o dashboard; **fonte única**, nenhum outro `EVENT_LABELS` de app tem labels de follow-up; sem migration: `CaseEvent` armazena `event_type`, label é computado no render, então eventos antigos passam a exibir o rótulo novo) |
-| `apps/dashboard/tests/` (3 arquivos) | 4 asserts de texto com "Follow-up" (`test_followup_list_view.py:302,304,346`, `test_followup_form_view.py:381`) + docstrings/comentários/fixture com o termo (ver D5) |
+| `apps/dashboard/tests/` (3 arquivos) | 5 asserts de texto com "Follow-up" (`test_followup_list_view.py:302,304,346`, `test_followup_form_view.py:381`, `test_followup_history.py:450` — card "Casos com follow-up no período") + docstrings/comentários/fixtures com o termo (ver D5) |
 | `docs/manual/manual-usuarios.md:15,1030-1140` | intro + §6 inteiro (slice 002) |
 
 O worker deve re-executar `rg -in "follow.?up" templates/ apps/{dashboard,intake,scheduler,doctor,cases}/views.py`
@@ -80,7 +80,10 @@ Seção "6. Ações do usuário Supervisor" passa a cobrir, com o rótulo novo:
   "follow-up" (case-insensitive) não aparece. **Fixtures** dos testes não
   devem usar o termo em dados (renomear o paciente `"Com Follow-up"` de
   `test_followup_history.py:266` para algo neutro, ex. `"Com registro"`), sob
-  pena de falso positivo.
+  pena de falso positivo. **Ambas** as fixtures com o termo em
+  `test_followup_history.py` (`:266` `"Com Follow-up"` e `:268` `"Elegível sem
+  follow-up"`) devem ser renomeadas para nomes neutros (ex.: "Com registro" /
+  "Sem registro").
 - **Timeline**: assert direto sobre os valores de `EVENT_LABELS` de
   `apps/intake/views.py` (nenhum valor contém "follow-up") — mais
   determinístico que renderizar a timeline.
