@@ -19,15 +19,16 @@
 | Onde | Ocorrências |
 |---|---|
 | `templates/dashboard/_nav.html:7` | pill "Follow-up" → "Pós-Procedimento" |
-| `templates/dashboard/_followup_tabs.html:1,8` | aria-label "Sub-abas do pill Follow-up…" → "…Pós-Procedimento…" |
+| `templates/dashboard/_followup_tabs.html:2,8` | aria-label "Sub-abas do pill Follow-up…" → "…Pós-Procedimento…" |
 | `templates/dashboard/followup_list.html:4,5,18,67,73,77` | title/h1 "Follow-up de desfecho…", card "Casos elegíveis para follow-up", badges "Follow-up registrado/pendente", botões "Atualizar/Registrar follow-up" |
 | `templates/dashboard/followup_form.html:4,5,47,62,93,98,180` | title/h1 "Follow-up · Caso…", painel "Versões do follow-up", empty "Nenhum follow-up registrado…", avisos, botão submit |
 | `templates/dashboard/followup_history.html:5,78` | h1 "Follow-up · Histórico…", card "Casos com follow-up no período" |
 | `apps/dashboard/views.py:~2008` | flash "Follow-up registrado (versão {n})…" |
-| `apps/dashboard/tests/` (3 arquivos) | 9 asserções de texto com "Follow-up" |
+| `apps/intake/views.py:343-344` | `EVENT_LABELS["FOLLOWUP_RECORDED"]/"FOLLOWUP_UPDATED"]` → "Pós-procedimento registrado/atualizado" (labels render-time exibidos na timeline do `case_detail` — template compartilhado com o dashboard; **fonte única**, nenhum outro `EVENT_LABELS` de app tem labels de follow-up; sem migration: `CaseEvent` armazena `event_type`, label é computado no render, então eventos antigos passam a exibir o rótulo novo) |
+| `apps/dashboard/tests/` (3 arquivos) | 4 asserts de texto com "Follow-up" (`test_followup_list_view.py:302,304,346`, `test_followup_form_view.py:381`) + docstrings/comentários/fixture com o termo (ver D5) |
 | `docs/manual/manual-usuarios.md:15,1030-1140` | intro + §6 inteiro (slice 002) |
 
-O worker deve re-executar `rg -in "follow.?up" templates/ apps/dashboard/views.py`
+O worker deve re-executar `rg -in "follow.?up" templates/ apps/{dashboard,intake,scheduler,doctor,cases}/views.py`
 para capturar eventuais ocorrências novas desde o mapeamento (data do scout:
 2026-09-06) — o inventário acima é o contrato mínimo, não o teto.
 
@@ -70,13 +71,32 @@ Seção "6. Ações do usuário Supervisor" passa a cobrir, com o rótulo novo:
 
 ## D5 — Testes
 
-- Slice 001 (UI): asserções existentes convertem para o rótulo novo; novo
-  teste varredura (ex.: render das páginas-chave e `assert "follow-up" not in
-  response` case-insensitive) para travar o não-regresso do anglicismo.
+- **Anti-anglicismo sobre TEXTO VISÍVEL, não HTML bruto**: as páginas
+  renderizam URLs não-renomeáveis (`href="/dashboard/follow-ups/"`) e podem
+  exibir dados do usuário. O teste de varredura (slice 001 R4) deve aplicar
+  `django.utils.html.strip_tags` no HTML — a função remove as tags INTEIRAS
+  (incluindo valores de atributos como `href` e `aria-label`), preservando
+  apenas os text nodes visíveis — normalizar espaços e então afirmar que
+  "follow-up" (case-insensitive) não aparece. **Fixtures** dos testes não
+  devem usar o termo em dados (renomear o paciente `"Com Follow-up"` de
+  `test_followup_history.py:266` para algo neutro, ex. `"Com registro"`), sob
+  pena de falso positivo.
+- **Timeline**: assert direto sobre os valores de `EVENT_LABELS` de
+  `apps/intake/views.py` (nenhum valor contém "follow-up") — mais
+  determinístico que renderizar a timeline.
+- Slice 001 (UI): 4 asserts existentes convertem para o rótulo novo;
+  docstrings/comentários dos testes acompanham o rename (higiene); fixture
+  renomeada conforme acima.
 - Slice 002 (manual): estender `tests/test_user_manual_artifacts.py` — §6
   menciona "Pós-Procedimento", "Histórico & Exportação", acesso CHD; e
-  `assert "follow-up" not in` manual (case-insensitive).
-- Flash message testada onde já é testada hoje (mesma asserção, novo texto).
+  "follow-up" ausente do texto do manual (case-insensitive).
+- **Critério grep operacional**: `rg -in "follow.?up" templates/ apps/ -g
+  '!*/tests/*' -g '!*__pycache__*'` NÃO será zero (URLs, `{% url %}`, nomes de
+  view/template/variável são identificadores permitidos). O critério é:
+  cada hit é classificável como identificador/URL/comentário de código;
+  hit em string VISÍVEL ao usuário (label, título, botão, flash, aria-label
+  de conteúdo, help text) = falha. O teste de varredura (automatizado) é o
+  gate; o grep classificado é inspeção de apoio.
 
 ## D6 — Riscos
 

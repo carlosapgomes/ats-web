@@ -39,12 +39,17 @@ Rótulo na UI: **"Pós-Procedimento"** — título/pill em Title Case
 - 5 templates do dashboard (`_nav`, `_followup_tabs`, `followup_list`,
   `followup_form`, `followup_history`) + 1 flash message em
   `apps/dashboard/views.py`.
+- **Timeline do caso**: `EVENT_LABELS` em `apps/intake/views.py` (labels
+  render-time de `FOLLOWUP_RECORDED`/`FOLLOWUP_UPDATED`, exibidos na timeline
+  de `case_detail` consumida também pelo dashboard; fonte única — nenhum outro
+  app define labels visíveis de follow-up).
 - Manual `docs/manual/manual-usuarios.md`: §6 completo + referência de
   introdução (~linha 15) + termos dispersos na seção.
-- Deltas de spec (MODIFIED) renomeando o rótulo nas duas capabilities.
-- Atualização das asserções de texto nos testes afetados (9 ocorrências de
-  "Follow-up" em `apps/dashboard/tests/`) + testes do manual
-  (`tests/test_user_manual_artifacts.py`).
+- Deltas de spec (MODIFIED/RENAMED) renomeando o rótulo nas duas capabilities.
+- Atualização dos asserts de texto nos testes afetados (4 asserts em
+  `apps/dashboard/tests/`) + testes do manual
+  (`tests/test_user_manual_artifacts.py`); demais ocorrências (docstrings,
+  comentários, fixture) tratadas conforme design D5.
 
 ## Não-goals
 
@@ -55,7 +60,8 @@ Rótulo na UI: **"Pós-Procedimento"** — título/pill em Title Case
 ## Sucesso
 
 - Nenhuma string "follow-up"/"Follow-up" visível ao usuário na UI ou no manual
-  (verificação por grep nos templates/flash/manual).
+  (verificação por teste de varredura sobre texto visível — design D5 — e
+  classificação de grep conforme D5; identificadores/URLs permanecem).
 - Manual §6 documenta registro, histórico e exportação com o novo rótulo e o
   acesso CHD.
 - Suíte completa verde no gate final; specs validadas.

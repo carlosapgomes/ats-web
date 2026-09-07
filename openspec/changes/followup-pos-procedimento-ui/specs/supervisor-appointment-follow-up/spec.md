@@ -41,3 +41,4 @@ A aba SHALL listar, para o dia local corrente e o dia anterior (default), os cas
 - **GIVEN** casos elegíveis em qualquer data
 - **WHEN** o supervisor busca por trecho do número da ocorrência ou do nome do paciente
 - **THEN** os elegíveis correspondentes são listados independentemente da data
+- **AND** o resultado é limitado a 50 casos
