@@ -43,15 +43,37 @@ CSV_COL = {name: index for index, name in enumerate(CSV_HEADER)}
 
 
 def _login_as(client, role_name: str):
-    """Cria usuário com papel, faz login e define active_role na sessão."""
+    """Cria usuário com papel, faz login e define active_role na sessão.
+
+    ``manager`` representa o supervisor do CHD (matriz D6): além do papel
+    manager recebe o papel scheduler (vínculo CHD). Para manager de papel
+    único (sem CHD, bloqueado pelo guard), use ``_login_as_plain_manager``.
+    """
     from apps.accounts.models import Role
 
     user = User.objects.create_user(username=f"followup-history-{role_name}@test", password="testpass123")
     role, _ = Role.objects.get_or_create(name=role_name)
     user.roles.add(role)
+    if role_name == "manager":
+        scheduler_role, _ = Role.objects.get_or_create(name="scheduler")
+        user.roles.add(scheduler_role)
     client.force_login(user)
     session = client.session
     session["active_role"] = role_name
+    session.save()
+    return user
+
+
+def _login_as_plain_manager(client):
+    """Cria usuário ``manager`` SEM o papel scheduler (sem CHD) — bloqueios D6."""
+    from apps.accounts.models import Role
+
+    user = User.objects.create_user(username="followup-history-plain-manager@test", password="testpass123")
+    role, _ = Role.objects.get_or_create(name="manager")
+    user.roles.add(role)
+    client.force_login(user)
+    session = client.session
+    session["active_role"] = "manager"
     session.save()
     return user
 
@@ -206,7 +228,7 @@ def _filter_scenario(client) -> dict[str, Case]:
 
 
 class TestHistoryAccess:
-    """GET /dashboard/follow-ups/history/ exige login + papel manager/admin."""
+    """GET /dashboard/follow-ups/history/ exige login + manager/admin com CHD (D6)."""
 
     def test_anonymous_redirected_to_login(self, client) -> None:
         response = client.get(HISTORY_URL)
@@ -214,17 +236,52 @@ class TestHistoryAccess:
         assert "/login/" in response.url
 
     def test_manager_allowed(self, client) -> None:
+        """Manager de teste é supervisor do CHD: possui manager+scheduler (R4/D6)."""
+        user = _login_as(client, "manager")
+        role_names = set(user.roles.values_list("name", flat=True))
+        assert {"manager", "scheduler"} <= role_names
+        response = client.get(HISTORY_URL)
+        assert response.status_code == 200
+
+    def test_chd_manager_allowed(self, client) -> None:
+        """manager + scheduler com papel ativo manager → 200 (fluxo atual)."""
         _login_as(client, "manager")
         response = client.get(HISTORY_URL)
         assert response.status_code == 200
 
-    def test_admin_allowed(self, client) -> None:
-        _login_as(client, "admin")
+    def test_manager_sem_chd_redirecionado(self, client) -> None:
+        """manager sem o papel scheduler → 302 "/" + flash, sem conteúdo."""
+        _login_as_plain_manager(client)
+        response = client.get(HISTORY_URL, follow=True)
+        assert response.status_code == 200
+        assert response.redirect_chain[0] == ("/", 302)
+        content = response.content.decode()
+        assert "Você não tem permissão para acessar esta página." in content
+        assert "Histórico &amp; Exportação" not in content
+
+    def test_admin_sem_chd_allowed(self, client) -> None:
+        """admin ativo sem scheduler → 200 (isenção D4, emergência/suporte)."""
+        user = _login_as(client, "admin")
+        assert not user.roles.filter(name="scheduler").exists()
+        response = client.get(HISTORY_URL)
+        assert response.status_code == 200
+
+    def test_admin_com_scheduler_ativo_manager(self, client) -> None:
+        """admin + scheduler com papel ativo manager → 200 (matriz D6)."""
+        from apps.accounts.models import Role
+
+        user = _login_as(client, "admin")
+        scheduler_role, _ = Role.objects.get_or_create(name="scheduler")
+        user.roles.add(scheduler_role)
+        session = client.session
+        session["active_role"] = "manager"
+        session.save()
         response = client.get(HISTORY_URL)
         assert response.status_code == 200
 
     @pytest.mark.parametrize("role_name", ["nir", "doctor", "scheduler"])
     def test_other_roles_redirected(self, client, role_name: str) -> None:
+        """scheduler/doctor/nir ativos → 302 (como hoje; sem conteúdo)."""
         _login_as(client, role_name)
         response = client.get(HISTORY_URL)
         assert response.status_code == 302
@@ -609,6 +666,21 @@ class TestHistoryExportAccess:
         case = _create_scheduled_case(user, arn="CSV-ROLE", name=f"Role {role_name}", when=_local_dt(day_offset=0))
         _record(case, user)
         assert client.get(EXPORT_URL).status_code == 200
+
+    def test_manager_sem_chd_redirecionado_sem_conteudo(self, client) -> None:
+        """manager sem CHD → 302 "/" + flash; dados do CSV não vazam."""
+        data_user = User.objects.create_user(username="export-data-chd@test", password="testpass123")
+        case = _create_scheduled_case(
+            data_user, arn="CSV-CHD-SECRET", name="Paciente Secreto CHD", when=_local_dt(day_offset=0)
+        )
+        _record(case, data_user)
+
+        _login_as_plain_manager(client)
+        response = client.get(EXPORT_URL)
+        assert response.status_code == 302
+        assert response.url == "/"
+        assert "CSV-CHD-SECRET" not in response.content.decode()
+        assert "Paciente Secreto CHD" not in response.content.decode()
 
     def test_export_anonimo_redirecionado(self, client) -> None:
         response = client.get(EXPORT_URL)

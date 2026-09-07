@@ -21,7 +21,7 @@ from django.utils import timezone
 from django.views.decorators.clickjacking import xframe_options_sameorigin
 from django.views.decorators.http import require_POST
 
-from apps.accounts.decorators import role_required
+from apps.accounts.decorators import followup_access_required, role_required
 from apps.cases.admission import (
     ADMISSION_FLOW_MAP,
     COMPACT_ADMISSION_FLOW_LABELS,
@@ -1455,6 +1455,7 @@ def _followup_item_sort_key(item: dict[str, Any]) -> tuple[str, datetime | None]
 
 @login_required
 @role_required("manager", "admin")
+@followup_access_required
 def followup_list(request: HttpRequest) -> HttpResponse:
     """Aba Follow-up do supervisor: desfechos elegíveis de hoje+ontem ou ?date=/busca.
 
@@ -1727,6 +1728,7 @@ def _followup_history_summary(rows: list[dict[str, Any]]) -> dict[str, Any]:
 
 @login_required
 @role_required("manager", "admin")
+@followup_access_required
 def followup_history(request: HttpRequest) -> HttpResponse:
     """Histórico de desfechos: janela por data de grupo, cards e tabela paginada.
 
@@ -1813,6 +1815,7 @@ _FOLLOWUP_CSV_HEADER = [
 
 @login_required
 @role_required("manager", "admin")
+@followup_access_required
 def followup_history_export(request: HttpRequest) -> HttpResponse:
     """Exporta o histórico em CSV pt-BR (mesma população/filtros da página).
 
@@ -1945,6 +1948,7 @@ def _followup_form_context(
 
 @login_required
 @role_required("manager", "admin")
+@followup_access_required
 def followup_form(request: HttpRequest, case_id: uuid.UUID) -> HttpResponse:
     """Formulário de follow-up: desfecho por procedimento + internação (D6).
 

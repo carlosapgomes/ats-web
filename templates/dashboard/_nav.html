@@ -3,9 +3,11 @@
     <li class="nav-item">
       <a href="{% url 'dashboard:index' %}" class="nav-link active" aria-current="page">Dashboard</a>
     </li>
+    {% if can_access_followup %}
     <li class="nav-item">
       <a href="{% url 'dashboard:followup_list' %}" class="nav-link">Follow-up</a>
     </li>
+    {% endif %}
     <li class="nav-item">
       <a href="{% url 'admin_ui:prompt_list' %}" class="nav-link">Prompts</a>
     </li>

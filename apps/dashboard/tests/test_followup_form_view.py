@@ -20,15 +20,37 @@ User = get_user_model()
 
 
 def _login_as(client, role_name: str):
-    """Cria usuário com papel, faz login e seta active_role na sessão."""
+    """Cria usuário com papel, faz login e seta active_role na sessão.
+
+    ``manager`` representa o supervisor do CHD (matriz D6): além do papel
+    manager recebe o papel scheduler (vínculo CHD). Para manager de papel
+    único (sem CHD, bloqueado pelo guard), use ``_login_as_plain_manager``.
+    """
     from apps.accounts.models import Role
 
     user = User.objects.create_user(username=f"followup-form-{role_name}@test", password="testpass123")
     role, _ = Role.objects.get_or_create(name=role_name)
     user.roles.add(role)
+    if role_name == "manager":
+        scheduler_role, _ = Role.objects.get_or_create(name="scheduler")
+        user.roles.add(scheduler_role)
     client.force_login(user)
     session = client.session
     session["active_role"] = role_name
+    session.save()
+    return user
+
+
+def _login_as_plain_manager(client):
+    """Cria usuário ``manager`` SEM o papel scheduler (sem CHD) — bloqueios D6."""
+    from apps.accounts.models import Role
+
+    user = User.objects.create_user(username="followup-form-plain-manager@test", password="testpass123")
+    role, _ = Role.objects.get_or_create(name="manager")
+    user.roles.add(role)
+    client.force_login(user)
+    session = client.session
+    session["active_role"] = "manager"
     session.save()
     return user
 
@@ -86,7 +108,7 @@ def _valid_payload(procedure: CaseProcedure, *, performed: str = "yes") -> dict[
 
 
 class TestFollowUpFormAccess:
-    """GET exige login + papel manager/admin; caso inelegível/inválido → 404."""
+    """GET exige login + papel manager/admin com CHD (D6); inelegível → 404."""
 
     def test_get_requires_login(self, client) -> None:
         plain = User.objects.create_user(username="followup-form-anon@test", password="testpass123")
@@ -96,15 +118,55 @@ class TestFollowUpFormAccess:
         assert "/login/" in response.url
 
     def test_get_manager_allowed(self, client) -> None:
+        """Manager de teste é supervisor do CHD: possui manager+scheduler (R4/D6)."""
         user = _login_as(client, "manager")
+        role_names = set(user.roles.values_list("name", flat=True))
+        assert {"manager", "scheduler"} <= role_names
         case = _create_case(user, arn="MGR-OK-001", name="Gerente")
         _add_procedure(case)
         response = client.get(_form_url(case))
         assert response.status_code == 200
 
-    def test_get_admin_allowed(self, client) -> None:
+    def test_get_chd_manager_allowed(self, client) -> None:
+        """manager + scheduler com papel ativo manager → form 200 (fluxo atual)."""
+        user = _login_as(client, "manager")
+        case = _create_case(user, arn="CHD-MGR-001", name="Supervisor CHD")
+        _add_procedure(case)
+        response = client.get(_form_url(case))
+        assert response.status_code == 200
+
+    def test_get_manager_sem_chd_redirecionado(self, client) -> None:
+        """manager sem o papel scheduler → 302 "/" + flash, form não é exposto."""
+        manager = _login_as_plain_manager(client)
+        case = _create_case(manager, arn="MGR-BLOCK-001", name="Sem CHD")
+        _add_procedure(case)
+        response = client.get(_form_url(case), follow=True)
+        assert response.status_code == 200
+        assert response.redirect_chain[0] == ("/", 302)
+        content = response.content.decode()
+        assert "Você não tem permissão para acessar esta página." in content
+        assert case.agency_record_number not in content
+
+    def test_admin_sem_chd_allowed(self, client) -> None:
+        """admin ativo sem scheduler → form 200 (isenção D4)."""
         user = _login_as(client, "admin")
+        assert not user.roles.filter(name="scheduler").exists()
         case = _create_case(user, arn="ADM-OK-001", name="Admin")
+        _add_procedure(case)
+        response = client.get(_form_url(case))
+        assert response.status_code == 200
+
+    def test_admin_com_scheduler_ativo_manager(self, client) -> None:
+        """admin + scheduler com papel ativo manager → form 200 (matriz D6)."""
+        from apps.accounts.models import Role
+
+        user = _login_as(client, "admin")
+        scheduler_role, _ = Role.objects.get_or_create(name="scheduler")
+        user.roles.add(scheduler_role)
+        session = client.session
+        session["active_role"] = "manager"
+        session.save()
+        case = _create_case(user, arn="ADM-CHD-001", name="Admin Supervisor")
         _add_procedure(case)
         response = client.get(_form_url(case))
         assert response.status_code == 200
