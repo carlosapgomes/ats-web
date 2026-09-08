@@ -1,13 +1,13 @@
 # supervisor-appointment-follow-up Specification
 
 ## Purpose
-Registro de desfecho pós-exame pelo Supervisor: permitir que `manager`/`admin` informem, por caso agendado (confirmado) ou de vinda imediata autorizada, se cada exame/procedimento foi realizado — e, quando não realizado, a causa estruturada (absenteísmo, falta de recursos no dia com submotivo, outras causas) — além da ocorrência de internação. Follow-up é registro puro e versionado append-only (autor e instante por versão, espelho em `CaseEvent`); não altera FSM nem dispara intercorrências/reagendamento.
+Registro de desfecho pós-exame pelo Supervisor: permitir que `manager`/`admin` informem, por caso agendado (confirmado) ou de vinda imediata autorizada, se cada exame/procedimento foi realizado — e, quando não realizado, a causa estruturada (absenteísmo, preparo inadequado, falta de recursos no dia com submotivo, outras causas) — além da ocorrência de internação. Follow-up é registro puro e versionado append-only (autor e instante por versão, espelho em `CaseEvent`); não altera FSM nem dispara intercorrências/reagendamento.
 
 ## Requirements
 
 ### Requirement: O sistema SHALL registrar o desfecho por procedimento de casos agendados e de vinda imediata
 
-O sistema SHALL permitir que supervisores do CHD (`manager` com papel `scheduler`, papel ativo `manager`) e `admin` registrem, por caso, o desfecho de cada `CaseProcedure` (realizado / não realizado) e a ocorrência de internação no nível do caso, sem alterar o estado FSM do caso nem disparar fluxos operacionais.
+O sistema SHALL permitir que supervisores do CHD (`manager` com papel `scheduler`, papel ativo `manager`) e `admin` registrem, por caso, o desfecho de cada `CaseProcedure` (realizado / não realizado) — e, quando não realizado, a causa estruturada do conjunto fechado: absenteísmo, preparo inadequado, cancelamento por falta de recursos no dia (com submotivo) ou outras causas (texto livre) — além da ocorrência de internação no nível do caso, sem alterar o estado FSM do caso nem disparar fluxos operacionais.
 
 #### Scenario: Registro inicial de desfecho
 
@@ -16,6 +16,13 @@ O sistema SHALL permitir que supervisores do CHD (`manager` com papel `scheduler
 - **THEN** uma `CaseFollowUp` versão 1 é criada com uma `ProcedureFollowUp` por procedimento
 - **AND** um `CaseEvent` `FOLLOWUP_RECORDED` é criado com snapshot do desfecho
 - **AND** o `status` do caso permanece inalterado
+
+#### Scenario: Registro com causa de preparo inadequado
+
+- **GIVEN** um caso elegível com um procedimento declarado
+- **WHEN** um supervisor do CHD registra o procedimento como não realizado com a causa `inadequate_prep`, sem submotivo e sem texto livre
+- **THEN** a gravação é aceita com `non_performance_reason="inadequate_prep"` e submotivo/texto vazios
+- **AND** o `CaseEvent` espelho carrega a mesma causa no snapshot do desfecho
 
 #### Scenario: Validação de causa estruturada
 
