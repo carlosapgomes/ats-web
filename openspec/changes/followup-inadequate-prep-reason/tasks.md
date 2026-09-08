@@ -34,18 +34,18 @@ exibida/documentada.
 
 ## Gate final (uma vez após todos os slices)
 
-- [ ] `uv run ruff check . && uv run ruff format --check .`
-- [ ] `uv run mypy .`
-- [ ] `uv run pytest`
-- [ ] `openspec validate followup-inadequate-prep-reason` OK
+- [x] `uv run ruff check . && uv run ruff format --check .` (exit 0 — All checks passed! / 240 files)
+- [x] `uv run mypy .` (exit 0 — 267 source files; warning pré-existente de django-fsm, não relacionado)
+- [x] `uv run pytest` (exit 0 — **3406 passed** em 122s vs 3399 da baseline v0.6.0; +7 líquidos = exatamente os 7 testes novos do slice)
+- [x] `openspec validate followup-inadequate-prep-reason` OK (--strict)
 - [ ] Atualizar a enumeração de causas no Purpose da spec
-  `supervisor-appointment-follow-up` no archive (convenção do projeto — D7)
+  `supervisor-appointment-follow-up` no archive (convenção do projeto — D7; operação do parent no fechamento/arquivamento, após revisão humana)
 
 ## Definition of Done
 
-- [ ] Causa "Preparo inadequado" gravável (service + form), com espelho em `CaseEvent` e submotivo/texto vazios
-- [ ] Combinações inválidas (causa nova + submotivo/texto) rejeitadas com mensagens específicas
-- [ ] Histórico: cards, filtro de causa e CSV exibem a causa nova sem edição de código nessas superfícies (D5)
-- [ ] Manual §6 documenta a causa; teste de artefatos cobre
-- [ ] Migração choices-only aplicada; constraints intactas
-- [ ] Commits atômicos (parent, pós-review) + push conforme política do projeto
+- [x] Causa "Preparo inadequado" gravável (service + form), com espelho em `CaseEvent` e submotivo/texto vazios
+- [x] Combinações inválidas (causa nova + submotivo/texto) rejeitadas com mensagens específicas
+- [x] Histórico: cards, filtro de causa e CSV exibem a causa nova sem edição de código nessas superfícies (D5)
+- [x] Manual §6 documenta a causa; teste de artefatos cobre
+- [x] Migração choices-only aplicada; constraints intactas
+- [x] Commits atômicos (parent, pós-review) — push pendente de instrução explícita (política: não empurrar automaticamente)
