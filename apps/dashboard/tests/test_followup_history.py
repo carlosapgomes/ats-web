@@ -1217,3 +1217,44 @@ class TestHistoryFilterCombo:
             records = _export_csv(client, **params)
             csv_arns = [row[CSV_COL["Ocorrência"]] for row in records[1:]]
             assert csv_arns == _history_arns(page), f"tabela e CSV divergiram com {params}"
+
+
+# ── Causa "Preparo inadequado" (follow-up-inadequate-prep-reason) ───────
+
+
+class TestPreparoInadequadoHistory:
+    """Causa nova nas superfícies derivadas do enum: cards, filtro e CSV."""
+
+    def test_preparo_inadequado_em_cards_e_filtro(self, client) -> None:
+        user = _login_as(client, "manager")
+        case = _create_scheduled_case(
+            user, arn="PREP-001", name="Preparo Inadequado", when=_local_dt(day_offset=0, hour=9)
+        )
+        _record(case, user, performed=False, reason="inadequate_prep")
+
+        response = client.get(HISTORY_URL)
+        assert response.status_code == 200
+        content = response.content.decode()
+        # (a) card "Causas de não realização" com o label humano da causa nova.
+        assert "Causas de não realização" in content
+        summary = response.context["summary"]
+        assert summary["not_performed"] == 1
+        (reason,) = summary["reasons"]
+        assert reason["reason"] == "inadequate_prep"
+        assert reason["label"] == "Preparo inadequado"
+        assert reason["count"] == 1
+        assert reason["details"] == []
+        # (b) filtro de linha oferece a causa nova.
+        assert '<option value="inadequate_prep">Preparo inadequado</option>' in content
+
+    def test_preparo_inadequado_no_csv(self, client) -> None:
+        user = _login_as(client, "manager")
+        case = _create_scheduled_case(user, arn="PREP-CSV", name="Preparo CSV", when=_local_dt(day_offset=0, hour=9))
+        _record(case, user, performed=False, reason="inadequate_prep")
+
+        records = _export_csv(client)
+        (row,) = records[1:]
+        assert row[CSV_COL["Desfecho"]] == "Não realizado"
+        assert row[CSV_COL["Causa"]] == "Preparo inadequado"
+        assert row[CSV_COL["Submotivo"]] == ""
+        assert row[CSV_COL["Outra causa (texto)"]] == ""

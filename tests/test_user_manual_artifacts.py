@@ -219,3 +219,9 @@ class TestUserManualSection6Supervisor:
         assert re.search(r"follow.?up", content, flags=re.IGNORECASE) is None, (
             "Manual ainda contém o anglicismo 'follow-up'"
         )
+
+    def test_manual_documenta_preparo_inadequado(self) -> None:
+        """§6 lista a causa 'Preparo inadequado' entre as causas de não realização."""
+        section = self._section6()
+        assert "**Preparo inadequado**" in section
+        assert "não foi realizado ou foi interrompido" in section

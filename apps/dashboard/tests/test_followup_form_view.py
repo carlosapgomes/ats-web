@@ -327,6 +327,20 @@ class TestFollowUpFormGet:
         assert user.username in content
         assert "v1" in content
 
+    def test_get_renders_preparo_inadequado_reason_option(self, client) -> None:
+        """GET renderiza a causa 'Preparo inadequado' entre as opções do bloco."""
+        user = _login_as(client, "manager")
+        case = _create_case(user, arn="GET-PREP-001", name="Preparo Get")
+        procedure = _add_procedure(case)
+
+        response = client.get(_form_url(case))
+        assert response.status_code == 200
+        content = response.content.decode()
+        fieldset_start = content.index(f"proc_{procedure.id}-performed")
+        fieldset = content[fieldset_start:]
+        assert 'value="inadequate_prep"' in fieldset
+        assert ">Preparo inadequado<" in fieldset
+
 
 # ── Regressão P1-2: caso híbrido (agendamento confirmado + fluxo operacional) ──
 
@@ -485,6 +499,22 @@ class TestFollowUpFormPostValid:
         row = CaseFollowUp.objects.get(case=case).procedure_outcomes.get(procedure=procedure)
         assert row.performed is False
         assert row.other_reason == "Paciente chegou após o encerramento"
+
+    def test_post_valid_preparo_inadequado(self, client) -> None:
+        user = _login_as(client, "manager")
+        case = _create_case(user, arn="POST-PREP-001", name="Preparo Inadequado")
+        procedure = _add_procedure(case)
+
+        payload = _valid_payload(procedure, performed="no")
+        payload[f"proc_{procedure.id}-non_performance_reason"] = "inadequate_prep"
+        response = client.post(_form_url(case), data=payload)
+        self._assert_success_redirect(response)
+
+        row = CaseFollowUp.objects.get(case=case).procedure_outcomes.get(procedure=procedure)
+        assert row.performed is False
+        assert row.non_performance_reason == "inadequate_prep"
+        assert row.resource_shortage_detail == ""
+        assert row.other_reason == ""
 
 
 # ── R3: POST inválido não persiste nada ────────────────────────────────

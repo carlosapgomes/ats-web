@@ -478,3 +478,64 @@ class TestConstraints:
                     non_performance_reason="absenteeism",
                     other_reason="texto indevido",
                 )
+
+
+# ── Causa "Preparo inadequado" (follow-up-inadequate-prep-reason) ───────
+
+
+class TestPreparoInadequado:
+    """Causa nova do conjunto fechado: gravável sem submotivo/texto e espelhada."""
+
+    def test_preparo_inadequado_gravado_e_espelhado(self, user, case_factory) -> None:
+        case = _case_with_procedures(case_factory, user)
+        follow_up = record_case_follow_up(
+            case=case,
+            performed_by=user,
+            patient_admitted=False,
+            procedure_outcomes=[
+                _outcome(case, performed=False, reason="inadequate_prep"),
+            ],
+        )
+        row = ProcedureFollowUp.objects.get(follow_up=follow_up)
+        assert row.performed is False
+        assert row.non_performance_reason == "inadequate_prep"
+        assert row.resource_shortage_detail == ""
+        assert row.other_reason == ""
+
+        event = CaseEvent.objects.get(case=case, event_type="FOLLOWUP_RECORDED")
+        (outcome_payload,) = event.payload["outcomes"]
+        assert outcome_payload["performed"] is False
+        assert outcome_payload["non_performance_reason"] == "inadequate_prep"
+        assert outcome_payload["resource_shortage_detail"] == ""
+        assert outcome_payload["other_reason"] == ""
+
+    def test_preparo_inadequado_com_submotivo_ou_texto_rejeitado(self, user, case_factory) -> None:
+        case = _case_with_procedures(case_factory, user)
+        with pytest.raises(
+            ValueError,
+            match="Submotivo só deve ser informado quando a causa é falta de recursos.",
+        ):
+            record_case_follow_up(
+                case=case,
+                performed_by=user,
+                patient_admitted=False,
+                procedure_outcomes=[
+                    _outcome(case, performed=False, reason="inadequate_prep", detail="emergency_occupied"),
+                ],
+            )
+        assert not CaseFollowUp.objects.filter(case=case).exists()
+
+        with pytest.raises(
+            ValueError,
+            match="Texto de outras causas só deve ser informado quando a causa é 'Outras causas'.",
+        ):
+            record_case_follow_up(
+                case=case,
+                performed_by=user,
+                patient_admitted=False,
+                procedure_outcomes=[
+                    _outcome(case, performed=False, reason="inadequate_prep", other="jejum incompleto"),
+                ],
+            )
+        assert not CaseFollowUp.objects.filter(case=case).exists()
+        assert not CaseEvent.objects.filter(case=case, event_type__startswith="FOLLOWUP").exists()

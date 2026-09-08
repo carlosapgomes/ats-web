@@ -1125,6 +1125,8 @@ agendamento, não na data antiga.
    - **Realizado** — o exame foi realizado;
    - **Não realizado** — informar a causa:
      - **Absenteísmo** — o paciente não compareceu;
+     - **Preparo inadequado** — o exame não foi realizado ou foi interrompido
+       porque o preparo do paciente estava inadequado;
      - **Cancelamento por falta de recursos no dia** — informar o submotivo:
        urgências que ocuparam o horário, falta de tempo hábil ou equipamento
        quebrado/não disponível;
@@ -1139,6 +1141,7 @@ Regras do formulário:
 - procedimento **não realizado** exige a causa — sem causa, o envio é
   bloqueado;
 - **Cancelamento por falta de recursos no dia** exige um dos submotivos;
+- **Preparo inadequado** — sem submotivo e sem texto: basta marcar a causa;
 - **Outras causas** exige a descrição (obrigatória).
 
 ### Versões do pós-procedimento

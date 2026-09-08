@@ -821,6 +821,7 @@ class FollowUpNonPerformanceReason(models.TextChoices):
     """Causa estruturada de procedimento não realizado (follow-up)."""
 
     ABSENTEEISM = "absenteeism", "Absenteísmo"
+    INADEQUATE_PREP = "inadequate_prep", "Preparo inadequado"
     RESOURCE_SHORTAGE = "resource_shortage", "Cancelamento por falta de recursos no dia"
     OTHER = "other", "Outras causas"
 

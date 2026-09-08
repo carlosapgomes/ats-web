@@ -1609,7 +1609,7 @@ def _followup_history_rows(
                 elif reason == FollowUpNonPerformanceReason.OTHER:
                     submotivo_label = ""
                     other_reason_text = outcome.other_reason.strip()
-                else:  # absenteeism
+                else:  # absenteeism/inadequate_prep
                     submotivo_label = ""
                     other_reason_text = ""
                 detail_label = submotivo_label or other_reason_text

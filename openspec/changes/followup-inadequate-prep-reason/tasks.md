@@ -2,7 +2,7 @@
 
 ## Slices verticais (ordem executável)
 
-- [ ] Slice 001 — Causa "Preparo inadequado" end-to-end: enum + migração + gravação (service/form) + visibilidade no Histórico/CSV + manual (`slices/slice-001-preparo-inadequado.md`)
+- [x] Slice 001 — Causa "Preparo inadequado" end-to-end: enum + migração + gravação (service/form) + visibilidade no Histórico/CSV + manual (`slices/slice-001-preparo-inadequado.md`)
 
 ## Preflight (uma vez por change)
 
@@ -28,9 +28,9 @@ exibida/documentada.
 
 ### Slice 001
 
-- Worker: (preencher — RED/GREEN, gates focados)
-- Review: (preencher — rodadas e verdict)
-- Desvios: (preencher)
+- Worker: RED confirmado (7 failed pelos motivos previstos no slice: `ValueError` enum fora em services/history-setup; `match` específico não bate na rejeição; opção ausente no GET; `200 != 302` no POST; assert do manual) → GREEN (7 passed, 143 passed nos módulos focados); `makemigrations cases --check` → "No changes detected"; ruff/format escopados OK; `mypy apps/cases apps/dashboard` OK (69 files). 8 arquivos exatamente no blast radius previsto, zero incidentais; diff de `views.py` = apenas o comentário.
+- Review r1: `Merge verdict: OK` — sem achados; nenhuma validação adicional solicitada (1 rodada de review).
+- Desvios: nenhum.
 
 ## Gate final (uma vez após todos os slices)
 
