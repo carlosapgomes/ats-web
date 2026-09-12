@@ -88,7 +88,7 @@ CPRE exige adicionalmente pelo menos um laudo, no relatório principal processad
 - RM/RNM de abdome ou abdome superior; ou
 - CPRM/colangiorressonância/colangiopancreatografia por ressonância.
 
-Mera solicitação, agendamento, menção ao nome do exame ou imagem sem localização anatômica compatível não satisfaz o requisito. A data será registrada quando disponível, sem janela de validade. Anexos não entram na sugestão automática no primeiro rollout, e essa limitação será informada ao médico.
+Mera solicitação, agendamento, menção ao nome do exame ou imagem sem localização anatômica compatível não satisfaz o requisito. Antes da hard rule, contexto e achado devem estar ancorados no relatório principal; o sistema rederiva modalidade/anatomia e exige predicado positivo de resultado ou heading estrito de conclusão/achados/laudo/resultado. As palavras isoladas `laudo`/`resultado` não bastam, e marcador de intenção/futuro na mesma oração domina e rejeita. Mismatch, conflito, contexto amplo ou duplicado e ambiguidade falham fechados. Assim, `solicita TC de abdome`, `solicita laudo de TC de abdome`, `laudo de TC agendado`, `tracked_exams` textual ou conteúdo somente em anexo não satisfazem. A data será registrada quando disponível, sem janela de validade. Anexos não entram na sugestão automática no primeiro rollout, e essa limitação será informada ao médico.
 
 A policy acumulará todas as pendências documentais e clínicas aplicáveis em ordem determinística. Campos legados de motivo primário permanecerão para compatibilidade, mas LLM2 e relatório médico receberão a coleção completa. Qualquer falha determinística força sugestão de negativa; o médico continua livre para aprovar.
 
@@ -124,9 +124,9 @@ As flags removem e bloqueiam as respectivas opções em upload, correção e ree
 
 ### 9. Rollback será por flags e correção para frente
 
-Após existir qualquer row de Ecoendoscopia/CPRE ou artefato 3.0, uma imagem antiga que conhece apenas EDA/Colonoscopia é insegura. Não haverá reverse migration destrutiva nem apagamento de rows para viabilizar downgrade.
+Após o primeiro write de qualquer artefato 3.0 — inclusive EDA ou Colonoscopia — ou após existir qualquer row de Ecoendoscopia/CPRE, uma imagem antiga que conhece apenas o writer 2.0 e dois tipos é insegura. Não haverá reverse migration destrutiva nem apagamento de rows para viabilizar downgrade.
 
-Rollback operacional preferencial: desligar ambas as flags, preservar a imagem/schema novos, drenar jobs e corrigir para frente. Retorno à imagem antiga só é admissível antes do primeiro intake especializado e após prechecks binários comprovarem ausência de rows, eventos e artefatos 3.0 incompatíveis.
+Rollback operacional preferencial: desligar ambas as flags, preservar a imagem/schema novos, drenar jobs e corrigir para frente. Retorno à imagem antiga só é admissível **antes do cutover 3.0**, após prechecks binários comprovarem ausência de qualquer artefato/job 3.0, row especializada ou evento incompatível.
 
 ## Alternativas Consideradas
 
@@ -182,7 +182,7 @@ Rollback operacional preferencial: desligar ambas as flags, preservar a imagem/s
 - Mudança transversal em domínio, contrato LLM, prompts, policy e múltiplas superfícies SSR.
 - Leitores históricos 1.1/2.0 e o sinal legado precisam ser preservados.
 - Anexos não satisfazem automaticamente o requisito no primeiro rollout.
-- Depois do primeiro caso especializado, downgrade para imagem antiga deixa de ser seguro.
+- Depois do primeiro write 3.0, mesmo de EDA/Colonoscopia, downgrade para imagem antiga deixa de ser seguro.
 - A matriz fechada bloqueia cenários que futuramente poderão exigir split explícito.
 
 ### Riscos e Mitigações

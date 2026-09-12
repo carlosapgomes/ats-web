@@ -12,10 +12,20 @@ Resumo executivo para retomada rapida apos pausas e para onboarding de novos con
 - `openspec/changes/` — changes ativos com proposals, designs e slices
 - Em caso de conflito: artefatos mais recentes no Git prevalecem.
 
+## Change Ativo e Override de Implementação
+
+- **Change ativo:** `openspec/changes/support-independent-echoendoscopy-cpre-workflows/`.
+- **Branch:** `feature/support-independent-echoendoscopy-cpre-workflows`.
+- **Decisão aceita:** ADR-0006 promove Ecoendoscopia e CPRE a procedimentos independentes e introduz writer LLM 3.0.
+- **Baseline atual do código:** continua funcionalmente em EDA/Colonoscopia e writer 2.0 até os slices correspondentes serem implementados.
+- **Regra de reentrada:** para este change, ADR-0006 + proposal + design + delta specs + **somente o próximo slice incompleto** são o override autoritativo sobre as descrições v2 abaixo. Não tratar o alvo 3.0 como já implementado nem usar o baseline v2 para negar requisitos do slice ativo.
+- **Ordem:** Ecoendoscopia é concluída antes de CPRE; cada slice exige RED → GREEN → REFACTOR, review e confirmação antes do seguinte.
+
+Alvo aprovado do change: tipos `eda|colonoscopy|echoendoscopy|cpre`; únicos conjuntos permitidos EDA, Colonoscopia, EDA+Colonoscopia, Ecoendoscopia e CPRE; contrato gravável 3.0; troca médica é `trocar e aprovar` sem rerun/repolicy; sem backfill especializado, split ou regra de sala.
+
 ## Objetivo do Sistema
 
-Sistema de **triagem automatizada para EDA e Colonoscopia** (Endoscopia
-Digestiva Alta e Baixa). Operadores NIR enviam PDFs de relatorios medicos, o
+No baseline atual, o sistema faz **triagem automatizada para EDA e Colonoscopia** (Endoscopia Digestiva Alta e Baixa). O change ativo amplia esse objetivo para Ecoendoscopia e CPRE independentes. Operadores NIR enviam PDFs de relatorios medicos, o
 sistema processa via pipeline LLM, apresenta ao medico para decisao, encaminha
 ao agendador, e retorna o resultado ao NIR. Monolito Django SSR, sem API REST
 e sem SPA.
@@ -107,7 +117,7 @@ static/          # css/app.css (paleta hospitalar), js/upload.js, js/password-to
 - **User** (AbstractUser): multi-role via M2M(Role), `account_status`, papel ativo na sessao
 - **Role**: nir, doctor, scheduler, manager, admin
 - **Case**: FSM 17 estados, 30+ campos (PDF, LLM artifacts, decisao medica, agendamento). A coluna ponte `Case.exam_type` foi **removida** (migration `0016`); a dimensão de procedimento vive exclusivamente em `CaseProcedure`. Vínculo opcional de reenvio corrigido: `corrects_case` (self-FK) + `correction_reason`/`correction_created_by`/`correction_created_at`.
-- **CaseProcedure**: componente normalizado do caso (Slice 001, design D1) — 1–2 rows por `Case`, no máximo uma por `(case, procedure_type)` (constraint `uniq_case_procedure_type`), tipos `eda|colonoscopy` (sem row genérica `combined`). Três dimensões autoritativas por componente: `declared_by_nir` (declaração do NIR), `detection_status` (`pending|detected|not_detected`) e `doctor_disposition` (`pending|approved|denied`) com `doctor_reason`. Fonte única das projeções de filas/filtros/dashboard; `CaseEvent` preserva os fatos append-only.
+- **CaseProcedure**: componente normalizado do caso, no máximo uma row por `(case, procedure_type)` (constraint `uniq_case_procedure_type`), sem row genérica `combined`. O baseline persistido usa `eda|colonoscopy`; o change ativo adicionará `echoendoscopy|cpre` sob matriz fechada. Três dimensões autoritativas por componente: `declared_by_nir` (declaração do NIR), `detection_status` (`pending|detected|not_detected`) e `doctor_disposition` (`pending|approved|denied`) com `doctor_reason`. Fonte única das projeções de filas/filtros/dashboard; `CaseEvent` preserva os fatos append-only.
 - **CaseEvent**: auditoria append-only (~40 tipos de evento)
 - **CaseCommunicationMessage**: thread operacional append-only vinculada a um `Case` (comunicação entre NIR/médico/scheduler para esclarecimentos; NÃO substitui decisão/agendamento/eventos estruturados). Suporta `message_type="user"` (manual, com autor) e `message_type="system"` (projeção automática de `CaseEvent`, sem autor) via `source_event` OneToOne idempotente + `system_event_type`.
 - **UserNotification**: notificação in-app user-scoped criada por menções explícitas (`@role`/`@username`) em `CaseCommunicationMessage`; badge SSR + inbox “Minhas notificações” + polling Vanilla JS do badge
@@ -127,7 +137,7 @@ static/          # css/app.css (paleta hospitalar), js/upload.js, js/password-to
 
 ## Contratos e Validações
 
-- **Procedimentos múltiplos e contrato LLM neutro (v2)**: o intake declara o conjunto **EDA**, **Colonoscopia** ou **EDA + Colonoscopia** por lote; o pipeline v2 extrai história comum uma única vez (`requested_procedures[]`), aplica policy determinística por procedimento e produz recomendação exata por componente; artefatos 1.1 permanecem legíveis sem rewrite. O LLM2 recebe uma projeção efêmera de `requested_procedures` limitada ao conjunto reconciliado, declarado no prompt como lista fechada; o artefato original do LLM1 permanece imutável. Mismatch de conjunto usa erro tipado e no máximo um retry corretivo, independente do retry pt-BR, com teto de três chamadas físicas e validação fail-closed. Single→combined com evidência forte recebe **upgrade automático** auditado (`PROCEDURE_SELECTION_AUTO_UPGRADED`) e segue ao médico sem ACK do NIR; combinado→single, troca entre tipos únicos e unknown/non-supported retornam ao NIR. Decisão médica por componente (aprovar/negar/incluir, razão por componente; inclusão não reexecuta LLM); um **agendamento casado** único para o conjunto autorizado; resposta final com solicitado/detectado/autorizado. Filtros por dimensão: NIR usa o **declarado**, médico usa o **detectado/autorizado**, CHD usa o **autorizado**; dashboard expõe as três dimensões e matriz de conversão declarado→detectado→autorizado (`1 caso / 2 componentes` no combinado). Flag `COLONOSCOPY_INTAKE_ENABLED` (default `false`) é lida **somente no serviço `web`/intake** e bloqueia apenas **novos uploads** de Colonoscopia e combinado — nenhum worker/pipeline consulta a flag para interromper casos existentes. Correção do conjunto declarado pelo NIR **somente** em `WAIT_R1_CLEANUP_THUMBS` com `manual_review_required` e motivo `exam_type_mismatch`/`mixed_exam_request`/`unknown_exam_type`, sem decisão médica — reprocessamento auditável do mesmo caso. Sem CPRE funcional; sem hard rule medicamentosa (alerta é informativo).
+- **Baseline — procedimentos múltiplos e contrato LLM neutro (v2)**: o intake declara o conjunto **EDA**, **Colonoscopia** ou **EDA + Colonoscopia** por lote; o pipeline v2 extrai história comum uma única vez (`requested_procedures[]`), aplica policy determinística por procedimento e produz recomendação exata por componente; artefatos 1.1 permanecem legíveis sem rewrite. O LLM2 recebe uma projeção efêmera de `requested_procedures` limitada ao conjunto reconciliado, declarado no prompt como lista fechada; o artefato original do LLM1 permanece imutável. Mismatch de conjunto usa erro tipado e no máximo um retry corretivo, independente do retry pt-BR, com teto de três chamadas físicas e validação fail-closed. Single→combined com evidência forte recebe **upgrade automático** auditado (`PROCEDURE_SELECTION_AUTO_UPGRADED`) e segue ao médico sem ACK do NIR; combinado→single, troca entre tipos únicos e unknown/non-supported retornam ao NIR. Decisão médica por componente (aprovar/negar/incluir, razão por componente; inclusão não reexecuta LLM); um **agendamento casado** único para o conjunto autorizado; resposta final com solicitado/detectado/autorizado. Filtros por dimensão: NIR usa o **declarado**, médico usa o **detectado/autorizado**, CHD usa o **autorizado**. Flag `COLONOSCOPY_INTAKE_ENABLED` é web-only. Este parágrafo descreve o código antes do cutover; o override 3.0 está no bloco `Change Ativo` e nos artefatos do change.
 - **Prompts canônicos (v2 neutros)**: `exam_llm1_system`, `exam_llm1_user`, `exam_llm2_system`, `exam_llm2_user` são os quatro nomes canônicos do dispatch (Slice 007). `seed_prompts` garante **exatamente uma versão ativa por nome neutro** (cria v1 ativa quando ausente) e **desativa toda versão ativa dos oito nomes legados** (`llm1_*`, `llm2_*`, `colonoscopy_llm1_*`, `colonoscopy_llm2_*`) preservando linhas/versões históricas para auditoria/rollback; reexecutar é idempotente. Fallback de código usa os mesmos defaults.
 - **Validação Pydantic v2**: schemas `apps/pipeline/schemas/llm1.py` (StructuredData) e `llm2.py` (Suggestion)
   validam rigidamente as respostas LLM. Respostas fora do contrato geram falha explícita de pipeline com
@@ -171,10 +181,9 @@ static/          # css/app.css (paleta hospitalar), js/upload.js, js/password-to
 
 ## State do Sistema
 
-- **Fase atual**: Fase 3 (débitos técnicos) — capacity de anexos clínicos entregue
-- **Change ativo**: nenhum — o hotfix mais recente foi arquivado em
-  `openspec/archive/fix-llm2-reconciled-procedure-set/` com promoção da spec
-  `procedure-neutral-analysis`.
+- **Fase atual**: change HIGH/ARCH de procedimentos especializados em planejamento aprovado, ainda sem código runtime implementado.
+- **Change ativo**: `openspec/changes/support-independent-echoendoscopy-cpre-workflows/`; ADR-0006 e planejamento aprovados, aguardando início explícito do Slice 001.
+- **Último baseline concluído relevante**: hotfix `openspec/archive/fix-llm2-reconciled-procedure-set/`, com promoção da spec `procedure-neutral-analysis`.
 - **Changes concluídos**:
   - `openspec/archive/bootstrap-django-ats-core/` (7 slices, Fase 0)
   - `openspec/archive/intake-nir/` (6 slices, Fase 1)
@@ -233,7 +242,7 @@ static/          # css/app.css (paleta hospitalar), js/upload.js, js/password-to
   intake (home, my_cases, case_detail), doctor (queue, decision)
 - **Documentacao de dominio**: `docs/DOMAIN_ANALYSIS.md`
 - **Investigações**: `docs/investigations/2026-05-18-nir-to-doctor-flow-review.md`
-- **ADR ativas**: ADR-0001 (arquitetura Django SSR), ADR-0002 (emails transacionais de conta/autenticação), ADR-0003 (perfis de procedimento e tipo de exame explícito — **Accepted**, parcialmente superada pela ADR-0004 nas decisões 1, 2, 3, 5, 6, 8 e 9), ADR-0004 (procedimentos múltiplos e contrato LLM neutro — **Accepted**, 2026-08-06)
+- **ADR ativas**: ADR-0001 (arquitetura Django SSR), ADR-0002 (emails transacionais de conta/autenticação), ADR-0003 (perfis de procedimento e tipo de exame explícito — **Accepted**, parcialmente superada pela ADR-0004), ADR-0004 (procedimentos múltiplos e contrato LLM neutro — **Accepted**, parcialmente superada pela ADR-0006), ADR-0006 (Ecoendoscopia e CPRE independentes + writer 3.0 — **Accepted**, 2026-09-12).
 - **Dívida técnica**: `django-fsm` deprecated → `viewflow.fsm` (não urgente); observabilidade de logs do gunicorn / falha SMTP (candidato a change de hardening)
 
 ## Quality Bar

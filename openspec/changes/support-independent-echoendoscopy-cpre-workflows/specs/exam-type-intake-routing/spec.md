@@ -32,6 +32,26 @@ Todo novo upload MUST escolher exatamente uma seleção válida — EDA, Colonos
 - **WHEN** backend valida
 - **THEN** nenhum caso ou procedimento parcial é criado.
 
+### Requirement: Histórico é classificado como EDA sem reprocessamento
+
+A projeção histórica criada pelo change anterior MUST ser preservada exatamente como está. Este change MUST NOT executar nova data migration, inferir Ecoendoscopia a partir do subtipo/sinal legado, criar CPRE retrospectiva nem reprocessar casos históricos. A única migration de `ProcedureType.choices` será alteração de schema state, sem backfill.
+
+> Nota de identidade OpenSpec: o título histórico é preservado. EDA/Colonoscopia já foram projetadas por migration anterior; este change apenas mantém essas rows e proíbe nova classificação retrospectiva.
+
+#### Scenario: Caso histórico EDA ou Colonoscopia
+
+- **GIVEN** caso já projetado pelo change anterior
+- **WHEN** migration deste change executa
+- **THEN** suas rows, status, eventos, decisões, agenda, documentos e JSON permanecem inalterados
+- **AND** nenhum LLM é reexecutado.
+
+#### Scenario: Caso histórico com sinal Ecoendoscopia
+
+- **GIVEN** caso 1.1/2.0 possui subtipo ou sinal legado `echoendoscopy`
+- **WHEN** este change é implantado
+- **THEN** nenhuma row `echoendoscopy` é criada automaticamente
+- **AND** o sinal histórico continua apenas legível.
+
 ### Requirement: Flag global bloqueia somente intake
 
 `COLONOSCOPY_INTAKE_ENABLED`, `ECHOENDOSCOPY_INTAKE_ENABLED` e `CPRE_INTAKE_ENABLED` MUST bloquear apenas novos uploads, correções e reenvios que dependam do respectivo procedimento, sem interromper casos existentes nem impedir substituição médica. Cada flag MUST operar independentemente.

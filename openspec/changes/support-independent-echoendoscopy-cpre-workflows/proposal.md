@@ -31,7 +31,7 @@ O ATS precisa promover os dois exames a `CaseProcedure`, aplicar requisitos pré
 - Estender filtros, analytics e follow-up aos dois novos procedimentos.
 - Preservar schemas 1.1/2.0 e sinais históricos sem backfill de Ecoendoscopia.
 - Fazer rollout sequencial: Ecoendoscopia antes de CPRE, com rollback por flags e fix-forward.
-- **BREAKING operacional:** depois da primeira row especializada/artefato 3.0, imagens antigas que só reconhecem EDA/Colonoscopia não são opção segura de rollback.
+- **BREAKING operacional:** depois do primeiro write 3.0 — mesmo de EDA/Colonoscopia — ou da primeira row especializada, imagens antigas que só possuem writer 2.0 e dois tipos não são opção segura de rollback.
 
 ## Capabilities
 
@@ -62,7 +62,7 @@ O ATS precisa promover os dois exames a `CaseProcedure`, aplicar requisitos pré
 
 - NIR cria um único caso declarado como Ecoendoscopia ou CPRE quando a flag correspondente está ativa.
 - Detecção, policy e LLM2 produzem resultado próprio para o procedimento especializado usando schema 3.0.
-- Imagem só satisfaz a hard rule quando modalidade, anatomia e conclusão/achado do laudo são comprovados no relatório principal.
+- Imagem só satisfaz a hard rule com contexto/achado ancorados, modalidade/anatomia rederivadas e predicado positivo ou heading estrito de resultado; intenção/agendamento dominam palavras isoladas como `laudo`, e mismatch, conflito ou ambiguidade falham fechados.
 - Todas as pendências aparecem juntas e forçam sugestão de negativa; decisão médica continua livre.
 - Troca médica persiste origem e destino com justificativa, não reanalisa e segue diretamente no fluxo escolhido.
 - Somente EDA + Colonoscopia é tratada como combinação/agendamento casado.

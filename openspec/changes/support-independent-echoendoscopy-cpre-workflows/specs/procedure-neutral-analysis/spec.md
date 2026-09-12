@@ -1,8 +1,3 @@
-## RENAMED Requirements
-
-- FROM: `### Requirement: Dispatch LLM de produção vincula strict schema ao contrato 2.0`
-- TO: `### Requirement: Dispatch LLM de produção vincula strict schema ao contrato 3.0`
-
 ## MODIFIED Requirements
 
 ### Requirement: História clínica comum é extraída uma única vez
@@ -130,11 +125,21 @@ Presenters e auditoria MUST ler schemas 1.1 e 2.0 históricos e schema 3.0 novo 
 - **THEN** conteúdo continua renderizável
 - **AND** nenhuma migration altera o JSON clínico.
 
-### Requirement: Dispatch LLM de produção vincula strict schema ao contrato 3.0
+## REMOVED Requirements
 
-O pipeline de produção, sem cliente LLM injetado, SHALL vincular chamadas de novos processamentos exclusivamente aos strict schemas 3.0. Schemas 1.1/2.0 SHALL permanecer somente em adapters/leitores históricos e em rollback anterior ao primeiro caso 3.0.
+### Requirement: Dispatch LLM de produção vincula strict schema ao contrato 2.0
 
-#### Scenario: LLM1 de produção recebe strict schema 2.0
+**Reason:** O contrato 2.0 é fechado em EDA/Colonoscopia e deixa de ser writer após o cutover 3.0.
+
+**Migration:** Drenar jobs 2.0 antes do cutover, ativar exatamente uma versão 3.0 dos quatro prompts neutros e manter schemas/adapters 2.0 somente para leitura histórica. Depois do primeiro write 3.0, rollback não reativa writer 2.0.
+
+## ADDED Requirements
+
+### Requirement: Dispatch LLM de produção SHALL vincular strict schema ao contrato 3.0
+
+O pipeline de produção, sem cliente LLM injetado, SHALL vincular novos processamentos exclusivamente aos strict schemas 3.0. Schemas 1.1/2.0 SHALL permanecer somente em adapters e leitores históricos após o cutover.
+
+#### Scenario: LLM1 de produção recebe strict schema 3.0
 
 - **GIVEN** o pipeline cria o cliente LLM1 sem injeção de teste após o cutover
 - **WHEN** a chamada à API é montada
@@ -143,7 +148,7 @@ O pipeline de produção, sem cliente LLM injetado, SHALL vincular chamadas de n
 - **AND** aceita quatro tipos e evidência abdominal tipada
 - **AND** não contém chaves exclusivas do contrato 1.1.
 
-#### Scenario: LLM2 de produção recebe strict schema 2.0
+#### Scenario: LLM2 de produção recebe strict schema 3.0
 
 - **GIVEN** o pipeline cria o cliente LLM2 sem injeção de teste após o cutover
 - **WHEN** a chamada à API é montada
@@ -151,15 +156,13 @@ O pipeline de produção, sem cliente LLM injetado, SHALL vincular chamadas de n
 - **AND** o schema vinculado define `schema_version` fixo em `"3.0"`
 - **AND** `procedure_recommendations` aceita os quatro tipos.
 
-#### Scenario: Schema vinculado é compatível com normalização strict
+#### Scenario: Schema 3.0 é compatível com normalização strict
 
 - **GIVEN** o JSON Schema de `Llm1ResponseV3` ou `Llm2ResponseV3`
 - **WHEN** a normalização strict é aplicada
 - **THEN** todo nó objeto declara `additionalProperties: false`
 - **AND** todo nó objeto lista todas as propriedades em `required`
 - **AND** nenhuma construção incompatível com strict mode permanece.
-
-## ADDED Requirements
 
 ### Requirement: Evidência abdominal SHALL separar modalidade, anatomia e achado
 
@@ -185,6 +188,78 @@ LLM1 3.0 SHALL extrair imagens do relatório principal em coleção tipada com m
 - **WHEN** policy executa
 - **THEN** data é preservada
 - **AND** antiguidade não invalida o requisito.
+
+### Requirement: Evidência de imagem SHALL estar ancorada no relatório principal
+
+Antes da hard rule, o sistema MUST verificar deterministicamente que contexto e conclusão/achado extraídos correspondem a trecho real e único do relatório principal. No mesmo contexto, o sistema MUST rederivar modalidade/anatomia por aliases versionados e exigir predicado positivo de resultado ou heading estrito de conclusão/achados/laudo/resultado. Substantivo isolado não é marcador positivo; qualquer intenção/agendamento na mesma oração MUST dominar e rejeitar. Mismatch, aliases conflitantes, ocorrência duplicada, contexto amplo com imagens distintas ou classificação ambígua MUST falhar fechados. Campo declarado pelo LLM, `tracked_exams` ou conteúdo somente em anexo MUST NOT satisfazer.
+
+#### Scenario: Excerpt inventado pelo LLM
+
+- **GIVEN** LLM1 declara modalidade/anatomia/achado válidos, mas o excerpt não existe no texto do relatório principal
+- **WHEN** evidência é verificada antes da policy
+- **THEN** ela é marcada insuficiente
+- **AND** a sugestão é negar por requisito de imagem não comprovado.
+
+#### Scenario: Solicitação real rotulada como achado
+
+- **GIVEN** relatório principal contém apenas `solicita TC de abdome`
+- **AND** LLM1 declara `ct`, `abdomen` e `report_finding_present=yes`
+- **WHEN** evidência é verificada antes da policy
+- **THEN** marcador de intenção torna a evidência insuficiente
+- **AND** a sugestão é negar.
+
+#### Scenario: Palavra laudo não contorna intenção ou agendamento
+
+- **GIVEN** cada contexto `solicita laudo de TC de abdome` e `laudo de TC de abdome agendado`
+- **AND** LLM1 declara achado presente
+- **WHEN** evidência é verificada
+- **THEN** intenção/estado futuro domina a palavra isolada `laudo`
+- **AND** a sugestão é negar.
+
+#### Scenario: Mera menção ao exame
+
+- **GIVEN** contexto menciona TC de abdome sem predicado de resultado e sem heading estrito
+- **WHEN** evidência é verificada
+- **THEN** a menção é insuficiente
+- **AND** a sugestão é negar.
+
+#### Scenario: Modalidade ou anatomia não corresponde ao contexto
+
+- **GIVEN** contexto ancorado não contém aliases da modalidade e anatomia declaradas
+- **WHEN** verificador rederiva esses campos
+- **THEN** mismatch é rejeitado fail-closed
+- **AND** trecho real não relacionado não satisfaz a hard rule.
+
+#### Scenario: Contexto conflitante ou ambíguo
+
+- **GIVEN** contexto contém aliases conflitantes, duas imagens distintas, mais de uma ocorrência normalizada ou não pode ser delimitado a uma entrada inequívoca
+- **WHEN** evidência é verificada
+- **THEN** ela é rejeitada fail-closed
+- **AND** a sugestão é negar por imagem não comprovada.
+
+#### Scenario: Evidência presente somente em tracked exams
+
+- **GIVEN** `tracked_exams` contém texto de imagem qualificante
+- **AND** relatório principal não contém contexto/achado verificável correspondente
+- **WHEN** hard rule executa
+- **THEN** `tracked_exams` não é promovido a evidência
+- **AND** a sugestão é negar.
+
+#### Scenario: Achado presente somente em anexo
+
+- **GIVEN** relatório principal não contém conclusão/achado qualificante e um anexo separado contém o laudo
+- **WHEN** pipeline do primeiro rollout executa
+- **THEN** o texto do anexo não é usado pela verificação
+- **AND** a sugestão é negar
+- **AND** o relatório médico informa que anexos não participaram da automação.
+
+#### Scenario: Excerpt real no relatório principal
+
+- **GIVEN** contexto e excerpt correspondem ao relatório principal após normalização conservadora
+- **AND** modalidade/anatomia rederivadas coincidem e há predicado positivo ou heading estrito de resultado
+- **WHEN** evidência é verificada
+- **THEN** ela pode seguir para a policy
+- **AND** a correspondência por si só não contorna os demais requisitos.
 
 ### Requirement: Ecoendoscopia SHALL exigir imagem adicional
 

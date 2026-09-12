@@ -29,6 +29,12 @@ Somente `{eda}`, `{colonoscopy}`, `{eda, colonoscopy}`, `{echoendoscopy}` e `{cp
 - **THEN** ele é rejeitado de modo fail-closed
 - **AND** não é classificado apenas pela quantidade de componentes.
 
+#### Scenario: Tipo desconhecido não é descartado
+
+- **WHEN** declaração ou evidência detectada contém tipo desconhecido junto de um tipo suportado
+- **THEN** o conjunto completo é rejeitado ou encaminhado à revisão com motivo explícito
+- **AND** o valor desconhecido não é filtrado para fazer o restante parecer válido.
+
 ### Requirement: Precedência especializada SHALL colapsar expressões de EDA
 
 A reconciliação SHALL interpretar `EDA com ecoendoscopia` e `EDA e ecoendoscopia` como somente Ecoendoscopia, e `EDA com CPRE` e `EDA e CPRE` como somente CPRE, preservando evidência da expressão original.

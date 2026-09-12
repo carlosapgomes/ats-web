@@ -78,7 +78,7 @@ Duplicações em `doctor/reporting.py`, `procedure_reconciliation.py`, orchestra
 
 - **Intake/reenvio/correção:** POST inválido é rejeitado antes de criar/alterar rows.
 - **LLM1:** aceita coleção única de até quatro tipos para não transformar resposta incompatível em erro de parse opaco.
-- **Reconciliação:** aplica precedência especializada, valida a matriz e envia conjuntos incompatíveis ao NIR com `unsupported_procedure_combination`.
+- **Reconciliação:** valida todos os valores antes de ordenar/filtrar, aplica precedência especializada, valida a matriz e envia tipos desconhecidos ou conjuntos incompatíveis ao NIR com motivo explícito. Nenhum valor desconhecido pode ser descartado para fazer o restante parecer válido.
 - **Médico:** valida o conjunto aprovado final dentro da transação; conjunto incompatível não persiste rows/evento/FSM.
 - **CHD/analytics:** `is_paired_appointment_set()` define exclusivamente EDA + Colonoscopia.
 
@@ -93,7 +93,9 @@ Qualquer mismatch envolvendo Ecoendoscopia/CPRE retorna ao NIR. Não há convers
 
 ### D3. Precedência especializada ocorre antes da matriz declarado×detectado
 
-A resposta bruta e o detector textual preservarão evidências por ocorrência. A reconciliação colapsará exatamente:
+A resposta bruta e o detector textual preservarão evidências por ocorrência. O contrato entre detecção e reconciliação deixará de transportar apenas conjuntos `strong/any`: cada ocorrência relevante levará `procedure_type`, qualificação (`current_request|historical|negated|mention`), trecho/evidence id e vínculo textual com EDA quando houver `com/e`. Assim, a reconciliação diferencia uma expressão composta que deve colapsar de solicitações independentes incompatíveis; ela não infere precedência a partir do conjunto isolado.
+
+A reconciliação colapsará exatamente:
 
 ```text
 {eda, echoendoscopy} → {echoendoscopy}
@@ -147,14 +149,25 @@ class AbdominalImagingEvidenceV3(StrictModel):
         "abdomen", "upper_abdomen", "hepatobiliary", "unspecified", "other"
     ]
     report_finding_present: Literal["yes", "no", "unknown"]
+    source_document: Literal["main_report"]
+    evidence_context_excerpt: str
     finding_excerpt: str | None
     exam_datetime_iso: str | None
-    source_text_hint: str
 ```
 
-Validator exige `finding_excerpt` não vazio quando `report_finding_present="yes"`. A policy também exige modalidade e anatomia aceitas; `unspecified|other` nunca satisfaz. CPRM/colangiorressonância é normalizada como `mrcp` com sítio hepatobiliar.
+Validator de schema exige ambos os excerpts não vazios quando `report_finding_present="yes"`, mas nenhum valor declarado pelo LLM basta para uma hard rule. Antes da policy, um verificador determinístico recebe exclusivamente `Case.extracted_text` do relatório principal e valida, em ordem:
 
-`tracked_exams` permanece disponível para apresentação histórica/recência, mas não participa da hard rule. Apenas o texto do PDF principal alimenta LLM1; anexos não são concatenados nem enviados. A data é persistida quando disponível e ignorada para aceite/negativa.
+1. `evidence_context_excerpt` corresponde a trecho real após normalização conservadora de Unicode, caixa e espaços; `finding_excerpt` é substring desse contexto;
+2. modalidade e anatomia são **derivadas novamente** do mesmo contexto por aliases versionados e devem coincidir com os enums declarados;
+3. o contexto é uma única oração/entrada de laudo e contém predicado positivo versionado de resultado (`demonstrou`, `evidenciou`, `identificou`, `revelou` ou equivalente explicitamente testado), ou está sob heading de linha reconhecido por forma estrita como `Conclusão:`, `Achados:`, `Laudo:` ou `Resultado:`; os substantivos isolados `laudo`, `resultado` e `achado` nunca são marcadores positivos;
+4. qualquer marcador de intenção/estado futuro na mesma oração (`solicita`, `pedido`, `agendado`, `aguarda`, `programado`, `indicado`, `a realizar`) rejeita a evidência, mesmo se a oração também contém as palavras `laudo` ou `resultado`; um resultado concluído só pode qualificar em outra oração/entrada inequívoca;
+5. mais de uma ocorrência normalizada do contexto, aliases conflitantes de modalidade/anatomia, mais de uma imagem distinta no contexto ou impossibilidade de delimitar uma única oração/entrada tornam a evidência ambígua e a rejeitam fail-closed.
+
+Não usar fuzzy match que acrescente/remova palavras clínicas, nem confiar em `report_finding_present` para reclassificar a oração. Negativos obrigatórios incluem `solicita TC de abdome`, `solicita laudo de TC de abdome`, `laudo de TC agendado`, mera menção sem predicado/heading, contexto duplicado, contexto amplo com imagens distintas e aliases conflitantes. Um trecho real não relacionado não pode ancorar modalidade/anatomia inventadas. Evidência rejeitada produz pendência/deny; não causa aceite nem é silenciosamente descartada do relatório de falhas.
+
+A policy recebe somente evidência verificada e exige modalidade e anatomia aceitas; `unspecified|other` nunca satisfaz. CPRM/colangiorressonância é normalizada como `mrcp` com sítio hepatobiliar. O payload passado à policy identifica que a origem verificada é o relatório principal. Os aliases/marcadores ficam centralizados junto ao verificador, não duplicados em prompt e policy.
+
+`tracked_exams` permanece disponível para apresentação histórica/recência, mas não participa da hard rule. Apenas `Case.extracted_text` do PDF principal alimenta LLM1/verificador; textos de `CaseAttachment` não são concatenados, consultados nem enviados. A data é persistida quando disponível e ignorada para aceite/negativa.
 
 ### D7. Perfis declarativos contêm somente diferenças clínicas aprovadas
 
@@ -308,7 +321,7 @@ Em especial, remover lógica binária `other = COLONOSCOPY if dimension == EDA e
 
 - **Contrato 3.0 divergir dos leitores atuais** → adapters explícitos e testes 1.1/2.0/3.0 antes do cutover.
 - **Resposta LLM incompatível virar caso parcial** → schemas strict, coleção única, matriz e persistência transacional.
-- **Imagem textual livre satisfazer hard rule** → campos tipados modalidade×anatomia×achado e testes negativos.
+- **LLM inventar imagem/achado, rotular solicitação como resultado ou usar anexo** → contexto/finding ancorados, modalidade/anatomia rederivadas, heading/predicado positivo estrito, intenção dominante e ambiguidade fail-closed; testes cobrem solicitação com/sem `laudo`, agendamento, menção, conflito, duplicidade, contexto amplo, mismatch e anexo-only.
 - **Agregação mudar motivo primário** → contrato aditivo com ordem estável e regressão dos consumidores de `reason_code`.
 - **Troca disparar automação por engano** → testes que espiam fila, orchestrator e policy; ação explícita `trocar e aprovar`.
 - **Mensagem sistêmica virar inbox** → evento dedicado, projector idempotente e teste de zero `UserNotification`.
@@ -348,10 +361,10 @@ Em especial, remover lógica binária `other = COLONOSCOPY if dimension == EDA e
 
 ### Rollback
 
-- **Antes da primeira row/artefato especializado:** é possível reativar prompts 2.0 e retornar à imagem anterior após drenagem e prechecks de ausência.
-- **Depois da primeira row/artefato especializado:** desligar flags, preservar imagem/schema 3.0, drenar jobs e corrigir para frente. Não remover rows, não reclassificar como EDA e não usar reverse migration destrutiva.
+- **Antes do cutover e sem qualquer write/job 3.0:** é possível manter/reativar prompts 2.0 e retornar à imagem anterior após drenagem e prechecks de ausência.
+- **Após o primeiro write 3.0, mesmo de EDA/Colonoscopia, ou após a primeira row especializada:** desligar flags, preservar imagem/schema 3.0, drenar jobs e corrigir para frente. Não reativar writer 2.0, remover rows, reclassificar como EDA nem usar reverse migration destrutiva.
 
-Prechecks de downgrade antigo devem falhar se existir qualquer `CaseProcedure` Ecoendoscopia/CPRE, artefato `schema_version="3.0"`, evento especializado ou job 3.0 em voo.
+Prechecks de downgrade antigo devem falhar se existir qualquer `CaseProcedure` Ecoendoscopia/CPRE, artefato `schema_version="3.0"`, evento especializado ou job 3.0 em voo. A fronteira é o cutover do writer, não a ativação posterior das flags de intake.
 
 ## Open Questions
 
@@ -359,13 +372,16 @@ Nenhuma questão de domínio permanece aberta para iniciar os slices. Copy final
 
 ## Slice Strategy
 
-1. **Catálogo e matriz fechada:** foundation inevitável e isolada; corrige pressupostos binários antes dos consumidores.
-2. **Contrato 3.0 e policies:** schemas/adapters/hard rules puros, incluindo pendências agregadas.
-3. **Cutover 3.0 preservando EDA/Colonoscopia:** entrega vertical de compatibilidade antes de liberar novos intakes.
-4. **Ecoendoscopia ponta a ponta:** NIR → pipeline → médico → CHD/NIR para procedimento originalmente especializado.
-5. **Troca para Ecoendoscopia:** ação `trocar e aprovar`, evento e mensagem sistêmica sem reanálise.
-6. **CPRE ponta a ponta:** reutiliza catálogo/contrato e entrega intake, policy, troca e downstream.
-7. **Filas, analytics e follow-up:** fecha superfícies operacionais para ambos os tipos e elimina pressupostos binários residuais.
-8. **Operação e rollout:** documentação, prechecks, smoke, rollback e gate global.
+Todos os slices entregam um fluxo observável por ator; não haverá slice horizontal exclusivo de model/schema/policy.
 
-Slices 1 e 2 são preparatórios porque catálogo/matriz e contrato strict são fronteiras compartilhadas impossíveis de introduzir com segurança em duplicidade por procedimento. As flags false mantêm comportamento de produção inalterado até os slices verticais.
+1. **Cutover vertical EDA/Colonoscopia:** expande catálogo/matriz, introduz contrato/policy 3.0 e prova um processamento atual completo até o médico sem regressão, com flags especializadas desligadas. O blast radius maior é inevitável para manter o repositório executável no mesmo slice.
+2. **Ecoendoscopia NIR → médico:** seleção, proveniência por ocorrência, precedência, policy e relatório médico.
+3. **Ecoendoscopia médico → CHD/NIR:** aprovação/troca, agenda/fluxo, transformação auditável e mensagem sistêmica.
+4. **CPRE ponta a ponta:** reutiliza a infraestrutura aprovada e entrega NIR → pipeline → médico → CHD/NIR, incluindo troca.
+5. **Jornada médica nas filas:** Pendentes e Decididos Hoje com filtros/badges especializados e transformação visível.
+6. **Jornada CHD e pós-procedimento:** filas, agendamento/histórico e follow-up por procedimento especializado.
+7. **Jornada NIR após intake:** acompanhamento, correção, encerrados e filtros especializados.
+8. **Jornada gerencial:** breakdown, tabela e volumes dimensionais para os quatro tipos.
+9. **Operação e rollout:** documentação, prechecks, smoke Eco antes de CPRE, rollback e gate global.
+
+O Slice 001 é vertical apesar do footprint alto: o cutover de um strict writer não pode ser dividido deixando schema, serviço e orchestrator incompatíveis entre commits. Se o inventário superar o cap declarado, o implementador deve parar e o planner deve redesenhar antes de qualquer edição extra. Os Slices 005–008 substituem o antigo fechamento horizontal por jornadas independentes de médico, CHD, NIR e gestor.
