@@ -2,7 +2,7 @@
 
 ## Status
 
-Accepted
+Accepted — parcialmente superada pela [ADR-0006](ADR-0006-ecoendoscopia-e-cpre-como-procedimentos-independentes.md) nas decisões que limitavam os tipos e o contrato gravável a EDA/Colonoscopia e mantinham CPRE fora de escopo.
 
 **Aceita em:** 2026-08-06
 
@@ -118,3 +118,4 @@ Permanecem válidas as decisões 4 (profiles/policy com exceções explícitas),
 ## Histórico de Mudanças
 
 - 2026-08-06: ADR criada, revisada e aceita como pré-condição do Slice 001 do change `support-combined-eda-colonoscopy-workflow`.
+- 2026-09-12: parcialmente superada pela ADR-0006 quanto ao catálogo limitado a EDA/Colonoscopia, ao contrato gravável 2.0 e à exclusão de CPRE; os invariantes de `CaseProcedure`, três dimensões e combinação EDA + Colonoscopia permanecem.
