@@ -31,10 +31,16 @@ from apps.cases.models import (
     ProcedureType,
 )
 from apps.cases.procedures import (
+    ALLOWED_PROCEDURE_SETS,
+    PAIRED_APPOINTMENT_SET,
+    SUPPORTED_PROCEDURE_TYPES,
     format_procedure_selection,
     get_approved_procedure_types,
     get_declared_procedure_types,
     get_detected_procedure_types,
+    is_paired_appointment_set,
+    normalize_procedure_selection,
+    selection_key,
     set_declared_procedures,
 )
 
@@ -72,9 +78,12 @@ class TestProcedureEnums:
     """R1 — enums mínimos sem CPRE/procedure engine genérica."""
 
     def test_procedure_type_values(self) -> None:
-        assert set(ProcedureType.values) == {"eda", "colonoscopy"}
+        # Cutover 3.0 (ADR-0006): o catálogo passa a ter os quatro procedimentos.
+        assert set(ProcedureType.values) == {"eda", "colonoscopy", "echoendoscopy", "cpre"}
         assert ProcedureType.EDA.label == "EDA"
         assert ProcedureType.COLONOSCOPY.label == "Colonoscopia"
+        assert ProcedureType.ECHOENDOSCOPY.label == "Ecoendoscopia"
+        assert ProcedureType.CPRE.label == "CPRE"
 
     def test_detection_status_values(self) -> None:
         assert set(DetectionStatus.values) == {"pending", "detected", "not_detected"}
@@ -319,8 +328,12 @@ class TestDeclaredProjectionService:
         case = case_factory(user)
         with pytest.raises(ValueError):
             set_declared_procedures(case=case, procedure_types=[], actor=user)
+        # Conjunto fora da matriz fechada (EDA + CPRE) é rejeitado (D2/R2).
         with pytest.raises(ValueError):
-            set_declared_procedures(case=case, procedure_types=["cpre"], actor=user)
+            set_declared_procedures(case=case, procedure_types=["eda", "cpre"], actor=user)
+        # Tipo fora do catálogo continua rejeitado — nunca filtrado em silêncio.
+        with pytest.raises(ValueError):
+            set_declared_procedures(case=case, procedure_types=["unknown_type"], actor=user)
         assert CaseProcedure.objects.filter(case=case).count() == 0
 
     def test_event_contains_ordered_set_without_clinical_text(self, user, case_factory) -> None:
@@ -420,3 +433,73 @@ class TestProcedureGettersReturnOnlyRows:
         assert get_declared_procedure_types(case) == ("eda",)
         assert get_detected_procedure_types(case) == ("colonoscopy",)
         assert get_approved_procedure_types(case) == ("colonoscopy",)
+
+
+class TestProcedureCatalogAndMatrix:
+    """Slice 001 (R2/R3) — catálogo de quatro tipos e matriz fechada."""
+
+    def test_catalog_has_four_ordered_types(self) -> None:
+        assert SUPPORTED_PROCEDURE_TYPES == ("eda", "colonoscopy", "echoendoscopy", "cpre")
+
+    def test_only_five_sets_are_allowed(self) -> None:
+        assert ALLOWED_PROCEDURE_SETS == frozenset(
+            {
+                frozenset({"eda"}),
+                frozenset({"colonoscopy"}),
+                frozenset({"eda", "colonoscopy"}),
+                frozenset({"echoendoscopy"}),
+                frozenset({"cpre"}),
+            }
+        )
+
+    @pytest.mark.parametrize(
+        "selection",
+        [
+            ["eda"],
+            ["colonoscopy"],
+            ["eda", "colonoscopy"],
+            ["echoendoscopy"],
+            ["cpre"],
+        ],
+    )
+    def test_normalize_accepts_every_allowed_set(self, selection: list[str]) -> None:
+        assert frozenset(normalize_procedure_selection(selection)) in ALLOWED_PROCEDURE_SETS
+
+    @pytest.mark.parametrize(
+        "selection",
+        [
+            [],
+            ["eda", "cpre"],
+            ["eda", "echoendoscopy"],
+            ["colonoscopy", "cpre"],
+            ["echoendoscopy", "cpre"],
+            ["eda", "colonoscopy", "echoendoscopy"],
+            ["unknown_type"],
+        ],
+    )
+    def test_normalize_rejects_invalid_or_unknown_sets(self, selection: list[str]) -> None:
+        # R2/R3: conjunto fora da matriz ou tipo desconhecido falha explicitamente,
+        # nunca é filtrado em silêncio para fazer o restante parecer válido.
+        with pytest.raises(ValueError):
+            normalize_procedure_selection(selection)
+
+    def test_paired_appointment_set_requires_exact_equality(self) -> None:
+        assert is_paired_appointment_set(["eda", "colonoscopy"]) is True
+        assert is_paired_appointment_set(["colonoscopy", "eda"]) is True
+        assert is_paired_appointment_set(["eda"]) is False
+        assert is_paired_appointment_set(["echoendoscopy", "cpre"]) is False
+        assert PAIRED_APPOINTMENT_SET == frozenset({"eda", "colonoscopy"})
+
+    def test_selection_key_is_not_length_based(self) -> None:
+        # R2: dois elementos só viram ``eda_colonoscopy`` quando são exatamente
+        # o par EDA + Colonoscopia; ``len == 2`` não é regra de domínio.
+        assert selection_key(("eda", "colonoscopy")) == "eda_colonoscopy"
+        assert selection_key(("echoendoscopy", "cpre")) == "echoendoscopy"
+        assert selection_key(("echoendoscopy",)) == "echoendoscopy"
+        assert selection_key(("cpre",)) == "cpre"
+        assert selection_key(()) == ""
+
+    def test_format_labels_for_specialized_singles(self) -> None:
+        assert format_procedure_selection(["echoendoscopy"]) == "Ecoendoscopia"
+        assert format_procedure_selection(["cpre"]) == "CPRE"
+        assert format_procedure_selection(["colonoscopy", "eda"]) == "EDA + Colonoscopia"

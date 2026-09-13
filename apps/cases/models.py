@@ -48,14 +48,19 @@ class CaseStatus(models.TextChoices):
 
 
 class ProcedureType(models.TextChoices):
-    """Procedimento endoscópico suportado como componente de um caso.
+    """Procedimento suportado como componente de um caso (design D1).
 
-    Um caso possui no máximo uma ocorrência de cada; combinação é o conjunto
-    das rows — nunca uma row genérica `combined`. CPRE fora de escopo.
+    Um caso possui no máximo uma ocorrência de cada; a combinação é o conjunto
+    das rows — nunca uma row genérica `combined`. Ecoendoscopia e CPRE são
+    procedimentos independentes (nunca subtipo/sinal de EDA) e a matriz válida
+    é fechada em ``apps.cases.procedures`` (EDA, Colonoscopia, EDA+Colonoscopia,
+    Ecoendoscopia, CPRE).
     """
 
     EDA = "eda", "EDA"
     COLONOSCOPY = "colonoscopy", "Colonoscopia"
+    ECHOENDOSCOPY = "echoendoscopy", "Ecoendoscopia"
+    CPRE = "cpre", "CPRE"
 
 
 class DetectionStatus(models.TextChoices):

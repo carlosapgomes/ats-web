@@ -1,0 +1,243 @@
+"""LLM2 Service v3 — sugestão por procedimento em uma única análise conjunta.
+
+Schema 3.0 (design D5 / ADR-0006): recebe exatamente o conjunto reconciliado
+sobre os quatro tipos suportados, valida igualdade exata de conjuntos (sem
+omissão/duplicata/adição) e devolve itens normalizados. Preserva os orçamentos
+finitos de correção já existentes: um retry one-shot para mismatch
+schema-válido (erro tipado) e um para idioma pt-BR, com máximo físico de três
+chamadas e revalidação integral a cada resposta.
+"""
+
+from __future__ import annotations
+
+import json
+from dataclasses import dataclass, field
+from typing import Any
+
+from pydantic import ValidationError
+
+from apps.pipeline.json_parser import LlmJsonParseError, decode_llm_json_object
+from apps.pipeline.llm import LlmClient
+from apps.pipeline.ptbr_language_guard import collect_forbidden_terms
+from apps.pipeline.schemas.llm2_v3 import Llm2ResponseV3
+
+_LANGUAGE_RETRY_INSTRUCTION = (
+    "Regra obrigatoria adicional: todo texto narrativo deve estar em portugues "
+    "brasileiro (pt-BR), sem palavras em ingles."
+)
+
+# Ordenação explícita do suporte global: none < anesthesist < anesthesist_icu (D8).
+GLOBAL_SUPPORT_ORDER: dict[str, int] = {
+    "none": 0,
+    "anesthesist": 1,
+    "anesthesist_icu": 2,
+}
+
+
+def strictest_global_support(support_values: tuple[str, ...]) -> str:
+    """Retorna o nível de suporte mais restritivo da coleção (máximo explícito)."""
+    if not support_values:
+        return "none"
+    return max(support_values, key=lambda value: GLOBAL_SUPPORT_ORDER.get(value, 0))
+
+
+LLM2_V3_DEFAULT_SYSTEM_PROMPT = (
+    "Voce e um assistente de apoio a decisao clinica para triagem de "
+    "Endoscopia Digestiva Alta (EDA), Colonoscopia, Ecoendoscopia e CPRE. "
+    "Retorne APENAS JSON valido que siga estritamente o schema_version 3.0. "
+    "Escreva todos os campos narrativos em portugues brasileiro (pt-BR). Nao "
+    "use palavras em ingles nos campos narrativos. Use apenas valores de enum "
+    "permitidos para suggestion e support_recommendation. Produza exatamente "
+    "um item em procedure_recommendations para cada procedimento reconciliado "
+    "recebido: nao omita, nao duplique e nao adicione procedimento. Nao invente "
+    "recomendacoes, razoes ou dados sem evidencia; baseie-se apenas nos dados "
+    "recebidos. Nao inclua markdown, blocos de codigo ou chaves extras."
+)
+
+LLM2_V3_DEFAULT_USER_PROMPT = (
+    "Tarefa: sugerir accept/deny e recomendacao de suporte para cada "
+    "procedimento reconciliado, usando os dados estruturados comuns do LLM1, "
+    "os resultados deterministicos da politica pre-operatoria por procedimento "
+    "e os casos anteriores por procedimento. Retorne um item por procedimento "
+    "em procedure_recommendations e o global_support_recommendation no nivel "
+    "mais restritivo entre os itens. Baseie-se apenas na evidencia recebida; "
+    "nao invente dados, razoes ou procedimentos. Nao use palavras em ingles "
+    "nos campos narrativos."
+)
+
+
+class Llm2V3ValidationError(RuntimeError):
+    """Resposta LLM2 v3 falhou validação de schema/igualdade de conjuntos."""
+
+
+class Llm2V3ProcedureSetMismatchError(Llm2V3ValidationError):
+    """Resposta schema-válida divergiu do conjunto reconciliado (omissão/adição)."""
+
+
+@dataclass
+class Llm2V3Result:
+    """Itens de recomendação validados (igualdade exata garantida)."""
+
+    procedure_recommendations: list[dict[str, Any]] = field(default_factory=list)
+    suggested_action: dict[str, object] = field(default_factory=dict)
+
+
+class Llm2ServiceV3:
+    """Executa a análise LLM2 v3 conjunta por caso, com contrato estrito."""
+
+    def __init__(self, client: LlmClient) -> None:
+        self._client = client
+
+    def run(
+        self,
+        *,
+        case_id: str,
+        agency_record_number: str,
+        llm1_structured_data: dict[str, object],
+        detected_procedure_types: tuple[str, ...],
+        policy_results: dict[str, dict[str, object]],
+        prior_contexts: dict[str, dict[str, object]],
+        system_prompt: str,
+        user_prompt_template: str,
+    ) -> Llm2V3Result:
+        """Executa a análise LLM2 conjunta com orçamentos finitos de correção."""
+        user_prompt = _render_user_prompt(
+            template=user_prompt_template,
+            case_id=case_id,
+            agency_record_number=agency_record_number,
+            llm1_structured_data=llm1_structured_data,
+            policy_results=policy_results,
+            prior_contexts=prior_contexts,
+            detected_procedure_types=detected_procedure_types,
+        )
+        raw_response = self._client.complete(system_prompt=system_prompt, user_prompt=user_prompt)
+        procedure_set_retry_used = False
+        language_retry_used = False
+        while True:
+            try:
+                validated = _decode_and_validate(
+                    raw_response=raw_response,
+                    case_id=case_id,
+                    agency_record_number=agency_record_number,
+                    detected_procedure_types=detected_procedure_types,
+                )
+            except Llm2V3ProcedureSetMismatchError:
+                if procedure_set_retry_used:
+                    raise
+                procedure_set_retry_used = True
+                raw_response = self._client.complete(
+                    system_prompt=system_prompt,
+                    user_prompt=f"{user_prompt}\n\n{_procedure_set_retry_instruction(detected_procedure_types)}",
+                )
+                continue
+
+            forbidden_terms = _collect_v3_forbidden_terms(validated=validated)
+            if not forbidden_terms:
+                break
+            if language_retry_used:
+                joined = ", ".join(forbidden_terms)
+                raise Llm2V3ValidationError(f"LLM2 v3 output contains non-ptbr narrative terms after retry: {joined}")
+            language_retry_used = True
+            raw_response = self._client.complete(
+                system_prompt=system_prompt,
+                user_prompt=f"{user_prompt}\n\n{_LANGUAGE_RETRY_INSTRUCTION}",
+            )
+
+        recommendations = [item.model_dump(mode="json") for item in validated.procedure_recommendations]
+        return Llm2V3Result(
+            procedure_recommendations=recommendations,
+            suggested_action={
+                "schema_version": "3.0",
+                "procedure_recommendations": recommendations,
+                "global_support_recommendation": validated.global_support_recommendation,
+                "summary": validated.summary,
+            },
+        )
+
+
+# ── Helpers ─────────────────────────────────────────────────────────────────
+
+
+def _closed_list_declaration(detected_procedure_types: tuple[str, ...]) -> str:
+    canonical_json = json.dumps(list(detected_procedure_types), ensure_ascii=False)
+    return (
+        f"Procedimentos canônicos reconciliados (lista fechada): {canonical_json}\n"
+        "Produza exatamente um item em procedure_recommendations para cada item "
+        "dessa lista e nenhum outro: não omita, não duplique e não adicione "
+        "procedimento."
+    )
+
+
+def _procedure_set_retry_instruction(detected_procedure_types: tuple[str, ...]) -> str:
+    return "Correcao obrigatoria: sua resposta anterior omitiu ou adicionou procedimento.\n" + _closed_list_declaration(
+        detected_procedure_types
+    )
+
+
+def _render_user_prompt(
+    *,
+    template: str,
+    case_id: str,
+    agency_record_number: str,
+    llm1_structured_data: dict[str, object],
+    policy_results: dict[str, dict[str, object]],
+    prior_contexts: dict[str, dict[str, object]],
+    detected_procedure_types: tuple[str, ...],
+) -> str:
+    llm1_json = json.dumps(llm1_structured_data, ensure_ascii=False)
+    policy_json = json.dumps(policy_results, ensure_ascii=False, default=str)
+    prior_json = json.dumps(prior_contexts, ensure_ascii=False, default=str)
+    return (
+        f"{template}\n\n"
+        f"case_id: {case_id}\n"
+        f"agency_record_number: {agency_record_number}\n\n"
+        f"Dados extraídos (JSON LLM1 v3):\n{llm1_json}\n\n"
+        f"Resultados da política pré-operatória por procedimento:\n{policy_json}\n\n"
+        f"Casos anteriores por procedimento:\n{prior_json}\n\n"
+        f"{_closed_list_declaration(detected_procedure_types)}\n\n"
+        "Retorne JSON schema_version 3.0 com um item por procedimento reconciliado "
+        "e global_support_recommendation mais restritivo.\n"
+        "Todos os campos narrativos devem estar em português brasileiro (pt-BR).\n"
+        "Não use palavras em inglês nos campos narrativos."
+    )
+
+
+def _decode_and_validate(
+    *,
+    raw_response: str,
+    case_id: str,
+    agency_record_number: str,
+    detected_procedure_types: tuple[str, ...],
+) -> Llm2ResponseV3:
+    try:
+        decoded = decode_llm_json_object(raw_response)
+    except LlmJsonParseError as error:
+        raise Llm2V3ValidationError("LLM2 v3 returned non-JSON payload") from error
+    try:
+        validated = Llm2ResponseV3.model_validate(decoded)
+    except ValidationError as error:
+        raise Llm2V3ValidationError(f"LLM2 v3 schema validation failed: {error}") from error
+
+    if validated.case_id != str(case_id):
+        raise Llm2V3ValidationError(f"LLM2 v3 case_id mismatch: expected {case_id!r}")
+    if validated.agency_record_number != str(agency_record_number):
+        raise Llm2V3ValidationError(f"LLM2 v3 agency_record_number mismatch: expected {agency_record_number!r}")
+
+    returned = {item.procedure_type for item in validated.procedure_recommendations}
+    expected = set(detected_procedure_types)
+    if returned != expected:
+        raise Llm2V3ProcedureSetMismatchError(
+            f"LLM2 v3 procedure set mismatch: expected {sorted(expected)}, got {sorted(returned)}"
+        )
+    return validated
+
+
+def _collect_v3_forbidden_terms(*, validated: Llm2ResponseV3) -> list[str]:
+    texts: list[str] = []
+    for item in validated.procedure_recommendations:
+        texts.append(item.rationale.short_reason)
+        texts.extend(item.rationale.details)
+        texts.extend(item.rationale.missing_info_questions)
+        if item.policy_alignment.notes:
+            texts.append(item.policy_alignment.notes)
+    return collect_forbidden_terms(texts=texts)

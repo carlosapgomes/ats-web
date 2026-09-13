@@ -86,7 +86,7 @@ def _llm1_v2(
     """LLM1 procedure-neutral v2 response."""
     return json.dumps(
         {
-            "schema_version": "2.0",
+            "schema_version": "3.0",
             "language": "pt-BR",
             "agency_record_number": "12345",
             "patient": {"name": "Paciente", "age": age, "sex": "F", "document_id": None},
@@ -184,7 +184,7 @@ def _priority_signals_llm1_response() -> str:
 def _llm2_v2(case_id: str, *, suggestion: str = "accept", procedure_type: str = "eda") -> str:
     return json.dumps(
         {
-            "schema_version": "2.0",
+            "schema_version": "3.0",
             "language": "pt-BR",
             "case_id": case_id,
             "agency_record_number": "12345",
@@ -254,7 +254,7 @@ class TestPipelineFullRun:
 
         case = _reload(case)
         assert isinstance(case.structured_data, dict)
-        assert case.structured_data["schema_version"] == "2.0"
+        assert case.structured_data["schema_version"] == "3.0"
 
     def test_pipeline_persist_summary_text(self, django_user_model) -> None:
         user = django_user_model.objects.create_user(username="nir3", password="pw")

@@ -32,6 +32,7 @@ expected_files:
   - apps/cases/exam_profiles.py
   - apps/cases/migrations/00xx_*.py
   - apps/pipeline/procedure_reconciliation.py
+  - apps/pipeline/scope_detection.py
   - apps/pipeline/schemas/llm1_v3.py
   - apps/pipeline/schemas/llm2_v3.py
   - apps/pipeline/schemas/adapters.py
@@ -50,7 +51,14 @@ expected_files:
 allowed_incidental_files:
   - apps/pipeline/tests/test_orchestrator.py
   - apps/pipeline/tests/test_llm_client.py
-file_cap: 23
+  - apps/pipeline/tests/test_colonoscopy_pipeline.py
+  - apps/pipeline/tests/test_slice_002_pipeline.py
+  - apps/doctor/tests/test_slice_003_procedure_decision.py
+  - apps/doctor/reporting.py
+  - apps/doctor/forms.py
+  - apps/doctor/presenters.py
+  - apps/doctor/views.py
+file_cap: 31
 out_of_scope:
   - intake/detecção especializada
   - proveniência e precedência EDA+Eco/CPRE
@@ -59,6 +67,10 @@ out_of_scope:
 ```
 
 O cap alto é justificado pelo cutover indivisível de um writer strict. Se excedido, parar antes de editar extras e pedir redimensionamento. Alterar FSM, roles ou reescrever 1.1/2.0 é bloqueante.
+
+**Emenda aprovada pelo parent durante a execução (escalonamento via stop rule):** o cutover strict 3.0 exige migrar fixtures/mocks de testes de integraação de schema 2.0 para 3.0 — superfície subestimada no planejamento. Aprovada a Opção A (migração mecânica de fixtures + mock renomeado `_run_v2_pipeline`→`_run_v3_pipeline`), sem decisão de produto e preservando toda a cobertura de regressão. Cap elevado 23→27; adicionados `scope_detection.py` aos esperados e os 3 arquivos de teste acima aos incidentais. Nenhum teste foi arquivado/removido.
+
+**Segunda emenda (parent):** 4 gates literais `schema_version == "2.0"` na superfície médica (`apps/doctor/reporting.py`, `apps/doctor/forms.py`, `apps/doctor/presenters.py`, `apps/doctor/views.py`) fariam TODO caso novo EDA/Colon (agora 3.0) cair no modo legado de relatório/decisão — regressão direta do objetivo "chegar à avaliação médica sem regressão". Aprovada generalização para `{"2.0", "3.0"}` via helper único, sem mudar comportamento 2.0. Cap 27→31. Sem isso, o cutover não fecha (Opção B degradada foi vetada).
 
 ## Matriz requisito → arquivo → teste/check
 

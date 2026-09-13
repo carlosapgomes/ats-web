@@ -8,7 +8,7 @@
 
 ## 1. Cutover vertical do fluxo existente
 
-- [ ] 1.1 Implementar o Slice 001 (`slices/slice-001-v3-cutover-preserves-existing-workflow.md`) e provar EDA/Colonoscopia ponta a ponta sob catálogo/matriz e writer 3.0, incluindo rejeição explícita de valores desconhecidos e compatibilidade 1.1/2.0.
+- [x] 1.1 Implementar o Slice 001 (`slices/slice-001-v3-cutover-preserves-existing-workflow.md`) e provar EDA/Colonoscopia ponta a ponta sob catálogo/matriz e writer 3.0, incluindo rejeição explícita de valores desconhecidos e compatibilidade 1.1/2.0.
 
 ## 2. Ecoendoscopia
 

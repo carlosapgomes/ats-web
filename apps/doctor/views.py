@@ -29,6 +29,7 @@ from apps.cases.procedures import (
     get_approved_procedure_types,
     get_declared_procedure_types,
     get_detected_procedure_types,
+    is_procedure_neutral_structured_data,
     record_doctor_procedure_decisions,
     selection_key,
 )
@@ -202,9 +203,8 @@ def _format_wait_minutes(total_minutes: int) -> str:
 
 
 def _is_v2_case(case: Case) -> bool:
-    """True quando o caso usa o contrato 2.0 procedure-neutral."""
-    structured = case.structured_data
-    return isinstance(structured, dict) and structured.get("schema_version") == "2.0"
+    """True quando o caso usa o contrato procedure-neutral (2.0 ou 3.0)."""
+    return is_procedure_neutral_structured_data(case.structured_data)
 
 
 def _build_case_card(

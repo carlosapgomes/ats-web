@@ -812,7 +812,7 @@ def _v2_llm1(procedures: list[dict[str, Any]], *, one_liner: str = "Colonoscopia
     """LLM1 v2 (procedure-neutral) com os procedimentos informados."""
     return json.dumps(
         {
-            "schema_version": "2.0",
+            "schema_version": "3.0",
             "language": "pt-BR",
             "agency_record_number": "12345",
             "patient": {"name": "Paciente", "age": 35, "sex": "M", "document_id": None},
@@ -891,7 +891,7 @@ def _v2_llm2_single(case_id: str, *, procedure_type: str = "colonoscopy", sugges
     """LLM2 v2 com uma recomendação para o procedimento detectado."""
     return json.dumps(
         {
-            "schema_version": "2.0",
+            "schema_version": "3.0",
             "language": "pt-BR",
             "case_id": case_id,
             "agency_record_number": "12345",

@@ -1,14 +1,19 @@
 """Projeção de procedimentos por caso — serviço central (design D1/D4).
 
-``CaseProcedure`` é a fonte autoritativa de EDA/Colonoscopia como componentes
-de um único caso; o conjunto declarado é derivado exclusivamente das rows
-(Slice 011-C removeu a coluna ponte ``Case.exam_type``).
+``CaseProcedure`` é a fonte autoritativa dos procedimentos de um caso; o
+conjunto declarado é derivado exclusivamente das rows (Slice 011-C removeu a
+coluna ponte ``Case.exam_type``).
+
+Catálogo, ordem canônica e matriz válida ficam centralizados aqui (design D1)
+e são a fonte única dos consumidores. A matriz é fechada: somente EDA,
+Colonoscopia, EDA+Colonoscopia, Ecoendoscopia e CPRE são conjuntos válidos; o
+agendamento casado é exatamente ``{EDA, Colonoscopia}`` (nunca ``len == 2``).
 
 Writes críticos (declaração) passam por este módulo: nenhuma view escreve rows
 diretamente. A declaração é atômica — falha em uma row não deixa caso/projeção
-parcial. Detecção (``set_detected_procedures``, Slice 002) e decisão médica
-(``record_doctor_procedure_decisions``, Slice 003) também são atômicas e
-centralizadas aqui (D4).
+parcial. Detecção (``set_detected_procedures``) e decisão médica
+(``record_doctor_procedure_decisions``) também são atômicas e centralizadas
+(D4).
 """
 
 from __future__ import annotations
@@ -27,34 +32,101 @@ from apps.cases.models import (
     ProcedureType,
 )
 
-# Ordem canônica de exibição: EDA antes de Colonoscopia (label "EDA + Colonoscopia").
-_PROCEDURE_ORDER: dict[str, int] = {
-    ProcedureType.EDA: 0,
-    ProcedureType.COLONOSCOPY: 1,
+# Catálogo canônico e ordem de exibição (design D1). EDA antes de Colonoscopia
+# antes de Ecoendoscopia antes de CPRE.
+SUPPORTED_PROCEDURE_TYPES: tuple[str, ...] = (
+    ProcedureType.EDA,
+    ProcedureType.COLONOSCOPY,
+    ProcedureType.ECHOENDOSCOPY,
+    ProcedureType.CPRE,
+)
+
+# Contratos procedure-neutral legíveis pelo domínio: 2.0 (histórico) e 3.0
+# (writer atual). 1.1 continua suportado apenas pelos adapters/presenters como
+# leitura histórica.
+PROCEDURE_NEUTRAL_SCHEMA_VERSIONS: frozenset[str] = frozenset({"2.0", "3.0"})
+
+
+def is_procedure_neutral_structured_data(structured_data: Any) -> bool:
+    """True quando o artefato estruturado usa o contrato procedure-neutral.
+
+    Aceita 2.0 (histórico) e 3.0 (writer atual) — os quatro tipos e a decisão
+    por componente exigem um dos dois; artefatos 1.1 continuam no caminho
+    legado. Substitui os gates literais ``== "2.0"`` espalhados pela UI médica
+    (R6 do cutover 3.0).
+    """
+    return (
+        isinstance(structured_data, dict) and structured_data.get("schema_version") in PROCEDURE_NEUTRAL_SCHEMA_VERSIONS
+    )
+
+
+PROCEDURE_ORDER: dict[str, int] = {type_: position for position, type_ in enumerate(SUPPORTED_PROCEDURE_TYPES)}
+
+# Agendamento casado: igualdade exata com {EDA, Colonoscopia} (design D1/D2).
+PAIRED_APPOINTMENT_SET: frozenset[str] = frozenset({ProcedureType.EDA, ProcedureType.COLONOSCOPY})
+
+# Matriz fechada: os únicos conjuntos válidos em qualquer fronteira (D2).
+ALLOWED_PROCEDURE_SETS: frozenset[frozenset[str]] = frozenset(
+    {
+        frozenset({ProcedureType.EDA}),
+        frozenset({ProcedureType.COLONOSCOPY}),
+        PAIRED_APPOINTMENT_SET,
+        frozenset({ProcedureType.ECHOENDOSCOPY}),
+        frozenset({ProcedureType.CPRE}),
+    }
+)
+
+# Chave textual do badge/CSS por conjunto válido (design D13).
+_SELECTION_KEY_BY_SET: dict[frozenset[str], str] = {
+    frozenset({ProcedureType.EDA}): ProcedureType.EDA,
+    frozenset({ProcedureType.COLONOSCOPY}): ProcedureType.COLONOSCOPY,
+    PAIRED_APPOINTMENT_SET: EDA_COLONOSCOPY,
+    frozenset({ProcedureType.ECHOENDOSCOPY}): ProcedureType.ECHOENDOSCOPY,
+    frozenset({ProcedureType.CPRE}): ProcedureType.CPRE,
 }
 
-# Seleção declarada aceita no intake: EDA, Colonoscopia ou a combinação.
-_DECLARED_SINGLE_TYPES: tuple[str, ...] = (ProcedureType.EDA, ProcedureType.COLONOSCOPY)
+_SUPPORTED_LABEL = ", ".join(SUPPORTED_PROCEDURE_TYPES)
 
 
-def normalize_procedure_selection(procedure_types: Any) -> tuple[str, ...]:
-    """Valida e ordena uma seleção declarada de procedimentos.
+def _ordered_supported(procedure_types: Any) -> tuple[str, ...]:
+    """Valida tipos contra o catálogo e devolve tupla ordenada sem duplicatas.
 
-    Regras: não-vazia, sem duplicatas e somente EDA/Colonoscopia (sem CPRE ou
-    procedure genérica). Retorna tupla ordenada (eda, colonoscopy) para
-    exibição/auditoria determinísticas. Levanta ``ValueError`` caso contrário.
+    Qualquer valor fora do catálogo falha explicitamente — nunca é descartado
+    em silêncio (R3).
     """
     seen: list[str] = []
     for raw in procedure_types or ():
         value = str(raw)
-        if value not in _DECLARED_SINGLE_TYPES:
-            raise ValueError(f"Procedimento inválido: {value!r}. Aceitos: {', '.join(_DECLARED_SINGLE_TYPES)}.")
+        if value not in PROCEDURE_ORDER:
+            raise ValueError(f"Procedimento inválido: {value!r}. Aceitos: {_SUPPORTED_LABEL}.")
         if value not in seen:
             seen.append(value)
-    if not seen:
-        raise ValueError("Selecione ao menos um procedimento (EDA e/ou Colonoscopia).")
-    seen.sort(key=lambda t: _PROCEDURE_ORDER[t])
+    seen.sort(key=lambda t: PROCEDURE_ORDER[t])
     return tuple(seen)
+
+
+def is_paired_appointment_set(procedure_types: Any) -> bool:
+    """True somente quando o conjunto é exatamente ``{EDA, Colonoscopia}``.
+
+    Substitui qualquer regra ``len == 2`` em consumidores de agendamento.
+    """
+    return frozenset(str(raw) for raw in (procedure_types or ())) == PAIRED_APPOINTMENT_SET
+
+
+def normalize_procedure_selection(procedure_types: Any) -> tuple[str, ...]:
+    """Valida e ordena uma seleção declarada de procedimentos (D2).
+
+    Regras: não-vazia, sem duplicatas, todos os tipos no catálogo e o conjunto
+    resultante presente em ``ALLOWED_PROCEDURE_SETS``. Retorna tupla ordenada
+    para exibição/auditoria determinísticas. Levanta ``ValueError`` caso
+    contrário.
+    """
+    ordered = _ordered_supported(procedure_types)
+    if not ordered:
+        raise ValueError("Selecione ao menos um procedimento.")
+    if frozenset(ordered) not in ALLOWED_PROCEDURE_SETS:
+        raise ValueError(f"Conjunto de procedimentos não suportado: {list(ordered)}.")
+    return ordered
 
 
 def _sync_declared_rows(case: Case, procedure_types: tuple[str, ...]) -> None:
@@ -117,20 +189,16 @@ def set_declared_procedures(
 
 
 def normalize_detected_set(detected_types: Any) -> tuple[str, ...]:
-    """Valida e ordena um conjunto detectado (apenas EDA/Colonoscopia, sem duplicatas).
+    """Valida e ordena um conjunto detectado (catálogo, sem duplicatas, D2).
 
     Conjunto vazio é aceito (nenhum procedimento detectado) — usado pela
-    projeção quando a análise não sustenta nenhum procedimento.
+    projeção quando a análise não sustenta nenhum procedimento. Conjunto não
+    vazio precisa pertencer à matriz fechada.
     """
-    seen: list[str] = []
-    for raw in detected_types or ():
-        value = str(raw)
-        if value not in _DECLARED_SINGLE_TYPES:
-            raise ValueError(f"Procedimento detectado inválido: {value!r}. Aceitos: EDA/Colonoscopia.")
-        if value not in seen:
-            seen.append(value)
-    seen.sort(key=lambda t: _PROCEDURE_ORDER[t])
-    return tuple(seen)
+    ordered = _ordered_supported(detected_types)
+    if ordered and frozenset(ordered) not in ALLOWED_PROCEDURE_SETS:
+        raise ValueError(f"Conjunto detectado não suportado: {list(ordered)}.")
+    return ordered
 
 
 def set_detected_procedures(
@@ -233,7 +301,7 @@ def record_doctor_procedure_decisions(
                     "added_by_doctor": bool(decision.get("added_by_doctor")),
                 }
             )
-        entries.sort(key=lambda entry: _PROCEDURE_ORDER[entry["procedure_type"]])
+        entries.sort(key=lambda entry: PROCEDURE_ORDER[entry["procedure_type"]])
         CaseEvent.objects.create(
             case=locked,
             event_type="DOCTOR_PROCEDURE_DECISIONS_RECORDED",
@@ -251,7 +319,7 @@ def _declared_types_from_rows(case: Case) -> tuple[str, ...]:
     return tuple(
         sorted(
             (p.procedure_type for p in case.procedures.all() if p.declared_by_nir),
-            key=lambda t: _PROCEDURE_ORDER[t],
+            key=lambda t: PROCEDURE_ORDER[t],
         )
     )
 
@@ -274,7 +342,7 @@ def get_detected_procedure_types(case: Case) -> tuple[str, ...]:
     return tuple(
         sorted(
             (p.procedure_type for p in case.procedures.all() if p.detection_status == DetectionStatus.DETECTED),
-            key=lambda t: _PROCEDURE_ORDER[t],
+            key=lambda t: PROCEDURE_ORDER[t],
         )
     )
 
@@ -289,19 +357,22 @@ def get_approved_procedure_types(case: Case) -> tuple[str, ...]:
     return tuple(
         sorted(
             (p.procedure_type for p in case.procedures.all() if p.doctor_disposition == DoctorDisposition.APPROVED),
-            key=lambda t: _PROCEDURE_ORDER[t],
+            key=lambda t: PROCEDURE_ORDER[t],
         )
     )
 
 
 def selection_key(procedure_types: tuple[str, ...]) -> str:
-    """Chave textual do badge/CSS: eda | colonoscopy | eda_colonoscopy.
+    """Chave textual do badge/CSS derivada do conjunto (design D13).
 
-    Derivada do conjunto (nunca do campo legado), para labels acessíveis.
+    ``eda`` | ``colonoscopy`` | ``eda_colonoscopy`` | ``echoendoscopy`` |
+    ``cpre``. O agendamento casado exige igualdade exata com
+    ``PAIRED_APPOINTMENT_SET`` — nunca ``len == 2``.
     """
-    if len(procedure_types) == 2:
+    types = tuple(str(raw) for raw in (procedure_types or ()))
+    if frozenset(types) == PAIRED_APPOINTMENT_SET:
         return EDA_COLONOSCOPY
-    return procedure_types[0] if procedure_types else ""
+    return types[0] if types else ""
 
 
 def format_procedure_selection(procedure_types: Any) -> str:

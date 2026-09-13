@@ -33,7 +33,7 @@ PROCEDURE_ORDER = (ProcedureType.EDA, ProcedureType.COLONOSCOPY)
 
 
 def _v2_structured(patient_name: str = "Paciente V2") -> dict[str, Any]:
-    """structured_data mínimo com contrato 2.0 (o suficiente para o modo v2)."""
+    """structured_data mínimo com contrato 3.0 (o suficiente para o modo v3)."""
     return {
         "schema_version": "2.0",
         "patient": {"name": patient_name, "age": 40, "sex": "F"},
@@ -399,7 +399,7 @@ class TestProcedureDecisionFormAndSubmit:
         token = self._claim_lock(case.case_id, doctor)
 
         with mock.patch(
-            "apps.pipeline.orchestrator._run_v2_pipeline",
+            "apps.pipeline.orchestrator._run_v3_pipeline",
             side_effect=AssertionError("LLM rerun não permitido no submit médico"),
         ) as v2_run:
             response = self._submit(

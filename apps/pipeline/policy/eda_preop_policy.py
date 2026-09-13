@@ -8,7 +8,7 @@ Every clinical threshold, conditional gate, and profile is preserved exactly.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Literal, cast
 
 from apps.cases.exam_profiles import get_exam_profile
@@ -22,6 +22,11 @@ SupportedEdaSubtype = Literal[
     "echoendoscopy",
 ]
 
+# Ordem estável das categorias de pendência (design D8): exames mínimos,
+# thresholds, exames condicionais e imagem especializada. O ``reason_code``
+# primário é sempre a primeira pendência desta ordem.
+REQUIREMENT_CATEGORIES: tuple[str, ...] = ("minimum", "threshold", "conditional", "imaging")
+
 _REQUIRED_MINIMUM_EXAMS: tuple[tuple[str, str, str], ...] = (
     ("hb_numeric_present", "missing_minimum_exam_hb_or_ht", "Hb/Ht"),
     ("platelets_numeric_present", "missing_minimum_exam_platelets", "plaquetas"),
@@ -33,6 +38,24 @@ _REQUIRED_MINIMUM_EXAMS: tuple[tuple[str, str, str], ...] = (
 
 
 @dataclass(frozen=True)
+class FailedRequirement:
+    """Pendência documental/clínica determinística (design D8).
+
+    ``text`` carrega a mensagem legada da pendência; ``code``/``label``/
+    ``category`` são o contrato aditivo consumido por LLM2, relatório médico e
+    correção NIR.
+    """
+
+    code: str
+    label: str
+    category: str
+    text: str
+
+    def to_dict(self) -> dict[str, str]:
+        return {"code": self.code, "label": self.label, "category": self.category}
+
+
+@dataclass(frozen=True)
 class EdaPreopDecision:
     """Deterministic pre-procedure decision with explicit reason metadata."""
 
@@ -41,9 +64,15 @@ class EdaPreopDecision:
     reason_text: str
     evidence_spans: list[dict[str, str]]
     pediatric_flag: bool
+    failed_requirements: list[FailedRequirement] = field(default_factory=list)
 
     def to_dict(self) -> dict[str, object]:
-        """Serialize deterministic decision payload for persistence and downstream use."""
+        """Serialize deterministic decision payload for persistence and downstream use.
+
+        Contrato aditivo (D8): ``reason_code``/``reason_text`` preservam o
+        motivo primário legado e ``failed_requirements[]`` expõe TODAS as
+        pendências em ordem estável.
+        """
 
         return {
             "decision": self.decision,
@@ -51,6 +80,7 @@ class EdaPreopDecision:
             "reason_text": self.reason_text,
             "evidence_spans": self.evidence_spans,
             "pediatric_flag": self.pediatric_flag,
+            "failed_requirements": [requirement.to_dict() for requirement in self.failed_requirements],
         }
 
 
@@ -90,10 +120,13 @@ def _evaluate_common_preop_policy(
     allow_foreign_body_exception: bool,
     procedure_label: str,
 ) -> dict[str, object]:
-    """Shared deterministic pre-procedure evaluation across profiles (R4).
+    """Shared deterministic pre-procedure evaluation across profiles (R4/D8).
 
     ``procedure_label`` is used only in persisted reason texts so a
-    colonoscopy case never asserts the EDA rulebook (R4).
+    colonoscopy case never asserts the EDA rulebook (R4). A avaliação deixa de
+    retornar na primeira falha (exceto o bypass de corpo estranho em EDA):
+    coleta TODAS as pendências em ordem estável e expõe ``failed_requirements[]``
+    mantendo ``reason_code``/``reason_text`` do primeiro item (D8).
     """
 
     preop_payload = _extract_dict(structured_data, "preop_screening")
@@ -112,58 +145,20 @@ def _evaluate_common_preop_policy(
             pediatric_flag=pediatric_flag,
         ).to_dict()
 
-    minimum_exam_failure = _find_missing_minimum_exam(structured_data=structured_data)
-    if minimum_exam_failure is not None:
-        reason_code, exam_label = minimum_exam_failure
-        return _deny(
-            reason_code=reason_code,
-            reason_text=(f"Exame mínimo obrigatório ausente ou insuficiente para {procedure_label}: {exam_label}."),
-            structured_data=structured_data,
-        )
-
-    thresholds = _resolve_contraindication_thresholds(structured_data=structured_data)
-    hb = _extract_hb_value(structured_data=structured_data)
-    if hb is not None and hb < thresholds.hb_min:
-        return _deny(
-            reason_code="hb_below_threshold",
-            reason_text=(
-                f"HB < {thresholds.hb_min:g} para perfil {thresholds.profile_name} dos critérios de {procedure_label}."
-            ),
-            structured_data=structured_data,
-        )
-
-    platelets = _extract_platelets_value(structured_data=structured_data)
-    if platelets is not None and platelets < thresholds.platelets_min:
-        return _deny(
-            reason_code="platelets_below_threshold",
-            reason_text=(
-                f"Plaquetas < {thresholds.platelets_min} para perfil {thresholds.profile_name} "
-                f"dos critérios de {procedure_label}."
-            ),
-            structured_data=structured_data,
-        )
-
-    rni = _extract_rni_value(structured_data=structured_data)
-    if rni is not None and rni > thresholds.rni_max:
-        return _deny(
-            reason_code="inr_above_threshold",
-            reason_text=(
-                f"RNI/INR > {thresholds.rni_max:g} para perfil {thresholds.profile_name} "
-                f"dos critérios de {procedure_label}."
-            ),
-            structured_data=structured_data,
-        )
-
-    conditional_exam_failure = _find_missing_conditional_exam_gate(
+    failures = _collect_failed_requirements(
         structured_data=structured_data,
+        procedure_label=procedure_label,
     )
-    if conditional_exam_failure is not None:
-        reason_code, reason_text = conditional_exam_failure
-        return _deny(
-            reason_code=reason_code,
-            reason_text=reason_text,
-            structured_data=structured_data,
-        )
+    if failures:
+        primary = failures[0]
+        return EdaPreopDecision(
+            decision="deny",
+            reason_code=primary.code,
+            reason_text=_with_pediatric_signal(primary.text, pediatric_flag),
+            evidence_spans=_extract_evidence_spans(preop_payload),
+            pediatric_flag=pediatric_flag,
+            failed_requirements=failures,
+        ).to_dict()
 
     return EdaPreopDecision(
         decision="accept",
@@ -177,85 +172,149 @@ def _evaluate_common_preop_policy(
     ).to_dict()
 
 
-def _deny(
-    *,
-    reason_code: str,
-    reason_text: str,
-    structured_data: dict[str, object],
-) -> dict[str, object]:
-    preop_payload = _extract_dict(structured_data, "preop_screening")
-    pediatric_flag = _is_pediatric(structured_data)
-    return EdaPreopDecision(
-        decision="deny",
-        reason_code=reason_code,
-        reason_text=_with_pediatric_signal(reason_text, pediatric_flag),
-        evidence_spans=_extract_evidence_spans(preop_payload),
-        pediatric_flag=pediatric_flag,
-    ).to_dict()
-
-
-def _find_missing_minimum_exam(
+def _collect_failed_requirements(
     *,
     structured_data: dict[str, object],
-) -> tuple[str, str] | None:
+    procedure_label: str,
+) -> list[FailedRequirement]:
+    """Coleta TODAS as pendências em ordem estável (D8).
+
+    Ordem: exames mínimos → thresholds → exames condicionais → imagem. A
+    imagem especializada é declarativa no perfil (D7) e só é avaliada pelos
+    slices verticais próprios; aqui a categoria permanece reservada.
+    """
+    failures: list[FailedRequirement] = []
+    failures.extend(_collect_missing_minimum_exams(structured_data=structured_data, procedure_label=procedure_label))
+    failures.extend(_collect_threshold_failures(structured_data=structured_data, procedure_label=procedure_label))
+    failures.extend(_collect_missing_conditional_exam_gates(structured_data=structured_data))
+    return failures
+
+
+def _collect_missing_minimum_exams(
+    *,
+    structured_data: dict[str, object],
+    procedure_label: str,
+) -> list[FailedRequirement]:
     minimum_exam_evidence = _extract_minimum_exam_evidence(structured_data=structured_data)
+    failures: list[FailedRequirement] = []
     for field_name, reason_code, exam_label in _REQUIRED_MINIMUM_EXAMS:
         if _extract_text(minimum_exam_evidence, field_name) != "yes":
-            return reason_code, exam_label
-    return None
+            failures.append(
+                FailedRequirement(
+                    code=reason_code,
+                    label=exam_label,
+                    category="minimum",
+                    text=f"Exame mínimo obrigatório ausente ou insuficiente para {procedure_label}: {exam_label}.",
+                )
+            )
+    return failures
 
 
-def _find_missing_conditional_exam_gate(
+def _collect_threshold_failures(
     *,
     structured_data: dict[str, object],
-) -> tuple[str, str] | None:
+    procedure_label: str,
+) -> list[FailedRequirement]:
+    thresholds = _resolve_contraindication_thresholds(structured_data=structured_data)
+    failures: list[FailedRequirement] = []
+
+    hb = _extract_hb_value(structured_data=structured_data)
+    if hb is not None and hb < thresholds.hb_min:
+        failures.append(
+            FailedRequirement(
+                code="hb_below_threshold",
+                label="HB",
+                category="threshold",
+                text=(
+                    f"HB < {thresholds.hb_min:g} para perfil {thresholds.profile_name} "
+                    f"dos critérios de {procedure_label}."
+                ),
+            )
+        )
+
+    platelets = _extract_platelets_value(structured_data=structured_data)
+    if platelets is not None and platelets < thresholds.platelets_min:
+        failures.append(
+            FailedRequirement(
+                code="platelets_below_threshold",
+                label="Plaquetas",
+                category="threshold",
+                text=(
+                    f"Plaquetas < {thresholds.platelets_min} para perfil {thresholds.profile_name} "
+                    f"dos critérios de {procedure_label}."
+                ),
+            )
+        )
+
+    rni = _extract_rni_value(structured_data=structured_data)
+    if rni is not None and rni > thresholds.rni_max:
+        failures.append(
+            FailedRequirement(
+                code="inr_above_threshold",
+                label="RNI/INR",
+                category="threshold",
+                text=(
+                    f"RNI/INR > {thresholds.rni_max:g} para perfil {thresholds.profile_name} "
+                    f"dos critérios de {procedure_label}."
+                ),
+            )
+        )
+
+    return failures
+
+
+def _collect_missing_conditional_exam_gates(
+    *,
+    structured_data: dict[str, object],
+) -> list[FailedRequirement]:
     conditional_exam_requirements = _extract_conditional_exam_requirements(
         structured_data=structured_data,
     )
+    failures: list[FailedRequirement] = []
 
     if _is_ecg_gate_required(structured_data=structured_data):
-        if (
-            _extract_text(
-                conditional_exam_requirements,
-                "ecg_report_finding_present",
-            )
-            != "yes"
-        ):
-            return (
-                "missing_ecg_with_cardiovascular_disease",
-                "Critério cardiovascular exige laudo mínimo de ECG no relatório; "
-                "mera menção do exame não satisfaz a completude.",
+        if _extract_text(conditional_exam_requirements, "ecg_report_finding_present") != "yes":
+            failures.append(
+                FailedRequirement(
+                    code="missing_ecg_with_cardiovascular_disease",
+                    label="ECG",
+                    category="conditional",
+                    text=(
+                        "Critério cardiovascular exige laudo mínimo de ECG no relatório; "
+                        "mera menção do exame não satisfaz a completude."
+                    ),
+                )
             )
 
     if _is_chest_xray_gate_required(structured_data=structured_data):
-        if (
-            _extract_text(
-                conditional_exam_requirements,
-                "chest_xray_report_finding_present",
-            )
-            != "yes"
-        ):
-            return (
-                "missing_chest_xray_with_respiratory_risk",
-                "Critério respiratório exige laudo mínimo de RX de tórax no "
-                "relatório; mera menção do exame não satisfaz a completude.",
+        if _extract_text(conditional_exam_requirements, "chest_xray_report_finding_present") != "yes":
+            failures.append(
+                FailedRequirement(
+                    code="missing_chest_xray_with_respiratory_risk",
+                    label="RX de tórax",
+                    category="conditional",
+                    text=(
+                        "Critério respiratório exige laudo mínimo de RX de tórax no "
+                        "relatório; mera menção do exame não satisfaz a completude."
+                    ),
+                )
             )
 
     if _is_echocardiogram_gate_required(structured_data=structured_data):
-        if (
-            _extract_text(
-                conditional_exam_requirements,
-                "echocardiogram_report_finding_present",
-            )
-            != "yes"
-        ):
-            return (
-                "missing_echocardiogram_with_structural_heart_risk",
-                "Critério cardíaco estrutural exige laudo mínimo de ecocardiograma "
-                "no relatório; mera menção do exame não satisfaz a completude.",
+        if _extract_text(conditional_exam_requirements, "echocardiogram_report_finding_present") != "yes":
+            failures.append(
+                FailedRequirement(
+                    code="missing_echocardiogram_with_structural_heart_risk",
+                    label="Ecocardiograma",
+                    category="conditional",
+                    text=(
+                        "Critério cardíaco estrutural exige laudo mínimo de ecocardiograma "
+                        "no relatório; mera menção do exame não satisfaz a completude."
+                    ),
+                )
             )
 
-    return None
+    return failures
 
 
 def _resolve_contraindication_thresholds(

@@ -206,8 +206,8 @@ class TestCreateOpenAiStrictSchemaClients:
             assert rf["json_schema"]["strict"] is True
             assert rf["json_schema"]["name"] == "llm2_response"
 
-    def test_llm1_client_binds_v2_strict_schema(self, settings: Any) -> None:
-        """Contract test: production LLM1 client binds the V2 strict schema.
+    def test_llm1_client_binds_v3_strict_schema(self, settings: Any) -> None:
+        """Contract test: production LLM1 client binds the V3 strict schema.
 
         Must fail when the factory binds the 1.1 contract (Llm1Response).
         """
@@ -216,7 +216,7 @@ class TestCreateOpenAiStrictSchemaClients:
             mock_openai_cls.return_value = mock_client
             mock_completion = MagicMock()
             mock_choice = MagicMock()
-            mock_choice.message.content = '{"schema_version": "2.0"}'
+            mock_choice.message.content = '{"schema_version": "3.0"}'
             mock_completion.choices = [mock_choice]
             mock_client.chat.completions.create.return_value = mock_completion
 
@@ -235,16 +235,16 @@ class TestCreateOpenAiStrictSchemaClients:
             properties = schema["properties"]
             schema_version = properties["schema_version"]
             if "const" in schema_version:
-                assert schema_version["const"] == "2.0"
+                assert schema_version["const"] == "3.0"
             else:
-                assert schema_version["enum"] == ["2.0"]
+                assert schema_version["enum"] == ["3.0"]
             assert "common_preop" in properties
             assert "requested_procedures" in properties
             assert "preop_screening" not in properties
             assert "eda" not in properties
 
-    def test_llm2_client_binds_v2_strict_schema(self, settings: Any) -> None:
-        """Contract test: production LLM2 client binds the V2 strict schema.
+    def test_llm2_client_binds_v3_strict_schema(self, settings: Any) -> None:
+        """Contract test: production LLM2 client binds the V3 strict schema.
 
         Must fail when the factory binds the 1.1 contract (Llm2Response).
         """
@@ -253,7 +253,7 @@ class TestCreateOpenAiStrictSchemaClients:
             mock_openai_cls.return_value = mock_client
             mock_completion = MagicMock()
             mock_choice = MagicMock()
-            mock_choice.message.content = '{"schema_version": "2.0"}'
+            mock_choice.message.content = '{"schema_version": "3.0"}'
             mock_completion.choices = [mock_choice]
             mock_client.chat.completions.create.return_value = mock_completion
 
@@ -272,9 +272,9 @@ class TestCreateOpenAiStrictSchemaClients:
             properties = schema["properties"]
             schema_version = properties["schema_version"]
             if "const" in schema_version:
-                assert schema_version["const"] == "2.0"
+                assert schema_version["const"] == "3.0"
             else:
-                assert schema_version["enum"] == ["2.0"]
+                assert schema_version["enum"] == ["3.0"]
             assert "procedure_recommendations" in properties
             assert "suggestion" not in properties
 

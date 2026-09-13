@@ -366,14 +366,14 @@ def _colon_procedure(**overrides: Any) -> dict[str, Any]:
     return item
 
 
-def _llm1_v2_json(
+def _llm1_json(
     *,
     procedures: list[dict[str, Any]],
     one_liner: str = "EDA e Colonoscopia indicadas.",
     hb_g_dl: float = 13.0,
 ) -> str:
     payload: dict[str, Any] = {
-        "schema_version": "2.0",
+        "schema_version": "3.0",
         "language": "pt-BR",
         "agency_record_number": "12345",
         "patient": {"name": "Paciente", "age": 35, "sex": "M", "document_id": None},
@@ -429,7 +429,7 @@ def _llm1_v2_json(
     return json.dumps(payload)
 
 
-def _llm2_v2_json(
+def _llm2_json(
     case_id: str, *, recommendations: list[dict[str, Any]] | None = None, global_support: str = "none"
 ) -> str:
     if recommendations is None:
@@ -473,7 +473,7 @@ def _llm2_v2_json(
         ]
     return json.dumps(
         {
-            "schema_version": "2.0",
+            "schema_version": "3.0",
             "language": "pt-BR",
             "case_id": case_id,
             "agency_record_number": "12345",
@@ -533,7 +533,7 @@ def _single_procedure_recommendation(procedure_type: str, *, suggestion: str = "
 
 def _extract_llm1_json_from_prompt(prompt: str) -> dict[str, Any]:
     """Faz parse do bloco “Dados extraídos” do prompt capturado (assert não frágil)."""
-    marker = "Dados extraídos (JSON LLM1 v2):\n"
+    marker = "Dados extraídos (JSON LLM1 v3):\n"
     start = prompt.index(marker) + len(marker)
     payload, _ = json.JSONDecoder().raw_decode(prompt[start:])
     return cast("dict[str, Any]", payload)
@@ -552,8 +552,8 @@ class TestCombinedHappyPath:
         )
         client = RecordingLlmClient(
             responses=[
-                _llm1_v2_json(procedures=[_eda_procedure(), _colon_procedure()]),
-                _llm2_v2_json(str(case.case_id)),
+                _llm1_json(procedures=[_eda_procedure(), _colon_procedure()]),
+                _llm2_json(str(case.case_id)),
             ]
         )
         from apps.pipeline.orchestrator import run_pipeline
@@ -592,8 +592,8 @@ class TestCombinedHappyPath:
         )
         client = RecordingLlmClient(
             responses=[
-                _llm1_v2_json(procedures=[_eda_procedure(), _colon_procedure()]),
-                _llm2_v2_json(str(case.case_id)),
+                _llm1_json(procedures=[_eda_procedure(), _colon_procedure()]),
+                _llm2_json(str(case.case_id)),
             ]
         )
         from apps.pipeline.orchestrator import run_pipeline
@@ -636,8 +636,8 @@ class TestCombinedHappyPath:
         )
         client = RecordingLlmClient(
             responses=[
-                _llm1_v2_json(procedures=[_eda_procedure(), _colon_procedure()]),
-                _llm2_v2_json(str(case.case_id)),
+                _llm1_json(procedures=[_eda_procedure(), _colon_procedure()]),
+                _llm2_json(str(case.case_id)),
             ]
         )
         from apps.pipeline.orchestrator import run_pipeline
@@ -655,8 +655,8 @@ class TestCombinedHappyPath:
         )
         client = RecordingLlmClient(
             responses=[
-                _llm1_v2_json(procedures=[_eda_procedure(), _colon_procedure()]),
-                _llm2_v2_json(str(case.case_id)),
+                _llm1_json(procedures=[_eda_procedure(), _colon_procedure()]),
+                _llm2_json(str(case.case_id)),
             ]
         )
         from apps.pipeline.orchestrator import run_pipeline
@@ -665,7 +665,7 @@ class TestCombinedHappyPath:
 
         detected_event = CaseEvent.objects.filter(case=case, event_type="CASE_PROCEDURES_DETECTED").latest("timestamp")
         payload: dict[str, Any] = detected_event.payload or {}
-        assert payload.get("schema_version") == "2.0"
+        assert payload.get("schema_version") == "3.0"
         assert payload.get("detected_procedures") == ["eda", "colonoscopy"]
         serialized = json.dumps(payload)
         assert "Motivo da Solicitacao" not in serialized
@@ -686,8 +686,8 @@ class TestReconciledProcedureContext:
         )
         client = RecordingLlmClient(
             responses=[
-                _llm1_v2_json(procedures=[_eda_procedure(), _colon_procedure()]),
-                _llm2_v2_json(str(case.case_id), recommendations=_single_procedure_recommendation("eda")),
+                _llm1_json(procedures=[_eda_procedure(), _colon_procedure()]),
+                _llm2_json(str(case.case_id), recommendations=_single_procedure_recommendation("eda")),
             ]
         )
         from apps.pipeline.orchestrator import run_pipeline
@@ -724,8 +724,8 @@ class TestReconciledProcedureContext:
         )
         client = RecordingLlmClient(
             responses=[
-                _llm1_v2_json(procedures=[_eda_procedure(), _colon_procedure()]),
-                _llm2_v2_json(str(case.case_id), recommendations=_single_procedure_recommendation("colonoscopy")),
+                _llm1_json(procedures=[_eda_procedure(), _colon_procedure()]),
+                _llm2_json(str(case.case_id), recommendations=_single_procedure_recommendation("colonoscopy")),
             ]
         )
         from apps.pipeline.orchestrator import run_pipeline
@@ -761,8 +761,8 @@ class TestReconciledProcedureContext:
         )
         client = RecordingLlmClient(
             responses=[
-                _llm1_v2_json(procedures=[_eda_procedure(), _colon_procedure()]),
-                _llm2_v2_json(str(case.case_id)),
+                _llm1_json(procedures=[_eda_procedure(), _colon_procedure()]),
+                _llm2_json(str(case.case_id)),
             ]
         )
         from apps.pipeline.orchestrator import run_pipeline
@@ -802,7 +802,7 @@ class TestReviewGates:
             exam_type="eda_colonoscopy",
             extracted_text="Solicito EDA para avaliacao de dispepsia.",
         )
-        client = RecordingLlmClient(responses=[_llm1_v2_json(procedures=[_eda_procedure()])])
+        client = RecordingLlmClient(responses=[_llm1_json(procedures=[_eda_procedure()])])
         from apps.pipeline.orchestrator import run_pipeline
 
         run_pipeline(
@@ -828,7 +828,7 @@ class TestReviewGates:
             exam_type="eda",
             extracted_text="Solicito colonoscopia para rastreamento.",
         )
-        client = RecordingLlmClient(responses=[_llm1_v2_json(procedures=[_colon_procedure()])])
+        client = RecordingLlmClient(responses=[_llm1_json(procedures=[_colon_procedure()])])
         from apps.pipeline.orchestrator import run_pipeline
 
         run_pipeline(
@@ -853,7 +853,7 @@ class TestReviewGates:
             extracted_text="Solicito EDA e colonoscopia para avaliacao.",
         )
         # LLM1 afirma apenas EDA (sem structured claim de colonoscopia).
-        client = RecordingLlmClient(responses=[_llm1_v2_json(procedures=[_eda_procedure()])])
+        client = RecordingLlmClient(responses=[_llm1_json(procedures=[_eda_procedure()])])
         from apps.pipeline.orchestrator import run_pipeline
 
         run_pipeline(
@@ -883,8 +883,8 @@ class TestSimpleAndFailurePaths:
         )
         client = RecordingLlmClient(
             responses=[
-                _llm1_v2_json(procedures=[_eda_procedure()], one_liner="EDA indicada."),
-                _llm2_v2_json(
+                _llm1_json(procedures=[_eda_procedure()], one_liner="EDA indicada."),
+                _llm2_json(
                     str(case.case_id),
                     recommendations=[
                         {
@@ -932,8 +932,8 @@ class TestSimpleAndFailurePaths:
         )
         client = RecordingLlmClient(
             responses=[
-                _llm1_v2_json(procedures=[_colon_procedure()], one_liner="Colonoscopia indicada."),
-                _llm2_v2_json(
+                _llm1_json(procedures=[_colon_procedure()], one_liner="Colonoscopia indicada."),
+                _llm2_json(
                     str(case.case_id),
                     recommendations=[
                         {
@@ -980,7 +980,7 @@ class TestSimpleAndFailurePaths:
             extracted_text="Solicito EDA.",
         )
         # Resposta inválida: requested_procedures vazio.
-        client = RecordingLlmClient(responses=['{"schema_version": "2.0", "requested_procedures": []}'])
+        client = RecordingLlmClient(responses=['{"schema_version": "3.0", "requested_procedures": []}'])
         from apps.pipeline.orchestrator import run_pipeline
 
         run_pipeline(case.case_id, llm_client=client, llm1_system_prompt="sp1", llm1_user_template="ut1")
@@ -997,10 +997,10 @@ class TestSimpleAndFailurePaths:
             exam_type="eda",
             extracted_text="Solicito EDA.",
         )
-        divergent = _llm2_v2_json(str(case.case_id))  # ambos os tipos para conjunto EDA-only
+        divergent = _llm2_json(str(case.case_id))  # ambos os tipos para conjunto EDA-only
         client = RecordingLlmClient(
             responses=[
-                _llm1_v2_json(procedures=[_eda_procedure()]),
+                _llm1_json(procedures=[_eda_procedure()]),
                 divergent,
                 divergent,
             ]
@@ -1034,8 +1034,8 @@ class TestSimpleAndFailurePaths:
         )
         client = RecordingLlmClient(
             responses=[
-                _llm1_v2_json(procedures=[_colon_procedure()], one_liner="Colonoscopia indicada."),
-                _llm2_v2_json(
+                _llm1_json(procedures=[_colon_procedure()], one_liner="Colonoscopia indicada."),
+                _llm2_json(
                     str(case.case_id),
                     recommendations=[
                         {
@@ -1131,10 +1131,10 @@ class TestLegacy11Render:
         from apps.doctor.presenters import DoctorReportPresenter
 
         v2_data = json.loads(
-            _llm1_v2_json(procedures=[_eda_procedure(), _colon_procedure()], one_liner="EDA e Colonoscopia indicadas.")
+            _llm1_json(procedures=[_eda_procedure(), _colon_procedure()], one_liner="EDA e Colonoscopia indicadas.")
         )
         suggested: dict[str, Any] = {
-            "schema_version": "2.0",
+            "schema_version": "3.0",
             "procedure_recommendations": [
                 {"procedure_type": "eda", "suggestion": "accept", "support_recommendation": "none"},
                 {"procedure_type": "colonoscopy", "suggestion": "deny", "support_recommendation": "anesthesist"},
@@ -1175,8 +1175,8 @@ class TestPreopDenyOverride:
         )
         client = RecordingLlmClient(
             responses=[
-                _llm1_v2_json(procedures=[_eda_procedure()], one_liner="EDA indicada.", hb_g_dl=6.0),
-                _llm2_v2_json(str(case.case_id), recommendations=_single_eda_recommendation(suggestion="accept")),
+                _llm1_json(procedures=[_eda_procedure()], one_liner="EDA indicada.", hb_g_dl=6.0),
+                _llm2_json(str(case.case_id), recommendations=_single_eda_recommendation(suggestion="accept")),
             ]
         )
         from apps.pipeline.orchestrator import run_pipeline
@@ -1207,8 +1207,8 @@ class TestPreopDenyOverride:
         )
         client = RecordingLlmClient(
             responses=[
-                _llm1_v2_json(procedures=[_eda_procedure()], one_liner="EDA indicada.", hb_g_dl=6.0),
-                _llm2_v2_json(str(case.case_id), recommendations=_single_eda_recommendation(suggestion="deny")),
+                _llm1_json(procedures=[_eda_procedure()], one_liner="EDA indicada.", hb_g_dl=6.0),
+                _llm2_json(str(case.case_id), recommendations=_single_eda_recommendation(suggestion="deny")),
             ]
         )
         from apps.pipeline.orchestrator import run_pipeline
@@ -1239,8 +1239,8 @@ class TestPreopDenyOverride:
         )
         client = RecordingLlmClient(
             responses=[
-                _llm1_v2_json(procedures=[_eda_procedure(), _colon_procedure()]),
-                _llm2_v2_json(str(case.case_id)),
+                _llm1_json(procedures=[_eda_procedure(), _colon_procedure()]),
+                _llm2_json(str(case.case_id)),
             ]
         )
         from apps.pipeline.orchestrator import run_pipeline
@@ -1258,7 +1258,7 @@ class TestPreopDenyOverride:
         assert case.status == CaseStatus.WAIT_DOCTOR
         llm2_event = CaseEvent.objects.filter(case=case, event_type="LLM2_OK").latest("timestamp")
         payload: dict[str, Any] = llm2_event.payload or {}
-        assert payload.get("schema_version") == "2.0"
+        assert payload.get("schema_version") == "3.0"
         assert payload.get("prompt_system_name") == "exam_llm2_system"
         assert payload.get("prompt_user_name") == "exam_llm2_user"
         assert payload.get("detected_procedures") == ["eda", "colonoscopy"]

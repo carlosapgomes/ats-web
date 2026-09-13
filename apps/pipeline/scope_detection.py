@@ -805,6 +805,55 @@ def _normalize_expected_exam_type(expected_exam_type: str | None) -> str:
 # ── Public API ───────────────────────────────────────────────────────────────
 
 
+def _extract_v3_structured_procedures(
+    *,
+    llm1_structured_data: dict[str, object],
+) -> set[str]:
+    """Procedimentos da lista estruturada v3 com evidence spans válidos.
+
+    Cobre os quatro tipos do catálogo. Ecoendoscopia/CPRE saem apenas do campo
+    estruturado: a detecção textual especializada (aliases e precedência
+    ``EDA com/e``) pertence ao slice vertical próprio (D3).
+    """
+    raw = llm1_structured_data.get("requested_procedures")
+    if not isinstance(raw, list):
+        return set()
+    result: set[str] = set()
+    for item in raw:
+        if not isinstance(item, dict):
+            continue
+        procedure_type = item.get("procedure_type")
+        spans = item.get("evidence_spans")
+        if procedure_type not in {"eda", "colonoscopy", "echoendoscopy", "cpre"}:
+            continue
+        if not isinstance(spans, list) or not spans:
+            continue
+        result.add(procedure_type)
+    return result
+
+
+def detect_requested_procedures_v3(
+    *,
+    llm1_structured_data: dict[str, object],
+    cleaned_text: str,
+) -> dict[str, dict[str, bool]]:
+    """Detecta solicitações atuais para o contrato 3.0 (quatro tipos).
+
+    EDA/Colonoscopia preservam a detecção textual já existente (contrato 2.0).
+    Ecoendoscopia/CPRE têm evidência estruturada da lista v3; a expansão de
+    aliases textuais e a precedência ``EDA com/e`` chegam no Slice 002.
+    """
+    detection = detect_requested_procedures_v2(
+        llm1_structured_data=llm1_structured_data,
+        cleaned_text=cleaned_text,
+    )
+    structured = _extract_v3_structured_procedures(llm1_structured_data=llm1_structured_data)
+    for procedure_type in ("echoendoscopy", "cpre"):
+        present = procedure_type in structured
+        detection[procedure_type] = {"strong": present, "any": present}
+    return detection
+
+
 def classify_exam_scope(
     *,
     llm1_structured_data: dict[str, object],

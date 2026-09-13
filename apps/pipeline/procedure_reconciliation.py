@@ -1,9 +1,16 @@
-"""Reconciliação de detecção procedure-neutral v2 (design D7 / ADR-0004).
+"""Reconciliação de detecção procedure-neutral (design D2/D3 / ADR-0006).
 
 Aplica a matriz declarado × detectado com gate de evidência forte para
 upgrade automático. Histórico/negação nunca combinam (detecção por ocorrência
 em ``scope_detection``); o payload de revisão NIR é enxuto (conjuntos + reason
 code), sem texto clínico integral.
+
+R3: a validação ocorre ANTES de ordenar/filtrar — tipos desconhecidos,
+duplicatas ou conjuntos fora da matriz fechada falham fechado com motivo
+explícito e nunca são descartados para fazer o restante parecer válido. A
+precedência ``EDA com/e Ecoendoscopia/CPRE → especializado`` (D3) depende de
+proveniência por ocorrência e é implementada no slice vertical de Ecoendoscopia;
+até então qualquer conjunto contendo especializado segue para revisão NIR.
 """
 
 from __future__ import annotations
@@ -11,22 +18,50 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
-from apps.cases.models import EDA_COLONOSCOPY, ProcedureType
+from apps.cases.models import EDA_COLONOSCOPY
+from apps.cases.procedures import (
+    ALLOWED_PROCEDURE_SETS,
+    PAIRED_APPOINTMENT_SET,
+    PROCEDURE_ORDER,
+    is_paired_appointment_set,
+)
 
-_PROCEDURE_ORDER: dict[str, int] = {
-    ProcedureType.EDA: 0,
-    ProcedureType.COLONOSCOPY: 1,
-}
+
+@dataclass(frozen=True)
+class ProcedurePartition:
+    """Separação explícita entre valores conhecidos do catálogo e desconhecidos."""
+
+    ordered: tuple[str, ...]
+    unknown: tuple[str, ...]
+    had_duplicates: bool
+
+
+def _partition_procedures(procedure_types: Any) -> ProcedurePartition:
+    """Particiona valores preservando ordem canônica sem descartar desconhecidos.
+
+    Nunca filtra em silêncio (R3): valores fora do catálogo são devolvidos em
+    ``unknown`` e duplicatas são sinalizadas em ``had_duplicates``.
+    """
+    seen: list[str] = []
+    unknown: list[str] = []
+    had_duplicates = False
+    for raw in procedure_types or ():
+        value = str(raw)
+        if value not in PROCEDURE_ORDER:
+            if value not in unknown:
+                unknown.append(value)
+            continue
+        if value in seen:
+            had_duplicates = True
+            continue
+        seen.append(value)
+    seen.sort(key=lambda t: PROCEDURE_ORDER[t])
+    return ProcedurePartition(ordered=tuple(seen), unknown=tuple(unknown), had_duplicates=had_duplicates)
 
 
 def _ordered(procedure_types: Any) -> tuple[str, ...]:
-    seen: list[str] = []
-    for raw in procedure_types or ():
-        value = str(raw)
-        if value in _PROCEDURE_ORDER and value not in seen:
-            seen.append(value)
-    seen.sort(key=lambda t: _PROCEDURE_ORDER[t])
-    return tuple(seen)
+    """Compatibilidade: ordem canônica dos valores conhecidos (sem validar)."""
+    return _partition_procedures(procedure_types).ordered
 
 
 @dataclass(frozen=True)
@@ -74,7 +109,7 @@ def reconcile_detected_procedures(
     strong: Any,
     any_evidence: Any,
 ) -> ProcedureReconciliationResult:
-    """Matriz D7 completa (declarado × detectado) com gate de evidência forte.
+    """Matriz D2/D3 completa (declarado × detectado) com gate de evidência forte.
 
     Args:
         declared: conjunto declarado pelo NIR (ordem canônica aplicada).
@@ -83,13 +118,47 @@ def reconcile_detected_procedures(
 
     Returns:
         ``proceed`` (conjunto detectado = declarado), ``auto_upgrade``
-        (declarado único + ambos detectados com evidência forte do segundo)
-        ou ``nir_review`` (combined→single, mismatch único, unknown/non-supported
-        ou evidência insuficiente para upgrade).
+        (declarado único EDA/Colon + ambos detectados com evidência forte do
+        segundo) ou ``nir_review`` (tipo desconhecido, combinação não
+        suportada, combined→single, mismatch único ou evidência insuficiente).
     """
-    declared_set = set(_ordered(declared))
-    strong_set = set(_ordered(strong))
-    any_set = set(_ordered(any_evidence))
+    declared_partition = _partition_procedures(declared)
+    strong_partition = _partition_procedures(strong)
+    any_partition = _partition_procedures(any_evidence)
+
+    # R3 — validação antes de qualquer ordenação/matriz: nenhum valor
+    # desconhecido ou duplicata pode ser descartado em silêncio.
+    if declared_partition.unknown or strong_partition.unknown or any_partition.unknown:
+        return _nir_review(
+            reason_code="unknown_exam_type",
+            reason_text="Procedimento fora do catálogo suportado na solicitação; revisão manual obrigatória.",
+            detected=any_partition.ordered,
+        )
+
+    if declared_partition.had_duplicates or any_partition.had_duplicates or strong_partition.had_duplicates:
+        return _nir_review(
+            reason_code="unsupported_procedure_combination",
+            reason_text="Solicitação com procedimento duplicado; revisão manual obrigatória.",
+            detected=any_partition.ordered,
+        )
+
+    declared_set = set(declared_partition.ordered)
+    strong_set = set(strong_partition.ordered)
+    any_set = set(any_partition.ordered)
+
+    if declared_set and frozenset(declared_set) not in ALLOWED_PROCEDURE_SETS:
+        return _nir_review(
+            reason_code="unsupported_procedure_combination",
+            reason_text="Conjunto declarado fora da matriz suportada; revisão manual obrigatória.",
+            detected=_ordered(any_set),
+        )
+
+    if any_set and frozenset(any_set) not in ALLOWED_PROCEDURE_SETS:
+        return _nir_review(
+            reason_code="unsupported_procedure_combination",
+            reason_text="Combinação de procedimentos não suportada; revisão manual obrigatória.",
+            detected=_ordered(any_set),
+        )
 
     if not any_set:
         return _nir_review(
@@ -99,10 +168,10 @@ def reconcile_detected_procedures(
         )
 
     if any_set == declared_set:
-        # EDA | EDA, Colon | Colon, Ambos | Ambos → prossegue.
+        # EDA | Colon | Eco | CPRE | Ambos | Ambos → prossegue.
         return _proceed(_ordered(any_set))
 
-    if len(declared_set) == 2 and len(any_set) == 1:
+    if declared_set == PAIRED_APPOINTMENT_SET and len(any_set) == 1:
         # Combinado declarado, somente um detectado → revisão NIR.
         return _nir_review(
             reason_code="exam_type_mismatch",
@@ -114,10 +183,12 @@ def reconcile_detected_procedures(
         )
 
     if len(declared_set) == 1 and len(any_set) == 2:
-        # Declarado único, ambos detectados → upgrade exige evidência forte do
-        # segundo procedimento; sem ela, revisão NIR (D7).
-        extra = any_set - declared_set
-        if extra.issubset(strong_set):
+        # Declarado único, ambos detectados → upgrade automático SOMENTE para o
+        # par EDA+Colonoscopia com evidência forte do segundo procedimento.
+        # Qualquer conjunto contendo especializado retorna ao NIR (D3: a
+        # precedência ``EDA com/e Eco/CPRE`` exige proveniência por ocorrência
+        # e é implementada no slice vertical de Ecoendoscopia).
+        if any_set == PAIRED_APPOINTMENT_SET and (any_set - declared_set).issubset(strong_set):
             return _auto_upgrade(_ordered(any_set))
         return _nir_review(
             reason_code="mixed_exam_request",
@@ -178,7 +249,9 @@ def build_v2_review_payload(
     declared_types = _ordered(declared)
     detected_types = _ordered(detected)
     detected_label = "mixed" if len(detected_types) == 2 else (detected_types[0] if detected_types else "unknown")
-    declared_label = EDA_COLONOSCOPY if len(declared_types) == 2 else (declared_types[0] if declared_types else "")
+    declared_label = (
+        EDA_COLONOSCOPY if is_paired_appointment_set(declared_types) else (declared_types[0] if declared_types else "")
+    )
     return {
         "schema_version": "2.0",
         "language": "pt-BR",

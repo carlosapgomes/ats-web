@@ -15,6 +15,7 @@ from apps.cases.priority_signals import (
     build_priority_signal_badges,
     build_priority_signal_context_fragments,
 )
+from apps.cases.procedures import is_procedure_neutral_structured_data
 
 
 def _format_exam_datetime(value: Any) -> str:
@@ -221,8 +222,8 @@ class DoctorReportPresenter:
     # ── Public API ───────────────────────────────────────────────────────
 
     def _is_v2(self) -> bool:
-        """True quando o structured_data é contrato 2.0 procedure-neutral."""
-        return isinstance(self.structured_data, dict) and self.structured_data.get("schema_version") == "2.0"
+        """True quando o structured_data é contrato procedure-neutral (2.0 ou 3.0)."""
+        return is_procedure_neutral_structured_data(self.structured_data)
 
     def build_report(self) -> dict[str, Any]:
         """Return the full report structure with blocks, context, and denial info.

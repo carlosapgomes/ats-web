@@ -6,6 +6,7 @@ from django import forms
 
 from apps.cases.admission import ADMISSION_FLOW_CHOICES, SUPPORT_FLAG_CHOICES
 from apps.cases.models import Case, DetectionStatus, DoctorDisposition, ProcedureType
+from apps.cases.procedures import is_procedure_neutral_structured_data
 
 
 class DoctorDecisionForm(forms.Form):
@@ -13,8 +14,8 @@ class DoctorDecisionForm(forms.Form):
 
     Dois modos (Slice 003, design D9/ADR-0004):
 
-    - **v2 (procedures)**: caso com ``structured_data.schema_version == 2.0`` —
-      decisão por componente ``procedure_<type>`` + razão
+    - **v2/v3 (procedures)**: caso com ``structured_data.schema_version`` em
+      ``{"2.0", "3.0"}`` — decisão por componente ``procedure_<type>`` + razão
       ``procedure_<type>_reason``; o campo global ``decision`` é derivado pelo
       serviço (zero aprovados → ``deny``; ≥1 aprovado → ``accept``); suporte e
       fluxo de admissão continuam obrigatórios quando houver aceite.
@@ -76,11 +77,10 @@ class DoctorDecisionForm(forms.Form):
 
     @property
     def is_v2_mode(self) -> bool:
-        """True quando o caso usa o contrato 2.0 (decisão por procedimento)."""
+        """True quando o caso usa o contrato procedure-neutral (2.0 ou 3.0)."""
         if self.case is None:
             return False
-        structured = self.case.structured_data
-        return isinstance(structured, dict) and structured.get("schema_version") == "2.0"
+        return is_procedure_neutral_structured_data(self.case.structured_data)
 
     def _detected_procedure_types(self) -> set[str]:
         """Conjunto de procedimentos detectados a partir das rows do caso."""

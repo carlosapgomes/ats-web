@@ -17,6 +17,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from apps.cases.models import Case, ProcedureType
+from apps.cases.procedures import is_procedure_neutral_structured_data
 from apps.pipeline.prior_case import lookup_prior_case_context
 
 from .presenters import DoctorReportPresenter
@@ -36,8 +37,8 @@ _PROCEDURE_ORDER: dict[str, int] = {
 
 
 def _is_v2_structured(structured_data: Any) -> bool:
-    """True quando o structured_data é contrato 2.0 procedure-neutral."""
-    return isinstance(structured_data, dict) and structured_data.get("schema_version") == "2.0"
+    """True quando o structured_data é contrato procedure-neutral (2.0 ou 3.0)."""
+    return is_procedure_neutral_structured_data(structured_data)
 
 
 # Tipos de procedimento aceitos na derivação 1.1 (R2).
