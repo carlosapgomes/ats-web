@@ -8,10 +8,12 @@ Every clinical threshold, conditional gate, and profile is preserved exactly.
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from dataclasses import dataclass, field
 from typing import Literal, cast
 
 from apps.cases.exam_profiles import get_exam_profile
+from apps.pipeline.imaging_evidence import ImagingEvidenceOutcome, ImagingVerificationReport
 
 DecisionValue = Literal["accept", "deny", "excluded", "manual_review_required"]
 SupportedEdaSubtype = Literal[
@@ -26,6 +28,10 @@ SupportedEdaSubtype = Literal[
 # thresholds, exames condicionais e imagem especializada. O ``reason_code``
 # primário é sempre a primeira pendência desta ordem.
 REQUIREMENT_CATEGORIES: tuple[str, ...] = ("minimum", "threshold", "conditional", "imaging")
+
+# Evidência de imagem já verificada deterministicamente (D6): a policy aceita a
+# sequência de outcomes ou o relatório completo do verificador.
+VerifiedImaging = Sequence[ImagingEvidenceOutcome] | ImagingVerificationReport
 
 _REQUIRED_MINIMUM_EXAMS: tuple[tuple[str, str, str], ...] = (
     ("hb_numeric_present", "missing_minimum_exam_hb_or_ht", "Hb/Ht"),
@@ -94,18 +100,30 @@ class ContraindicationThresholds:
     profile_name: str
 
 
-def evaluate_preop_policy(*, structured_data: dict[str, object], exam_type: str) -> dict[str, object]:
+def evaluate_preop_policy(
+    *,
+    structured_data: dict[str, object],
+    exam_type: str,
+    verified_imaging: VerifiedImaging | None = None,
+) -> dict[str, object]:
     """Evaluate deterministic pre-procedure criteria for a declared exam type.
 
     Profile-dispatched (design D3 / ADR-0003): EDA and colonoscopy share the
     same minimum exams, thresholds and conditional gates. The foreign-body
     exception is exclusive to EDA (R4).
+
+    ``verified_imaging`` são os outcomes do verificador determinístico de
+    imagem (design D6): a policy consome SOMENTE evidência aprovada, nunca o
+    payload bruto do LLM. Perfis sem ``accepted_imaging`` (EDA/Colonoscopia)
+    ignoram o parâmetro e mantêm o comportamento anterior exatamente.
     """
     profile = get_exam_profile(exam_type)
     return _evaluate_common_preop_policy(
         structured_data=structured_data,
         allow_foreign_body_exception=profile.allows_foreign_body_exception,
         procedure_label=profile.label,
+        accepted_imaging=profile.accepted_imaging,
+        verified_imaging=verified_imaging,
     )
 
 
@@ -119,6 +137,8 @@ def _evaluate_common_preop_policy(
     structured_data: dict[str, object],
     allow_foreign_body_exception: bool,
     procedure_label: str,
+    accepted_imaging: tuple[tuple[str, str], ...] = (),
+    verified_imaging: VerifiedImaging | None = None,
 ) -> dict[str, object]:
     """Shared deterministic pre-procedure evaluation across profiles (R4/D8).
 
@@ -148,6 +168,8 @@ def _evaluate_common_preop_policy(
     failures = _collect_failed_requirements(
         structured_data=structured_data,
         procedure_label=procedure_label,
+        accepted_imaging=accepted_imaging,
+        verified_imaging=verified_imaging,
     )
     if failures:
         primary = failures[0]
@@ -176,18 +198,112 @@ def _collect_failed_requirements(
     *,
     structured_data: dict[str, object],
     procedure_label: str,
+    accepted_imaging: tuple[tuple[str, str], ...] = (),
+    verified_imaging: VerifiedImaging | None = None,
 ) -> list[FailedRequirement]:
     """Coleta TODAS as pendências em ordem estável (D8).
 
     Ordem: exames mínimos → thresholds → exames condicionais → imagem. A
-    imagem especializada é declarativa no perfil (D7) e só é avaliada pelos
-    slices verticais próprios; aqui a categoria permanece reservada.
+    categoria de imagem só é avaliada quando o perfil declara
+    ``accepted_imaging`` (Ecoendoscopia/CPRE) e recebe SOMENTE a evidência
+    aprovada pelo verificador determinístico (D6); perfis EDA/Colonoscopia
+    permanecem exatamente como antes, sem pendência de imagem.
     """
     failures: list[FailedRequirement] = []
     failures.extend(_collect_missing_minimum_exams(structured_data=structured_data, procedure_label=procedure_label))
     failures.extend(_collect_threshold_failures(structured_data=structured_data, procedure_label=procedure_label))
     failures.extend(_collect_missing_conditional_exam_gates(structured_data=structured_data))
+    failures.extend(
+        _collect_imaging_failures(
+            accepted_imaging=accepted_imaging,
+            verified_imaging=verified_imaging,
+            procedure_label=procedure_label,
+        )
+    )
     return failures
+
+
+# Códigos de imagem estáveis e específicos (D8): distinguem ausência de
+# modalidade aceita, localização não aceita e ausência de conclusão/achado.
+IMAGING_MODALITY_ABSENT = "abdominal_imaging_modality_absent"
+IMAGING_SITE_NOT_ACCEPTED = "abdominal_imaging_site_not_accepted"
+IMAGING_FINDING_ABSENT = "abdominal_imaging_finding_absent"
+
+
+def _collect_imaging_failures(
+    *,
+    accepted_imaging: tuple[tuple[str, str], ...],
+    verified_imaging: VerifiedImaging | None,
+    procedure_label: str,
+) -> list[FailedRequirement]:
+    """Avalia a imagem abdominal adicional de perfis especializados (D7/D8).
+
+    Recebe os outcomes do verificador determinístico. A classificação usa as
+    dimensões rederivadas (determinísticas), mas a SATISFAÇÃO exige
+    ``verified=True`` com ``report_finding_present="yes"``: excerpt inventado,
+    trecho de solicitação/agendamento, ambiguidade ou anexo apenas nunca aceitam.
+    """
+    if not accepted_imaging:
+        return []
+
+    outcomes = list(_iter_verified_outcomes(verified_imaging))
+    accepted_modalities = {modality for modality, _ in accepted_imaging}
+    accepted_pairs = set(accepted_imaging)
+
+    candidates = [outcome for outcome in outcomes if outcome.modality in accepted_modalities]
+    if not candidates:
+        return [
+            FailedRequirement(
+                code=IMAGING_MODALITY_ABSENT,
+                label="Imagem abdominal",
+                category="imaging",
+                text=(
+                    "Imagem abdominal qualificante ausente no relatório principal para "
+                    f"{procedure_label}: é exigida TC ou RM de abdome/abdome superior com laudo."
+                ),
+            )
+        ]
+
+    paired = [outcome for outcome in candidates if (outcome.modality, outcome.anatomical_site) in accepted_pairs]
+    if not paired:
+        return [
+            FailedRequirement(
+                code=IMAGING_SITE_NOT_ACCEPTED,
+                label="Imagem abdominal (localização)",
+                category="imaging",
+                text=(
+                    "Imagem abdominal com localização anatômica não aceita para "
+                    f"{procedure_label}: é exigida avaliação de abdome/abdome superior."
+                ),
+            )
+        ]
+
+    if any(outcome.verified and outcome.report_finding_present == "yes" for outcome in paired):
+        return []
+
+    return [
+        FailedRequirement(
+            code=IMAGING_FINDING_ABSENT,
+            label="Imagem abdominal (conclusão/achado)",
+            category="imaging",
+            text=(
+                "Imagem abdominal sem conclusão/achado comprovado no relatório principal "
+                f"para {procedure_label}: solicitação, agendamento ou menção não satisfazem."
+            ),
+        )
+    ]
+
+
+def _iter_verified_outcomes(verified_imaging: VerifiedImaging | None) -> list[ImagingEvidenceOutcome]:
+    """Itera os outcomes verificados recebidos da camada de verificação."""
+    if verified_imaging is None:
+        return []
+    if isinstance(verified_imaging, (list, tuple)):
+        return list(verified_imaging)
+    outcomes = getattr(verified_imaging, "outcomes", None)
+    if isinstance(outcomes, (list, tuple)):
+        return list(outcomes)
+    return []
 
 
 def _collect_missing_minimum_exams(

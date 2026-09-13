@@ -17,6 +17,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from apps.cases.models import Case, ProcedureType
+from apps.cases.procedures import PROCEDURE_ORDER as _PROCEDURE_ORDER
 from apps.cases.procedures import is_procedure_neutral_structured_data
 from apps.pipeline.prior_case import lookup_prior_case_context
 
@@ -29,11 +30,9 @@ PRIOR_DECISION_DISPLAY: dict[str, str] = {
     "doctor_approved": "Aprovado anteriormente",
 }
 
-# Ordem canônica de exibição das seções de histórico por procedimento.
-_PROCEDURE_ORDER: dict[str, int] = {
-    ProcedureType.EDA: 0,
-    ProcedureType.COLONOSCOPY: 1,
-}
+# D15: a ordem canônica de exibição vem de ``apps.cases.procedures``
+# (``_PROCEDURE_ORDER``); nunca manter catálogo binário local — o relatório
+# médico e as seções de histórico precisam cobrir os quatro tipos.
 
 
 def _is_v2_structured(structured_data: Any) -> bool:

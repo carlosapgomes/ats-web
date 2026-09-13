@@ -12,7 +12,7 @@ Entregar aprovação direta ou `trocar e aprovar como Ecoendoscopia`, sem reaná
 
 ## Requisitos verificáveis
 
-- **R1:** singleton pode ser mantido, negado ou trocado/aprovado como Eco com uma justificativa.
+- **R1:** singleton pode ser mantido, negado ou trocado/aprovado como Eco com uma justificativa. **Dívida herdada do Slice 002 (P2 da revisão):** o loop de procedimentos em `templates/doctor/decision.html` liga qualquer entrada não-EDA ao campo `procedure_colonoscopy` (ramo `{% else %}`); antes de habilitar decisão de Eco, criar ramos próprios `procedure_echoendoscopy` (e preparar `procedure_cpre` para o Slice 004).
 - **R2:** origem denied + destino approved persistem atomicamente com matriz/lock/FSM/suporte/fluxo válidos.
 - **R3:** troca não chama LLM, Q ou policy e não mostra sugestão/checklist do destino.
 - **R4:** substituição integral de combinado por Eco é aceita; conjunto parcial incompatível é rejeitado sem write.

@@ -6,24 +6,36 @@ do motivo primário (compatibilidade com presenter, correção NIR e dashboard).
 
 Este módulo é o seam procedure-aware: resolve o perfil do procedimento, delega
 a avaliação determinística compartilhada e mantém a ordem estável das
-categorias. A categoria ``imaging`` (imagem abdominal especializada e seu
-verificador determinístico) é ativada pelos slices verticais de Ecoendoscopia e
-CPRE; no Slice 001 o comportamento de EDA/Colonoscopia permanece inalterado
-(R5).
+categorias. A categoria ``imaging`` é ativada pelos slices verticais de
+Ecoendoscopia e CPRE e recebe exclusivamente a evidência aprovada pelo
+verificador determinístico (design D6); sem isso, o comportamento de
+EDA/Colonoscopia permanece inalterado (R5).
 """
 
 from __future__ import annotations
 
 from apps.cases.exam_profiles import get_exam_profile
-from apps.pipeline.policy.eda_preop_policy import REQUIREMENT_CATEGORIES, evaluate_preop_policy
+from apps.pipeline.policy.eda_preop_policy import (
+    REQUIREMENT_CATEGORIES,
+    VerifiedImaging,
+    evaluate_preop_policy,
+)
 
 
-def evaluate_procedure_policy(*, structured_data: dict[str, object], procedure_type: str) -> dict[str, object]:
+def evaluate_procedure_policy(
+    *,
+    structured_data: dict[str, object],
+    procedure_type: str,
+    verified_imaging: VerifiedImaging | None = None,
+) -> dict[str, object]:
     """Avalia critérios determinísticos de um procedimento reconciliado (D8).
 
     Args:
         structured_data: projeção 1.1 do procedimento (adapta 1.1/2.0/3.0).
         procedure_type: um dos quatro tipos do catálogo.
+        verified_imaging: outcomes do verificador determinístico de imagem
+            (design D6). A policy consome SOMENTE evidência aprovada; perfis
+            EDA/Colonoscopia ignoram o parâmetro e não mudam de comportamento.
 
     Returns:
         Payload determinístico com ``decision``, ``reason_code`` primário,
@@ -31,7 +43,11 @@ def evaluate_procedure_policy(*, structured_data: dict[str, object], procedure_t
         ``failed_requirements[]`` em ordem estável.
     """
     profile = get_exam_profile(procedure_type)
-    return evaluate_preop_policy(structured_data=structured_data, exam_type=profile.exam_type)
+    return evaluate_preop_policy(
+        structured_data=structured_data,
+        exam_type=profile.exam_type,
+        verified_imaging=verified_imaging,
+    )
 
 
-__all__ = ["REQUIREMENT_CATEGORIES", "evaluate_procedure_policy"]
+__all__ = ["REQUIREMENT_CATEGORIES", "VerifiedImaging", "evaluate_procedure_policy"]

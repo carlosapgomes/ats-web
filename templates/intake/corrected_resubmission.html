@@ -118,6 +118,18 @@
           </label>
           {% endif %}
         </div>
+        <div class="form-check">
+          {% if echoendoscopy_intake_enabled %}
+          <input class="form-check-input" type="radio" name="exam_type" value="echoendoscopy" id="exam-type-echoendoscopy">
+          <label class="form-check-label" for="exam-type-echoendoscopy">Ecoendoscopia</label>
+          {% else %}
+          <input class="form-check-input" type="radio" name="exam_type" value="echoendoscopy" id="exam-type-echoendoscopy" disabled>
+          <label class="form-check-label text-muted" for="exam-type-echoendoscopy">
+            Ecoendoscopia
+            <span class="badge bg-secondary-subtle text-secondary-emphasis">indisponível para novos envios</span>
+          </label>
+          {% endif %}
+        </div>
       </div>
     </fieldset>
 

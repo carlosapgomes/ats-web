@@ -120,6 +120,22 @@ COLONOSCOPY_INTAKE_ENABLED = os.environ.get("COLONOSCOPY_INTAKE_ENABLED", "false
     "yes",
 )
 
+# Flags de procedimentos especializados (Slice 002, R1/D4)
+# Independentes e web-only: bloqueiam APENAS novos uploads/correção/reenvio do
+# respectivo tipo. Default false. Nenhum worker/pipeline/fila/médico consulta
+# estas flags — caso existente sempre conclui. CPRE permanece oculta no intake
+# até o slice vertical próprio (Slice 004).
+ECHOENDOSCOPY_INTAKE_ENABLED = os.environ.get("ECHOENDOSCOPY_INTAKE_ENABLED", "false").lower() in (
+    "true",
+    "1",
+    "yes",
+)
+CPRE_INTAKE_ENABLED = os.environ.get("CPRE_INTAKE_ENABLED", "false").lower() in (
+    "true",
+    "1",
+    "yes",
+)
+
 # Header do proxy/tunnel com IP real do cliente
 # Cloudflare Tunnel padrão usa CF-Connecting-IP
 TRUSTED_PROXY_HEADER = os.environ.get("TRUSTED_PROXY_HEADER", "HTTP_CF_CONNECTING_IP")

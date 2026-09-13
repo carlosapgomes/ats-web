@@ -10,12 +10,21 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import Any
 
+from apps.cases.exam_profiles import get_exam_profile
 from apps.cases.priority_signals import (
     PRIORITY_SIGNAL_VERSION,
     build_priority_signal_badges,
     build_priority_signal_context_fragments,
 )
 from apps.cases.procedures import is_procedure_neutral_structured_data
+
+# Ordem canônica dos procedimentos detectados no relatório médico (D12).
+_DETECTED_PROCEDURE_ORDER: tuple[str, ...] = (
+    "eda",
+    "colonoscopy",
+    "echoendoscopy",
+    "cpre",
+)
 
 
 def _format_exam_datetime(value: Any) -> str:
@@ -234,6 +243,7 @@ class DoctorReportPresenter:
         - ``context``: dict with procedure, origin, transfusion_lines,
           tracked_exam_lines, pediatric
         - ``recent_denial``: dict | None with lines and display fields
+        - ``notices``: avisos operacionais (ex.: limite técnico dos anexos em 3.0)
         """
         return {
             "blocks": self._build_all_blocks(),
@@ -241,7 +251,63 @@ class DoctorReportPresenter:
             "recent_denial": self._build_recent_denial(),
             "priority_signal_badges": build_priority_signal_badges(self.priority_signals),
             "prior_sections": self._build_prior_sections(),
+            "notices": self._build_notices(),
         }
+
+    def _is_v3(self) -> bool:
+        """True quando o artefato é do contrato gravável 3.0."""
+        return isinstance(self.structured_data, dict) and self.structured_data.get("schema_version") == "3.0"
+
+    def _build_notices(self) -> list[str]:
+        """Avisos operacionais do relatório (design D9).
+
+        No contrato 3.0 a sugestão automática usa SOMENTE o relatório principal:
+        o aviso descreve o limite técnico (anexos disponíveis na tela não
+        participaram), sem afirmar invalidade clínica e sem bloquear decisão.
+        """
+        if not self._is_v3():
+            return []
+        return [
+            "Anexos disponíveis na tela não participaram da sugestão automática; "
+            "o médico pode consultá-los e decidir de forma divergente."
+        ]
+
+    def _detected_procedure_types(self) -> tuple[str, ...]:
+        """Tipos reconciliados (detectados) na ordem do catálogo.
+
+        D12: o relatório médico descreve o conjunto DETECTADO. A leitura vem das
+        recomendações por componente do ``suggested_action``; sem elas, cai no
+        ``requested_procedures`` do artefato.
+        """
+        recommendations = self.suggested_action.get("procedure_recommendations")
+        types: list[str] = []
+        if isinstance(recommendations, list):
+            for recommendation in recommendations:
+                if isinstance(recommendation, dict):
+                    procedure_type = recommendation.get("procedure_type")
+                    if isinstance(procedure_type, str) and procedure_type not in types:
+                        types.append(procedure_type)
+        if not types:
+            from apps.pipeline.schemas.adapters import requested_procedure_types_v3
+
+            types = list(requested_procedure_types_v3(self.structured_data))
+        return tuple(procedure_type for procedure_type in _DETECTED_PROCEDURE_ORDER if procedure_type in types)
+
+    def _canonical_label_for_type(self, procedure_type: str) -> str:
+        """Label canônico do procedimento para a decisão por componente."""
+        from apps.pipeline.schemas.adapters import requested_procedure_for_type
+
+        if procedure_type != "eda":
+            return get_exam_profile(procedure_type).label
+        procedure = requested_procedure_for_type(self.structured_data, "eda")
+        subtype = procedure.get("subtype") or "standard"
+        if subtype == "foreign_body":
+            return "EDA para retirada de corpo estranho"
+        if subtype == "gastrostomy":
+            return "EDA para gastrostomia"
+        if subtype == "esophageal_dilation":
+            return "EDA para dilatação esofágica"
+        return "EDA"
 
     # ── Priority signals (persisted — Slice 003) ────────────────────────
 
@@ -494,7 +560,8 @@ class DoctorReportPresenter:
             for recommendation in recommendations:
                 if not isinstance(recommendation, dict):
                     continue
-                procedure_name = "EDA" if recommendation.get("procedure_type") == "eda" else "Colonoscopia"
+                procedure_type = str(recommendation.get("procedure_type") or "")
+                procedure_name = self._canonical_label_for_type(procedure_type) if procedure_type else "—"
                 suggestion_text = (
                     _format_scalar(recommendation.get("suggestion")) if recommendation.get("suggestion") else ""
                 )
@@ -743,32 +810,20 @@ class DoctorReportPresenter:
     def _resolve_canonical_procedure_name(self) -> str:
         """Resolve the canonical procedure name for the report context.
 
-        Contrato 2.0 (Slice 002): o conjunto declarado/detectado vem de
-        ``requested_procedures``; combinado exibe EDA + Colonoscopia.
+        Contrato 2.0/3.0 (Slice 002): o nome vem do conjunto DETECTADO, lido das
+        recomendações por componente — nunca inferido do envelope legado. Assim
+        Ecoendoscopia/CPRE singleton não caem em "EDA".
         Contrato 1.1: comportamento legado preservado (``exam_type`` + sinais).
         """
         if self._is_v2():
-            from apps.pipeline.schemas.adapters import (
-                requested_procedure_for_type,
-                requested_procedure_types_v2,
-            )
-
-            types = requested_procedure_types_v2(self.structured_data)
+            types = self._detected_procedure_types()
+            if not types:
+                return "procedimento não identificado no laudo"
+            if len(types) == 1:
+                return self._canonical_label_for_type(types[0])
             if len(types) == 2:
-                return "EDA + Colonoscopia"
-            if len(types) == 1 and types[0] == "colonoscopy":
-                return "Colonoscopia"
-            procedure = requested_procedure_for_type(self.structured_data, "eda")
-            subtype = procedure.get("subtype") or "standard"
-            if subtype == "foreign_body":
-                return "EDA para retirada de corpo estranho"
-            if subtype == "gastrostomy":
-                return "EDA para gastrostomia"
-            if subtype == "esophageal_dilation":
-                return "EDA para dilatação esofágica"
-            if subtype == "echoendoscopy":
-                return "EDA com ecoendoscopia"
-            return "EDA"
+                return " + ".join(get_exam_profile(procedure_type).label for procedure_type in types)
+            return " + ".join(get_exam_profile(procedure_type).label for procedure_type in types)
         if self.exam_type == "colonoscopy":
             return "Colonoscopia"
         if not self.exam_type:

@@ -35,6 +35,9 @@ expected_files:
   - apps/pipeline/orchestrator.py
   - apps/pipeline/llm1_service_v3.py
   - apps/pipeline/imaging_evidence.py
+  - apps/pipeline/schemas/llm1_v3.py
+  - apps/pipeline/policy/procedure_policy.py
+  - apps/doctor/reporting.py
   - apps/cases/exam_profiles.py
   - apps/pipeline/policy/eda_preop_policy.py
   - apps/cases/priority_signals.py
@@ -46,7 +49,10 @@ expected_files:
   - apps/doctor/tests/test_echoendoscopy_workflow.py
 allowed_incidental_files:
   - config/settings/test.py
-file_cap: 20
+  - apps/pipeline/tests/test_orchestrator.py
+  - apps/pipeline/tests/test_v3_existing_workflow.py
+  - apps/intake/tests/test_slice_001_combined_intake.py
+file_cap: 24
 out_of_scope:
   - troca médica especializada
   - CHD/resposta final especializada
@@ -55,6 +61,8 @@ out_of_scope:
 ```
 
 Escalar se proveniência não puder ser transportada sem mudar o contrato desenhado, ou antes de tocar FSM/anexos.
+
+**Emenda aprovada pelo parent durante a execução (escalonamento via stop rule):** inventário real 23 arquivos vs cap 20. Justificativa dos 6 extras: `procedure_policy.py` (plumbing de `verified_imaging` até a policy especializada), `llm1_v3.py` (dívida (a) do Slice 001 — `EdaProcedureSubtypeV3` sem `echoendoscopy`, D5), `reporting.py` (catálogo binário local `{eda, colon}` causava KeyError em caso Eco; substituído pelo `PROCEDURE_ORDER` central, D15 — mesma classe dos gates médicos autorizados no Slice 001), e 3 arquivos de teste de caracterização com contrato superado pelo desenho deste slice (D14 remove sinal `echoendoscopy` em 3.0; R8 do Slice 001 cede lugar à abertura Eco sob flag; radios 3→4). Nenhuma decisão de produto; Opção B (reverter testes) vetada por deixar a suíte mentindo sobre o contrato atual. Cap 20→24.
 
 ## Matriz requisito → arquivo → teste/check
 

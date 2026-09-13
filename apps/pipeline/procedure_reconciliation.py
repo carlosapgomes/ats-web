@@ -7,10 +7,12 @@ code), sem texto clínico integral.
 
 R3: a validação ocorre ANTES de ordenar/filtrar — tipos desconhecidos,
 duplicatas ou conjuntos fora da matriz fechada falham fechado com motivo
-explícito e nunca são descartados para fazer o restante parecer válido. A
-precedência ``EDA com/e Ecoendoscopia/CPRE → especializado`` (D3) depende de
-proveniência por ocorrência e é implementada no slice vertical de Ecoendoscopia;
-até então qualquer conjunto contendo especializado segue para revisão NIR.
+explícito e nunca são descartados para fazer o restante parecer válido.
+
+D3: a precedência ``EDA com/e Ecoendoscopia/CPRE → especializado`` depende de
+PROVENIÊNCIA POR OCORRÊNCIA (``occurrences``): só colapsa quando existe uma
+ocorrência atual do especializado vinculada textualmente a um EDA no mesmo
+contexto. Duas solicitações independentes nunca colapsam pelo conjunto.
 """
 
 from __future__ import annotations
@@ -18,7 +20,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
-from apps.cases.models import EDA_COLONOSCOPY
+from apps.cases.models import EDA_COLONOSCOPY, ProcedureType
 from apps.cases.procedures import (
     ALLOWED_PROCEDURE_SETS,
     PAIRED_APPOINTMENT_SET,
@@ -62,6 +64,33 @@ def _partition_procedures(procedure_types: Any) -> ProcedurePartition:
 def _ordered(procedure_types: Any) -> tuple[str, ...]:
     """Compatibilidade: ordem canônica dos valores conhecidos (sem validar)."""
     return _partition_procedures(procedure_types).ordered
+
+
+# Especializados que podem colapsar uma expressão composta ``EDA com/e X``.
+_LINKED_COLLAPSIBLE_SPECIALIZED: frozenset[str] = frozenset({ProcedureType.ECHOENDOSCOPY, ProcedureType.CPRE})
+
+
+def _collapse_linked_specialized(*, any_set: set[str], occurrences: Any) -> set[str]:
+    """Colapsa ``{eda, especializado}`` apenas com vínculo textual comprovado.
+
+    Exige uma ocorrência ATUAL do especializado marcada com ``linked_eda``
+    (``EDA com/e Ecoendoscopia`` no mesmo contexto). Decisão derivada da
+    proveniência, nunca do conjunto isolado (D3); a validação de catálogo já
+    ocorreu antes (R3).
+    """
+    if not occurrences:
+        return any_set
+    if len(any_set) != 2 or ProcedureType.EDA not in any_set:
+        return any_set
+    for occurrence in occurrences:
+        if not getattr(occurrence, "linked_eda", False):
+            continue
+        if str(getattr(occurrence, "qualification", "")) != "current_request":
+            continue
+        specialized = str(getattr(occurrence, "procedure_type", ""))
+        if specialized in _LINKED_COLLAPSIBLE_SPECIALIZED and any_set == {ProcedureType.EDA, specialized}:
+            return {specialized}
+    return any_set
 
 
 @dataclass(frozen=True)
@@ -108,6 +137,7 @@ def reconcile_detected_procedures(
     declared: Any,
     strong: Any,
     any_evidence: Any,
+    occurrences: Any = (),
 ) -> ProcedureReconciliationResult:
     """Matriz D2/D3 completa (declarado × detectado) com gate de evidência forte.
 
@@ -115,6 +145,8 @@ def reconcile_detected_procedures(
         declared: conjunto declarado pelo NIR (ordem canônica aplicada).
         strong: procedimentos com evidência forte de solicitação atual.
         any_evidence: procedimentos com qualquer evidência de solicitação atual.
+        occurrences: ocorrências qualificadas (``scope_detection``) que
+            carregam o vínculo ``com/e EDA``; sem elas não há colapso (D3).
 
     Returns:
         ``proceed`` (conjunto detectado = declarado), ``auto_upgrade``
@@ -152,6 +184,14 @@ def reconcile_detected_procedures(
             reason_text="Conjunto declarado fora da matriz suportada; revisão manual obrigatória.",
             detected=_ordered(any_set),
         )
+
+    # D3 — precedência por ocorrência: ``EDA com/e Ecoendoscopia`` é UMA
+    # solicitação do especializado. O colapso acontece ANTES da validação da
+    # matriz do lado detectado, mas DEPOIS da validação de catálogo/duplicatas
+    # (R3). Só colapsa com proveniência vinculada no mesmo contexto; duas
+    # solicitações independentes seguem como combinação não suportada e vão
+    # ao NIR.
+    any_set = _collapse_linked_specialized(any_set=any_set, occurrences=occurrences)
 
     if any_set and frozenset(any_set) not in ALLOWED_PROCEDURE_SETS:
         return _nir_review(

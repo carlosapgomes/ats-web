@@ -518,6 +518,7 @@ def resolve_priority_signals(
     structured_data: dict[str, object],
     source_text: str,
     exam_type: str = "eda",
+    excluded_signal_codes: frozenset[str] = frozenset(),
 ) -> list[dict[str, object]]:
     """Resolve the canonical priority signals deterministically.
 
@@ -526,6 +527,9 @@ def resolve_priority_signals(
 
     Slice 003 (R7): the declared exam profile restricts which signals are
     persisted — colonoscopy keeps only ``pediatric``; EDA keeps all six.
+    Slice 002 (D14/R6): ``excluded_signal_codes`` permite ao writer 3.0 não
+    duplicar o código legado ``echoendoscopy``, que nesses artefatos existe
+    apenas como ``CaseProcedure``.
     """
     from apps.cases.exam_profiles import get_exam_profile
 
@@ -552,7 +556,11 @@ def resolve_priority_signals(
     deduped.sort(key=lambda s: CANONICAL_ORDER.index(str(s["code"])))
 
     allowed = get_exam_profile(exam_type).allowed_priority_signal_codes
-    return [signal for signal in deduped if str(signal["code"]) in allowed]
+    return [
+        signal
+        for signal in deduped
+        if str(signal["code"]) in allowed and str(signal["code"]) not in excluded_signal_codes
+    ]
 
 
 # ── Badge projection (presentation metadata, single mapping) ──────────────

@@ -22,6 +22,7 @@ from apps.cases.models import Case
 from apps.cases.priority_signals import resolve_priority_signals
 from apps.cases.procedures import PROCEDURE_ORDER, SUPPORTED_PROCEDURE_TYPES, set_detected_procedures
 from apps.llm.models import PromptTemplate
+from apps.pipeline.imaging_evidence import verify_abdominal_imaging_evidence
 from apps.pipeline.llm import LlmClient
 from apps.pipeline.llm1_service_v3 import (
     LLM1_V3_DEFAULT_SYSTEM_PROMPT,
@@ -49,7 +50,7 @@ from apps.pipeline.procedure_reconciliation import (
     reconcile_detected_procedures,
 )
 from apps.pipeline.schemas.adapters import project_v3_to_llm1_shape
-from apps.pipeline.scope_detection import detect_requested_procedures_v3
+from apps.pipeline.scope_detection import detect_procedure_occurrences, detect_requested_procedures_v3
 
 logger = logging.getLogger(__name__)
 
@@ -124,27 +125,54 @@ class DeclaredProceduresMissingError(Exception):
     """Caso sem procedimentos declarados válidos na projeção ``CaseProcedure``."""
 
 
+class UnsupportedDeclaredProcedureError(Exception):
+    """Row de ``CaseProcedure`` com valor fora do catálogo (dado anômalo).
+
+    Dívida herdada do Slice 001: um valor desconhecido vindo do banco falha
+    explícito em vez de ser filtrado em silêncio (senão o caso pareceria ter
+    procedimentos válidos).
+    """
+
+
 def _require_declared_procedures(case: Case) -> tuple[str, ...]:
     """Declaração autoritativa de ``CaseProcedure`` (sem fallback da ponte).
 
     Novos jobs exigem 1–4 procedimentos declarados válidos (R1). A leitura é
     feita diretamente das rows ``declared_by_nir=True`` — não usa fallback —
     para que um caso sem projeção falhe de modo explícito/auditável em vez de
-    cair em perfil singular/EDA.
+    cair em perfil singular/EDA. Um valor fora do catálogo falha explícito
+    (nunca é filtrado em silêncio).
     """
-    declared = sorted(
-        (
-            row.procedure_type
-            for row in case.procedures.filter(declared_by_nir=True)
-            if row.procedure_type in PROCEDURE_ORDER
-        ),
-        key=lambda t: PROCEDURE_ORDER[t],
-    )
+    declared_values = [row.procedure_type for row in case.procedures.filter(declared_by_nir=True)]
+    unknown = sorted({value for value in declared_values if value not in PROCEDURE_ORDER})
+    if unknown:
+        raise UnsupportedDeclaredProcedureError(
+            f"Procedimento declarado fora do catálogo suportado (case_id={case.case_id}): {', '.join(unknown)}."
+        )
+    declared = sorted(set(declared_values), key=lambda t: PROCEDURE_ORDER[t])
     if not declared:
         raise DeclaredProceduresMissingError(
             f"Pipeline v3 exige procedimentos declarados em CaseProcedure (case_id={case.case_id}); nenhum encontrado."
         )
     return tuple(declared)
+
+
+def _resolve_pipeline_signals_type(detected_procedure_types: tuple[str, ...]) -> str:
+    """Perfil que restringe os sinais persistidos para o conjunto detectado.
+
+    EDA tem precedência histórica quando presente; caso contrário o próprio
+    tipo detectado (Colonoscopia/Ecoendoscopia/CPRE) restringe os códigos
+    permitidos pelo perfil (D7).
+    """
+    for procedure_type in ("eda", "colonoscopy", "echoendoscopy", "cpre"):
+        if procedure_type in detected_procedure_types:
+            return procedure_type
+    return "eda"
+
+
+# D14/R6: em artefatos 3.0 a Ecoendoscopia é persistida apenas como
+# ``CaseProcedure``; o resolvedor não adiciona o MESMO código de sinal.
+_V3_EXCLUDED_SIGNAL_CODES: frozenset[str] = frozenset({"echoendoscopy"})
 
 
 def _resolve_prompt(name: str) -> tuple[str, int]:
@@ -260,12 +288,17 @@ def _run_v3_pipeline(
         llm1_structured_data=result1.structured_data,
         cleaned_text=case.extracted_text,
     )
+    occurrences = detect_procedure_occurrences(
+        llm1_structured_data=result1.structured_data,
+        cleaned_text=case.extracted_text,
+    )
     strong = tuple(t for t in _PROCEDURE_TYPES if detection[t]["strong"])
     any_evidence = tuple(t for t in _PROCEDURE_TYPES if detection[t]["any"])
     reconciliation = reconcile_detected_procedures(
         declared=declared,
         strong=strong,
         any_evidence=any_evidence,
+        occurrences=occurrences,
     )
 
     # ── 3. Projeção de detecção atômica (R4) ───────────────────────────
@@ -274,9 +307,10 @@ def _run_v3_pipeline(
         detected_types=reconciliation.detected_procedure_types,
     )
 
-    # Sinais prioritários por projeção compatível (R5): EDA quando presente,
-    # senão Colonoscopia (perfil restringe códigos permitidos).
-    signals_type = "eda" if "eda" in reconciliation.detected_procedure_types else "colonoscopy"
+    # Sinais prioritários por projeção compatível (R5/D7): EDA quando presente,
+    # senão o próprio tipo detectado restringe os códigos permitidos. Em 3.0 o
+    # sinal legado ``echoendoscopy`` é excluído (D14).
+    signals_type = _resolve_pipeline_signals_type(reconciliation.detected_procedure_types)
     signals_projection = project_v3_to_llm1_shape(
         v3_data=result1.structured_data,
         procedure_type=signals_type,
@@ -285,6 +319,7 @@ def _run_v3_pipeline(
         structured_data=signals_projection,
         source_text=case.extracted_text,
         exam_type=signals_type,
+        excluded_signal_codes=_V3_EXCLUDED_SIGNAL_CODES,
     )
 
     # ── 4. Eventos de detecção (R8: versões de schema/prompt + conjuntos) ─
@@ -342,13 +377,25 @@ def _run_v3_pipeline(
     case.save()
 
     # ── 7. Policy determinística por componente (R5/D8) ────────────────
+    # A imagem abdominal é verificada deterministicamente ANTES da policy: a
+    # hard rule consome SOMENTE evidência ancorada no relatório principal (D6).
+    common_preop = result1.structured_data.get("common_preop")
+    raw_imaging = common_preop.get("abdominal_imaging") if isinstance(common_preop, dict) else None
+    verified_imaging = verify_abdominal_imaging_evidence(
+        entries=raw_imaging,
+        main_report_text=case.extracted_text,
+    )
     policy_results: dict[str, dict[str, object]] = {}
     for procedure_type in reconciliation.detected_procedure_types:
         projection = project_v3_to_llm1_shape(
             v3_data=result1.structured_data,
             procedure_type=procedure_type,
         )
-        decision = evaluate_procedure_policy(structured_data=projection, procedure_type=procedure_type)
+        decision = evaluate_procedure_policy(
+            structured_data=projection,
+            procedure_type=procedure_type,
+            verified_imaging=verified_imaging.outcomes,
+        )
         policy_results[procedure_type] = decision
         case._record_event(
             "EDA_PREOP_POLICY_DECISION",

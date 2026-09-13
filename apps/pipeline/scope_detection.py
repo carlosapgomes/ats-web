@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import re
 import unicodedata
+from dataclasses import dataclass
 
 from apps.cases.exam_profiles import COLONOSCOPY_PROFILE
 
@@ -507,6 +508,16 @@ _EDA_FULL_NAME_PATTERN = re.compile(
 
 _EDA_ACRONYM_PATTERN = re.compile(r"\beda\b|\be\s*[.\-]?\s*d\s*[.\-]?\s*a\b")
 
+# Ocorrência EDA para precedência especializada: nome completo + sigla. Os
+# termos de subtipo/alias de Ecoendoscopia pertencem a outro padrão e NÃO podem
+# contar como ocorrência EDA (senão ``ecoendoscopia`` viraria EDA também).
+_EDA_PROCEDURE_OCCURRENCE_PATTERN = re.compile(
+    r"\bendoscopia\s+digestiva\s+alta\b"
+    r"|\bvideoendoscopia\s+digestiva\s+alta\b"
+    r"|\bendoscopia\s+digestiva\s+superior\b"
+    r"|\beda\b|\be\s*[.\-]?\s*d\s*[.\-]?\s*a\b"
+)
+
 _EDA_TERM_PATTERN = re.compile(
     r"\bendoscopia\s+digestiva\s+alta\b"
     r"|\bvideoendoscopia\s+digestiva\s+alta\b"
@@ -840,18 +851,43 @@ def detect_requested_procedures_v3(
     """Detecta solicitações atuais para o contrato 3.0 (quatro tipos).
 
     EDA/Colonoscopia preservam a detecção textual já existente (contrato 2.0).
-    Ecoendoscopia/CPRE têm evidência estruturada da lista v3; a expansão de
-    aliases textuais e a precedência ``EDA com/e`` chegam no Slice 002.
+    Ecoendoscopia combina a lista estruturada v3 com as ocorrências textuais
+    qualificadas (R2): um pedido atual textual (inclusive a expressão composta
+    ``EDA com/e Ecoendoscopia``) já é evidência forte. Histórico/negação nunca
+    criam componente. CPRE textuval permanece fora do slice vertical próprio.
     """
     detection = detect_requested_procedures_v2(
         llm1_structured_data=llm1_structured_data,
         cleaned_text=cleaned_text,
     )
     structured = _extract_v3_structured_procedures(llm1_structured_data=llm1_structured_data)
+    occurrences = detect_procedure_occurrences(
+        llm1_structured_data=llm1_structured_data,
+        cleaned_text=cleaned_text,
+    )
+    textual_current = {
+        occurrence.procedure_type for occurrence in occurrences if occurrence.qualification == _QUALIFICATION_CURRENT
+    }
+
+    # D5: em 3.0 Ecoendoscopia NÃO é subtipo/sinal de EDA. A detecção 2.0 (que
+    # conta ``ecoendoscopia`` como evidência EDA) é corrigida quando não há
+    # nenhuma evidência EDA própria — textual, estruturada ou no motivo.
+    if "eda" not in structured and "eda" not in textual_current and not _motive_requires_eda_proper(cleaned_text):
+        detection["eda"] = {"strong": False, "any": False}
+
     for procedure_type in ("echoendoscopy", "cpre"):
-        present = procedure_type in structured
+        present = procedure_type in structured or procedure_type in textual_current
         detection[procedure_type] = {"strong": present, "any": present}
     return detection
+
+
+def _motive_requires_eda_proper(cleaned_text: str) -> bool:
+    """Motivo da Solicitação pede EDA próprio (não apenas Ecoendoscopia)."""
+    motive_text = _extract_motivo_solicitacao_text(cleaned_text=cleaned_text)
+    if motive_text is None:
+        return False
+    normalized_motive = _normalize_scope_keyword_text(value=motive_text)
+    return _EDA_PROCEDURE_OCCURRENCE_PATTERN.search(normalized_motive) is not None
 
 
 def classify_exam_scope(
@@ -1116,3 +1152,216 @@ def detect_requested_procedures_v2(
             "any": _any(strong_colon, colon_current, colon_mentions, colon_neg_or_hist),
         },
     }
+
+
+# ── Ocorrências qualificadas por procedimento (Slice 002, R2/D3) ─────────────
+#
+# D3: o contrato entre detecção e reconciliação não transporta apenas conjuntos
+# ``strong/any``. Cada ocorrência relevante leva tipo, qualificação
+# (``current_request|historical|negated|mention``), trecho/offsets (evidence id)
+# e o vínculo textual ``com/e EDA`` quando a expressão é composta. Só assim a
+# reconciliação distingue "EDA com Ecoendoscopia" (colapsa para Eco) de duas
+# solicitações independentes incompatíveis (vão ao NIR).
+
+_QUALIFICATION_CURRENT = "current_request"
+_QUALIFICATION_HISTORICAL = "historical"
+_QUALIFICATION_NEGATED = "negated"
+_QUALIFICATION_MENTION = "mention"
+
+_ECHOENDOSCOPY_TERM_PATTERN = re.compile(
+    r"\becoendoscopia\b|\beco\s+endoscopia\b|\beco-endoscopia\b"
+    r"|\bultrassonografia\s+endoscopica\b|\bultrassom\s+endoscopico\b|\beus\b"
+)
+
+# Termos que expressam a MESMA ocorrência composta "EDA com/e <especializado>".
+_LINK_SEPARATOR_PATTERN = re.compile(r"\b(?:com|e)\b")
+
+
+@dataclass(frozen=True)
+class ProcedureOccurrence:
+    """Ocorrência qualificada de um procedimento no texto da solicitação.
+
+    ``start``/``end`` são offsets no texto normalizado e formam, com o tipo, o
+    ``evidence_id`` determinístico da ocorrência (proveniência auditável).
+    ``linked_eda`` marca a expressão composta ``EDA com/e <especializado>`` no
+    mesmo contexto, que a reconciliação colapsa (D3).
+    """
+
+    procedure_type: str
+    qualification: str
+    excerpt: str
+    start: int
+    end: int
+    linked_eda: bool = False
+
+    @property
+    def evidence_id(self) -> str:
+        return f"{self.procedure_type}:{self.start}-{self.end}"
+
+
+_PROCEDURE_OCCURRENCE_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
+    ("eda", _EDA_PROCEDURE_OCCURRENCE_PATTERN),
+    ("colonoscopy", _COLONOSCOPY_TERM_PATTERN),
+    ("echoendoscopy", _ECHOENDOSCOPY_TERM_PATTERN),
+)
+
+
+def _classify_occurrence(*, prefix: str, suffix: str) -> str:
+    """Qualifica a ocorrência ancorada no próprio contexto (D3)."""
+    if _HISTORICAL_BEFORE_OCCURRENCE_PATTERN.search(prefix) or _HISTORICAL_AFTER_OCCURRENCE_PATTERN.match(suffix):
+        return _QUALIFICATION_HISTORICAL
+    if _NEGATION_BEFORE_OCCURRENCE_PATTERN.search(prefix) or _NEGATION_AFTER_OCCURRENCE_PATTERN.match(suffix):
+        return _QUALIFICATION_NEGATED
+    if (
+        _REQUEST_BEFORE_OCCURRENCE_PATTERN.search(prefix) is not None
+        or _LABEL_BEFORE_OCCURRENCE_PATTERN.search(prefix) is not None
+        or _REQUEST_AFTER_OCCURRENCE_PATTERN.match(suffix) is not None
+    ):
+        return _QUALIFICATION_CURRENT
+    return _QUALIFICATION_MENTION
+
+
+def _linked_eda_in_clause(*, clause: str, specialized: ProcedureOccurrence) -> bool:
+    """True quando há ocorrência EDA ligada ao especializado por ``com``/``e``.
+
+    O vínculo é textual e local: exige uma ocorrência EDA no MESMO contexto e um
+    separador ``com``/``e`` entre as duas ocorrências. Conjunto por si só nunca
+    colapsa (D3).
+    """
+    if specialized.procedure_type == "eda":
+        return False
+    for match in _EDA_PROCEDURE_OCCURRENCE_PATTERN.finditer(clause):
+        eda_start, eda_end = match.start(), match.end()
+        if eda_end <= specialized.start:
+            between = clause[eda_end : specialized.start]
+        elif specialized.end <= eda_start:
+            between = clause[specialized.end : eda_start]
+        else:
+            return True
+        if _LINK_SEPARATOR_PATTERN.search(between) is not None:
+            return True
+    return False
+
+
+def detect_procedure_occurrences(
+    *,
+    llm1_structured_data: dict[str, object],
+    cleaned_text: str,
+) -> tuple[ProcedureOccurrence, ...]:
+    """Detecta ocorrências qualificadas dos procedimentos no relatório.
+
+    Determinístico e puro (sem ORM/I-O). ``llm1_structured_data`` é aceito para
+    paridade de assinatura com os demais detectores; a proveniência textual
+    vem exclusivamente de ``cleaned_text`` (relatório principal).
+    """
+    del llm1_structured_data  # proveniência textual é a autoridade aqui
+    normalized_text = _normalize_scope_keyword_text(value=cleaned_text or "")
+    if not normalized_text:
+        return ()
+
+    clauses = [clause for clause in re.split(r"(?<=[.;!?])\s+|\n", normalized_text) if clause.strip()]
+    occurrences: list[ProcedureOccurrence] = []
+    seen: set[tuple[str, int, int]] = set()
+    for clause in clauses:
+        clause_start = normalized_text.find(clause)
+        if clause_start < 0:
+            continue
+        for procedure_type, pattern in _PROCEDURE_OCCURRENCE_PATTERNS:
+            for match in pattern.finditer(clause):
+                start = clause_start + match.start()
+                end = clause_start + match.end()
+                key = (procedure_type, start, end)
+                if key in seen:
+                    continue
+                seen.add(key)
+                prefix, suffix = _clause_context(normalized_text, start, end)
+                occurrences.append(
+                    ProcedureOccurrence(
+                        procedure_type=procedure_type,
+                        qualification=_classify_occurrence(prefix=prefix, suffix=suffix),
+                        excerpt=normalized_text[start:end],
+                        start=start,
+                        end=end,
+                    )
+                )
+
+    # Vínculo ``com/e`` é avaliado por cláusula, após todas as ocorrências da
+    # cláusula existirem (o separador pode preceder ou suceder o especializado).
+    # Uma expressão composta cuja ocorrência EDA é solicitação ATUAL é, por
+    # definição, uma solicitação atual do especializado (``EDA com Eco`` = Eco).
+    clause_for = {
+        occurrence.start: _clause_text_at(normalized_text=normalized_text, start=occurrence.start)
+        for occurrence in occurrences
+    }
+    current_eda_by_clause: dict[str, bool] = {}
+    for occurrence in occurrences:
+        clause = clause_for[occurrence.start]
+        if occurrence.procedure_type == "eda" and occurrence.qualification == _QUALIFICATION_CURRENT:
+            current_eda_by_clause[clause] = True
+
+    linked: list[ProcedureOccurrence] = []
+    linked_specialized_clauses: set[str] = set()
+    resolved: list[ProcedureOccurrence] = []
+    for occurrence in occurrences:
+        clause = clause_for[occurrence.start]
+        if occurrence.procedure_type == "eda":
+            resolved.append(occurrence)
+            continue
+        clause_start = normalized_text.find(clause)
+        local = replace_occurrence_offsets(occurrence=occurrence, clause_start=clause_start)
+        if _linked_eda_in_clause(clause=clause, specialized=local):
+            linked_specialized_clauses.add(clause)
+            qualification = occurrence.qualification
+            if current_eda_by_clause.get(clause) and qualification == _QUALIFICATION_MENTION:
+                qualification = _QUALIFICATION_CURRENT
+            resolved.append(replace_occurrence_link(occurrence=occurrence, linked=True, qualification=qualification))
+        else:
+            resolved.append(occurrence)
+
+    # O vínculo é simétrico: a ocorrência EDA da expressão composta também é
+    # marcada, para que a reconciliação veja a proveniência de ambos os lados.
+    for occurrence in resolved:
+        if occurrence.procedure_type == "eda" and clause_for[occurrence.start] in linked_specialized_clauses:
+            linked.append(replace_occurrence_link(occurrence=occurrence, linked=True))
+        else:
+            linked.append(occurrence)
+    return tuple(linked)
+
+
+def _clause_text_at(*, normalized_text: str, start: int) -> str:
+    """Retorna a cláusula que contém a posição informada."""
+    left = 0
+    for boundary in re.finditer(r"[.;!?]\s+|\n", normalized_text):
+        if boundary.end() > start:
+            return normalized_text[left : boundary.start()]
+        left = boundary.end()
+    return normalized_text[left:]
+
+
+def replace_occurrence_offsets(*, occurrence: ProcedureOccurrence, clause_start: int) -> ProcedureOccurrence:
+    """Reprojeta os offsets da ocorrência no referencial da cláusula."""
+    return ProcedureOccurrence(
+        procedure_type=occurrence.procedure_type,
+        qualification=occurrence.qualification,
+        excerpt=occurrence.excerpt,
+        start=occurrence.start - clause_start,
+        end=occurrence.end - clause_start,
+        linked_eda=occurrence.linked_eda,
+    )
+
+
+def replace_occurrence_link(
+    *,
+    occurrence: ProcedureOccurrence,
+    linked: bool,
+    qualification: str | None = None,
+) -> ProcedureOccurrence:
+    """Devolve a ocorrência com o vínculo ``com/e EDA`` e qualificação resolvidos."""
+    return ProcedureOccurrence(
+        procedure_type=occurrence.procedure_type,
+        qualification=qualification or occurrence.qualification,
+        excerpt=occurrence.excerpt,
+        start=occurrence.start,
+        end=occurrence.end,
+        linked_eda=linked,
+    )

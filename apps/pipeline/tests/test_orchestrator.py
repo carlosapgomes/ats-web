@@ -167,7 +167,11 @@ def _low_hb_llm1_response() -> str:
 
 
 def _priority_signals_llm1_response() -> str:
-    """EDA foreign-body + pediatric + echoendoscopy (from text)."""
+    """EDA foreign-body + pediatric; Ecoendoscopia é menção HISTÓRICA no texto.
+
+    Slice 002/D14: em artefatos 3.0 a Ecoendoscopia existe apenas como
+    ``CaseProcedure`` — o sinal legado ``echoendoscopy`` não é persistido.
+    """
     return _llm1_v2(
         procedures=[
             _eda_procedure(
@@ -503,15 +507,17 @@ class TestPipelinePrioritySignals:
         case = self._run(
             user,
             extracted_text=(
-                "Motivo da Solicitação: EDA com ecoendoscopia para retirada de corpo estranho "
-                "em paciente de 10 anos. Unid. Origem: HSA."
+                "Motivo da Solicitação: EDA para retirada de corpo estranho em paciente de 10 anos. "
+                "Histórico de ecoendoscopia em 2019. Unid. Origem: HSA."
             ),
             llm1_response=_priority_signals_llm1_response(),
             llm2_response=_llm2_v2,
         )
         assert case.status == CaseStatus.WAIT_DOCTOR
         codes = {s["code"] for s in case.priority_signals}
-        assert codes == {"foreign_body", "pediatric", "echoendoscopy"}
+        assert codes == {"foreign_body", "pediatric"}
+        # D14: o sinal legado não é duplicado em artefatos 3.0.
+        assert "echoendoscopy" not in codes
         for signal in case.priority_signals:
             assert signal["version"] == 1
             assert signal["category"] in {"clinical_alert", "special_population", "special_procedure"}
@@ -521,8 +527,8 @@ class TestPipelinePrioritySignals:
         case = self._run(
             user,
             extracted_text=(
-                "Motivo da Solicitação: EDA com ecoendoscopia para retirada de corpo estranho "
-                "em paciente de 10 anos. Unid. Origem: HSA."
+                "Motivo da Solicitação: EDA para retirada de corpo estranho em paciente de 10 anos. "
+                "Histórico de ecoendoscopia em 2019. Unid. Origem: HSA."
             ),
             llm1_response=_priority_signals_llm1_response(),
             llm2_response=_llm2_v2,
@@ -530,7 +536,7 @@ class TestPipelinePrioritySignals:
         llm1_ok = CaseEvent.objects.filter(case=case, event_type="LLM1_OK").latest("timestamp")
         payload: dict[str, Any] = llm1_ok.payload or {}
         codes = set(payload["priority_signal_codes"])
-        assert codes == {"foreign_body", "pediatric", "echoendoscopy"}
+        assert codes == {"foreign_body", "pediatric"}
         # A auditoria não copia texto clínico adicional (apenas resumo + códigos).
         assert "extracted_text" not in payload
 

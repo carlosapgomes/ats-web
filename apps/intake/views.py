@@ -67,6 +67,7 @@ from .services import (
     correct_case_exam_type,
     ensure_exam_type_allowed,
     is_colonoscopy_intake_enabled,
+    is_echoendoscopy_intake_enabled,
     is_exam_type_correction_eligible,
     process_uploaded_files,
     validate_attachment_file,
@@ -488,6 +489,7 @@ def intake_home(request: HttpRequest) -> HttpResponse:
             # R3: UI explica indisponibilidade de colonoscopia quando a flag
             # de intake está desligada (a opção ativa só aparece com flag on).
             "colonoscopy_intake_enabled": is_colonoscopy_intake_enabled(),
+            "echoendoscopy_intake_enabled": is_echoendoscopy_intake_enabled(),
         },
     )
 
@@ -1169,6 +1171,7 @@ def corrected_resubmission(request: HttpRequest, case_id: uuid.UUID) -> HttpResp
                     "original_case": original_case,
                     "patient_name": original_case.patient_name,
                     "colonoscopy_intake_enabled": is_colonoscopy_intake_enabled(),
+                    "echoendoscopy_intake_enabled": is_echoendoscopy_intake_enabled(),
                 },
             )
 
@@ -1205,6 +1208,7 @@ def corrected_resubmission(request: HttpRequest, case_id: uuid.UUID) -> HttpResp
                 "original_case": original_case,
                 "patient_name": original_case.patient_name,
                 "colonoscopy_intake_enabled": is_colonoscopy_intake_enabled(),
+                "echoendoscopy_intake_enabled": is_echoendoscopy_intake_enabled(),
             },
         )
 
@@ -1218,6 +1222,7 @@ def corrected_resubmission(request: HttpRequest, case_id: uuid.UUID) -> HttpResp
             "status_label": STATUS_LABELS.get(original_case.status, original_case.get_status_display()),
             "status_css": STATUS_CSS_CLASS.get(original_case.status, "status-pending"),
             "colonoscopy_intake_enabled": is_colonoscopy_intake_enabled(),
+            "echoendoscopy_intake_enabled": is_echoendoscopy_intake_enabled(),
         },
     )
 

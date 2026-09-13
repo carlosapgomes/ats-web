@@ -42,12 +42,32 @@ from apps.pipeline.schemas.llm1 import (
     StrictModel,
 )
 from apps.pipeline.schemas.llm1_v2 import (
+    EdaIndicationCategoryV2,
     Llm1ColonoscopyProcedureV2,
-    Llm1EdaProcedureV2,
     Llm1ProcedureEvidenceSpanV2,
 )
 
 MAX_EVIDENCE_SPANS_PER_PROCEDURE = 3
+
+# D5: em 3.0 Ecoendoscopia NÃO é subtipo de EDA. O item EDA do contrato 3.0
+# reusa a forma 2.0 (nome/urgência/indicação/evidence spans), mas com subtipos
+# próprios da EDA — o valor ``echoendoscopy`` é rejeitado no schema.
+EdaProcedureSubtypeV3 = Literal["standard", "gastrostomy", "esophageal_dilation", "foreign_body", "unknown"]
+
+
+class Llm1EdaProcedureV3(StrictModel):
+    """Procedimento EDA tipado no contrato 3.0 (sem subtipo de Ecoendoscopia)."""
+
+    procedure_type: Literal["eda"] = "eda"
+    name: str | None = None
+    urgency: Literal["eletivo", "urgente", "emergente", "indefinido"] = "indefinido"
+    indication_category: EdaIndicationCategoryV2 = "unknown"
+    subtype: EdaProcedureSubtypeV3 = "standard"
+    evidence_spans: list[Llm1ProcedureEvidenceSpanV2] = Field(
+        min_length=1,
+        max_length=MAX_EVIDENCE_SPANS_PER_PROCEDURE,
+    )
+
 
 AbdominalImagingModalityV3 = Literal["ultrasound", "ct", "mri", "mrcp", "other"]
 AbdominalAnatomicalSiteV3 = Literal["abdomen", "upper_abdomen", "hepatobiliary", "unspecified", "other"]
@@ -117,7 +137,7 @@ class Llm1CpreProcedureV3(StrictModel):
 
 
 Llm1RequestedProcedureV3 = Annotated[
-    Llm1EdaProcedureV2 | Llm1ColonoscopyProcedureV2 | Llm1EchoendoscopyProcedureV3 | Llm1CpreProcedureV3,
+    Llm1EdaProcedureV3 | Llm1ColonoscopyProcedureV2 | Llm1EchoendoscopyProcedureV3 | Llm1CpreProcedureV3,
     Field(discriminator="procedure_type"),
 ]
 

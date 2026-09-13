@@ -12,7 +12,7 @@
 
 ## 2. Ecoendoscopia
 
-- [ ] 2.1 Implementar o Slice 002 (`slices/slice-002-echoendoscopy-intake-to-doctor.md`) e provar seleção NIR → proveniência/precedência → policy → fila/relatório médico sob flag própria.
+- [x] 2.1 Implementar o Slice 002 (`slices/slice-002-echoendoscopy-intake-to-doctor.md`) e provar seleção NIR → proveniência/precedência → policy → fila/relatório médico sob flag própria.
 - [ ] 2.2 Implementar o Slice 003 (`slices/slice-003-echoendoscopy-doctor-swap-and-downstream.md`) e provar `trocar e aprovar`, ausência de rerun/repolicy, conjunto válido, CHD/NIR, evento e mensagem sistêmica sem `UserNotification`.
 
 ## 3. CPRE

@@ -212,9 +212,13 @@ class TestCombinedFlagEnforcement:
         content = response.content.decode()
         assert "EDA + Colonoscopia" in content
         radios = re.findall(r'<input[^>]*name=["\']exam_type["\'][^>]*>', content)
-        assert len(radios) == 3
+        # Slice 002 (R1): EDA, Colonoscopia, EDA + Colonoscopia e Ecoendoscopia
+        # (esta última gated pela própria flag, default false).
+        assert len(radios) == 4
         for tag in radios:
             assert "checked" not in tag, f"Radio pré-marcado: {tag}"
+        echo_tag = next(tag for tag in radios if 'value="echoendoscopy"' in tag)
+        assert "disabled" in echo_tag
 
     def test_flag_off_disables_colon_and_combined(self, client) -> None:
         client, _ = _nir_client(client)

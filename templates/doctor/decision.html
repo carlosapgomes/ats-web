@@ -137,6 +137,13 @@
       <div class="report-block doctor-report-wide"><div class="report-block-title">📝 Motivo Objetivo</div><div class="report-block-body">{% for line in report.blocks.motivo_objetivo %}<p class="mb-1">{{ line }}</p>{% endfor %}</div></div>
     </div>
 
+    {% if report.notices %}
+    <div class="report-block border-secondary border rounded p-2 bg-secondary bg-opacity-10 mt-3">
+      <div class="report-block-title">ℹ️ Escopo da automação</div>
+      <div class="report-block-body">{% for line in report.notices %}<div class="small">{{ line }}</div>{% endfor %}</div>
+    </div>
+    {% endif %}
+
     {% if report.recent_denial %}
     <div class="report-block border-warning border rounded p-2 bg-warning bg-opacity-10 mt-3">
       <div class="report-block-title">🕓 Histórico de Negativa Recente</div>

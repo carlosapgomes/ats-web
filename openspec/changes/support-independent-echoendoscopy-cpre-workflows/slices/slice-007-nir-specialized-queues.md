@@ -14,7 +14,7 @@ Fechar acompanhamento, revisão/correção, encerrados e filtros do NIR para Eco
 
 - **R1:** listas operacionais/encerradas filtram `all|eda|colonoscopy|eda_colonoscopy|echoendoscopy|cpre` por declarado.
 - **R2:** cards/detalhes mostram badge singleton e comparação declarado/detectado/autorizado.
-- **R3:** mismatch especializado oferece correção somente quando flag ativa e antes de `WAIT_DOCTOR`.
+- **R3:** mismatch especializado oferece correção somente quando flag ativa e antes de `WAIT_DOCTOR`. **Dívida herdada do Slice 002 (P2 da revisão):** `correct_case_exam_type`/`validate_exam_type` em `apps/intake/services.py` aceitam `echoendoscopy` sem consultar `is_echoendoscopy_intake_enabled`; inserir o gate (reutilizar `ensure_exam_type_allowed` ou equivalente) para que correção com flag off seja rejeitada, cobrindo também CPRE quando o Slice 004 o liberar.
 - **R4:** correção preserva PDF/anexos/texto, invalida derivados e reprocessa uma vez em 3.0 sem analisar anexos.
 - **R5:** histórico legado Eco permanece sinal legível e não recebe row por backfill.
 - **R6:** busca, polling e parâmetros existentes continuam.
