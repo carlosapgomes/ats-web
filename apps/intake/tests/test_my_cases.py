@@ -1,4 +1,10 @@
-"""Testes da view my_cases — lista com filtros — Slice 4."""
+"""Testes da view my_cases — lista com filtros — Slice 4.
+
+Slice 007 (R1/R2/R5/R6) acrescenta os buckets declarados especializados
+(``echoendoscopy``/``cpre``), o badge singleton nos cards, o filtro equivalente
+na busca de encerrados e a prova de que o sinal legado de Ecoendoscopia
+permanece apenas legível — sem backfill de row.
+"""
 
 from __future__ import annotations
 
@@ -313,6 +319,14 @@ class TestMyCasesList:
 class TestMyCasesExamTypeFilter:
     """R1: NIR compõe tipo de exame (Todos/EDA/Colonoscopia) com status e busca."""
 
+    _DECLARED_BY_SELECTION: dict[str, tuple[str, ...]] = {
+        "eda": (ProcedureType.EDA,),
+        "colonoscopy": (ProcedureType.COLONOSCOPY,),
+        "eda_colonoscopy": (ProcedureType.EDA, ProcedureType.COLONOSCOPY),
+        "echoendoscopy": (ProcedureType.ECHOENDOSCOPY,),
+        "cpre": (ProcedureType.CPRE,),
+    }
+
     def _make(self, user, selection: str, record: str, status: str = CaseStatus.NEW) -> Case:
         # Slice 008 (R5)/011-B: fixture NIR explícita — rows declaradas
         # autorizam o filtro por dimensão declarada (sem coluna).
@@ -321,9 +335,8 @@ class TestMyCasesExamTypeFilter:
             agency_record_number=record,
             status=status,
         )
-        for procedure_type in (ProcedureType.EDA, ProcedureType.COLONOSCOPY):
-            if selection == procedure_type or selection == "eda_colonoscopy":
-                CaseProcedure.objects.create(case=case, procedure_type=procedure_type, declared_by_nir=True)
+        for procedure_type in self._DECLARED_BY_SELECTION[selection]:
+            CaseProcedure.objects.create(case=case, procedure_type=procedure_type, declared_by_nir=True)
         return case
 
     def test_default_todos_shows_both_types(self, client) -> None:
@@ -361,12 +374,17 @@ class TestMyCasesExamTypeFilter:
         assert "EDA-001" not in content
 
     def test_invalid_exam_type_falls_back_to_all(self, client) -> None:
-        """Tipo inválido cai para Todos (default), sem erro."""
+        """Tipo inválido cai para Todos (default), sem erro.
+
+        Slice 007: ``cpre`` deixou de ser valor inválido (agora é dimensão
+        declarada válida), então a prova de fallback usa um valor realmente
+        fora do catálogo.
+        """
         client, user = _nir_client(client)
         self._make(user, "eda", "EDA-001")
         self._make(user, "colonoscopy", "COL-001")
 
-        response = client.get(PAGE_URL + "?exam_type=cpre")
+        response = client.get(PAGE_URL + "?exam_type=bogus")
         content = response.content.decode()
         assert "EDA-001" in content
         assert "COL-001" in content
@@ -432,3 +450,172 @@ class TestMyCasesExamTypeFilter:
         content = response.content.decode()
         assert "exam-type-colonoscopy" in content
         assert "Colonoscopia" in content
+
+    # ── Slice 007 (R1/R2/R6): buckets e badge especializados ────────────
+
+    def test_filter_echoendoscopy(self, client) -> None:
+        """?exam_type=echoendoscopy lista somente casos Ecoendoscopia declarados."""
+        client, user = _nir_client(client)
+        self._make(user, "echoendoscopy", "ECO-001")
+        self._make(user, "eda", "EDA-001")
+        self._make(user, "cpre", "CPRE-001")
+
+        content = client.get(PAGE_URL + "?exam_type=echoendoscopy").content.decode()
+        assert "ECO-001" in content
+        assert "EDA-001" not in content
+        assert "CPRE-001" not in content
+
+    def test_filter_cpre(self, client) -> None:
+        """?exam_type=cpre lista somente casos CPRE declarados."""
+        client, user = _nir_client(client)
+        self._make(user, "echoendoscopy", "ECO-001")
+        self._make(user, "cpre", "CPRE-001")
+
+        content = client.get(PAGE_URL + "?exam_type=cpre").content.decode()
+        assert "CPRE-001" in content
+        assert "ECO-001" not in content
+
+    def test_specialized_bucket_excludes_combined_and_singletons(self, client) -> None:
+        """Buckets especializados são exclusivos: combinado não cai em Eco/CPRE."""
+        client, user = _nir_client(client)
+        self._make(user, "eda_colonoscopy", "COMB-001")
+        self._make(user, "echoendoscopy", "ECO-001")
+
+        content = client.get(PAGE_URL + "?exam_type=echoendoscopy").content.decode()
+        assert "ECO-001" in content
+        assert "COMB-001" not in content
+
+        content = client.get(PAGE_URL + "?exam_type=eda_colonoscopy").content.decode()
+        assert "COMB-001" in content
+        assert "ECO-001" not in content
+
+    def test_specialized_filter_composes_with_search(self, client) -> None:
+        """Dimensão especializada compõe com busca por ocorrência (conjunção)."""
+        client, user = _nir_client(client)
+        self._make(user, "cpre", "2026-CPRE-001")
+        self._make(user, "eda", "2026-CPRE-002")
+
+        content = client.get(PAGE_URL + "?exam_type=cpre&q=CPRE").content.decode()
+        assert "2026-CPRE-001" in content
+        assert "2026-CPRE-002" not in content
+
+    def test_template_has_specialized_exam_type_options(self, client) -> None:
+        """O controle de tipo da lista operacional oferece Ecoendoscopia e CPRE."""
+        client, _ = _nir_client(client)
+        content = client.get(PAGE_URL).content.decode()
+        assert '<option value="echoendoscopy"' in content
+        assert '<option value="cpre"' in content
+
+    def test_partial_polling_preserves_specialized_exam_type(self, client) -> None:
+        """Polling preserva o filtro especializado na query string."""
+        client, _ = _nir_client(client)
+        content = client.get(PAGE_URL + "?exam_type=echoendoscopy&q=0428").content.decode()
+        assert 'hx-get="/cases/my-cases/partial/?exam_type=echoendoscopy&amp;q=0428"' in content
+        assert 'hx-trigger="every 20s"' in content
+
+    def test_cards_show_specialized_exam_type_badge(self, client) -> None:
+        """R2: card de caso especializado mostra badge singleton (sem EDA)."""
+        client, user = _nir_client(client)
+        self._make(user, "echoendoscopy", "ECO-BADGE")
+
+        content = client.get(PAGE_URL).content.decode()
+        assert "exam-type-echoendoscopy" in content
+        assert "exam-type-eda" not in content
+
+
+@pytest.mark.django_db
+class TestClosedCasesSpecializedFilters:
+    """R1/R6: a busca de encerrados filtra pela dimensão DECLARADA especializada."""
+
+    SEARCH_URL = reverse("intake:closed_cases_search")
+
+    def _make_cleaned(self, user, selection: str, record: str) -> Case:
+        case = Case.objects.create(
+            created_by=user,
+            agency_record_number=record,
+            status=CaseStatus.CLEANED,
+        )
+        declared = {
+            "eda": (ProcedureType.EDA,),
+            "echoendoscopy": (ProcedureType.ECHOENDOSCOPY,),
+            "cpre": (ProcedureType.CPRE,),
+        }[selection]
+        for procedure_type in declared:
+            CaseProcedure.objects.create(case=case, procedure_type=procedure_type, declared_by_nir=True)
+        return case
+
+    def test_closed_search_filters_specialized_declared(self, client) -> None:
+        """Dimensão especializada sem termo lista somente aquele procedimento."""
+        client, user = _nir_client(client)
+        self._make_cleaned(user, "echoendoscopy", "CLOSED-ECO-001")
+        self._make_cleaned(user, "cpre", "CLOSED-CPRE-001")
+        self._make_cleaned(user, "eda", "CLOSED-EDA-001")
+
+        content = client.get(self.SEARCH_URL + "?exam_type=echoendoscopy").content.decode()
+        assert "CLOSED-ECO-001" in content
+        assert "CLOSED-CPRE-001" not in content
+        assert "CLOSED-EDA-001" not in content
+
+        content = client.get(self.SEARCH_URL + "?exam_type=cpre").content.decode()
+        assert "CLOSED-CPRE-001" in content
+        assert "CLOSED-ECO-001" not in content
+
+    def test_closed_search_specialized_composes_with_query(self, client) -> None:
+        """Dimensão especializada compõe com o termo de busca (conjunção)."""
+        client, user = _nir_client(client)
+        self._make_cleaned(user, "cpre", "2026-CPRE-900")
+        self._make_cleaned(user, "eda", "2026-CPRE-901")
+
+        content = client.get(self.SEARCH_URL + "?exam_type=cpre&q=CPRE-900").content.decode()
+        assert "2026-CPRE-900" in content
+        assert "2026-CPRE-901" not in content
+
+    def test_closed_search_template_has_specialized_options(self, client) -> None:
+        """O select da busca de encerrados oferece Ecoendoscopia e CPRE."""
+        client, _ = _nir_client(client)
+        content = client.get(self.SEARCH_URL).content.decode()
+        assert '<option value="echoendoscopy"' in content
+        assert '<option value="cpre"' in content
+
+
+@pytest.mark.django_db
+class TestLegacyEchoSignalStaysReadable:
+    """R5: histórico legado de Ecoendoscopia é sinal legível e SEM row/backfill."""
+
+    def _legacy_case(self, user) -> Case:
+        """Caso pré-migration: sinal legado persistido, artefato 2.0, sem rows."""
+        return Case.objects.create(
+            created_by=user,
+            agency_record_number="LEGACY-ECO-001",
+            status=CaseStatus.WAIT_R1_CLEANUP_THUMBS,
+            structured_data={
+                "schema_version": "2.0",
+                "eda": {"requested_procedure": {"subtype": "echoendoscopy"}},
+                "preop_screening": {"exam_type": "eda"},
+            },
+            priority_signals=[{"code": "echoendoscopy", "version": 1}],
+        )
+
+    def test_legacy_signal_is_rendered_and_never_promoted_to_bucket(self, client) -> None:
+        """O sinal legado aparece no card, mas não entra no bucket especializado."""
+        client, user = _nir_client(client)
+        self._legacy_case(user)
+
+        content = client.get(PAGE_URL).content.decode()
+        assert "LEGACY-ECO-001" in content
+        assert 'data-priority-signal-code="echoendoscopy"' in content
+
+        content = client.get(PAGE_URL + "?exam_type=echoendoscopy").content.decode()
+        assert "LEGACY-ECO-001" not in content
+
+    def test_legacy_read_never_creates_a_row(self, client) -> None:
+        """R5: nenhum backfill — listar/abrir o legado não cria CaseProcedure."""
+        client, user = _nir_client(client)
+        legacy = self._legacy_case(user)
+
+        client.get(PAGE_URL)
+        client.get(PAGE_URL + "?exam_type=echoendoscopy")
+        client.get(reverse("intake:case_detail", args=[legacy.case_id]))
+
+        assert CaseProcedure.objects.filter(case=legacy).count() == 0
+        assert CaseProcedure.objects.filter(procedure_type=ProcedureType.ECHOENDOSCOPY).count() == 0

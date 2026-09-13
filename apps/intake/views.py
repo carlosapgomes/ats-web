@@ -34,6 +34,7 @@ from apps.cases.models import (
 from apps.cases.navigation import resolve_safe_next_url
 from apps.cases.priority_signals import build_priority_signal_badges
 from apps.cases.procedures import (
+    PROCEDURE_ORDER,
     SUPPORTED_PROCEDURE_TYPES,
     format_procedure_selection,
     get_approved_procedure_types,
@@ -99,49 +100,90 @@ def _declared_badge(case: Case) -> dict[str, str]:
     return {"declared_label": "—", "declared_type_key": ""}
 
 
-# Dimensões aceitas nos filtros NIR (R5/D13): Todos + EDA/Colonoscopia/Combinado,
-# SEMPRE pelo conjunto DECLARADO (nunca detected/approved). ``eda_colonoscopy``
-# é a seleção combinada; o valor inválido cai para all.
+# Dimensões aceitas nos filtros NIR (R5/D13): Todos + EDA/Colonoscopia/Combinado
+# + os especializados (Slice 007), SEMPRE pelo conjunto DECLARADO (nunca
+# detected/approved). ``eda_colonoscopy`` é a seleção combinada; o valor
+# inválido cai para all.
 _NIR_DECLARED_DIMENSIONS: frozenset[str] = frozenset(
-    {"all", ProcedureType.EDA, ProcedureType.COLONOSCOPY, EDA_COLONOSCOPY}
+    {
+        "all",
+        ProcedureType.EDA,
+        ProcedureType.COLONOSCOPY,
+        EDA_COLONOSCOPY,
+        ProcedureType.ECHOENDOSCOPY,
+        ProcedureType.CPRE,
+    }
 )
 
 
+def _declared_row_exists(procedure_type: str) -> models.Exists:
+    """Existência de row DECLARADA daquele tipo para o caso externo."""
+    return models.Exists(
+        CaseProcedure.objects.filter(
+            case_id=models.OuterRef("pk"),
+            procedure_type=procedure_type,
+            declared_by_nir=True,
+        )
+    )
+
+
 def _filter_by_declared_dimension(qs: models.QuerySet[Case], dimension: str) -> models.QuerySet[Case]:
-    """Filtra um queryset pela dimensão DECLARADA (R5/D13, Slice 008).
+    """Filtra um queryset pela dimensão DECLARADA (R5/D13, Slice 008/007).
 
     Usa subqueries ``Exists`` explícitas para evitar a semântica ambígua de
     ``exclude`` sobre relação múltipla (que divide condições em dois EXISTS
-    separados). Buckets EXCLUSIVOS: ``eda``/``colonoscopy`` exigem a row
-    declarada do tipo e a AUSÊNCIA da row declarada do outro; combinado exige
-    as duas rows declaradas. NUNCA consulta detected/approved (D13) e, desde o
-    Slice 008, NUNCA consulta a ponte ``Case.exam_type``: um caso sem rows
-    declaradas (legado/inválido) é fail-closed — não aparece em bucket
-    específico e não recebe default EDA. Apenas "Todos" (sem filtro) o lista.
+    separados). Buckets EXCLUSIVOS: ``eda``/``colonoscopy``/``echoendoscopy``/
+    ``cpre`` exigem a row declarada do tipo e a AUSÊNCIA de qualquer outra row
+    declarada; combinado exige as duas rows EDA + Colonoscopia. NUNCA consulta
+    detected/approved (D13) e, desde o Slice 008, NUNCA consulta a ponte
+    ``Case.exam_type``: um caso sem rows declaradas (legado/inválido) é
+    fail-closed — não aparece em bucket específico e não recebe default EDA.
+    Apenas "Todos" (sem filtro) o lista. O sinal legado de Ecoendoscopia
+    também não alimenta o bucket especializado (R5: sem backfill/inferência).
     """
-    declared_eda = models.Exists(
-        CaseProcedure.objects.filter(
-            case_id=models.OuterRef("pk"),
-            procedure_type=ProcedureType.EDA,
-            declared_by_nir=True,
-        )
-    )
-    declared_colon = models.Exists(
-        CaseProcedure.objects.filter(
-            case_id=models.OuterRef("pk"),
-            procedure_type=ProcedureType.COLONOSCOPY,
-            declared_by_nir=True,
-        )
-    )
     qs = qs.annotate(
-        _decl_eda=declared_eda,
-        _decl_colon=declared_colon,
+        _decl_eda=_declared_row_exists(ProcedureType.EDA),
+        _decl_colonoscopy=_declared_row_exists(ProcedureType.COLONOSCOPY),
+        _decl_echoendoscopy=_declared_row_exists(ProcedureType.ECHOENDOSCOPY),
+        _decl_cpre=_declared_row_exists(ProcedureType.CPRE),
     )
     if dimension == EDA_COLONOSCOPY:
-        return qs.filter(_decl_eda=True, _decl_colon=True)
+        return qs.filter(_decl_eda=True, _decl_colonoscopy=True)
+    qs = qs.annotate(
+        _decl_others=models.Exists(
+            CaseProcedure.objects.filter(case_id=models.OuterRef("pk"), declared_by_nir=True).exclude(
+                procedure_type=dimension
+            )
+        )
+    )
     if dimension == ProcedureType.EDA:
-        return qs.filter(_decl_eda=True, _decl_colon=False)
-    return qs.filter(_decl_colon=True, _decl_eda=False)
+        return qs.filter(_decl_eda=True, _decl_others=False)
+    if dimension == ProcedureType.COLONOSCOPY:
+        return qs.filter(_decl_colonoscopy=True, _decl_others=False)
+    if dimension == ProcedureType.ECHOENDOSCOPY:
+        return qs.filter(_decl_echoendoscopy=True, _decl_others=False)
+    return qs.filter(_decl_cpre=True, _decl_others=False)
+
+
+def _correction_detected_label(suggested: dict[str, object]) -> str:
+    """Label do conjunto DETECTADO no card de correção (R2/D13, Slice 007).
+
+    Prefere o conjunto do payload (``detected_procedures``): um conjunto fora
+    da matriz — ex.: ``Solicito EDA. Solicito CPRE.`` independentes — é
+    rotulado pelo PRÓPRIO conjunto (``EDA + CPRE``), nunca pela chave legada
+    ``mixed``, que afirma EDA + Colonoscopia. Cai para a chave singular legada
+    quando o payload não traz o conjunto (casos 1.1/2.0 e fixtures antigas) e
+    nunca levanta: a projeção de card não valida a matriz.
+    """
+    detected_types = suggested.get("detected_procedures")
+    if isinstance(detected_types, list) and detected_types:
+        ordered = sorted(
+            {str(raw) for raw in detected_types},
+            key=lambda t: PROCEDURE_ORDER.get(t, len(PROCEDURE_ORDER)),
+        )
+        return " + ".join(ProcedureType(t).label if t in ProcedureType.values else t for t in ordered)
+    legacy = str(suggested.get("detected_exam_type") or suggested.get("exam_type") or "")
+    return CORRECTION_DETECTED_TYPE_LABELS.get(legacy, legacy or "—")
 
 
 def _procedure_origin_text(*, is_declared: bool, is_detected: bool, is_approved: bool) -> str:
@@ -427,8 +469,10 @@ STEPS: list[dict[str, str]] = [
 
 # Labels legíveis para o tipo detectado no card de correção (Slice 006).
 CORRECTION_DETECTED_TYPE_LABELS: dict[str, str] = {
-    "eda": "EDA",
-    "colonoscopy": "Colonoscopia",
+    ProcedureType.EDA: "EDA",
+    ProcedureType.COLONOSCOPY: "Colonoscopia",
+    ProcedureType.ECHOENDOSCOPY: "Ecoendoscopia",
+    ProcedureType.CPRE: "CPRE",
     "mixed": "Solicitação mista (EDA + Colonoscopia)",
     "unknown": "Não identificado",
     "non_eda": "Fora do escopo suportado",
@@ -812,16 +856,19 @@ def case_detail(request: HttpRequest, case_id: uuid.UUID) -> HttpResponse:
     if lock_held and is_exam_type_correction_eligible(case):
         can_correct_exam_type = True
         suggested = case.suggested_action or {}
-        detected = suggested.get("detected_exam_type") or suggested.get("exam_type") or ""
         correction_form_context = {
             # Label declarado projetado da projeção (combinado → "EDA + Colonoscopia").
             "declared_label": declared_badge["declared_label"],
             # Slice 011-C (decisão 2): chave de seleção derivada da projeção
             # para os radios marcarem "(atual)" — nunca a coluna removida.
             "declared_type_key": declared_badge["declared_type_key"],
-            "detected_exam_type_label": CORRECTION_DETECTED_TYPE_LABELS.get(detected, detected or "—"),
+            "detected_exam_type_label": _correction_detected_label(suggested),
             "reason_text": suggested.get("reason_text", ""),
             "correction_reason_choices": list(EXAM_TYPE_CORRECTION_REASONS.items()),
+            # Slice 007 (R3): as opções especializadas só aparecem com a flag
+            # de intake do próprio tipo ligada — o backend rejeita igualmente.
+            "echoendoscopy_intake_enabled": is_echoendoscopy_intake_enabled(),
+            "cpre_intake_enabled": is_cpre_intake_enabled(),
         }
 
     # ── Correction context (R1: corrects_case card) ──────────────
@@ -1721,6 +1768,10 @@ def closed_case_detail(request: HttpRequest, case_id: uuid.UUID) -> HttpResponse
         "current_step_idx": current_step_idx,
         "status_label": STATUS_LABELS.get(case.status, case.get_status_display()),
         "status_css": STATUS_CSS_CLASS.get(case.status, "status-pending"),
+        # R2 (Slice 007): badge declarado projetado — o histórico encerrado
+        # exibe o procedimento (inclusive especializado) sem consultar rows no
+        # template e sem inferir do sinal legado.
+        **_declared_badge(case),
         "result_info": result_info,
         "patient_name": patient_name,
         "origin_unit": origin_unit,

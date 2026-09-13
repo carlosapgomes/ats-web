@@ -871,12 +871,16 @@ class TestClosedCasesSearchExamTypeFilter:
         assert "CLOSED-COL-001" not in content
 
     def test_invalid_type_falls_back_to_all(self, client) -> None:
-        """Tipo inválido cai para Todos (default)."""
+        """Tipo inválido cai para Todos (default).
+
+        Slice 007: ``cpre`` deixou de ser valor inválido (virou dimensão
+        declarada válida), então a prova usa um valor fora do catálogo.
+        """
         nir_client, nir_user = _nir_client(client)
         self._cleaned(nir_user, "eda", "CLOSED-EDA-001")
         self._cleaned(nir_user, "colonoscopy", "CLOSED-COL-001")
 
-        response = nir_client.get(self.SEARCH_URL, {"q": "CLOSED", "exam_type": "cpre"})
+        response = nir_client.get(self.SEARCH_URL, {"q": "CLOSED", "exam_type": "bogus"})
         content = response.content.decode()
         assert "CLOSED-EDA-001" in content
         assert "CLOSED-COL-001" in content

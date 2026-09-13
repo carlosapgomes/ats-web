@@ -26,7 +26,7 @@ from typing import Any
 
 import pytest
 
-from apps.cases.models import Case, CaseAttachment, CaseEvent, CaseStatus, ProcedureType
+from apps.cases.models import Case, CaseAttachment, CaseEvent, CaseProcedure, CaseStatus, DetectionStatus, ProcedureType
 from apps.cases.procedures import set_declared_procedures
 from apps.pipeline.imaging_evidence import verify_abdominal_imaging_evidence
 from apps.pipeline.llm import RecordingLlmClient
@@ -750,6 +750,42 @@ class TestCpreEndToEnd:
         reloaded = _reload(case)
         assert reloaded.status != CaseStatus.WAIT_DOCTOR
         assert len(client.calls) == 1
+
+    def test_independent_eda_and_cpre_requests_reach_nir_review_without_pipeline_failure(
+        self, django_user_model
+    ) -> None:
+        """R3 (dívida herdada do Slice 004): conjunto detectado fora da matriz → NIR.
+
+        Declarado EDA + duas solicitações independentes (``Solicito EDA.
+        Solicito CPRE.``) formam ``{eda, cpre}``, que não pertence a
+        ``ALLOWED_PROCEDURE_SETS``: o caso deve chegar à revisão manual
+        (``EDA_SCOPE_GATED_MANUAL_REVIEW`` + ``scope_gate_bypass``) com motivo
+        explícito, sem tentar projetar o conjunto e cair em ``PIPELINE_FAILED``.
+        """
+        user = django_user_model.objects.create_user(username="nir-eda-cpre-independent")
+        report = "Solicito EDA. Solicito CPRE para avaliacao de via biliar."
+        case = _make_case(user, procedure_types=(ProcedureType.EDA,), extracted_text=report)
+        client = RecordingLlmClient(responses=[_llm1_json(procedures=[_eda_procedure(), _cpre_procedure()])])
+        run_pipeline(case.case_id, llm_client=client)
+
+        reloaded = _reload(case)
+        assert len(client.calls) == 1  # LLM2 nunca é chamado no gate de revisão
+        assert reloaded.status == CaseStatus.WAIT_R1_CLEANUP_THUMBS
+        events = list(CaseEvent.objects.filter(case=reloaded).values_list("event_type", flat=True))
+        assert "EDA_SCOPE_GATED_MANUAL_REVIEW" in events
+        assert "SCOPE_GATE_BYPASS" in events
+        assert "PIPELINE_FAILED" not in events
+
+        suggested = reloaded.suggested_action
+        assert isinstance(suggested, dict)
+        assert suggested["reason_code"] == "unsupported_procedure_combination"
+        assert set(suggested["detected_procedures"]) == {ProcedureType.EDA, ProcedureType.CPRE}
+
+        # Declaração intacta e nenhuma projeção de detecção inválida.
+        assert set(
+            CaseProcedure.objects.filter(case=reloaded, declared_by_nir=True).values_list("procedure_type", flat=True)
+        ) == {ProcedureType.EDA}
+        assert not CaseProcedure.objects.filter(case=reloaded, detection_status=DetectionStatus.DETECTED).exists()
 
 
 # ── R5: anexos nunca participam da automação (mesma fronteira do Slice 002) ──

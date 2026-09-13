@@ -1644,3 +1644,252 @@ class TestTimelineLabels:
         content = response.content.decode()
         assert "Conjunto de procedimentos declarado corrigido pelo NIR" in content
         assert "Reprocessamento solicitado" in content
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# Slice 007 — R3/R4: correção especializada sob flag e reprocessamento seguro
+# ═══════════════════════════════════════════════════════════════════════════
+
+
+@pytest.mark.django_db
+class TestSpecializedCorrectionGate:
+    """R3 (dívida do Slice 002): correção consulta a flag do tipo especializado.
+
+    ``echoendoscopy``/``cpre`` exigem a flag própria ligada; EDA/Colonoscopia/
+    Combinado mantêm o contrato do Slice 005 (a flag de colonoscopia gateia
+    criação de caso, não correção).
+    """
+
+    def _specialized_case(self, *, user, declared: str, detected: str) -> Case:
+        return _eligible_case(user=user, exam_type=declared, detected=detected)
+
+    @pytest.mark.parametrize(
+        ("new_exam_type", "flag_name", "detected"),
+        [
+            (ProcedureType.ECHOENDOSCOPY, "ECHOENDOSCOPY_INTAKE_ENABLED", "echoendoscopy"),
+            (ProcedureType.CPRE, "CPRE_INTAKE_ENABLED", "cpre"),
+        ],
+    )
+    def test_specialized_correction_rejected_with_flag_off(
+        self, django_user_model, new_exam_type: str, flag_name: str, detected: str
+    ) -> None:
+        """Flag desligada rejeita a correção sem qualquer mutação."""
+        from django.test import override_settings
+
+        user = _nir_user(django_user_model, f"nir-flag-off-{new_exam_type}@test.com")
+        case = self._specialized_case(user=user, declared=ProcedureType.EDA, detected=detected)
+        token = _claim_receipt_lease(case, user)
+
+        with override_settings(**{flag_name: False}), pytest.raises(ValueError):
+            correct_case_exam_type(
+                case_id=case.case_id,
+                new_exam_type=new_exam_type,
+                user=user,
+                active_role="nir",
+                lock_token=token,
+                reason_code="nir_identified_exam",
+            )
+
+        reloaded = Case.objects.get(pk=case.pk)
+        assert reloaded.status == CaseStatus.WAIT_R1_CLEANUP_THUMBS
+        assert get_declared_procedure_types(reloaded) == (ProcedureType.EDA,)
+        assert reloaded.structured_data is not None
+        assert reloaded.suggested_action is not None
+        assert not CaseEvent.objects.filter(case=case, event_type="CASE_PROCEDURE_DECLARATION_CORRECTED").exists()
+
+    @pytest.mark.parametrize(
+        ("new_exam_type", "flag_name", "detected"),
+        [
+            (ProcedureType.ECHOENDOSCOPY, "ECHOENDOSCOPY_INTAKE_ENABLED", "echoendoscopy"),
+            (ProcedureType.CPRE, "CPRE_INTAKE_ENABLED", "cpre"),
+        ],
+    )
+    def test_specialized_correction_allowed_with_flag_on(
+        self, django_user_model, monkeypatch, new_exam_type: str, flag_name: str, detected: str
+    ) -> None:
+        """Flag ligada corrige o MESMO caso, invalida derivados e reenfileira 1x."""
+        from django.test import override_settings
+
+        pipeline_calls: list[object] = []
+        pdf_calls: list[object] = []
+        monkeypatch.setattr(
+            "apps.pipeline.tasks.enqueue_pipeline",
+            lambda case_id: pipeline_calls.append(case_id),
+        )
+        monkeypatch.setattr(
+            "apps.intake.tasks.enqueue_pdf_extraction",
+            lambda case_id: pdf_calls.append(case_id),
+        )
+        user = _nir_user(django_user_model, f"nir-flag-on-{new_exam_type}@test.com")
+        case = self._specialized_case(user=user, declared=ProcedureType.EDA, detected=detected)
+        case.pdf_file = "pdfs/2025/01/original.pdf"  # nome apenas — não é tocado
+        case.save()
+        original_id = case.case_id
+        extracted_text = case.extracted_text
+        token = _claim_receipt_lease(case, user)
+
+        with override_settings(**{flag_name: True}):
+            result = correct_case_exam_type(
+                case_id=case.case_id,
+                new_exam_type=new_exam_type,
+                user=user,
+                active_role="nir",
+                lock_token=token,
+                reason_code="nir_identified_exam",
+            )
+
+        assert result.case_id == original_id
+        assert result.status == CaseStatus.LLM_STRUCT
+        assert get_declared_procedure_types(Case.objects.get(pk=case.pk)) == (new_exam_type,)
+        # R4: um único reprocessamento, sem reextração de PDF/anexos.
+        assert pipeline_calls == [original_id]
+        assert pdf_calls == []
+        # R4: fontes preservadas; derivados invalidados.
+        reloaded = Case.objects.get(pk=case.pk)
+        assert reloaded.extracted_text == extracted_text
+        assert reloaded.pdf_file.name == "pdfs/2025/01/original.pdf"
+        assert reloaded.structured_data is None
+        assert reloaded.summary_text == ""
+        assert reloaded.suggested_action is None
+        assert reloaded.priority_signals == []
+
+    def test_specialized_correction_resets_derived_dimensions(self, django_user_model) -> None:
+        """R4: detecção e disposição médica voltam a pending; rows declaradas corretas."""
+        from django.test import override_settings
+
+        from apps.cases.models import DetectionStatus, DoctorDisposition
+
+        user = _nir_user(django_user_model, "nir-spec-reset@test.com")
+        case = self._specialized_case(user=user, declared=ProcedureType.EDA, detected="echoendoscopy")
+        case.procedures.update(detection_status=DetectionStatus.DETECTED)
+        token = _claim_receipt_lease(case, user)
+
+        with override_settings(ECHOENDOSCOPY_INTAKE_ENABLED=True):
+            correct_case_exam_type(
+                case_id=case.case_id,
+                new_exam_type=ProcedureType.ECHOENDOSCOPY,
+                user=user,
+                active_role="nir",
+                lock_token=token,
+                reason_code="nir_identified_exam",
+            )
+
+        reloaded = Case.objects.get(pk=case.pk)
+        assert not CaseProcedure.objects.filter(case=reloaded, detection_status=DetectionStatus.DETECTED).exists()
+        assert not CaseProcedure.objects.filter(case=reloaded, doctor_disposition=DoctorDisposition.APPROVED).exists()
+        assert (
+            CaseProcedure.objects.get(case=reloaded, procedure_type=ProcedureType.ECHOENDOSCOPY).declared_by_nir is True
+        )
+
+    def test_specialized_mismatch_not_correctable_after_wait_doctor(self, django_user_model, advance_to) -> None:
+        """R3: mismatch especializado só é corrigível ANTES de ``WAIT_DOCTOR``."""
+        from django.test import override_settings
+
+        user = _nir_user(django_user_model, "nir-spec-waitdoc@test.com")
+        case = Case.objects.create(created_by=user)
+        case = advance_to(case, CaseStatus.WAIT_DOCTOR)
+        case.suggested_action = {
+            "decision": "manual_review_required",
+            "reason_code": "exam_type_mismatch",
+            "detected_exam_type": "echoendoscopy",
+        }
+        case.save()
+        CaseProcedure.objects.create(case=case, procedure_type=ProcedureType.EDA, declared_by_nir=True)
+        assert is_exam_type_correction_eligible(case) is False
+
+        with override_settings(ECHOENDOSCOPY_INTAKE_ENABLED=True), pytest.raises(ValueError):
+            correct_case_exam_type(
+                case_id=case.case_id,
+                new_exam_type=ProcedureType.ECHOENDOSCOPY,
+                user=user,
+                active_role="nir",
+                lock_token=uuid.uuid4(),
+                reason_code="nir_identified_exam",
+            )
+
+        reloaded = Case.objects.get(pk=case.pk)
+        assert reloaded.status == CaseStatus.WAIT_DOCTOR
+        assert get_declared_procedure_types(reloaded) == (ProcedureType.EDA,)
+
+    def _unsupported_combination_case(self, *, user) -> Case:
+        """Caso em revisão por série incompatível (``{eda, cpre}`` detectado).
+
+        Payload idêntico ao produzido pela reconciliação 3.0: conjunto
+        detectado fora de ``ALLOWED_PROCEDURE_SETS`` e chave legada ``mixed``.
+        """
+        case = _eligible_case(
+            user=user,
+            exam_type=ProcedureType.EDA,
+            reason_code="unsupported_procedure_combination",
+            detected="mixed",
+        )
+        case.suggested_action = {
+            **(case.suggested_action or {}),
+            "declared_procedures": [ProcedureType.EDA],
+            "detected_procedures": [ProcedureType.EDA, ProcedureType.CPRE],
+        }
+        case.save()
+        return case
+
+    def test_incompatible_combination_review_is_correctable(self, django_user_model, monkeypatch) -> None:
+        """R3: revisão por conjunto incompatível é corrigível (spec: conjunto incompatível)."""
+        from django.test import override_settings
+
+        pipeline_calls: list[object] = []
+        monkeypatch.setattr(
+            "apps.pipeline.tasks.enqueue_pipeline",
+            lambda case_id: pipeline_calls.append(case_id),
+        )
+        user = _nir_user(django_user_model, "nir-incompatible@test.com")
+        case = self._unsupported_combination_case(user=user)
+        assert is_exam_type_correction_eligible(case) is True
+        token = _claim_receipt_lease(case, user)
+
+        with override_settings(CPRE_INTAKE_ENABLED=True):
+            result = correct_case_exam_type(
+                case_id=case.case_id,
+                new_exam_type=ProcedureType.CPRE,
+                user=user,
+                active_role="nir",
+                lock_token=token,
+                reason_code="nir_identified_exam",
+            )
+
+        assert result.status == CaseStatus.LLM_STRUCT
+        assert get_declared_procedure_types(Case.objects.get(pk=case.pk)) == (ProcedureType.CPRE,)
+        assert pipeline_calls == [case.case_id]
+
+    def test_incompatible_combination_card_labels_detected_set(self, client) -> None:
+        """R2: card rotula o CONJUNTO detectado (EDA + CPRE), nunca ``mixed``."""
+        from django.test import override_settings
+
+        client, user = _nir_client(client, "nir-incompatible-card@test.com")
+        case = self._unsupported_combination_case(user=user)
+
+        with override_settings(CPRE_INTAKE_ENABLED=True, ECHOENDOSCOPY_INTAKE_ENABLED=False):
+            content = client.get(reverse("intake:case_detail", args=[case.case_id])).content.decode()
+
+        assert "Correção de Tipo de Exame" in content
+        assert "EDA + CPRE" in content
+        assert "Solicitação mista" not in content
+        assert 'value="cpre"' in content
+
+    def test_correction_card_offers_specialized_option_only_with_flag(self, client) -> None:
+        """R2/R3: o card oferece Eco/CPRE somente quando a flag correspondente está ligada."""
+        from django.test import override_settings
+
+        client, user = _nir_client(client, "nir-spec-card@test.com")
+        case = _eligible_case(user=user, detected="echoendoscopy")
+
+        with override_settings(ECHOENDOSCOPY_INTAKE_ENABLED=False, CPRE_INTAKE_ENABLED=False):
+            content = client.get(reverse("intake:case_detail", args=[case.case_id])).content.decode()
+        assert "Correção de Tipo de Exame" in content
+        assert 'value="echoendoscopy"' not in content
+        assert 'value="cpre"' not in content
+        # Label legível do tipo detectado, nunca a chave crua.
+        assert "Ecoendoscopia" in content
+
+        with override_settings(ECHOENDOSCOPY_INTAKE_ENABLED=True, CPRE_INTAKE_ENABLED=True):
+            content = client.get(reverse("intake:case_detail", args=[case.case_id])).content.decode()
+        assert 'value="echoendoscopy"' in content
+        assert 'value="cpre"' in content

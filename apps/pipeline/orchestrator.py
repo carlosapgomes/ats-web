@@ -20,7 +20,12 @@ import uuid
 from apps.cases.exam_profiles import get_exam_profile
 from apps.cases.models import Case
 from apps.cases.priority_signals import resolve_priority_signals
-from apps.cases.procedures import PROCEDURE_ORDER, SUPPORTED_PROCEDURE_TYPES, set_detected_procedures
+from apps.cases.procedures import (
+    ALLOWED_PROCEDURE_SETS,
+    PROCEDURE_ORDER,
+    SUPPORTED_PROCEDURE_TYPES,
+    set_detected_procedures,
+)
 from apps.llm.models import PromptTemplate
 from apps.pipeline.imaging_evidence import verify_abdominal_imaging_evidence
 from apps.pipeline.llm import LlmClient
@@ -302,10 +307,20 @@ def _run_v3_pipeline(
     )
 
     # ── 3. Projeção de detecção atômica (R4) ───────────────────────────
-    set_detected_procedures(
-        case=case,
-        detected_types=reconciliation.detected_procedure_types,
-    )
+    # Slice 007/R3: a projeção só é escrita quando o conjunto detectado é
+    # projetável — vazio ou pertencente a ``ALLOWED_PROCEDURE_SETS``. A
+    # reconciliação pode devolver ``nir_review`` com conjunto fora da matriz
+    # (ex.: duas solicitações independentes ``Solicito EDA. Solicito CPRE.``);
+    # projetar esse conjunto levantaria ValueError e derrubaria o caso em
+    # PIPELINE_FAILED em vez do estado de revisão NIR desenhado (D2).
+    # Singletons válidos de mismatch (declarado EDA + detectado Ecoendoscopia)
+    # continuam projetados e chegam à revisão.
+    detected_types = reconciliation.detected_procedure_types
+    if not detected_types or frozenset(detected_types) in ALLOWED_PROCEDURE_SETS:
+        set_detected_procedures(
+            case=case,
+            detected_types=detected_types,
+        )
 
     # Sinais prioritários por projeção compatível (R5/D7): EDA quando presente,
     # senão o próprio tipo detectado restringe os códigos permitidos. Em 3.0 o

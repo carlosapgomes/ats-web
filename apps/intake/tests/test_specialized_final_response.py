@@ -252,3 +252,56 @@ class TestSpecializedFinalResponse:
         assert "CPRE" in content
         assert "exam-type-cpre" in content
         assert "Agendamento casado" not in content
+
+    # ── Slice 007 (R2/R5): detalhe encerrado com badge e legado legível ──
+
+    @pytest.mark.parametrize(
+        ("declared", "type_key"),
+        [
+            (ProcedureType.ECHOENDOSCOPY, "echoendoscopy"),
+            (ProcedureType.CPRE, "cpre"),
+        ],
+    )
+    def test_closed_case_detail_shows_specialized_declared_badge(self, client, declared: str, type_key: str) -> None:
+        """R2: o detalhe do caso encerrado mostra o badge singleton do declarado."""
+        client, user = _nir_client(client)
+        case = _make_case(
+            user=user,
+            declared=(declared,),
+            detected=(declared,),
+            approved=(declared,),
+            reasons={declared: "Autorizado após revisão."},
+            status=CaseStatus.CLEANED,
+        )
+
+        response = client.get(reverse("intake:closed_case_detail", args=[case.case_id]))
+
+        assert response.status_code == 200
+        content = response.content.decode()
+        assert f"exam-type-{type_key}" in content
+        assert "Solicitado pelo NIR" in content
+        assert "Agendamento casado" not in content
+
+    def test_closed_case_detail_keeps_legacy_echo_signal_without_row(self, client) -> None:
+        """R5: histórico legado de Ecoendoscopia continua legível e sem nova row."""
+        client, user = _nir_client(client)
+        legacy = Case.objects.create(
+            created_by=user,
+            status=CaseStatus.CLEANED,
+            agency_record_number="CLOSED-LEGACY-ECO",
+            structured_data={
+                "schema_version": "2.0",
+                "eda": {"requested_procedure": {"subtype": "echoendoscopy"}},
+                "preop_screening": {"exam_type": "eda"},
+            },
+            priority_signals=[{"code": "echoendoscopy", "version": 1}],
+        )
+
+        response = client.get(reverse("intake:closed_case_detail", args=[legacy.case_id]))
+
+        assert response.status_code == 200
+        content = response.content.decode()
+        assert 'data-priority-signal-code="echoendoscopy"' in content
+        # R5: nada de backfill — o sinal legado não vira procedimento declarado.
+        assert CaseProcedure.objects.filter(case=legacy).count() == 0
+        assert CaseProcedure.objects.filter(procedure_type=ProcedureType.ECHOENDOSCOPY).count() == 0

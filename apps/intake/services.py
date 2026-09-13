@@ -100,6 +100,29 @@ def validate_exam_type(exam_type: str | None) -> str:
     return value
 
 
+def ensure_specialized_exam_type_allowed(exam_type: str | None) -> str:
+    """Gate de choice + flag dos tipos ESPECIALIZADOS (Slice 007, R3).
+
+    Exige a flag de intake do próprio tipo ligada para Ecoendoscopia/CPRE —
+    fronteira compartilhada pelo intake (upload/reenvio) e pela correção NIR.
+    EDA, Colonoscopia e EDA + Colonoscopia passam inalterados: na correção
+    eles mantêm o contrato do Slice 005 (a flag de colonoscopia gateia a
+    criação de NOVO caso, não a correção do caso em revisão).
+    """
+    value = validate_exam_type(exam_type)
+    if value == ProcedureType.ECHOENDOSCOPY and not is_echoendoscopy_intake_enabled():
+        raise ValueError(
+            "Ecoendoscopia ainda não está habilitada para novos envios. "
+            "Envie lotes apenas de EDA ou selecione um tipo disponível."
+        )
+    if value == ProcedureType.CPRE and not is_cpre_intake_enabled():
+        raise ValueError(
+            "CPRE ainda não está habilitada para novos envios. "
+            "Envie lotes apenas de EDA ou selecione um tipo disponível."
+        )
+    return value
+
+
 def ensure_exam_type_allowed(exam_type: str | None) -> str:
     """Validação central de choice + flag para criação de novo caso.
 
@@ -111,21 +134,11 @@ def ensure_exam_type_allowed(exam_type: str | None) -> str:
 
     Backend é a fonte de verdade; templates/JS apenas melhoram a UX.
     """
-    value = validate_exam_type(exam_type)
+    value = ensure_specialized_exam_type_allowed(exam_type)
     if value in (ProcedureType.COLONOSCOPY, EDA_COLONOSCOPY) and not is_colonoscopy_intake_enabled():
         raise ValueError(
             "Colonoscopia e EDA + Colonoscopia ainda não estão habilitadas para novos envios. "
             "Envie lotes apenas de EDA."
-        )
-    if value == ProcedureType.ECHOENDOSCOPY and not is_echoendoscopy_intake_enabled():
-        raise ValueError(
-            "Ecoendoscopia ainda não está habilitada para novos envios. "
-            "Envie lotes apenas de EDA ou selecione um tipo disponível."
-        )
-    if value == ProcedureType.CPRE and not is_cpre_intake_enabled():
-        raise ValueError(
-            "CPRE ainda não está habilitada para novos envios. "
-            "Envie lotes apenas de EDA ou selecione um tipo disponível."
         )
     return value
 
@@ -145,11 +158,19 @@ def _procedure_types_for_selection(exam_type: str) -> tuple[str, ...]:
 
 # Reason codes do scope gate elegíveis para correção de tipo: o NIR vê
 # declarado/detectado e corrige o tipo no MESMO caso (spec exam-type-correction).
-# non_eda_request e invalid_regulation_report NÃO são elegíveis: não se
-# resolvem trocando o tipo (fora do escopo EDA/colonoscopia e falha de gate
-# de regulação, respectivamente).
+# ``unsupported_procedure_combination`` entra no Slice 007 como "conjunto
+# incompatível" da spec (ex.: ``Solicito EDA. Solicito CPRE.`` independentes
+# chegam ao NIR sem falhar o pipeline). ``non_eda_request`` e
+# ``invalid_regulation_report`` NÃO são elegíveis: não se resolvem trocando o
+# tipo (fora do escopo suportado e falha de gate de regulação,
+# respectivamente).
 EXAM_TYPE_CORRECTION_ELIGIBLE_REASON_CODES: frozenset[str] = frozenset(
-    {"exam_type_mismatch", "mixed_exam_request", "unknown_exam_type"}
+    {
+        "exam_type_mismatch",
+        "mixed_exam_request",
+        "unknown_exam_type",
+        "unsupported_procedure_combination",
+    }
 )
 
 # Motivos de correção selecionáveis pelo NIR (payload de CASE_PROCEDURE_DECLARATION_CORRECTED).
@@ -290,7 +311,7 @@ def correct_case_exam_type(
             incompatível/ausente/expirada.
         EnqueueAfterCommitError: enqueue pós-commit falhou (correção commitada).
     """
-    validated_exam_type = validate_exam_type(new_exam_type)
+    validated_exam_type = ensure_specialized_exam_type_allowed(new_exam_type)
     if reason_code not in EXAM_TYPE_CORRECTION_REASONS:
         raise ValueError("Motivo da correção inválido.")
     if lock_token is None:

@@ -28,16 +28,23 @@ expected_files:
   - templates/intake/_my_cases_content.html
   - templates/intake/case_detail.html
   - templates/intake/closed_cases_search.html
+  - apps/pipeline/orchestrator.py
   - apps/intake/tests/test_my_cases.py
   - apps/intake/tests/test_exam_type_correction.py
   - apps/intake/tests/test_specialized_final_response.py
+  - apps/pipeline/tests/test_echoendoscopy_pipeline_v3.py
+  - apps/pipeline/tests/test_cpre_pipeline_v3.py
 allowed_incidental_files:
   - templates/intake/closed_case_detail.html
-file_cap: 9
+  - templates/intake/my_cases.html
+  - apps/intake/tests/test_corrected_resubmission.py
+file_cap: 14
 out_of_scope:
   - doctor/CHD/dashboard manager
   - backfill/rewrite JSON
 ```
+
+**Emenda de ponteiros e cap aprovada pelo parent (correção de planejamento, sem mudança de escopo comportamental; mesma classe das emendas dos Slices 005/006):** a dívida herdada do Slice 004 (R3) exige editar `apps/pipeline/orchestrator.py` (a projeção em `set_detected_procedures` ~L305 ocorre ANTES do gate `nir_review` ~L351) e os testes end-to-end do critério de aceite vivem naturalmente em `apps/pipeline/tests/test_echoendoscopy_pipeline_v3.py` e `test_cpre_pipeline_v3.py` — nenhum deles estava na lista original. Cap 9→13 (11 esperados + 2 incidentais). A correção mínima permanece a derivada da revisão do Slice 004: projetar detecção somente quando `reconciliation.action != "nir_review"` (ou gate equivalente preservando a projeção para singletons válidos de mismatch); `apps/cases/procedures.py` só entra se estritamente necessário (escalar antes de editar fora da lista emendada). **Segunda emenda (durante execução, fatos verificados pelo parent):** o `<select name="exam_type">` da lista operacional vive em `templates/intake/my_cases.html` (L34), não em `_my_cases_content.html` (apenas header+cards) — mesmo erro de ponteiro do Slice 005; `my_cases.html` entra como incidental adicional (cap 12→13). Confirmado com o worker: o gate de correção do R3a é **somente para especializados** (dívida nomeia echo/cpre; colonoscopia/combinado na correção mantém comportamento atual — flag gateia criação, não correção). **Terceira emenda (durante execução, fato verificado pelo parent):** `test_corrected_resubmission.py::test_invalid_type_falls_back_to_all` usava `exam_type="cpre"` como exemplo de valor inválido (L879); R1 torna `cpre` dimensão válida e o teste quebraria — mesma classe da correção de premissa aprovada no Slice 004 (`test_exam_type_correction.py`). Arquivo entra como incidental (cap 13→14); troca somente do valor inválido, preservando a intenção e os demais usos legítimos de cpre no arquivo.
 
 ## Matriz requisito → arquivo → teste/check
 

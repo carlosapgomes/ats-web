@@ -38,6 +38,7 @@
     </div>
     <div class="col-md-6 text-md-end mt-3 mt-md-0">
       <span class="status-badge {{ status_css }} fs-6">{{ status_label }}</span>
+      <span class="badge exam-type-badge exam-type-{{ declared_type_key }} ms-2 fs-6">{{ declared_label }}</span>
       {% if case.post_schedule_issue_status == "opened" %}
       <div class="mt-2">
         {% if case.post_acceptance_issue_context == "operational_notice" %}

@@ -408,6 +408,24 @@
           EDA + Colonoscopia {% if correction_form_context.declared_type_key == "eda_colonoscopy" %}(atual){% endif %}
         </label>
       </div>
+      {% if correction_form_context.echoendoscopy_intake_enabled %}
+      <div class="form-check">
+        <input class="form-check-input" type="radio" name="exam_type" id="exam-type-echoendoscopy" value="echoendoscopy"
+               {% if correction_form_context.declared_type_key == "echoendoscopy" %}disabled{% endif %}>
+        <label class="form-check-label" for="exam-type-echoendoscopy">
+          Ecoendoscopia {% if correction_form_context.declared_type_key == "echoendoscopy" %}(atual){% endif %}
+        </label>
+      </div>
+      {% endif %}
+      {% if correction_form_context.cpre_intake_enabled %}
+      <div class="form-check">
+        <input class="form-check-input" type="radio" name="exam_type" id="exam-type-cpre" value="cpre"
+               {% if correction_form_context.declared_type_key == "cpre" %}disabled{% endif %}>
+        <label class="form-check-label" for="exam-type-cpre">
+          CPRE {% if correction_form_context.declared_type_key == "cpre" %}(atual){% endif %}
+        </label>
+      </div>
+      {% endif %}
     </div>
     <div class="mb-3">
       <label for="correction-reason-code" class="form-label fw-semibold">
