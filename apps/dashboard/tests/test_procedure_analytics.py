@@ -118,6 +118,42 @@ def _seed_four_cases(user):
     return a, b, c, d
 
 
+def _seed_specialized_cases(user):
+    """5 casos (Slice 008): Eco, CPRE, EDA, combinado e Eco com negativa integral.
+
+    Eco e CPRE confirmados existem de propósito para provar que não inflam EDA
+    nem o contador de agendamentos casados; o único casado é o combinado.
+    """
+    Case.objects.all().delete()
+    eco = _make_case(
+        user,
+        "SP-ECO",
+        declared=("echoendoscopy",),
+        detected=("echoendoscopy",),
+        approved=("echoendoscopy",),
+        appointment_status="confirmed",
+    )
+    cpre = _make_case(
+        user,
+        "SP-CPRE",
+        declared=("cpre",),
+        detected=("cpre",),
+        approved=("cpre",),
+        appointment_status="confirmed",
+    )
+    eda = _make_case(user, "SP-EDA", declared=("eda",), detected=("eda",), approved=("eda",))
+    combined = _make_case(
+        user,
+        "SP-COMB",
+        declared=("eda", "colonoscopy"),
+        detected=("eda", "colonoscopy"),
+        approved=("eda", "colonoscopy"),
+        appointment_status="confirmed",
+    )
+    denied = _make_case(user, "SP-DENY", declared=("echoendoscopy",), detected=("echoendoscopy",))
+    return eco, cpre, eda, combined, denied
+
+
 # ── R1/R6: Consolidado case-level e snapshot preservados ────────────────
 
 
@@ -176,12 +212,33 @@ class TestDimensionBreakdownAndVolume:
             total = sum(breakdown[dim].values())
             assert total == 4, f"Breakdown {dim} deve fechar com 4 casos, obteve {total}"
 
-        # Declarado: A,D = EDA; B = combinado; C = Colonoscopia
-        assert breakdown["declared"] == {"eda": 2, "colonoscopy": 1, "eda_colonoscopy": 1, "none": 0}
-        # Detectado: A = EDA; B,D = combinado; C = Colonoscopia
-        assert breakdown["detected"] == {"eda": 1, "colonoscopy": 1, "eda_colonoscopy": 2, "none": 0}
+        # Declarado: A,D = EDA; B = combinado; C = Colonoscopia; sem especializados
+        assert breakdown["declared"] == {
+            "eda": 2,
+            "colonoscopy": 1,
+            "eda_colonoscopy": 1,
+            "echoendoscopy": 0,
+            "cpre": 0,
+            "none": 0,
+        }
+        # Detectado: A = EDA; B,D = combinado; C = Colonoscopia; sem especializados
+        assert breakdown["detected"] == {
+            "eda": 1,
+            "colonoscopy": 1,
+            "eda_colonoscopy": 2,
+            "echoendoscopy": 0,
+            "cpre": 0,
+            "none": 0,
+        }
         # Autorizado: A = EDA; B = combinado; C = Nenhum (negado integral); D = Colonoscopia
-        assert breakdown["approved"] == {"eda": 1, "colonoscopy": 1, "eda_colonoscopy": 1, "none": 1}
+        assert breakdown["approved"] == {
+            "eda": 1,
+            "colonoscopy": 1,
+            "eda_colonoscopy": 1,
+            "echoendoscopy": 0,
+            "cpre": 0,
+            "none": 1,
+        }
 
     def test_component_volume_counts_combined_as_two(self, client) -> None:
         from apps.dashboard.procedure_analytics import compute_procedure_analytics
@@ -193,11 +250,29 @@ class TestDimensionBreakdownAndVolume:
         volume = analytics["volume"]
 
         # Declarado: EDA em A,B,D (3); Colon em B,C (2); combinado B (1)
-        assert volume["declared"] == {"eda": 3, "colonoscopy": 2, "combined": 1}
+        assert volume["declared"] == {
+            "eda": 3,
+            "colonoscopy": 2,
+            "echoendoscopy": 0,
+            "cpre": 0,
+            "combined": 1,
+        }
         # Detectado: EDA em A,B,D (3); Colon em B,C,D (3); combinado B,D (2)
-        assert volume["detected"] == {"eda": 3, "colonoscopy": 3, "combined": 2}
+        assert volume["detected"] == {
+            "eda": 3,
+            "colonoscopy": 3,
+            "echoendoscopy": 0,
+            "cpre": 0,
+            "combined": 2,
+        }
         # Autorizado: EDA em A,B (2); Colon em B,D (2); combinado B (1)
-        assert volume["approved"] == {"eda": 2, "colonoscopy": 2, "combined": 1}
+        assert volume["approved"] == {
+            "eda": 2,
+            "colonoscopy": 2,
+            "echoendoscopy": 0,
+            "cpre": 0,
+            "combined": 1,
+        }
 
         # Casos (4) ≠ componentes (5 no declarado): 4 + 1 combinado = 5
         assert volume["declared"]["eda"] + volume["declared"]["colonoscopy"] == 5
@@ -229,6 +304,95 @@ class TestDimensionBreakdownAndVolume:
 
 
 # ── R4: Matriz de conversão e agendamentos casados ──────────────────────
+
+
+@pytest.mark.django_db
+class TestSpecializedDimensionAnalytics:
+    """Slice 008 (R1–R4) — Ecoendoscopia/CPRE em categorias e volumes exclusivos.
+
+    Cada caso pertence a exatamente uma categoria (nunca dupla contagem), o
+    volume por componente contempla os quatro tipos sem inflar EDA, e somente
+    o conjunto exato EDA + Colonoscopia confirmado compõe os casados.
+    """
+
+    def test_breakdown_includes_specialized_and_closes(self, client) -> None:
+        from apps.dashboard.procedure_analytics import compute_procedure_analytics
+
+        user = _login_as(client)
+        _seed_specialized_cases(user)
+
+        breakdown = compute_procedure_analytics(Case.objects.all())["breakdown"]
+
+        for dim in ("declared", "detected", "approved"):
+            assert sum(breakdown[dim].values()) == 5, f"Breakdown {dim} deve fechar com 5 casos"
+
+        # Declarado: EDA (SP-EDA), combinado (SP-COMB), Eco (SP-ECO, SP-DENY), CPRE (SP-CPRE)
+        assert breakdown["declared"] == {
+            "eda": 1,
+            "colonoscopy": 0,
+            "eda_colonoscopy": 1,
+            "echoendoscopy": 2,
+            "cpre": 1,
+            "none": 0,
+        }
+        # Autorizado: SP-DENY cai em Nenhum (negativa integral) sem virar EDA
+        assert breakdown["approved"] == {
+            "eda": 1,
+            "colonoscopy": 0,
+            "eda_colonoscopy": 1,
+            "echoendoscopy": 1,
+            "cpre": 1,
+            "none": 1,
+        }
+
+    def test_component_volume_includes_specialized_without_inflating_eda(self, client) -> None:
+        from apps.dashboard.procedure_analytics import compute_procedure_analytics
+
+        user = _login_as(client)
+        _seed_specialized_cases(user)
+
+        volume = compute_procedure_analytics(Case.objects.all())["volume"]
+
+        assert volume["declared"] == {
+            "eda": 2,
+            "colonoscopy": 1,
+            "echoendoscopy": 2,
+            "cpre": 1,
+            "combined": 1,
+        }
+        # Eco/CPRE nunca incrementam EDA: apenas SP-EDA e SP-COMB contam como EDA.
+        assert volume["declared"]["eda"] == 2
+
+    def test_paired_confirmed_excludes_specialized(self, client) -> None:
+        from apps.dashboard.procedure_analytics import compute_procedure_analytics
+
+        user = _login_as(client)
+        _seed_specialized_cases(user)
+
+        analytics = compute_procedure_analytics(Case.objects.all())
+
+        # Somente SP-COMB (EDA + Colonoscopia confirmado); Eco/CPRE confirmados não contam.
+        assert analytics["paired_confirmed"] == 1
+
+    def test_paired_confirmed_rejects_non_paired_two_set(self, client) -> None:
+        """R4 — igualdade exata com {EDA, Colonoscopia}; ``len == 2`` não é regra.
+
+        Rows incompatíveis (EDA + Ecoendoscopia) só existem por escrita direta
+        (os serviços bloqueiam a matriz fechada); a métrica deve ignorá-las
+        ainda que o conjunto tenha tamanho 2 e o agendamento esteja confirmado.
+        """
+        from apps.cases.models import CaseProcedure
+        from apps.dashboard.procedure_analytics import compute_procedure_analytics
+
+        user = _login_as(client)
+        Case.objects.all().delete()
+        case = _make_case(user, "SP-LEN2", appointment_status="confirmed")
+        # Escrita direta contorna a validação de matriz para provar o predicado exato.
+        CaseProcedure.objects.create(case=case, procedure_type="eda", doctor_disposition="approved")
+        CaseProcedure.objects.create(case=case, procedure_type="echoendoscopy", doctor_disposition="approved")
+
+        analytics = compute_procedure_analytics(Case.objects.all())
+        assert analytics["paired_confirmed"] == 0, "Conjunto de tamanho 2 não-casado não conta"
 
 
 @pytest.mark.django_db
@@ -359,6 +523,87 @@ class TestDimensionTableFilter:
         content = client.get(url).content.decode()
         assert "TF-3" in content, "Nenhum na dimensão autorizado deve mostrar TF-3"
         assert "TF-1" not in content and "TF-2" not in content
+
+    def test_selection_filters_specialized_types(self, client) -> None:
+        """R5 — seleções Ecoendoscopia/CPRE são exclusivas e não tocam EDA."""
+        user = _login_as(client)
+        Case.objects.all().delete()
+        _make_case(user, "SP-EDA-1", declared=("eda",), detected=("eda",))
+        _make_case(user, "SP-ECO-1", declared=("echoendoscopy",), detected=("echoendoscopy",))
+        _make_case(user, "SP-CPRE-1", declared=("cpre",), detected=("cpre",))
+
+        url = (
+            reverse("dashboard:index")
+            + "?procedure_dimension=declared&procedure_selection=echoendoscopy&case_scope=all"
+        )
+        content = client.get(url).content.decode()
+        assert "SP-ECO-1" in content, "Seleção Ecoendoscopia deve mostrar SP-ECO-1"
+        assert "SP-EDA-1" not in content and "SP-CPRE-1" not in content
+
+        url = reverse("dashboard:index") + "?procedure_dimension=declared&procedure_selection=cpre&case_scope=all"
+        content = client.get(url).content.decode()
+        assert "SP-CPRE-1" in content, "Seleção CPRE deve mostrar SP-CPRE-1"
+        assert "SP-EDA-1" not in content and "SP-ECO-1" not in content
+
+        # Eco/CPRE não aparecem sob seleção EDA (nunca inflam EDA).
+        url = reverse("dashboard:index") + "?procedure_dimension=declared&procedure_selection=eda&case_scope=all"
+        content = client.get(url).content.decode()
+        assert "SP-EDA-1" in content
+        assert "SP-ECO-1" not in content and "SP-CPRE-1" not in content
+
+    def test_specialized_selection_composes_with_search_and_status(self, client) -> None:
+        """R5 — seleção especializada compõe com busca e status (AND)."""
+        user = _login_as(client)
+        Case.objects.all().delete()
+        _make_case(
+            user,
+            "SP-AND-1",
+            declared=("cpre",),
+            detected=("cpre",),
+            status=CaseStatus.WAIT_DOCTOR,
+            structured_data={"patient": {"name": "Carla CPRE"}},
+        )
+        _make_case(
+            user,
+            "SP-AND-2",
+            declared=("cpre",),
+            detected=("cpre",),
+            status=CaseStatus.NEW,
+            structured_data={"patient": {"name": "Carla CPRE"}},
+        )
+        _make_case(
+            user,
+            "SP-AND-3",
+            declared=("echoendoscopy",),
+            detected=("echoendoscopy",),
+            status=CaseStatus.WAIT_DOCTOR,
+            structured_data={"patient": {"name": "Carla ECO"}},
+        )
+
+        url = (
+            reverse("dashboard:index")
+            + "?procedure_dimension=detected&procedure_selection=cpre&search=carla&status="
+            + CaseStatus.WAIT_DOCTOR
+            + "&case_scope=all"
+        )
+        content = client.get(url).content.decode()
+        assert "SP-AND-1" in content, "Dimensão+CPRE+busca+status devem casar SP-AND-1"
+        assert "SP-AND-2" not in content, "Status NEW não pode casar com WAIT_DOCTOR"
+        assert "SP-AND-3" not in content, "Ecoendoscopia não pode casar com CPRE"
+
+    def test_partial_pagination_preserves_specialized_selection(self, client) -> None:
+        """R5 — paginação do partial preserva dimensão + seleção especializada."""
+        user = _login_as(client)
+        Case.objects.all().delete()
+        for i in range(25):
+            _make_case(user, f"SP-PP-{i:03d}", declared=("cpre",), detected=("cpre",))
+        response = client.get(
+            reverse("dashboard:index") + "?procedure_dimension=detected&procedure_selection=cpre&case_scope=all",
+            headers={"X-ATS-Partial": "case-list"},
+        )
+        content = response.content.decode()
+        assert "procedure_dimension=detected" in content, "Paginação do partial deve preservar dimensão"
+        assert "procedure_selection=cpre" in content, "Paginação do partial deve preservar seleção especializada"
 
     def test_selection_composes_with_search_and_status(self, client) -> None:
         user = _login_as(client)
@@ -743,5 +988,11 @@ class TestProcedureDimensionAuthority:
 
         analytics = compute_procedure_analytics(Case.objects.all())
         assert analytics["breakdown"]["declared"]["eda_colonoscopy"] == 1
-        assert analytics["volume"]["declared"] == {"eda": 1, "colonoscopy": 1, "combined": 1}
+        assert analytics["volume"]["declared"] == {
+            "eda": 1,
+            "colonoscopy": 1,
+            "echoendoscopy": 0,
+            "cpre": 0,
+            "combined": 1,
+        }
         assert analytics["paired_confirmed"] == 1

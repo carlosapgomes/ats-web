@@ -5007,7 +5007,8 @@ class TestProcedureSummaryCard:
     """Slice 001 — resumo compacto case-level no card de procedimentos.
 
     R1: marcador ``.procedure-summary-card``, título compacto e exatamente
-        quatro itens case-level (EDA, Colonoscopia, EDA + Colonoscopia, Nenhum).
+        seis itens case-level (EDA, Colonoscopia, EDA + Colonoscopia,
+        Ecoendoscopia, CPRE, Nenhum).
     R2: labels orientados ao usuário com fonte única (Solicitado (NIR) /
         Detectado (análise) / Autorizado (médico)) no seletor do card, no
         ``select`` da lista e no badge dimensional.
@@ -5024,16 +5025,52 @@ class TestProcedureSummaryCard:
         assert end != -1, "Card deve terminar antes da seção Sub-metrics"
         return content[start:end]
 
-    def test_procedure_summary_card_has_marker_title_and_four_items(self, client) -> None:
-        """R1 — marcador, título compacto e exatamente quatro itens case-level."""
+    def test_procedure_summary_card_has_marker_title_and_six_items(self, client) -> None:
+        """R1 — marcador, título compacto e exatamente seis itens case-level."""
         _login_as(client, "manager")
         content = client.get(reverse("dashboard:index")).content.decode()
         card = self._summary_card_block(content)
         assert "PROCEDIMENTOS —" in card, "Título compacto sem 'POR DIMENSÃO'"
         assert "POR DIMENSÃO" not in card
-        assert card.count("procedure-summary-item") == 4, "Exatamente quatro categorias"
-        for category in ("EDA", "Colonoscopia", "EDA + Colonoscopia", "Nenhum"):
+        assert card.count("procedure-summary-item") == 6, "Seis categorias exclusivas"
+        for category in ("EDA", "Colonoscopia", "EDA + Colonoscopia", "Ecoendoscopia", "CPRE", "Nenhum"):
             assert category in card, f"Categoria {category!r} deve constar no resumo"
+
+    def test_procedure_selection_select_includes_specialized_options(self, client) -> None:
+        """R5 — o select de procedimento oferece Ecoendoscopia e CPRE."""
+        _login_as(client, "manager")
+        content = client.get(reverse("dashboard:index")).content.decode()
+        assert '<option value="echoendoscopy"' in content
+        assert '<option value="cpre"' in content
+        assert ">Ecoendoscopia</option>" in content
+        assert ">CPRE</option>" in content
+
+    def test_case_badge_shows_specialized_category(self, client) -> None:
+        """R1 — badge do card projeta a categoria especializada das rows."""
+        from apps.cases.procedures import set_declared_procedures
+
+        user = _login_as(client, "manager")
+        Case.objects.all().delete()
+        eco = _create_case(created_by=user, status=CaseStatus.NEW, agency_record_number="SP-BADGE-ECO")
+        set_declared_procedures(case=eco, procedure_types=["echoendoscopy"], actor=user)
+        cpre = _create_case(created_by=user, status=CaseStatus.NEW, agency_record_number="SP-BADGE-CPRE")
+        set_declared_procedures(case=cpre, procedure_types=["cpre"], actor=user)
+        content = client.get(reverse("dashboard:index")).content.decode()
+        assert 'title="Categoria na dimensão Solicitado (NIR)">Ecoendoscopia</span>' in content
+        assert 'title="Categoria na dimensão Solicitado (NIR)">CPRE</span>' in content
+
+    def test_no_new_conversion_matrix_panel_for_specialized(self, client) -> None:
+        """R6 — nenhuma matriz de conversão/painel proibido é introduzida."""
+        _login_as(client, "manager")
+        content = client.get(reverse("dashboard:index")).content.decode()
+        assert content.count("procedure-summary-card") == 1, "Card único de resumo de procedimentos"
+        for forbidden in (
+            "MATRIZ DE CONVERSÃO",
+            "VOLUME DE PROCEDIMENTOS",
+            "BREAKDOWN POR CATEGORIA",
+            "AGENDAMENTOS CASADOS",
+        ):
+            assert forbidden not in content, f"{forbidden!r} não pode existir na página"
 
     def test_procedure_summary_removes_advanced_comparison(self, client) -> None:
         """R3/R5 — matriz, volume, tabela técnica e explicações ausentes do HTML."""

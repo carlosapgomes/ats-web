@@ -18,9 +18,11 @@ from django.db.models import Exists, OuterRef, Q
 
 from apps.cases.models import CaseEvent, CaseProcedure, ProcedureType
 from apps.cases.procedures import (
+    SUPPORTED_PROCEDURE_TYPES,
     get_approved_procedure_types,
     get_declared_procedure_types,
     get_detected_procedure_types,
+    is_paired_appointment_set,
     selection_key,
 )
 
@@ -35,17 +37,27 @@ DIMENSION_LABELS: dict[str, str] = {
 }
 
 # Seleções válidas do parâmetro ``procedure_selection`` da tabela gerencial.
-SELECTIONS: tuple[str, ...] = ("all", "eda", "colonoscopy", "eda_colonoscopy", "none")
+# ``none`` permanece porque a dimensão consultada admite negativa integral.
+SELECTIONS: tuple[str, ...] = ("all", "eda", "colonoscopy", "eda_colonoscopy", "echoendoscopy", "cpre", "none")
 
-# Categorias exclusivas de um caso numa dimensão (D14). ``none`` pertence ao
+# Categorias exclusivas de um caso numa dimensão (D13). ``none`` pertence ao
 # universo quando a projeção da dimensão é vazia (ex.: negativa integral na
 # dimensão autorizado, ou detecção ainda não sustentada).
-CATEGORY_ORDER: tuple[str, ...] = ("eda", "colonoscopy", "eda_colonoscopy", "none")
+CATEGORY_ORDER: tuple[str, ...] = (
+    "eda",
+    "colonoscopy",
+    "eda_colonoscopy",
+    "echoendoscopy",
+    "cpre",
+    "none",
+)
 
 CATEGORY_LABELS: dict[str, str] = {
     "eda": "EDA",
     "colonoscopy": "Colonoscopia",
     "eda_colonoscopy": "EDA + Colonoscopia",
+    "echoendoscopy": "Ecoendoscopia",
+    "cpre": "CPRE",
     "none": "Nenhum",
 }
 
@@ -77,7 +89,8 @@ def resolve_selection(raw: str) -> str:
 
 
 def category_key(procedure_types: tuple[str, ...]) -> str:
-    """Categoria exclusiva de um conjunto ordenado: eda|colonoscopy|eda_colonoscopy|none."""
+    """Categoria exclusiva de um conjunto ordenado: eda|colonoscopy|eda_colonoscopy|
+    echoendoscopy|cpre|none."""
     return selection_key(procedure_types) or "none"
 
 
@@ -111,16 +124,23 @@ def compute_procedure_analytics(period_cases: Any) -> dict[str, Any]:
 
         {
             "breakdown": {dimensão: {categoria: int}},
-            "volume": {dimensão: {"eda": int, "colonoscopy": int, "combined": int}},
+            "volume": {dimensão: {componente: int}},
             "matrix": {(declarado_key, detectado_key): {autorizado_key: int}},
             "paired_confirmed": int,
         }
+
+    ``volume`` distingue os quatro componentes (``eda``, ``colonoscopy``,
+    ``echoendoscopy``, ``cpre``) e ``combined`` (set exato EDA + Colonoscopia),
+    sem jamais somar Eco/CPRE em EDA.
     """
     prefetched = period_cases.prefetch_related("procedures")
     admin_closed_ids = admin_closed_case_ids(period_cases)
 
     breakdown: dict[str, dict[str, int]] = {dim: {cat: 0 for cat in CATEGORY_ORDER} for dim in DIMENSIONS}
-    volume: dict[str, dict[str, int]] = {dim: {"eda": 0, "colonoscopy": 0, "combined": 0} for dim in DIMENSIONS}
+    volume: dict[str, dict[str, int]] = {
+        dim: {**{procedure_type: 0 for procedure_type in SUPPORTED_PROCEDURE_TYPES}, "combined": 0}
+        for dim in DIMENSIONS
+    }
     matrix: dict[tuple[str, str], dict[str, int]] = {}
     paired_confirmed = 0
 
@@ -133,11 +153,10 @@ def compute_procedure_analytics(period_cases: Any) -> dict[str, Any]:
         for dim in DIMENSIONS:
             proc_set = per_dimension[dim]
             breakdown[dim][category_key(proc_set)] += 1
-            if ProcedureType.EDA in proc_set:
-                volume[dim]["eda"] += 1
-            if ProcedureType.COLONOSCOPY in proc_set:
-                volume[dim]["colonoscopy"] += 1
-            if len(proc_set) == 2:
+            for procedure_type in SUPPORTED_PROCEDURE_TYPES:
+                if procedure_type in proc_set:
+                    volume[dim][procedure_type] += 1
+            if is_paired_appointment_set(proc_set):
                 volume[dim]["combined"] += 1
 
         path = (category_key(declared), category_key(detected))
@@ -145,7 +164,11 @@ def compute_procedure_analytics(period_cases: Any) -> dict[str, Any]:
         approved_key = category_key(approved)
         cell[approved_key] = cell.get(approved_key, 0) + 1
 
-        if len(approved) == 2 and case.appointment_status == "confirmed" and case.case_id not in admin_closed_ids:
+        if (
+            is_paired_appointment_set(approved)
+            and case.appointment_status == "confirmed"
+            and case.case_id not in admin_closed_ids
+        ):
             paired_confirmed += 1
 
     return {
@@ -164,22 +187,38 @@ def apply_procedure_selection_filter(cases_qs: Any, dimension: str, selection: s
     ``Case.exam_type`` nem de ``doctor_decision`` (Slice 010, R2). ``none``
     significa ausência de rows na dimensão consultada (conjunto vazio),
     consistente com o breakdown Python e os helpers de domínio.
+
+    Slice 008 (D13): predicado de singleton exige presença do tipo e ausência
+    dos demais; ``eda_colonoscopy`` exige exatamente EDA + Colonoscopia. Assim
+    Eco/CPRE nunca casam as categorias clássicas e vice-versa.
     """
     if selection == "all":
         return cases_qs
 
     predicate = DIMENSION_PREDICATES[dimension]
     proc = CaseProcedure.objects.filter(case=OuterRef("pk"))
-    eda_match = Exists(proc.filter(procedure_type=ProcedureType.EDA, **predicate))
-    col_match = Exists(proc.filter(procedure_type=ProcedureType.COLONOSCOPY, **predicate))
+
+    def present(procedure_type: str) -> Exists:
+        return Exists(proc.filter(procedure_type=procedure_type, **predicate))
+
+    annotations = {
+        "_proc_eda": present(ProcedureType.EDA),
+        "_proc_colonoscopy": present(ProcedureType.COLONOSCOPY),
+        "_proc_echoendoscopy": present(ProcedureType.ECHOENDOSCOPY),
+        "_proc_cpre": present(ProcedureType.CPRE),
+    }
 
     if selection == "eda":
-        category_q = Q(_proc_eda=True) & Q(_proc_col=False)
+        category_q = Q(_proc_eda=True) & Q(_proc_colonoscopy=False, _proc_echoendoscopy=False, _proc_cpre=False)
     elif selection == "colonoscopy":
-        category_q = Q(_proc_eda=False) & Q(_proc_col=True)
+        category_q = Q(_proc_colonoscopy=True) & Q(_proc_eda=False, _proc_echoendoscopy=False, _proc_cpre=False)
+    elif selection == "echoendoscopy":
+        category_q = Q(_proc_echoendoscopy=True) & Q(_proc_eda=False, _proc_colonoscopy=False, _proc_cpre=False)
+    elif selection == "cpre":
+        category_q = Q(_proc_cpre=True) & Q(_proc_eda=False, _proc_colonoscopy=False, _proc_echoendoscopy=False)
     elif selection == "eda_colonoscopy":
-        category_q = Q(_proc_eda=True) & Q(_proc_col=True)
+        category_q = Q(_proc_eda=True, _proc_colonoscopy=True) & Q(_proc_echoendoscopy=False, _proc_cpre=False)
     else:  # none — ausência de rows da dimensão consultada
-        category_q = Q(_proc_eda=False) & Q(_proc_col=False)
+        category_q = Q(_proc_eda=False, _proc_colonoscopy=False, _proc_echoendoscopy=False, _proc_cpre=False)
 
-    return cases_qs.annotate(_proc_eda=eda_match, _proc_col=col_match).filter(category_q)
+    return cases_qs.annotate(**annotations).filter(category_q)
