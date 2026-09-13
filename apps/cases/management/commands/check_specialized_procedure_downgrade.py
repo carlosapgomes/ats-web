@@ -7,20 +7,32 @@ primeira row especializada, uma imagem antiga que só conhece o writer 2.0 e os
 dois tipos convencionais é insegura. Não existe deleção de dados nem reverse
 migration destrutiva para viabilizar downgrade.
 
-Exit 0 (``allowed``) somente pré-cutover, com zero write 3.0 e zero artefato
-especializado. Exit 1 (``blocked``) diante de QUALQUER uma das cinco classes:
+``status`` e exit code refletem SOMENTE a fronteira do primeiro write 3.0
+(``quick-precheck-legacy-distinction-css-scope`` R1). Exit 0 (``allowed``)
+somente pré-cutover, com zero write 3.0, zero row especializada e zero job 3.0
+em voo. Exit 1 (``blocked``) diante de QUALQUER uma das três classes de
+fronteira:
 
 1. ``pipeline_job_in_flight`` — caso em estado de pipeline; o writer ativo é
    exclusivamente o 3.0 (Slice 001/R1), então todo job em voo é um job 3.0;
 2. ``specialized_case_procedure`` — row ``CaseProcedure`` de Ecoendoscopia/CPRE;
-3. ``specialized_case_event`` — ``CaseEvent`` cujo payload referencia um
-   procedimento especializado;
-4. ``legacy_echo_artifact`` — artefato derivado do sinal legado
-   ``echoendoscopy`` (projeção ``priority_signals``), que o writer 3.0 exclui
-   (design D14); a checagem é conservadora e fail-closed;
-5. ``v3_artifact_write`` — marcador ``schema_version="3.0"`` persistido em
+3. ``v3_artifact_write`` — marcador ``schema_version="3.0"`` persistido em
    ``Case.structured_data``, ``Case.suggested_action`` ou payload de
    ``CaseEvent``.
+
+Dado legado da era 2.0 (R2/R3) é informativo e NUNCA bloqueia o cutover. As duas
+classes legadas
+
+4. ``legacy_echo_artifact`` — artefato derivado do sinal legado
+   ``echoendoscopy`` (projeção ``priority_signals``), que o writer 3.0 exclui
+   (design D14); e
+5. ``specialized_case_event`` — ``CaseEvent`` cujo payload referencia um
+   procedimento especializado;
+
+aparecem no relatório em ``old_image_return_available`` (``false`` quando há
+legado ou fronteira cruzada) e em ``notes``, que registra a indisponibilidade
+da exceção de retorno à imagem anterior (runbook §4.3). Separar os grupos é o
+que mantém o gate pré-cutover binário e satisfazível em bancos com histórico v2.
 
 O relatório é machine-readable: um único documento JSON no stdout, apenas com
 contagens e UUIDs de caso (amostras limitadas) — nunca texto clínico, PDF,
@@ -46,6 +58,26 @@ COMMAND_NAME = "check_specialized_procedure_downgrade"
 
 # Fronteira de rollback (ADR-0006 §9 / design Migration Plan).
 BOUNDARY = "first_3_0_write"
+
+# Códigos estáveis das classes do relatório.
+CODE_PIPELINE_JOB = "pipeline_job_in_flight"
+CODE_SPECIALIZED_ROW = "specialized_case_procedure"
+CODE_SPECIALIZED_EVENT = "specialized_case_event"
+CODE_LEGACY_ECHO = "legacy_echo_artifact"
+CODE_V3_WRITE = "v3_artifact_write"
+
+# Classes de fronteira: writes do writer 3.0. Bloqueiam o cutover.
+BOUNDARY_CODES: tuple[str, ...] = (CODE_PIPELINE_JOB, CODE_SPECIALIZED_ROW, CODE_V3_WRITE)
+
+# Classes de dado legado v2 (sinal de Eco da era 2.0): informativas, nunca
+# bloqueiam o cutover — apenas tornam a exceção de retorno à imagem anterior
+# (runbook §4.3) indisponível.
+LEGACY_CODES: tuple[str, ...] = (CODE_LEGACY_ECHO, CODE_SPECIALIZED_EVENT)
+
+LEGACY_EXCEPTION_NOTE = (
+    "old_image_return_available=false: exceção de retorno à imagem anterior (runbook Seção 4.3) "
+    "indisponível por dado legado v2 ({codes}) — dado legado não bloqueia o cutover."
+)
 
 # Sinal prioritário legado derivado do subtipo EDA ``echoendoscopy``
 # (``apps/cases/priority_signals.py``).
@@ -159,37 +191,43 @@ def build_report() -> dict[str, Any]:
     specialized_events, v3_events = _scan_events()
     checks = [
         _check(
-            "pipeline_job_in_flight",
+            CODE_PIPELINE_JOB,
             "Caso em estado de pipeline (job 3.0 em voo)",
             _pipeline_job_ids(),
         ),
         _check(
-            "specialized_case_procedure",
+            CODE_SPECIALIZED_ROW,
             f"Row CaseProcedure de {_SPECIALIZED_LABELS}",
             _specialized_row_ids(),
         ),
         _check(
-            "specialized_case_event",
+            CODE_SPECIALIZED_EVENT,
             f"CaseEvent com procedimento especializado ({_SPECIALIZED_LABELS})",
             specialized_events,
         ),
         _check(
-            "legacy_echo_artifact",
+            CODE_LEGACY_ECHO,
             "Artefato derivado do sinal legado de Ecoendoscopia",
             _legacy_echo_ids(),
         ),
         _check(
-            "v3_artifact_write",
+            CODE_V3_WRITE,
             "Write 3.0 persistido (structured_data/suggested_action/evento)",
             [*_v3_case_artifact_ids(), *v3_events],
         ),
     ]
-    blocking_checks = [check["code"] for check in checks if check["count"]]
+    counts = {check["code"]: check["count"] for check in checks}
+    blocking_checks = [code for code in BOUNDARY_CODES if counts[code]]
+    legacy_hits = [code for code in LEGACY_CODES if counts[code]]
+    allowed = not blocking_checks
+    notes = [LEGACY_EXCEPTION_NOTE.format(codes=", ".join(legacy_hits))] if legacy_hits else []
     return {
         "command": COMMAND_NAME,
         "boundary": BOUNDARY,
-        "status": "blocked" if blocking_checks else "allowed",
+        "status": "allowed" if allowed else "blocked",
         "blocking_checks": blocking_checks,
+        "old_image_return_available": allowed and not legacy_hits,
+        "notes": notes,
         "checks": checks,
     }
 
@@ -203,7 +241,10 @@ class Command(BaseCommand):
         if report["status"] == "blocked":
             raise CommandError(
                 "Downgrade bloqueado: a fronteira do primeiro write 3.0 já foi cruzada "
-                f"({', '.join(report['blocking_checks'])}). Caminho suportado: desligar "
-                "ECHOENDOSCOPY_INTAKE_ENABLED e CPRE_INTAKE_ENABLED, manter imagem/schema 3.0, "
-                "drenar jobs e corrigir para frente — sem deleção de dados e sem reverse migration."
+                f"({', '.join(report['blocking_checks'])}). Dado legado v2 não bloqueia o cutover; "
+                "quando presente, apenas torna a exceção de retorno à imagem anterior (Seção 4.3) "
+                "indisponível — ver `old_image_return_available` no relatório. Caminho suportado: "
+                "desligar ECHOENDOSCOPY_INTAKE_ENABLED e CPRE_INTAKE_ENABLED, manter imagem/schema "
+                "3.0, drenar jobs e corrigir para frente — sem deleção de dados e sem reverse "
+                "migration."
             )

@@ -186,6 +186,7 @@ uv run ruff check . && uv run ruff format --check . && uv run mypy . && uv run p
 - Nao deixar TODO/FIXME sem issue ou plano.
 - Nao acoplar regras de negocio em camada de apresentacao.
 - Nao executar slices horizontais por camada sem valor end-to-end.
+- Nao introduzir vocabulario novo de classe CSS em fatia de UI sem incluir o arquivo CSS no blast radius da fatia (ex.: `static/css/app.css`) e/ou um teste de guarda que pine esse vocabulario.
 
 ## 9. Prompt de Reentrada
 

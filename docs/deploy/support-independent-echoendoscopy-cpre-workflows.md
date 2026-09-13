@@ -174,9 +174,13 @@ PIPE_STATES=$($DPROD exec -T db psql -U ats_web -d ats_web -At -v ON_ERROR_STOP=
   exit 1; }
 
 # 3d. PRECHECK DE DOWNGRADE (machine-readable, não destrutivo). Pré-cutover
-#     DEVE retornar status "allowed" e exit code 0. Qualquer classe bloqueante
-#     significa que a fronteira do write 3.0 já foi cruzada — PARAR e ir para a
+#     DEVE retornar status "allowed" e exit code 0. O status/exit code refletem
+#     SOMENTE a fronteira do primeiro write 3.0 (pipeline_job_in_flight,
+#     specialized_case_procedure, v3_artifact_write): qualquer classe de
+#     fronteira significa que o write 3.0 já foi cruzado — PARAR e ir para a
 #     Seção 4.2 (rollback suportado), nunca para a imagem antiga.
+#     Dado legado v2 (legacy_echo_artifact, specialized_case_event) NÃO bloqueia
+#     o cutover: aparece em "old_image_return_available" e na nota do relatório.
 $DPROD run --rm web uv run python manage.py check_specialized_procedure_downgrade \
   --settings=config.settings.prod
 
@@ -192,12 +196,18 @@ print('OK: nomes legados monitorados:', len(LEGACY_PROMPT_NAMES))
 ```
 
 **Saída esperada do 3d (pré-cutover):** um JSON com `"status": "allowed"`,
-`"blocking_checks": []` e os cinco checks com `count: 0`
-(`pipeline_job_in_flight`, `specialized_case_procedure`,
-`specialized_case_event`, `legacy_echo_artifact`, `v3_artifact_write`).
+`"blocking_checks": []` e os três checks de **fronteira** com `count: 0`
+(`pipeline_job_in_flight`, `specialized_case_procedure`, `v3_artifact_write`).
+Os dois checks de **dado legado** (`legacy_echo_artifact`,
+`specialized_case_event`) podem ter `count > 0` sem bloquear o cutover: nesse
+caso o relatório traz `"old_image_return_available": false` e uma nota em
+`"notes"` registrando que a exceção de retorno à imagem anterior (Seção 4.3)
+fica indisponível por dado legado v2. O campo vem `true` somente com a fronteira
+intacta **e** zero legado.
 
-**Se o precheck sair com exit code 1:** a fronteira já foi cruzada. **PARAR** o
-deploy de cutover e seguir a Seção 4.2 — sem reagendar o writer 2.0.
+**Se o precheck sair com exit code 1:** a fronteira já foi cruzada — dado legado
+v2, por si só, nunca produz exit 1. **PARAR** o deploy de cutover e seguir a
+Seção 4.2 — sem reagendar o writer 2.0.
 
 ### Passo 4 — JANELA DE MANUTENÇÃO: parar todos os writers e aplicar migrations
 
@@ -275,8 +285,10 @@ CONSTRAINT_N=$($DPROD exec -T db psql -U ats_web -d ats_web -At -v ON_ERROR_STOP
   "SELECT count(*) FROM pg_constraint WHERE conname='uniq_case_procedure_type';")
 [ "${CONSTRAINT_N}" = "1" ] || { echo "ERRO: constraint uniq_case_procedure_type ausente"; exit 1; }
 
-# 6c. O precheck de downgrade ainda deve estar `allowed` — prova de que nenhum
-#     write 3.0 existia quando a janela abriu.
+# 6c. O precheck de downgrade ainda deve estar `allowed` (exit 0) — prova de que
+#     nenhum write 3.0 existia quando a janela abriu. O status reflete somente as
+#     classes de fronteira; `old_image_return_available` é o único indicador de
+#     dado legado v2 (não bloqueia o cutover).
 $DPROD run --rm web uv run python manage.py check_specialized_procedure_downgrade \
   --settings=config.settings.prod
 ```
@@ -484,9 +496,11 @@ especializada, o caminho suportado é **fix-forward**:
 
 ### 4.3 Retorno à imagem anterior (exceção, somente PRÉ-cutover)
 
-Admissível **apenas** se o precheck do Passo 3 retornar `allowed` (zero write
-3.0, zero row/evento especializado, zero artefato derivado do sinal legado, zero
-job em voo). Sequência:
+Admissível **apenas** se o precheck do Passo 3 retornar `allowed` **e**
+`"old_image_return_available": true` — isto é, zero write 3.0, zero row
+especializada, zero job 3.0 em voo e zero dado legado v2. O `allowed` (gate de
+cutover) não cobre dado legado; é o campo `old_image_return_available` que o faz.
+Sequência:
 
 1. `$DPROD stop web worker pdf_worker` (nenhum writer ativo na janela).
 2. Reativar a matriz de prompts compatível com a imagem anterior (o writer 2.0
@@ -497,8 +511,19 @@ job em voo). Sequência:
 4. Validar um envio EDA em homologação antes de liberar para a operação.
 
 O precheck (`check_specialized_procedure_downgrade`) é o gate **binário** desse
-caminho: exit code 1 significa que a exceção **não** está disponível — voltar à
-Seção 4.2.
+caminho: exit code 1 significa fronteira cruzada — voltar à Seção 4.2. Com exit
+0 e `"old_image_return_available": false` a exceção também **não** está
+disponível: o banco carrega dado legado v2 (sinal de Eco da era 2.0) que a
+imagem anterior não interpreta, e a nota `"notes"` do relatório registra isso.
+
+> **NOTA HISTÓRICA (2026-09-13):** no rollout de produção de 2026-09-13 o
+> precheck reportava o dado legado v2 (14 casos encerrados com sinal de Eco da
+> era 2.0) como bloqueio, o que tornava o Passo 3d insatisfazível por
+> construção; o operador aprovou um desvio (Opção A) para prosseguir o cutover.
+> Esse desvio **não** é comportamento esperado e não deve ser repetido: o gate
+> do Passo 3d é binário e satisfazível (apenas classes de fronteira), e a
+> condição de dado legado vive em `old_image_return_available`, exclusiva desta
+> exceção.
 
 ---
 

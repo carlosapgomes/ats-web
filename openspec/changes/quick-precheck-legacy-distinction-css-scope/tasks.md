@@ -2,7 +2,7 @@
 
 ## Slice vertical
 
-- [ ] 1.1 Slice 001 — Precheck separa fronteira 3.0 de legado v2; runbook e AGENTS.md alinhados (`slices/slice-001-precheck-legacy-distinction.md`)
+- [x] 1.1 Slice 001 — Precheck separa fronteira 3.0 de legado v2; runbook e AGENTS.md alinhados (`slices/slice-001-precheck-legacy-distinction.md`)
 
 ## Preflight
 
@@ -11,8 +11,8 @@
 
 ## Definition of Done
 
-- [ ] Cenário legado-only: exit 0, `status: allowed`, `old_image_return_available: false`.
-- [ ] Fronteira 3.0 cruzada: exit 1, `status: blocked` (comportamento preservado).
-- [ ] Runbook (3d/6c/§4.3) coerente com a saída nova.
-- [ ] AGENTS.md §8 com o anti-padrão de CSS em fatia de UI.
-- [ ] Gate completo verde; commit atômico.
+- [x] Cenário legado-only: exit 0, `status: allowed`, `old_image_return_available: false`.
+- [x] Fronteira 3.0 cruzada: exit 1, `status: blocked` (comportamento preservado).
+- [x] Runbook (3d/6c/§4.3) coerente com a saída nova.
+- [x] AGENTS.md §8 com o anti-padrão de CSS em fatia de UI.
+- [x] Gate completo verde; commit atômico.
