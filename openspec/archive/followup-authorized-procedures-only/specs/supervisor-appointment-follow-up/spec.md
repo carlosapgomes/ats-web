@@ -4,7 +4,7 @@ Restringe a cobertura do follow-up às rows `CaseProcedure` autorizadas pela dec
 
 ## MODIFIED Requirements
 
-### Requirement: O sistema SHALL registrar o desfecho por procedimento autorizado de casos agendados e de vinda imediata
+### Requirement: O sistema SHALL registrar o desfecho por procedimento de casos agendados e de vinda imediata
 
 O sistema SHALL permitir que supervisores do CHD (`manager` com papel `scheduler`, papel ativo `manager`) e `admin` registrem, por caso, o desfecho de cada `CaseProcedure` com `doctor_disposition == "approved"` (realizado / não realizado) — e, quando não realizado, a causa estruturada do conjunto fechado: absenteísmo, preparo inadequado, cancelamento por falta de recursos no dia (com submotivo) ou outras causas (texto livre) — além da ocorrência de internação no nível do caso, sem alterar o estado FSM do caso nem disparar fluxos operacionais. Rows `CaseProcedure` não autorizadas (negadas ou pendentes) SHALL ser isentas de desfecho, e desfecho informado para row não autorizada SHALL ser rejeitado.
 
