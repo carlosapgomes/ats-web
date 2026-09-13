@@ -59,12 +59,28 @@ def is_echoendoscopy_intake_enabled() -> bool:
     return bool(getattr(settings, "ECHOENDOSCOPY_INTAKE_ENABLED", False))
 
 
+def is_cpre_intake_enabled() -> bool:
+    """Flag independente de intake para CPRE (Slice 004, R1/D4).
+
+    Mesma fronteira da flag de Ecoendoscopia: web-only (upload, correção e
+    reenvio) e independente dela. Nenhum worker/pipeline/fila/médico consulta
+    esta flag; caso existente sempre conclui.
+    """
+    return bool(getattr(settings, "CPRE_INTAKE_ENABLED", False))
+
+
 # Seleção declarada aceita no intake: EDA, Colonoscopia, a combinação
-# eda_colonoscopy e (Slice 002, sob flag) echoendoscopy. O valor combinado NÃO
-# é membro de ProcedureType.values — é chave de seleção derivada da projeção,
-# não field choice. CPRE fica fora até o slice vertical próprio (Slice 004).
+# eda_colonoscopy e (sob flag própria) echoendoscopy e cpre. O valor combinado
+# NÃO é membro de ProcedureType.values — é chave de seleção derivada da
+# projeção, não field choice.
 _DECLARED_SELECTION_VALUES: frozenset[str] = frozenset(
-    {ProcedureType.EDA, ProcedureType.COLONOSCOPY, EDA_COLONOSCOPY, ProcedureType.ECHOENDOSCOPY}
+    {
+        ProcedureType.EDA,
+        ProcedureType.COLONOSCOPY,
+        EDA_COLONOSCOPY,
+        ProcedureType.ECHOENDOSCOPY,
+        ProcedureType.CPRE,
+    }
 )
 
 
@@ -72,7 +88,7 @@ def validate_exam_type(exam_type: str | None) -> str:
     """Valida e normaliza a seleção declarada (intake e correção NIR).
 
     Levanta ``ValueError`` se ausente/inválida. Aceita EDA, Colonoscopia,
-    Ecoendoscopia ou a combinação ``eda_colonoscopy`` (chave de seleção
+    Ecoendoscopia, CPRE ou a combinação ``eda_colonoscopy`` (chave de seleção
     derivada) — nunca inferência por texto (R1). Desde o Slice 005 a correção
     NIR aceita as seleções, então esta validação é compartilhada por novos
     intakes/reenvios e pela correção; o gate de flag de intake fica em
@@ -80,7 +96,7 @@ def validate_exam_type(exam_type: str | None) -> str:
     """
     value = (exam_type or "").strip()
     if value not in _DECLARED_SELECTION_VALUES:
-        raise ValueError("Selecione o tipo de exame (EDA, Colonoscopia, EDA + Colonoscopia ou Ecoendoscopia).")
+        raise ValueError("Selecione o tipo de exame (EDA, Colonoscopia, EDA + Colonoscopia, Ecoendoscopia ou CPRE).")
     return value
 
 
@@ -90,6 +106,7 @@ def ensure_exam_type_allowed(exam_type: str | None) -> str:
     - tipo ausente/inválido → ValueError;
     - colonoscopia ou combinação com flag de intake desligada → ValueError;
     - ecoendoscopia com a própria flag desligada → ValueError;
+    - cpre com a própria flag desligada → ValueError (independente da de Eco);
     - EDA sempre permitido.
 
     Backend é a fonte de verdade; templates/JS apenas melhoram a UX.
@@ -103,6 +120,11 @@ def ensure_exam_type_allowed(exam_type: str | None) -> str:
     if value == ProcedureType.ECHOENDOSCOPY and not is_echoendoscopy_intake_enabled():
         raise ValueError(
             "Ecoendoscopia ainda não está habilitada para novos envios. "
+            "Envie lotes apenas de EDA ou selecione um tipo disponível."
+        )
+    if value == ProcedureType.CPRE and not is_cpre_intake_enabled():
+        raise ValueError(
+            "CPRE ainda não está habilitada para novos envios. "
             "Envie lotes apenas de EDA ou selecione um tipo disponível."
         )
     return value

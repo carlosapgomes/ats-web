@@ -369,7 +369,7 @@ class TestCorrectionService:
         with pytest.raises(ValueError):
             correct_case_exam_type(
                 case_id=case.case_id,
-                new_exam_type="cpre",
+                new_exam_type="eda_cpre",
                 user=user,
                 active_role="nir",
                 lock_token=token,
@@ -1564,7 +1564,7 @@ class TestCorrectionView:
 
         response = client.post(
             reverse("intake:exam_type_correction", args=[case.case_id]),
-            {"exam_type": "cpre", "reason_code": "nir_identified_exam", "lock_token": token},
+            {"exam_type": "eda_cpre", "reason_code": "nir_identified_exam", "lock_token": token},
             follow=True,
         )
         content = response.content.decode()

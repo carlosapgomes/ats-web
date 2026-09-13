@@ -42,6 +42,10 @@ expected_files:
   - apps/intake/tests/test_specialized_final_response.py
 allowed_incidental_files:
   - apps/llm/management/commands/seed_prompts.py
+  - apps/intake/views.py
+  - apps/intake/tests/test_exam_type_correction.py
+  - apps/intake/tests/test_slice_001_combined_intake.py
+  - apps/pipeline/tests/test_v3_existing_workflow.py
 file_cap: 17
 out_of_scope:
   - policy clínica não aprovada
@@ -51,6 +55,8 @@ out_of_scope:
 ```
 
 Escalar se CPRE exigir branch fora do catálogo/profile, nova FSM ou ampliação clínica.
+
+**Emenda de composição aprovada pelo parent (registro, sem decisão de produto):** total tocado permanece 17 (= cap), mas 4 arquivos entraram nos incidentais — `apps/intake/views.py` (plumbing puro para expor `cpre_intake_enabled` aos dois templates listados; mesma classe dos gates médicos aprovados no Slice 001) e 3 arquivos de teste de caracterização cujas asserções codificavam o contrato superado "CPRE permanece fechado" (`test_exam_type_correction.py` usava `cpre` como exemplo de tipo inválido; `test_slice_001_combined_intake.py` radios 4→5; `test_v3_existing_workflow.py` `TestSpecializedIntakeStaysClosed`→`TestSpecializedIntakeFlags`) — mesma classe da emenda aprovada no Slice 002. `config/settings/base.py`, `procedure_reconciliation.py` e `templates/doctor/decision.html` (listados) não precisaram de mudança.
 
 ## Matriz requisito → arquivo → teste/check
 

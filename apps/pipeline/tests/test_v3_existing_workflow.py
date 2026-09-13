@@ -200,19 +200,26 @@ class TestSeedPromptsV3:
 # ── R8: intake especializado permanece fechado ──────────────────────────────
 
 
-class TestSpecializedIntakeStaysClosed:
-    """Slice 002 substitui o R8 do Slice 001: Ecoendoscopia entra sob flag.
+class TestSpecializedIntakeFlags:
+    """Slice 002/004 substituem o R8 do Slice 001: os dois especializados entram sob flag.
 
-    O Slice 001 mantinha TODO intake especializado fechado. O Slice 002 abre
-    Ecoendoscopia atrás de ``ECHOENDOSCOPY_INTAKE_ENABLED`` (default false) e
-    mantém CPRE fechada — o contrato é a flag, não a ausência da opção.
+    O Slice 001 mantinha TODO intake especializado fechado. O Slice 002 abriu
+    Ecoendoscopia atrás de ``ECHOENDOSCOPY_INTAKE_ENABLED`` e o Slice 004 abriu
+    CPRE atrás de ``CPRE_INTAKE_ENABLED`` (default false) — o contrato é a flag,
+    não a ausência da opção.
     """
 
-    def test_intake_rejects_still_unsupported_specialized_types(self) -> None:
+    def test_intake_rejects_unknown_procedure_selections(self) -> None:
         from apps.intake.services import _DECLARED_SELECTION_VALUES, validate_exam_type
 
-        assert _DECLARED_SELECTION_VALUES == {"eda", "colonoscopy", "eda_colonoscopy", "echoendoscopy"}
-        for value in ("cpre", "eda_cpre", "eda_echoendoscopy"):
+        assert _DECLARED_SELECTION_VALUES == {
+            "eda",
+            "colonoscopy",
+            "eda_colonoscopy",
+            "echoendoscopy",
+            "cpre",
+        }
+        for value in ("eda_cpre", "eda_echoendoscopy"):
             with pytest.raises(ValueError):
                 validate_exam_type(value)
 
@@ -220,23 +227,17 @@ class TestSpecializedIntakeStaysClosed:
         assert getattr(settings, "ECHOENDOSCOPY_INTAKE_ENABLED", False) is False
         assert getattr(settings, "CPRE_INTAKE_ENABLED", False) is False
 
-    def test_cpre_has_no_visual_option_in_intake(self) -> None:
-        """CPRE permanece oculta no intake até o slice vertical próprio."""
+    def test_cpre_visual_option_is_flag_gated(self) -> None:
+        """Opção visual existe, mas nasce ``disabled`` com a flag desligada."""
         from pathlib import Path
 
         from django.conf import settings as django_settings
 
         base = Path(django_settings.BASE_DIR)
-        templates = [
-            base / "templates/intake/intake_home.html",
-            base / "templates/intake/corrected_resubmission.html",
-            base / "templates/intake/closed_cases_search.html",
-            base / "templates/intake/case_detail.html",
-        ]
-        for template_path in templates:
-            source = template_path.read_text(encoding="utf-8")
-            assert 'value="cpre"' not in source
-            assert ">CPRE<" not in source
+        for relative in ("templates/intake/intake_home.html", "templates/intake/corrected_resubmission.html"):
+            source = (base / relative).read_text(encoding="utf-8")
+            assert 'value="cpre"' in source
+            assert "cpre_intake_enabled" in source
 
     def test_echoendoscopy_option_is_flag_gated(self) -> None:
         """Opção visual existe, mas nasce ``disabled`` com a flag desligada."""

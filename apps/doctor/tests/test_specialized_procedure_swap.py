@@ -1,16 +1,18 @@
 """Slice 003 — troca médica especializada: manter, negar e trocar/aprovar.
 
-Cobre R1–R4 do slice ``slice-003-echoendoscopy-doctor-swap-and-downstream``:
+Cobre R1–R4 do slice ``slice-003-echoendoscopy-doctor-swap-and-downstream`` e
+R5 do slice ``slice-004-cpre-end-to-end``:
 
 - R1: singleton pode ser mantido, negado ou trocado/aprovado como Ecoendoscopia
-  com uma justificativa; o template médico tem ramo próprio por procedimento
-  (fim do ``{% else %}`` que ligava qualquer tipo não-EDA a Colonoscopia);
+  (Slice 003) ou CPRE (Slice 004) com uma justificativa; o template médico tem
+  campo próprio por procedimento (fim do ``{% else %}`` que ligava qualquer
+  tipo não-EDA a Colonoscopia);
 - R2: origem denied + destino approved persistem atomicamente — falha
   estrutural não deixa write parcial, evento ou transição;
 - R3: a troca NÃO chama LLM, fila django-q2 nem policy, e não exibe
   sugestão/checklist do destino;
-- R4: substituição integral de combinado por Ecoendoscopia é aceita; conjunto
-  parcial incompatível é rejeitado sem write.
+- R4/R5: substituição integral de combinado por especializado é aceita;
+  conjunto parcial incompatível é rejeitado sem write.
 """
 
 from __future__ import annotations
@@ -265,13 +267,13 @@ class TestSpecializedProcedureSwap:
         assert CaseEvent.objects.filter(case=case, event_type="ADMISSION_FLOW_OPERATIONAL_NOTICE").exists()
         assert not CaseEvent.objects.filter(case=case, event_type="CASE_READY_FOR_SCHEDULER").exists()
 
-    def test_unsupported_specialized_type_is_not_silently_dropped(self, client) -> None:
-        """CPRE ainda não é ofertado, mas o catálogo já o suporta (Slice 004)."""
+    def test_cpre_is_selectable_and_unknown_field_fails_closed(self, client) -> None:
+        """CPRE entra no catálogo selecionável (Slice 004); fora dele é rejeitado."""
         from apps.cases.procedures import SUPPORTED_PROCEDURE_TYPES
         from apps.doctor.forms import SELECTABLE_PROCEDURE_TYPES
 
         assert ProcedureType.CPRE in SUPPORTED_PROCEDURE_TYPES
-        assert ProcedureType.CPRE not in SELECTABLE_PROCEDURE_TYPES
+        assert ProcedureType.CPRE in SELECTABLE_PROCEDURE_TYPES
 
         case = self._make_case(detected=[ProcedureType.EDA])
         doctor = self._login(client, "doctor")
@@ -284,14 +286,14 @@ class TestSpecializedProcedureSwap:
             support_flag="none",
             admission_flow="scheduled",
             token=token,
-            procedure_cpre="approved",
-            procedure_cpre_reason="tentativa de inclusão não ofertada",
+            procedure_eda_colonoscopy="approved",
+            procedure_eda_colonoscopy_reason="conjunto derivado não é procedimento do catálogo",
         )
 
         assert response.status_code == 200  # fail-closed, não descarta em silêncio
         case = Case.objects.get(pk=case.pk)
         assert case.status == CaseStatus.WAIT_DOCTOR
-        assert not case.procedures.filter(procedure_type=ProcedureType.CPRE).exists()
+        assert get_approved_procedure_types(case) == ()
 
     # ── R2: atomicidade ─────────────────────────────────────────────────
 
@@ -428,3 +430,173 @@ class TestSpecializedProcedureSwap:
             assert row.doctor_reason == ""
         assert not case.procedures.filter(procedure_type=ProcedureType.ECHOENDOSCOPY).exists()
         assert not CaseEvent.objects.filter(case=case, event_type="DOCTOR_PROCEDURE_DECISIONS_RECORDED").exists()
+
+    # ── Slice 004 (R5): CPRE — manter, negar e trocar/aprovar ───────────────
+
+    def test_swap_singleton_eda_to_cpre(self, client) -> None:
+        """EDA declarada/detectada → negada; CPRE → aprovada com justificativa."""
+        case = self._make_case(detected=[ProcedureType.EDA])
+        doctor = self._login(client, "doctor")
+        token = self._claim_lock(case.case_id, doctor)
+
+        response = self._submit(
+            client,
+            case,
+            procedures={
+                ProcedureType.EDA: {"disposition": "denied", "reason": "Substituída por CPRE"},
+                ProcedureType.CPRE: {"disposition": "approved", "reason": "CPRE indicada para via biliar"},
+            },
+            support_flag="anesthesist",
+            admission_flow="scheduled",
+            token=token,
+        )
+        assert response.status_code == 302
+
+        case = Case.objects.get(pk=case.pk)
+        assert case.doctor_decision == "accept"
+        assert case.status == CaseStatus.WAIT_APPT
+        eda_row = case.procedures.get(procedure_type=ProcedureType.EDA)
+        cpre_row = case.procedures.get(procedure_type=ProcedureType.CPRE)
+        assert eda_row.doctor_disposition == "denied"
+        assert eda_row.doctor_reason == "Substituída por CPRE"
+        assert cpre_row.doctor_disposition == "approved"
+        assert cpre_row.doctor_reason == "CPRE indicada para via biliar"
+        assert get_approved_procedure_types(case) == (ProcedureType.CPRE,)
+        changed = CaseEvent.objects.get(case=case, event_type="DOCTOR_PROCEDURE_SET_CHANGED")
+        assert changed.payload["detected"] == [ProcedureType.EDA]
+        assert changed.payload["approved"] == [ProcedureType.CPRE]
+        assert changed.payload["reason_present"] is True
+
+    def test_detected_cpre_row_requires_a_disposition(self, client) -> None:
+        """Dívida do Slice 003 (P2): row CPRE detectada exige decisão própria (R1)."""
+        case = self._make_case(detected=[ProcedureType.CPRE])
+        doctor = self._login(client, "doctor")
+        token = self._claim_lock(case.case_id, doctor)
+
+        response = self._submit(client, case, procedures={}, token=token)
+
+        assert response.status_code == 200
+        assert "Defina a decisão para este procedimento detectado." in response.content.decode()
+        case = Case.objects.get(pk=case.pk)
+        assert case.status == CaseStatus.WAIT_DOCTOR
+        assert case.procedures.get(procedure_type=ProcedureType.CPRE).doctor_disposition == "pending"
+
+    def test_keep_singleton_cpre(self, client) -> None:
+        case = self._make_case(detected=[ProcedureType.CPRE])
+        doctor = self._login(client, "doctor")
+        token = self._claim_lock(case.case_id, doctor)
+
+        response = self._submit(
+            client,
+            case,
+            procedures={ProcedureType.CPRE: {"disposition": "approved", "reason": ""}},
+            support_flag="none",
+            admission_flow="scheduled",
+            token=token,
+        )
+        assert response.status_code == 302
+        case = Case.objects.get(pk=case.pk)
+        assert case.doctor_decision == "accept"
+        assert get_approved_procedure_types(case) == (ProcedureType.CPRE,)
+
+    def test_deny_singleton_cpre_requires_own_reason(self, client) -> None:
+        """Negar CPRE exige razão no PRÓPRIO campo do procedimento."""
+        case = self._make_case(detected=[ProcedureType.CPRE])
+        doctor = self._login(client, "doctor")
+        token = self._claim_lock(case.case_id, doctor)
+
+        response = self._submit(
+            client,
+            case,
+            procedures={ProcedureType.CPRE: {"disposition": "denied", "reason": ""}},
+            token=token,
+        )
+        assert response.status_code == 200
+        html = response.content.decode()
+        textarea = re.search(r'<textarea[^>]*name="procedure_cpre_reason"[^>]*>', html)
+        assert textarea is not None, "textarea de razão da CPRE ausente"
+        assert "is-invalid" in textarea.group(0)
+
+        case = Case.objects.get(pk=case.pk)
+        assert case.status == CaseStatus.WAIT_DOCTOR
+        assert get_approved_procedure_types(case) == ()
+
+    def test_cpre_swap_does_not_call_llm_queue_or_policy(self, client) -> None:
+        """Spies provam zero rerun/repolicy/enfileiramento na troca para CPRE (R5)."""
+        case = self._make_case(detected=[ProcedureType.EDA])
+        doctor = self._login(client, "doctor")
+        token = self._claim_lock(case.case_id, doctor)
+
+        with (
+            mock.patch("apps.pipeline.orchestrator.run_pipeline") as run_pipeline,
+            mock.patch("apps.pipeline.tasks.enqueue_pipeline") as enqueue_pipeline,
+            mock.patch("apps.pipeline.tasks.async_task") as async_task,
+            mock.patch("apps.pipeline.policy.procedure_policy.evaluate_procedure_policy") as evaluate_policy,
+        ):
+            response = self._submit(
+                client,
+                case,
+                procedures={
+                    ProcedureType.EDA: {"disposition": "denied", "reason": "troca"},
+                    ProcedureType.CPRE: {"disposition": "approved", "reason": "troca"},
+                },
+                support_flag="none",
+                admission_flow="scheduled",
+                token=token,
+            )
+
+        assert response.status_code == 302
+        run_pipeline.assert_not_called()
+        enqueue_pipeline.assert_not_called()
+        async_task.assert_not_called()
+        evaluate_policy.assert_not_called()
+
+    def test_combined_full_replacement_by_cpre(self, client) -> None:
+        """{EDA, Colonoscopia} integralmente substituído por {CPRE} (R5)."""
+        case = self._make_case(detected=[ProcedureType.EDA, ProcedureType.COLONOSCOPY])
+        doctor = self._login(client, "doctor")
+        token = self._claim_lock(case.case_id, doctor)
+
+        response = self._submit(
+            client,
+            case,
+            procedures={
+                ProcedureType.EDA: {"disposition": "denied", "reason": "troca"},
+                ProcedureType.COLONOSCOPY: {"disposition": "denied", "reason": "troca"},
+                ProcedureType.CPRE: {"disposition": "approved", "reason": "substitui ambos"},
+            },
+            support_flag="none",
+            admission_flow="scheduled",
+            token=token,
+        )
+        assert response.status_code == 302
+        case = Case.objects.get(pk=case.pk)
+        assert case.doctor_decision == "accept"
+        assert get_approved_procedure_types(case) == (ProcedureType.CPRE,)
+
+    def test_partial_incompatible_set_with_cpre_rejected_without_write(self, client) -> None:
+        """Manter Colonoscopia e incluir CPRE é incompatível: zero write (R5)."""
+        case = self._make_case(detected=[ProcedureType.EDA, ProcedureType.COLONOSCOPY])
+        doctor = self._login(client, "doctor")
+        token = self._claim_lock(case.case_id, doctor)
+
+        response = self._submit(
+            client,
+            case,
+            procedures={
+                ProcedureType.EDA: {"disposition": "denied", "reason": "troca"},
+                ProcedureType.COLONOSCOPY: {"disposition": "approved", "reason": ""},
+                ProcedureType.CPRE: {"disposition": "approved", "reason": "inclusão indevida"},
+            },
+            support_flag="none",
+            admission_flow="scheduled",
+            token=token,
+        )
+        assert response.status_code == 200  # re-render com erro de matriz
+
+        case = Case.objects.get(pk=case.pk)
+        assert case.status == CaseStatus.WAIT_DOCTOR
+        assert case.doctor_decision == ""
+        for row in case.procedures.all():
+            assert row.doctor_disposition == "pending"
+        assert not case.procedures.filter(procedure_type=ProcedureType.CPRE).exists()

@@ -77,6 +77,10 @@ Valores fixos e enums obrigatorios:
   Quando report_finding_present="yes", evidence_context_excerpt e
   finding_excerpt sao obrigatorios e devem ser trechos reais do relatorio
   principal; uso somente de solicitacao/agendamento NAO conta como achado.
+  Registre cada imagem qualificante do relatorio principal: para Ecoendoscopia,
+  TC ou RM de abdome/abdome superior; para CPRE, USG (ultrasound) de
+  abdome/abdome superior/hepatobiliar, TC ou RM de abdome/abdome superior, ou
+  colangiorressonancia/CPRM (mrcp) hepatobiliar.
 - policy_precheck: {excluded_from_eda_flow, exclusion_reason, labs_required,
   labs_pass, labs_failed_items, ecg_required, ecg_present, pediatric_flag,
   notes}.

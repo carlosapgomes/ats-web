@@ -35,6 +35,10 @@ class ExamProfile:
     # Pares (modality, anatomical_site) aceitos para a imagem abdominal
     # adicional (design D6/D7). Vazio = sem requisito de imagem adicional.
     accepted_imaging: tuple[tuple[str, str], ...] = field(default_factory=tuple)
+    # Descrição clínica do requisito de imagem quando ``accepted_imaging`` não
+    # é vazio: usada apenas no ``reason_text`` da pendência de imagem (D7/D8),
+    # para que o motivo exibido ao NIR/médico corresponda ao perfil real.
+    imaging_requirement_label: str = ""
 
 
 EDA_PROFILE = ExamProfile(
@@ -90,6 +94,7 @@ ECHOENDOSCOPY_PROFILE = ExamProfile(
         ("mri", "abdomen"),
         ("mri", "upper_abdomen"),
     ),
+    imaging_requirement_label="TC ou RM de abdome/abdome superior com laudo de conclusao/achado",
 )
 
 # D7: CPRE exige USG abdominal/abdome superior/hepatobiliar, TC/RM de
@@ -99,7 +104,14 @@ CPRE_PROFILE = ExamProfile(
     label="CPRE",
     allows_foreign_body_exception=False,
     allowed_priority_signal_codes=frozenset({"pediatric"}),
-    scope_aliases=(),
+    # Aliases de solicitação (nome completo + sigla) usados pela detecção de
+    # escopo (Slice 004, R2). Fonte única: ``scope_detection`` compõe o padrão
+    # de ocorrência a partir daqui.
+    scope_aliases=(
+        "cpre",
+        "colangiopancreatografia endoscopica retrograda",
+        "colangiopancreatografia retrograda endoscopica",
+    ),
     canonical_procedure="CPRE",
     accepted_imaging=(
         ("ultrasound", "abdomen"),
@@ -110,6 +122,12 @@ CPRE_PROFILE = ExamProfile(
         ("mri", "abdomen"),
         ("mri", "upper_abdomen"),
         ("mrcp", "hepatobiliary"),
+    ),
+    # Descrição clínica do requisito de imagem aceito (D7): o perfil é a fonte
+    # única das diferenças clínicas; a policy apenas a apresenta no motivo.
+    imaging_requirement_label=(
+        "USG de abdome/abdome superior/hepatobiliar, TC ou RM de abdome/abdome superior "
+        "ou CPRM hepatobiliar, com laudo de conclusao/achado"
     ),
 )
 

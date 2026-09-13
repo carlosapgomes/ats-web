@@ -13,12 +13,14 @@ from apps.cases.procedures import (
 )
 
 # Tipos que o médico pode manter, negar ou aprovar como destino da troca
-# (design D10/D14). CPRE entra reutilizando esta mesma estrutura no Slice 004 —
-# basta acrescentá-lo aqui, sem novo ramo de template ou validação.
+# (design D10/D14). O catálogo selecionável é exatamente os quatro tipos
+# suportados: CPRE entrou no Slice 004 reutilizando esta mesma estrutura, sem
+# novo ramo de template ou validação.
 SELECTABLE_PROCEDURE_TYPES: tuple[str, ...] = (
     ProcedureType.EDA,
     ProcedureType.COLONOSCOPY,
     ProcedureType.ECHOENDOSCOPY,
+    ProcedureType.CPRE,
 )
 
 
@@ -71,8 +73,8 @@ class DoctorDecisionForm(forms.Form):
     # ── Campos por procedimento (modo procedure-neutral) ─────────────
     # Construídos a partir de ``SELECTABLE_PROCEDURE_TYPES`` em ``__init__``:
     # um par ``procedure_<tipo>``/``procedure_<tipo>_reason`` por tipo, sem
-    # ramo por procedimento. R1 do Slice 003 exige que Ecoendoscopia tenha
-    # campo próprio (o template ligava todo tipo não-EDA a Colonoscopia).
+    # ramo por procedimento (R1 do Slice 003 e R5 do Slice 004 exigem campo
+    # próprio para Ecoendoscopia e CPRE).
 
     def __init__(self, *args: Any, case: Case | None = None, **kwargs: Any) -> None:
         super().__init__(*args, **kwargs)
@@ -138,9 +140,10 @@ class DoctorDecisionForm(forms.Form):
     def _reject_unknown_procedure_fields(self) -> None:
         """Rejeita ``procedure_*`` fora do catálogo selecionável (fail-closed).
 
-        Valor desconhecido NUNCA é descartado em silêncio (D2): um campo
-        especializado não ofertado neste slice (ex.: CPRE) enviado por POST
-        manipulado invalida o formulário inteiro antes de qualquer write.
+        Valor desconhecido NUNCA é descartado em silêncio (D2): um campo que
+        não corresponde a um tipo do catálogo (ex.: a chave derivada
+        ``procedure_eda_colonoscopy``) enviado por POST manipulado invalida o
+        formulário inteiro antes de qualquer write.
         """
         known = set(self.fields)
         for key in self.data:

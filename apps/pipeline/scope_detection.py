@@ -18,7 +18,7 @@ import re
 import unicodedata
 from dataclasses import dataclass
 
-from apps.cases.exam_profiles import COLONOSCOPY_PROFILE
+from apps.cases.exam_profiles import COLONOSCOPY_PROFILE, CPRE_PROFILE
 
 _SUPPORTED_EDA_SUBTYPES: frozenset[str] = frozenset(
     {"standard", "gastrostomy", "esophageal_dilation", "foreign_body", "echoendoscopy"}
@@ -822,9 +822,9 @@ def _extract_v3_structured_procedures(
 ) -> set[str]:
     """Procedimentos da lista estruturada v3 com evidence spans válidos.
 
-    Cobre os quatro tipos do catálogo. Ecoendoscopia/CPRE saem apenas do campo
-    estruturado: a detecção textual especializada (aliases e precedência
-    ``EDA com/e``) pertence ao slice vertical próprio (D3).
+    Cobre os quatro tipos do catálogo. Ecoendoscopia/CPRE também são
+    detectados textualmente (occurrences + precedência ``EDA com/e``) em
+    ``detect_requested_procedures_v3``; aqui entra apenas o campo estruturado.
     """
     raw = llm1_structured_data.get("requested_procedures")
     if not isinstance(raw, list):
@@ -851,10 +851,10 @@ def detect_requested_procedures_v3(
     """Detecta solicitações atuais para o contrato 3.0 (quatro tipos).
 
     EDA/Colonoscopia preservam a detecção textual já existente (contrato 2.0).
-    Ecoendoscopia combina a lista estruturada v3 com as ocorrências textuais
-    qualificadas (R2): um pedido atual textual (inclusive a expressão composta
-    ``EDA com/e Ecoendoscopia``) já é evidência forte. Histórico/negação nunca
-    criam componente. CPRE textuval permanece fora do slice vertical próprio.
+    Ecoendoscopia e CPRE combinam a lista estruturada v3 com as ocorrências
+    textuais qualificadas (R2): um pedido atual textual (inclusive a expressão
+    composta ``EDA com/e <especializado>``) já é evidência forte.
+    Histórico/negação nunca criam componente.
     """
     detection = detect_requested_procedures_v2(
         llm1_structured_data=llm1_structured_data,
@@ -1173,6 +1173,11 @@ _ECHOENDOSCOPY_TERM_PATTERN = re.compile(
     r"|\bultrassonografia\s+endoscopica\b|\bultrassom\s+endoscopico\b|\beus\b"
 )
 
+# CPRE (nome completo + sigla): aliases aprovados no perfil do procedimento
+# (D7) são a fonte única; o nome completo aparece nas duas ordens usadas na
+# prática clínica.
+_CPRE_TERM_PATTERN = re.compile("|".join(rf"\b{re.escape(alias)}\b" for alias in CPRE_PROFILE.scope_aliases))
+
 # Termos que expressam a MESMA ocorrência composta "EDA com/e <especializado>".
 _LINK_SEPARATOR_PATTERN = re.compile(r"\b(?:com|e)\b")
 
@@ -1203,6 +1208,7 @@ _PROCEDURE_OCCURRENCE_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
     ("eda", _EDA_PROCEDURE_OCCURRENCE_PATTERN),
     ("colonoscopy", _COLONOSCOPY_TERM_PATTERN),
     ("echoendoscopy", _ECHOENDOSCOPY_TERM_PATTERN),
+    ("cpre", _CPRE_TERM_PATTERN),
 )
 
 

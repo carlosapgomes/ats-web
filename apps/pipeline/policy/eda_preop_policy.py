@@ -123,6 +123,7 @@ def evaluate_preop_policy(
         allow_foreign_body_exception=profile.allows_foreign_body_exception,
         procedure_label=profile.label,
         accepted_imaging=profile.accepted_imaging,
+        imaging_requirement_label=profile.imaging_requirement_label,
         verified_imaging=verified_imaging,
     )
 
@@ -138,6 +139,7 @@ def _evaluate_common_preop_policy(
     allow_foreign_body_exception: bool,
     procedure_label: str,
     accepted_imaging: tuple[tuple[str, str], ...] = (),
+    imaging_requirement_label: str = "",
     verified_imaging: VerifiedImaging | None = None,
 ) -> dict[str, object]:
     """Shared deterministic pre-procedure evaluation across profiles (R4/D8).
@@ -169,6 +171,7 @@ def _evaluate_common_preop_policy(
         structured_data=structured_data,
         procedure_label=procedure_label,
         accepted_imaging=accepted_imaging,
+        imaging_requirement_label=imaging_requirement_label,
         verified_imaging=verified_imaging,
     )
     if failures:
@@ -199,6 +202,7 @@ def _collect_failed_requirements(
     structured_data: dict[str, object],
     procedure_label: str,
     accepted_imaging: tuple[tuple[str, str], ...] = (),
+    imaging_requirement_label: str = "",
     verified_imaging: VerifiedImaging | None = None,
 ) -> list[FailedRequirement]:
     """Coleta TODAS as pendências em ordem estável (D8).
@@ -218,6 +222,7 @@ def _collect_failed_requirements(
             accepted_imaging=accepted_imaging,
             verified_imaging=verified_imaging,
             procedure_label=procedure_label,
+            imaging_requirement_label=imaging_requirement_label,
         )
     )
     return failures
@@ -235,6 +240,7 @@ def _collect_imaging_failures(
     accepted_imaging: tuple[tuple[str, str], ...],
     verified_imaging: VerifiedImaging | None,
     procedure_label: str,
+    imaging_requirement_label: str = "",
 ) -> list[FailedRequirement]:
     """Avalia a imagem abdominal adicional de perfis especializados (D7/D8).
 
@@ -242,10 +248,15 @@ def _collect_imaging_failures(
     dimensões rederivadas (determinísticas), mas a SATISFAÇÃO exige
     ``verified=True`` com ``report_finding_present="yes"``: excerpt inventado,
     trecho de solicitação/agendamento, ambiguidade ou anexo apenas nunca aceitam.
+
+    ``imaging_requirement_label`` vem do perfil do procedimento (D7) para que o
+    motivo exibido descreva o requisito REAL do perfil (CPRE aceita USG e CPRM,
+    além de TC/RM; Ecoendoscopia aceita TC/RM).
     """
     if not accepted_imaging:
         return []
 
+    requirement = imaging_requirement_label or "imagem abdominal qualificante"
     outcomes = list(_iter_verified_outcomes(verified_imaging))
     accepted_modalities = {modality for modality, _ in accepted_imaging}
     accepted_pairs = set(accepted_imaging)
@@ -259,7 +270,7 @@ def _collect_imaging_failures(
                 category="imaging",
                 text=(
                     "Imagem abdominal qualificante ausente no relatório principal para "
-                    f"{procedure_label}: é exigida TC ou RM de abdome/abdome superior com laudo."
+                    f"{procedure_label}: é exigida {requirement}."
                 ),
             )
         ]
@@ -273,7 +284,7 @@ def _collect_imaging_failures(
                 category="imaging",
                 text=(
                     "Imagem abdominal com localização anatômica não aceita para "
-                    f"{procedure_label}: é exigida avaliação de abdome/abdome superior."
+                    f"{procedure_label}: é exigida {requirement}."
                 ),
             )
         ]

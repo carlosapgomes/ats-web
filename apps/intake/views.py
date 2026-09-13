@@ -69,6 +69,7 @@ from .services import (
     correct_case_exam_type,
     ensure_exam_type_allowed,
     is_colonoscopy_intake_enabled,
+    is_cpre_intake_enabled,
     is_echoendoscopy_intake_enabled,
     is_exam_type_correction_eligible,
     process_uploaded_files,
@@ -494,6 +495,7 @@ def intake_home(request: HttpRequest) -> HttpResponse:
             # de intake está desligada (a opção ativa só aparece com flag on).
             "colonoscopy_intake_enabled": is_colonoscopy_intake_enabled(),
             "echoendoscopy_intake_enabled": is_echoendoscopy_intake_enabled(),
+            "cpre_intake_enabled": is_cpre_intake_enabled(),
         },
     )
 
@@ -1176,6 +1178,7 @@ def corrected_resubmission(request: HttpRequest, case_id: uuid.UUID) -> HttpResp
                     "patient_name": original_case.patient_name,
                     "colonoscopy_intake_enabled": is_colonoscopy_intake_enabled(),
                     "echoendoscopy_intake_enabled": is_echoendoscopy_intake_enabled(),
+                    "cpre_intake_enabled": is_cpre_intake_enabled(),
                 },
             )
 
@@ -1213,6 +1216,7 @@ def corrected_resubmission(request: HttpRequest, case_id: uuid.UUID) -> HttpResp
                 "patient_name": original_case.patient_name,
                 "colonoscopy_intake_enabled": is_colonoscopy_intake_enabled(),
                 "echoendoscopy_intake_enabled": is_echoendoscopy_intake_enabled(),
+                "cpre_intake_enabled": is_cpre_intake_enabled(),
             },
         )
 
@@ -1227,6 +1231,7 @@ def corrected_resubmission(request: HttpRequest, case_id: uuid.UUID) -> HttpResp
             "status_css": STATUS_CSS_CLASS.get(original_case.status, "status-pending"),
             "colonoscopy_intake_enabled": is_colonoscopy_intake_enabled(),
             "echoendoscopy_intake_enabled": is_echoendoscopy_intake_enabled(),
+            "cpre_intake_enabled": is_cpre_intake_enabled(),
         },
     )
 

@@ -17,7 +17,7 @@
 
 ## 3. CPRE
 
-- [ ] 3.1 Implementar o Slice 004 (`slices/slice-004-cpre-end-to-end.md`) e provar intake, aliases, policy de USG/TC/RM/CPRM, decisão direta/troca e projeção CHD/NIR sob flag própria.
+- [x] 3.1 Implementar o Slice 004 (`slices/slice-004-cpre-end-to-end.md`) e provar intake, aliases, policy de USG/TC/RM/CPRM, decisão direta/troca e projeção CHD/NIR sob flag própria.
 
 ## 4. Jornadas operacionais por ator
 

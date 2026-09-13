@@ -1,6 +1,7 @@
-"""Slice 003 — resposta final do NIR para procedimento especializado (R6).
+"""Slice 003/004 — resposta final do NIR para procedimento especializado (R6).
 
-Cobre o recorte NIR do slice ``slice-003-echoendoscopy-doctor-swap-and-downstream``:
+Cobre o recorte NIR dos slices ``slice-003-echoendoscopy-doctor-swap-and-downstream``
+e ``slice-004-cpre-end-to-end``:
 
 - R6: a resposta final compara as TRÊS dimensões (declarado/detectado/
   autorizado), mostra as razões por componente e o badge do procedimento
@@ -176,3 +177,78 @@ class TestSpecializedFinalResponse:
 
         assert EVENT_LABELS.get("DOCTOR_PROCEDURE_SET_CHANGED")
         assert EVENT_DOT_CSS.get("DOCTOR_PROCEDURE_SET_CHANGED")
+
+    # ── Slice 004 (R6): CPRE na resposta final do NIR ───────────────────────
+
+    def test_comparison_exposes_cpre_in_three_dimensions(self) -> None:
+        """CPRE autorizada aparece na dimensão autorizada, sem label casado."""
+        from apps.accounts.models import Role
+
+        nir_user = User.objects.create_user(username=f"nir-cpre-{uuid.uuid4().hex[:8]}@test.com", password="pw")
+        role, _ = Role.objects.get_or_create(name="nir")
+        nir_user.roles.add(role)
+        case = _make_case(
+            user=nir_user,
+            declared=(ProcedureType.EDA,),
+            detected=(ProcedureType.EDA,),
+            approved=(ProcedureType.CPRE,),
+            denied=(ProcedureType.EDA,),
+            reasons={
+                ProcedureType.CPRE: "CPRE para avaliacao de via biliar",
+                ProcedureType.EDA: "Substituída por CPRE.",
+            },
+            status=CaseStatus.WAIT_R1_CLEANUP_THUMBS,
+        )
+
+        comparison = _procedure_comparison(case)
+
+        assert comparison["declared_label"] == "EDA"
+        assert comparison["detected_label"] == "EDA"
+        assert comparison["authorized_label"] == "CPRE"
+        assert comparison["is_paired"] is False
+        labels: dict[str, dict[str, object]] = {
+            str(row["label"]): row for row in cast("list[dict[str, object]]", comparison["per_procedure"])
+        }
+        assert "CPRE" in labels
+        assert labels["CPRE"]["reason"] == "CPRE para avaliacao de via biliar"
+        assert labels["CPRE"]["status"] == "Aprovado"
+
+    def test_case_detail_renders_cpre_three_dimensions_without_paired_badge(self, client) -> None:
+        client, user = _nir_client(client)
+        case = _make_case(
+            user=user,
+            declared=(ProcedureType.EDA,),
+            detected=(ProcedureType.EDA,),
+            approved=(ProcedureType.CPRE,),
+            denied=(ProcedureType.EDA,),
+            reasons={ProcedureType.CPRE: "CPRE para avaliacao de via biliar"},
+            status=CaseStatus.WAIT_R1_CLEANUP_THUMBS,
+        )
+
+        response = client.get(reverse("intake:case_detail", args=[case.case_id]))
+
+        assert response.status_code == 200
+        content = response.content.decode()
+        assert "Solicitado pelo NIR" in content
+        assert "Detectado na análise" in content
+        assert "Decisão médica" in content
+        assert "CPRE" in content
+        assert "CPRE para avaliacao de via biliar" in content
+        assert "Agendamento casado" not in content
+
+    def test_cpre_declared_badge_uses_specialized_label(self, client) -> None:
+        client, user = _nir_client(client)
+        case = _make_case(
+            user=user,
+            declared=(ProcedureType.CPRE,),
+            detected=(ProcedureType.CPRE,),
+            status=CaseStatus.WAIT_DOCTOR,
+        )
+
+        response = client.get(reverse("intake:case_detail", args=[case.case_id]))
+
+        assert response.status_code == 200
+        content = response.content.decode()
+        assert "CPRE" in content
+        assert "exam-type-cpre" in content
+        assert "Agendamento casado" not in content
