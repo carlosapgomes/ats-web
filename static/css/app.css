@@ -1308,3 +1308,18 @@ html {
   color: var(--bs-purple-text-emphasis, #4b2e83);
   border: 1px solid var(--bs-purple-border-subtle, #b99add);
 }
+
+/* Especializados (v0.8.1): mesmas distinção sutil e acessibilidade; o texto
+   permanece o identificador canônico. Ciano (info) para Ecoendoscopia e
+   rosa (pink) para CPRE — matizes distintos de eda/colonoscopy/combinado. */
+.exam-type-echoendoscopy {
+  background-color: var(--bs-info-bg-subtle, #cff4fc);
+  color: var(--bs-info-text-emphasis, #055160);
+  border: 1px solid var(--bs-info-border-subtle, #9eeaf9);
+}
+
+.exam-type-cpre {
+  background-color: var(--bs-pink-bg-subtle, #f7d6e0);
+  color: var(--bs-pink-text-emphasis, #701a3a);
+  border: 1px solid var(--bs-pink-border-subtle, #f1b0c7);
+}
