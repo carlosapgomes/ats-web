@@ -34,10 +34,12 @@ from apps.cases.models import (
 from apps.cases.navigation import resolve_safe_next_url
 from apps.cases.priority_signals import build_priority_signal_badges
 from apps.cases.procedures import (
+    SUPPORTED_PROCEDURE_TYPES,
     format_procedure_selection,
     get_approved_procedure_types,
     get_declared_procedure_types,
     get_detected_procedure_types,
+    is_paired_appointment_set,
     selection_key,
 )
 from apps.cases.services import (
@@ -169,7 +171,7 @@ def _procedure_comparison(case: Case) -> dict[str, object]:
 
     rows_by_type = {p.procedure_type: p for p in case.procedures.all()}
     per_procedure: list[dict[str, object]] = []
-    for procedure_type in (ProcedureType.EDA, ProcedureType.COLONOSCOPY):
+    for procedure_type in SUPPORTED_PROCEDURE_TYPES:
         row = rows_by_type.get(procedure_type)
         is_declared = procedure_type in declared
         is_detected = procedure_type in detected
@@ -207,7 +209,7 @@ def _procedure_comparison(case: Case) -> dict[str, object]:
         "has_detection": has_detection,
         "has_decision": has_decision,
         "per_procedure": per_procedure,
-        "is_paired": len(approved) == 2,
+        "is_paired": is_paired_appointment_set(approved),
         "paired_label": "EDA + Colonoscopia · Agendamento casado",
     }
 
@@ -292,6 +294,7 @@ EVENT_LABELS: dict[str, str] = {
     "DOCTOR_ACCEPT": "Aceito pelo médico",
     "DOCTOR_DENY": "Recusado pelo médico",
     "DOCTOR_PROCEDURE_DECISIONS_RECORDED": "Decisões médicas por procedimento registradas",
+    "DOCTOR_PROCEDURE_SET_CHANGED": "Procedimento autorizado alterado pelo médico",
     "CASE_READY_FOR_SCHEDULER": "Caso enviado para agendamento",
     "SCHEDULER_REQUEST_POSTED": "Solicitação de agendamento enviada",
     "APPT_CONFIRMED": "Agendamento confirmado",
@@ -361,6 +364,7 @@ EVENT_DOT_CSS: dict[str, str] = {
     "DOCTOR_ACCEPT": "doctor",
     "DOCTOR_DENY": "doctor",
     "DOCTOR_PROCEDURE_DECISIONS_RECORDED": "doctor",
+    "DOCTOR_PROCEDURE_SET_CHANGED": "doctor",
     "CASE_READY_FOR_SCHEDULER": "system",
     "SCHEDULER_REQUEST_POSTED": "system",
     "APPT_CONFIRMED": "scheduler",

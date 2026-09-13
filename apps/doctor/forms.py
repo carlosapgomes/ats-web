@@ -6,7 +6,20 @@ from django import forms
 
 from apps.cases.admission import ADMISSION_FLOW_CHOICES, SUPPORT_FLAG_CHOICES
 from apps.cases.models import Case, DetectionStatus, DoctorDisposition, ProcedureType
-from apps.cases.procedures import is_procedure_neutral_structured_data
+from apps.cases.procedures import (
+    ALLOWED_PROCEDURE_SETS,
+    PROCEDURE_ORDER,
+    is_procedure_neutral_structured_data,
+)
+
+# Tipos que o médico pode manter, negar ou aprovar como destino da troca
+# (design D10/D14). CPRE entra reutilizando esta mesma estrutura no Slice 004 —
+# basta acrescentá-lo aqui, sem novo ramo de template ou validação.
+SELECTABLE_PROCEDURE_TYPES: tuple[str, ...] = (
+    ProcedureType.EDA,
+    ProcedureType.COLONOSCOPY,
+    ProcedureType.ECHOENDOSCOPY,
+)
 
 
 class DoctorDecisionForm(forms.Form):
@@ -55,25 +68,26 @@ class DoctorDecisionForm(forms.Form):
         help_text="Opcional · Máx. 500 caracteres. Para pedir documentos, use Comunicação operacional.",
     )
 
-    # ── Campos por procedimento (modo v2) ───────────────────────────────
-    procedure_eda = forms.ChoiceField(
-        choices=[("", "---"), ("approved", "Aprovar"), ("denied", "Negar")],
-        required=False,
-    )
-    procedure_eda_reason = forms.CharField(widget=forms.Textarea, required=False)
-    procedure_colonoscopy = forms.ChoiceField(
-        choices=[("", "---"), ("approved", "Aprovar"), ("denied", "Negar")],
-        required=False,
-    )
-    procedure_colonoscopy_reason = forms.CharField(widget=forms.Textarea, required=False)
+    # ── Campos por procedimento (modo procedure-neutral) ─────────────
+    # Construídos a partir de ``SELECTABLE_PROCEDURE_TYPES`` em ``__init__``:
+    # um par ``procedure_<tipo>``/``procedure_<tipo>_reason`` por tipo, sem
+    # ramo por procedimento. R1 do Slice 003 exige que Ecoendoscopia tenha
+    # campo próprio (o template ligava todo tipo não-EDA a Colonoscopia).
 
     def __init__(self, *args: Any, case: Case | None = None, **kwargs: Any) -> None:
         super().__init__(*args, **kwargs)
         self.case = case
-        # Modo v2: a decisão global é derivada das disposições por componente
-        # (R4); o campo global só é exigido no modo legado 1.1.
         if self.is_v2_mode:
+            # Modo procedure-neutral: a decisão global é derivada das
+            # disposições por componente (R4); o campo global só é exigido no
+            # modo legado 1.1.
             self.fields["decision"].required = False
+        for procedure_type in SELECTABLE_PROCEDURE_TYPES:
+            self.fields[f"procedure_{procedure_type}"] = forms.ChoiceField(
+                choices=[("", "---"), ("approved", "Aprovar"), ("denied", "Negar")],
+                required=False,
+            )
+            self.fields[f"procedure_{procedure_type}_reason"] = forms.CharField(widget=forms.Textarea, required=False)
 
     @property
     def is_v2_mode(self) -> bool:
@@ -121,21 +135,34 @@ class DoctorDecisionForm(forms.Form):
 
         return cleaned
 
+    def _reject_unknown_procedure_fields(self) -> None:
+        """Rejeita ``procedure_*`` fora do catálogo selecionável (fail-closed).
+
+        Valor desconhecido NUNCA é descartado em silêncio (D2): um campo
+        especializado não ofertado neste slice (ex.: CPRE) enviado por POST
+        manipulado invalida o formulário inteiro antes de qualquer write.
+        """
+        known = set(self.fields)
+        for key in self.data:
+            if key.startswith("procedure_") and key not in known:
+                self.add_error(None, f"Procedimento não suportado neste formulário: {key}.")
+
     def _clean_procedure_mode(self, cleaned: dict[str, Any]) -> dict[str, Any]:
-        """Modo 2.0: validação por componente, fail-closed (R1/R2/D9).
+        """Modo procedure-neutral: validação por componente, fail-closed (R1/R2/D9).
 
         - todo procedimento detectado exige disposição (approved|denied);
         - negado exige razão específica do componente;
-        - aprovado sem ter sido detectado (inclusão) exige justificativa;
-        - troca completa exige razão em ambas as rows afetadas;
+        - aprovado sem ter sido detectado (inclusão/troca) exige justificativa;
         - pelo menos um aprovado exige suporte + fluxo de admissão;
-        - disposição ``denied`` em procedimento não detectado é inválida.
+        - o conjunto aprovado final precisa pertencer à matriz fechada (R4):
+          conjunto parcial incompatível invalida o formulário sem write.
         """
         detected = self._detected_procedure_types()
-        approved_count = 0
+        approved: list[str] = []
         saw_disposition = False
+        self._reject_unknown_procedure_fields()
 
-        for procedure_type in (ProcedureType.EDA, ProcedureType.COLONOSCOPY):
+        for procedure_type in SELECTABLE_PROCEDURE_TYPES:
             disposition = str(cleaned.get(f"procedure_{procedure_type}") or "")
             reason = str(cleaned.get(f"procedure_{procedure_type}_reason") or "").strip()
 
@@ -154,7 +181,7 @@ class DoctorDecisionForm(forms.Form):
                         "Informe o motivo da negativa deste procedimento.",
                     )
             elif disposition == DoctorDisposition.APPROVED:
-                approved_count += 1
+                approved.append(procedure_type)
                 if procedure_type not in detected and not reason:
                     self.add_error(
                         f"procedure_{procedure_type}_reason",
@@ -166,7 +193,15 @@ class DoctorDecisionForm(forms.Form):
                     "Defina a decisão para este procedimento detectado.",
                 )
 
-        if approved_count > 0:
+        if approved and frozenset(approved) not in ALLOWED_PROCEDURE_SETS:
+            labels = " + ".join(ProcedureType(t).label for t in sorted(approved, key=lambda t: PROCEDURE_ORDER[t]))
+            self.add_error(
+                None,
+                f"Conjunto de procedimentos autorizado não suportado: {labels}. "
+                "Substitua o conjunto inteiro ou negue os componentes excedentes.",
+            )
+
+        if approved:
             if not cleaned.get("support_flag"):
                 self.add_error("support_flag", "Selecione o tipo de suporte.")
             if not cleaned.get("admission_flow"):
@@ -176,7 +211,7 @@ class DoctorDecisionForm(forms.Form):
             # não pode decidir nada (um deny global vazio não tem razão de
             # componente) — fail-closed (BUG 2 pós-verificação).
             self.add_error(
-                "procedure_eda",
+                f"procedure_{SELECTABLE_PROCEDURE_TYPES[0]}",
                 "Defina a decisão de ao menos um procedimento.",
             )
 

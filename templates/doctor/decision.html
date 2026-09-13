@@ -340,8 +340,6 @@
           justificativa própria; negativas exigem razão específica por componente.
         </p>
         {% for entry in procedure_entries %}
-        {% if entry.procedure_type == "eda" %}
-        {% with pfield=form.procedure_eda preason=form.procedure_eda_reason %}
         <div class="procedure-decision-row mb-3 p-3 border rounded">
           <div class="d-flex flex-wrap align-items-center gap-2 mb-2">
             <strong>{{ entry.procedure_label }}</strong>
@@ -350,46 +348,25 @@
           </div>
           <div class="row g-2">
             <div class="col-md-4">
-              <select class="form-select{% if pfield.errors %} is-invalid{% endif %}" id="procedure-{{ entry.procedure_type }}" name="procedure_{{ entry.procedure_type }}">
+              <select class="form-select{% if entry.field.errors %} is-invalid{% endif %}" id="procedure-{{ entry.procedure_type }}" name="procedure_{{ entry.procedure_type }}">
                 <option value="" selected>Selecione...</option>
-                <option value="approved"{% if pfield.value == "approved" %} selected{% endif %}>Aprovar</option>
-                {% if entry.detected %}<option value="denied"{% if pfield.value == "denied" %} selected{% endif %}>Negar</option>{% endif %}
+                <option value="approved"{% if entry.field.value == "approved" %} selected{% endif %}>Aprovar</option>
+                {% if entry.detected %}<option value="denied"{% if entry.field.value == "denied" %} selected{% endif %}>Negar</option>{% endif %}
               </select>
-              {% if pfield.errors %}<div class="invalid-feedback d-block">{{ pfield.errors.0 }}</div>{% endif %}
+              {% if entry.field.errors %}<div class="invalid-feedback d-block">{{ entry.field.errors.0 }}</div>{% endif %}
             </div>
             <div class="col-md-8">
-              <textarea class="form-control{% if preason.errors %} is-invalid{% endif %}" id="procedure-{{ entry.procedure_type }}-reason" name="procedure_{{ entry.procedure_type }}_reason" rows="2" placeholder="{% if entry.detected %}Razão da negativa (obrigatória se negar); aprovação pode incluir observação{% else %}Justificativa de inclusão (obrigatória){% endif %}">{{ preason.value|default:"" }}</textarea>
-              {% if preason.errors %}<div class="invalid-feedback d-block">{{ preason.errors.0 }}</div>{% endif %}
+              <textarea class="form-control{% if entry.reason_field.errors %} is-invalid{% endif %}" id="procedure-{{ entry.procedure_type }}-reason" name="procedure_{{ entry.procedure_type }}_reason" rows="2" placeholder="{% if entry.detected %}Razão da negativa (obrigatória se negar); aprovação pode incluir observação{% else %}Justificativa de inclusão (obrigatória){% endif %}">{{ entry.reason_field.value|default:"" }}</textarea>
+              {% if entry.reason_field.errors %}<div class="invalid-feedback d-block">{{ entry.reason_field.errors.0 }}</div>{% endif %}
             </div>
           </div>
         </div>
-        {% endwith %}
-        {% else %}
-        {% with pfield=form.procedure_colonoscopy preason=form.procedure_colonoscopy_reason %}
-        <div class="procedure-decision-row mb-3 p-3 border rounded">
-          <div class="d-flex flex-wrap align-items-center gap-2 mb-2">
-            <strong>{{ entry.procedure_label }}</strong>
-            <span class="badge bg-secondary">{{ entry.origin_label }}</span>
-            {% if entry.recommendation %}<span class="badge bg-info text-dark">Sugestão do sistema: {{ entry.recommendation }}</span>{% endif %}
-          </div>
-          <div class="row g-2">
-            <div class="col-md-4">
-              <select class="form-select{% if pfield.errors %} is-invalid{% endif %}" id="procedure-{{ entry.procedure_type }}" name="procedure_{{ entry.procedure_type }}">
-                <option value="" selected>Selecione...</option>
-                <option value="approved"{% if pfield.value == "approved" %} selected{% endif %}>Aprovar</option>
-                {% if entry.detected %}<option value="denied"{% if pfield.value == "denied" %} selected{% endif %}>Negar</option>{% endif %}
-              </select>
-              {% if pfield.errors %}<div class="invalid-feedback d-block">{{ pfield.errors.0 }}</div>{% endif %}
-            </div>
-            <div class="col-md-8">
-              <textarea class="form-control{% if preason.errors %} is-invalid{% endif %}" id="procedure-{{ entry.procedure_type }}-reason" name="procedure_{{ entry.procedure_type }}_reason" rows="2" placeholder="{% if entry.detected %}Razão da negativa (obrigatória se negar); aprovação pode incluir observação{% else %}Justificativa de inclusão (obrigatória){% endif %}">{{ preason.value|default:"" }}</textarea>
-              {% if preason.errors %}<div class="invalid-feedback d-block">{{ preason.errors.0 }}</div>{% endif %}
-            </div>
-          </div>
-        </div>
-        {% endwith %}
-        {% endif %}
         {% endfor %}
+        {% if form.non_field_errors %}
+        <div class="alert alert-danger mb-3">
+          {% for error in form.non_field_errors %}<div>{{ error }}</div>{% endfor %}
+        </div>
+        {% endif %}
       </div>
 
       <div class="decision-section active">
@@ -515,6 +492,13 @@
       {% if lock_error %}
       <div class="alert alert-danger mb-3">
         🔒 {{ lock_error }}
+        <a href="{% url 'doctor:queue' %}" class="alert-link">Voltar para fila</a>
+      </div>
+      {% endif %}
+
+      {% if decision_error %}
+      <div class="alert alert-danger mb-3">
+        ⚠ {{ decision_error }}
         <a href="{% url 'doctor:queue' %}" class="alert-link">Voltar para fila</a>
       </div>
       {% endif %}

@@ -1441,6 +1441,8 @@ SUPPORTED_SYSTEM_NOTICE_EVENT_TYPES: frozenset[str] = frozenset(
         "POST_ACCEPTANCE_ISSUE_RESPONDED",
         "POST_ACCEPTANCE_ISSUE_ACKNOWLEDGED",
         "CASE_ADMINISTRATIVELY_CLOSED",
+        # Slice 003 — troca médica (conjunto autorizado difere do detectado)
+        "DOCTOR_PROCEDURE_SET_CHANGED",
         # POST_SCHEDULE_ISSUE_ACKNOWLEDGED omitido: payload legado vazio,
         # é ruído na thread. POST_ACCEPTANCE_ISSUE_ACKNOWLEDGED incluído
         # pois possui cycle_id, context e admission_flow úteis (Slice 002 C6).
@@ -1628,6 +1630,37 @@ def _format_administratively_closed(payload: dict[str, object]) -> str:
     return " ".join(parts).strip()
 
 
+def _procedure_labels_for_notice(procedure_types: Any) -> str:
+    """Labels de procedimento para mensagem sistêmica — total, nunca levanta.
+
+    Diferente de ``format_procedure_selection`` (que valida a matriz e falha
+    fechado para escrita), a projeção de evento precisa renderizar payloads
+    históricos ou vazios sem quebrar a transação de origem — um conjunto
+    vazio é legítimo (negativa integral).
+    """
+    from apps.cases.models import ProcedureType
+    from apps.cases.procedures import PROCEDURE_ORDER
+
+    values = {str(raw) for raw in (procedure_types or [])}
+    ordered = sorted(values, key=lambda t: PROCEDURE_ORDER.get(t, len(PROCEDURE_ORDER)))
+    return " + ".join(ProcedureType(t).label if t in ProcedureType.values else t for t in ordered)
+
+
+def _format_doctor_procedure_set_changed(payload: dict[str, object]) -> str:
+    """Formata corpo para DOCTOR_PROCEDURE_SET_CHANGED (D11).
+
+    Projeta a transformação detectado → autorizado com labels do catálogo.
+    Não copia texto clínico: a razão autoritativa permanece em
+    ``CaseProcedure.doctor_reason``; aqui só se registra a presença.
+    """
+    detected_label = _procedure_labels_for_notice(payload.get("detected")) or "nenhum procedimento"
+    approved_label = _procedure_labels_for_notice(payload.get("approved")) or "nenhum procedimento"
+    parts = [f"Procedimento autorizado alterado pelo médico: {detected_label} → {approved_label}."]
+    if payload.get("reason_present"):
+        parts.append("Motivo registrado na decisão médica.")
+    return " ".join(parts).strip()
+
+
 _SYSTEM_NOTICE_FORMATTERS: dict[str, Callable[[dict[str, object]], str]] = {
     "CASE_ATTACHMENT_SUPPRESSED": _format_attachment_suppressed,
     "CASE_ATTACHMENT_SUPPLEMENT_ADDED": _format_attachment_supplement_added,
@@ -1640,6 +1673,8 @@ _SYSTEM_NOTICE_FORMATTERS: dict[str, Callable[[dict[str, object]], str]] = {
     "POST_ACCEPTANCE_ISSUE_RESPONDED": _format_post_acceptance_issue_responded,
     "POST_ACCEPTANCE_ISSUE_ACKNOWLEDGED": _format_post_acceptance_issue_acknowledged,
     "CASE_ADMINISTRATIVELY_CLOSED": _format_administratively_closed,
+    # Slice 003 — troca médica
+    "DOCTOR_PROCEDURE_SET_CHANGED": _format_doctor_procedure_set_changed,
 }
 
 

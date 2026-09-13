@@ -40,6 +40,7 @@ from apps.cases.procedures import (
     format_procedure_selection,
     get_approved_procedure_types,
     get_detected_procedure_types,
+    is_paired_appointment_set,
     selection_key,
 )
 from apps.cases.services import (
@@ -177,7 +178,10 @@ def _approved_snapshot(case: Case) -> dict[str, Any]:
     """
     approved_types = get_approved_procedure_types(case)
     detected_types = get_detected_procedure_types(case)
-    paired = len(approved_types) == 2
+    # Agendamento casado é igualdade exata com {EDA, Colonoscopia} (D1/D15):
+    # Ecoendoscopia/CPRE nunca recebem o sufixo casado, independentemente do
+    # número de componentes autorizados.
+    paired = is_paired_appointment_set(approved_types)
     if approved_types:
         approved_label = format_procedure_selection(approved_types)
         approved_selection_key = selection_key(approved_types)
@@ -1110,7 +1114,7 @@ def scheduler_submit(request: HttpRequest, case_id: uuid.UUID) -> HttpResponse:
         # Snapshot da dimensão autorizada (R4/D11): o evento de
         # confirmação/negativa carrega o conjunto aprovado ordenado + flag
         # de agenda casada — no MESMO evento, sem duplicar transição.
-        paired = len(approved_types) == 2
+        paired = is_paired_appointment_set(approved_types)
         snapshot: dict[str, Any] = {"approved_procedures": list(approved_types), "paired": paired}
 
         # Persist scheduler decision fields

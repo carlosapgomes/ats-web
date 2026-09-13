@@ -265,12 +265,20 @@ def record_doctor_procedure_decisions(
 
     Cada decisão: ``{procedure_type, disposition (approved|denied), reason,
     added_by_doctor}``. Escreve ``doctor_disposition``/``doctor_reason`` na
-    row ``CaseProcedure`` correspondente (get_or_create — inclusão cria a row
-    sem alterar ``declared_by_nir``/``detection_status``) e registra o evento
-    enxuto ``DOCTOR_PROCEDURE_DECISIONS_RECORDED`` com a lista ordenada
-    (EDA antes de Colonoscopia). NUNCA reexecuta LLM e NUNCA escreve a
+    row ``CaseProcedure`` correspondente (get_or_create — inclusão/troca cria
+    a row sem alterar ``declared_by_nir``/``detection_status``) e registra o
+    evento enxuto ``DOCTOR_PROCEDURE_DECISIONS_RECORDED`` com a lista ordenada
+    (ordem canônica do catálogo). Quando o conjunto autorizado difere do
+    detectado, registra adicionalmente ``DOCTOR_PROCEDURE_SET_CHANGED`` (D11)
+    na MESMA transação. NUNCA reexecuta LLM e NUNCA escreve a
     detecção/declaração. Toda falha reverte a operação inteira — nenhuma
     disposição ou evento parcial.
+
+    O conjunto autorizado final é validado contra a matriz fechada
+    (``ALLOWED_PROCEDURE_SETS``) DENTRO da transação (D2): combinação
+    incompatível (ex.: manter Colonoscopia e incluir Ecoendoscopia) falha com
+    ``ValueError`` antes de qualquer write. Procedimento fora do catálogo
+    também falha explicitamente — nunca é descartado em silêncio.
 
     Args:
         case: instância do caso (relockada dentro da transação).
@@ -279,20 +287,36 @@ def record_doctor_procedure_decisions(
 
     Returns:
         Instância atualizada do caso.
+
+    Raises:
+        ValueError: disposição inválida, procedimento fora do catálogo ou
+            conjunto autorizado fora da matriz fechada.
     """
     with transaction.atomic():
         locked = Case.objects.select_for_update().get(pk=case.pk)
+        approved: set[str] = {
+            row.procedure_type
+            for row in CaseProcedure.objects.filter(case=locked, doctor_disposition=DoctorDisposition.APPROVED)
+        }
         entries: list[dict[str, Any]] = []
+        reason_present = False
         for decision in decisions:
             procedure_type = str(decision["procedure_type"])
+            if procedure_type not in PROCEDURE_ORDER:
+                raise ValueError(f"Procedimento inválido: {procedure_type!r}. Aceitos: {_SUPPORTED_LABEL}.")
             disposition = str(decision["disposition"])
             if disposition not in (DoctorDisposition.APPROVED, DoctorDisposition.DENIED):
                 raise ValueError(f"Disposição inválida para {procedure_type}: {disposition!r}.")
             reason = str(decision.get("reason") or "").strip()
+            reason_present = reason_present or bool(reason)
             row, _ = CaseProcedure.objects.get_or_create(case=locked, procedure_type=procedure_type)
             row.doctor_disposition = disposition
             row.doctor_reason = reason
             row.save(update_fields=["doctor_disposition", "doctor_reason"])
+            if disposition == DoctorDisposition.APPROVED:
+                approved.add(procedure_type)
+            else:
+                approved.discard(procedure_type)
             entries.append(
                 {
                     "procedure_type": procedure_type,
@@ -301,6 +325,9 @@ def record_doctor_procedure_decisions(
                     "added_by_doctor": bool(decision.get("added_by_doctor")),
                 }
             )
+        if approved and frozenset(approved) not in ALLOWED_PROCEDURE_SETS:
+            labels = " + ".join(ProcedureType(t).label for t in sorted(approved, key=lambda t: PROCEDURE_ORDER[t]))
+            raise ValueError(f"Conjunto de procedimentos autorizado não suportado: {labels}.")
         entries.sort(key=lambda entry: PROCEDURE_ORDER[entry["procedure_type"]])
         CaseEvent.objects.create(
             case=locked,
@@ -309,6 +336,29 @@ def record_doctor_procedure_decisions(
             actor_type="human",
             payload={"decisions": entries},
         )
+
+        approved_types = tuple(sorted(approved, key=lambda t: PROCEDURE_ORDER[t]))
+        detected_types = tuple(
+            sorted(
+                (
+                    row.procedure_type
+                    for row in CaseProcedure.objects.filter(case=locked, detection_status=DetectionStatus.DETECTED)
+                ),
+                key=lambda t: PROCEDURE_ORDER[t],
+            )
+        )
+        if approved_types != detected_types:
+            CaseEvent.objects.create(
+                case=locked,
+                event_type="DOCTOR_PROCEDURE_SET_CHANGED",
+                actor=actor,
+                actor_type="human",
+                payload={
+                    "detected": list(detected_types),
+                    "approved": list(approved_types),
+                    "reason_present": reason_present,
+                },
+            )
     return locked
 
 

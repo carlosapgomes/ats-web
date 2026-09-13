@@ -12,7 +12,7 @@ Permitir que o CHD filtre/agende/consulte Ecoendoscopia e CPRE e registre seu p�
 
 ## Requisitos verificáveis
 
-- **R1:** Pendentes/Processados/Histórico CHD filtram por autorizado incluindo Eco/CPRE.
+- **R1:** Pendentes/Processados/Histórico CHD filtram por autorizado incluindo Eco/CPRE. **Dívida herdada do Slice 003 (P2 da revisão):** remover os predicados binários residuais `_filter_by_approved_dimension` (`other = COLONOSCOPY if dimension == EDA else EDA`) e `_sum_approved_selection_counts` (contadores de aba sem Eco) em `apps/scheduler/views.py`.
 - **R2:** especializado confirmado tem um `appointment_at` e nunca label/contador casado.
 - **R3:** todos os grupos CHD usam o mesmo universo do contador.
 - **R4:** follow-up lista e grava desfecho por row especializada com label correto, sem mudar seu modelo.

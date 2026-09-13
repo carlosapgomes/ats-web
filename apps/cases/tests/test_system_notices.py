@@ -1178,3 +1178,127 @@ class TestLegacyPostScheduleEventCompatibility:
 
         dot = EVENT_DOT_CSS.get("POST_SCHEDULE_ISSUE_ACKNOWLEDGED")
         assert dot is not None, "POST_SCHEDULE_ISSUE_ACKNOWLEDGED deve ter dot CSS"
+
+
+# ── Slice 003: troca médica especializada (R7) ────────────────────────────
+
+
+@pytest.mark.django_db
+class TestDoctorProcedureSetChangedNotice:
+    """R7: troca médica cria evento dedicado + mensagem sistêmica idempotente.
+
+    ``DOCTOR_PROCEDURE_SET_CHANGED`` é criado na mesma transação da decisão
+    quando ``approved_set != detected_set``; sua projeção gera UMA mensagem
+    sistêmica (idempotente por ``source_event``) e ZERO ``UserNotification``.
+    """
+
+    def _case_with_detection(self, case_factory, user, detected: tuple[str, ...]):
+        from apps.cases.models import CaseProcedure, DetectionStatus
+
+        case = case_factory(user)
+        for procedure_type in detected:
+            CaseProcedure.objects.create(
+                case=case,
+                procedure_type=procedure_type,
+                declared_by_nir=True,
+                detection_status=DetectionStatus.DETECTED,
+            )
+        return case
+
+    def _swap_to_echoendoscopy(self, case, user):
+        from apps.cases.procedures import record_doctor_procedure_decisions
+
+        return record_doctor_procedure_decisions(
+            case=case,
+            decisions=[
+                {"procedure_type": "eda", "disposition": "denied", "reason": "troca", "added_by_doctor": False},
+                {
+                    "procedure_type": "echoendoscopy",
+                    "disposition": "approved",
+                    "reason": "caracterização",
+                    "added_by_doctor": True,
+                },
+            ],
+            actor=user,
+        )
+
+    def test_set_changed_event_created_on_swap(self, user, case_factory):
+        """Troca EDA → Ecoendoscopia cria o evento dedicado com payload mínimo."""
+        case = self._case_with_detection(case_factory, user, ("eda",))
+
+        self._swap_to_echoendoscopy(case, user)
+
+        events = CaseEvent.objects.filter(case=case, event_type="DOCTOR_PROCEDURE_SET_CHANGED")
+        assert events.count() == 1
+        payload = events.get().payload
+        assert payload["detected"] == ["eda"]
+        assert payload["approved"] == ["echoendoscopy"]
+        assert payload["reason_present"] is True
+
+    def test_set_changed_event_absent_when_approved_equals_detected(self, user, case_factory):
+        """Manter o conjunto detectado não cria o evento dedicado."""
+        from apps.cases.procedures import record_doctor_procedure_decisions
+
+        case = self._case_with_detection(case_factory, user, ("eda",))
+
+        record_doctor_procedure_decisions(
+            case=case,
+            decisions=[{"procedure_type": "eda", "disposition": "approved", "reason": "", "added_by_doctor": False}],
+            actor=user,
+        )
+
+        assert not CaseEvent.objects.filter(case=case, event_type="DOCTOR_PROCEDURE_SET_CHANGED").exists()
+        assert CaseEvent.objects.filter(case=case, event_type="DOCTOR_PROCEDURE_DECISIONS_RECORDED").exists()
+
+    def test_swap_projects_system_message_with_transformation(self, user, case_factory):
+        """A projeção gera mensagem sistêmica com a transformação EDA → Ecoendoscopia."""
+        from apps.cases.models import CaseCommunicationMessage
+
+        case = self._case_with_detection(case_factory, user, ("eda",))
+
+        self._swap_to_echoendoscopy(case, user)
+
+        msgs = CaseCommunicationMessage.objects.filter(case=case, system_event_type="DOCTOR_PROCEDURE_SET_CHANGED")
+        assert msgs.count() == 1
+        msg = msgs.get()
+        assert msg.message_type == "system"
+        assert msg.author is None
+        assert "EDA" in msg.body
+        assert "Ecoendoscopia" in msg.body
+        assert "Motivo" in msg.body
+
+    def test_set_changed_notice_is_idempotent(self, user, case_factory):
+        """Reprojetar o mesmo evento não duplica a mensagem sistêmica."""
+        from apps.cases.models import CaseCommunicationMessage
+        from apps.cases.services import create_system_communication_notice_for_event
+
+        case = self._case_with_detection(case_factory, user, ("eda",))
+
+        self._swap_to_echoendoscopy(case, user)
+
+        event = CaseEvent.objects.get(case=case, event_type="DOCTOR_PROCEDURE_SET_CHANGED")
+        create_system_communication_notice_for_event(event)
+        create_system_communication_notice_for_event(event)
+
+        assert (
+            CaseCommunicationMessage.objects.filter(case=case, system_event_type="DOCTOR_PROCEDURE_SET_CHANGED").count()
+            == 1
+        )
+
+    def test_set_changed_notice_creates_no_user_notification(self, user, case_factory):
+        """Mensagem sistêmica da troca não cria inbox (UserNotification)."""
+        from apps.accounts.models import UserNotification
+
+        case = self._case_with_detection(case_factory, user, ("eda",))
+        before = UserNotification.objects.filter(case=case).count()
+
+        self._swap_to_echoendoscopy(case, user)
+
+        assert UserNotification.objects.filter(case=case).count() == before
+
+    def test_set_changed_has_timeline_label_and_dot(self):
+        """O evento dedicado tem label e dot CSS na timeline do NIR."""
+        from apps.intake.views import EVENT_DOT_CSS, EVENT_LABELS
+
+        assert EVENT_LABELS.get("DOCTOR_PROCEDURE_SET_CHANGED")
+        assert EVENT_DOT_CSS.get("DOCTOR_PROCEDURE_SET_CHANGED")

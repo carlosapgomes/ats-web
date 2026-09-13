@@ -25,6 +25,7 @@ from apps.cases.models import Case, CaseAttachment, CaseStatus, DetectionStatus,
 from apps.cases.navigation import resolve_safe_next_url
 from apps.cases.priority_signals import build_priority_signal_badges
 from apps.cases.procedures import (
+    PROCEDURE_ORDER,
     format_procedure_selection,
     get_approved_procedure_types,
     get_declared_procedure_types,
@@ -56,7 +57,7 @@ from apps.intake.views import (
     STEPS,
 )
 
-from .forms import DoctorDecisionForm
+from .forms import SELECTABLE_PROCEDURE_TYPES, DoctorDecisionForm
 from .reporting import prepare_doctor_case_report
 
 DOCTOR_DECISION_STATUSES = [
@@ -393,11 +394,13 @@ def doctor_queue_partial(request: HttpRequest) -> HttpResponse:
 # ── Decision helpers ─────────────────────────────────────────────────────
 
 
-def _build_procedure_entries(case: Case) -> list[dict[str, Any]]:
-    """Entradas EDA/Colonoscopia do formulário v2 (R1).
+def _build_procedure_entries(case: Case, form: DoctorDecisionForm) -> list[dict[str, Any]]:
+    """Entradas do formulário procedure-neutral, uma por tipo selecionável (R1).
 
-    Cada entrada expõe origem (declarada/detectada) e recomendação da análise
-    quando existente; procedimento não detectado é candidato a inclusão.
+    Cada entrada expõe origem (declarada/detectada), recomendação da análise
+    quando existente e os ``BoundField`` PRÓPRIOS do procedimento. O template
+    não tem ramo por tipo: o antigo ``{% else %}`` ligava qualquer tipo
+    não-EDA a Colonoscopia, o que impedia a troca para Ecoendoscopia.
     """
     rows = {row.procedure_type: row for row in case.procedures.all()}
     recommendations: dict[str, str] = {}
@@ -410,7 +413,11 @@ def _build_procedure_entries(case: Case) -> list[dict[str, Any]]:
                 recommendations[str(rec["procedure_type"])] = SUGGESTION_FLOW_MAP.get(str(raw), "—")
 
     entries: list[dict[str, Any]] = []
-    for procedure_type in (ProcedureType.EDA, ProcedureType.COLONOSCOPY):
+    for procedure_type in sorted(SELECTABLE_PROCEDURE_TYPES, key=lambda t: PROCEDURE_ORDER[t]):
+        field_name = f"procedure_{procedure_type}"
+        reason_field_name = f"{field_name}_reason"
+        if field_name not in form.fields or reason_field_name not in form.fields:
+            continue
         row = rows.get(procedure_type)
         detected = row is not None and row.detection_status == DetectionStatus.DETECTED
         declared = bool(row and row.declared_by_nir)
@@ -428,6 +435,8 @@ def _build_procedure_entries(case: Case) -> list[dict[str, Any]]:
                 "declared": declared,
                 "origin_label": origin_label,
                 "recommendation": recommendations.get(procedure_type, ""),
+                "field": form[field_name],
+                "reason_field": form[reason_field_name],
             }
         )
     return entries
@@ -441,7 +450,7 @@ def _build_procedure_decisions(cleaned: dict[str, Any], case: Case) -> list[dict
     """
     detected = {row.procedure_type for row in case.procedures.all() if row.detection_status == DetectionStatus.DETECTED}
     decisions: list[dict[str, Any]] = []
-    for procedure_type in (ProcedureType.EDA, ProcedureType.COLONOSCOPY):
+    for procedure_type in SELECTABLE_PROCEDURE_TYPES:
         disposition = str(cleaned.get(f"procedure_{procedure_type}") or "")
         if disposition not in (DoctorDisposition.APPROVED, DoctorDisposition.DENIED):
             continue
@@ -538,6 +547,13 @@ def _submit_v2_procedure_decisions(
         ctx["lock_error"] = str(exc)
         messages.warning(request, str(exc))
         return render(request, "doctor/decision.html", ctx)
+    except ValueError as exc:
+        # Guarda transacional da matriz (D2/R4): conjunto incompatível ou
+        # procedimento fora do catálogo nunca persiste row/evento/FSM.
+        ctx = _build_decision_context(case, form, request=request)
+        ctx["decision_error"] = str(exc)
+        messages.warning(request, str(exc))
+        return render(request, "doctor/decision.html", ctx)
 
     release_lock_service(
         case_id=case.case_id,
@@ -596,7 +612,7 @@ def _build_decision_context(case: Case, form: DoctorDecisionForm, request: HttpR
 
     # ── Slice 003: decisão e histórico por procedimento (v2) ─────────────
     per_procedure = _is_v2_case(case)
-    procedure_entries = _build_procedure_entries(case) if per_procedure else []
+    procedure_entries = _build_procedure_entries(case, form) if per_procedure else []
 
     # ── Suppress duplicate prior-case card when same as correction (R7) ──
     # If the case has an explicit correction and the prior case lookup

@@ -12,7 +12,7 @@ Entregar CPRE em uma jornada completa NIR → pipeline → médico → CHD/NIR, 
 
 ## Requisitos verificáveis
 
-- **R1:** flag CPRE false oculta/rejeita; true permite upload/correção/reenvio singleton, independentemente da flag Eco.
+- **R1:** flag CPRE false oculta/rejeita; true permite upload/correção/reenvio singleton, independentemente da flag Eco. **Dívida herdada do Slice 003 (P2 da revisão):** estender `SELECTABLE_PROCEDURE_TYPES` em `apps/doctor/forms.py` (e consequentemente `_clean_procedure_mode`/`_build_procedure_decisions`) para incluir CPRE, garantindo que row CPRE detectada exija decisão.
 - **R2:** detector qualifica `CPRE`/nome completo; histórico/negação não detectam; `EDA com/e CPRE` colapsa somente quando a ocorrência prova vínculo.
 - **R3:** policy aceita US/TC/RM/MRCP somente após verificação determinística: contexto único, aliases coerentes e predicado/heading estrito. Sem sítio/achado, solicitação com/sem `laudo`, agendamento, menção, conflito, duplicidade, contexto amplo, mismatch, excerpt inventado, `tracked_exams`-only ou anexo-only falham. Data antiga é preservada e não expira.
 - **R4:** pendências agregadas forçam sugestão deny sem bloquear médico.
