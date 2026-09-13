@@ -2,7 +2,7 @@
 
 ## Status
 
-Accepted
+Accepted — cláusula de cobertura de follow-up (D13) parcialmente superada pela ADR-0007
 
 **Aceita em:** 2026-09-12
 
@@ -200,3 +200,4 @@ Rollback operacional preferencial: desligar ambas as flags, preservar a imagem/s
 ## Histórico de Mudanças
 
 - 2026-09-12: ADR criada e aceita para o change `support-independent-echoendoscopy-cpre-workflows`.
+- 2026-09-12: Cláusula de D13 sobre follow-up ("sem mudar o modelo ou a semântica de desfecho" na cobertura) parcialmente superada pela ADR-0007 (cobertura restrita a rows autorizadas). O restante do D13 (filtros/analytics orientados ao catálogo) permanece vigente.
