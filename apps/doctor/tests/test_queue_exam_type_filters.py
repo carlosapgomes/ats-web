@@ -16,10 +16,25 @@ Proves R1–R5:
 
 Sem runner JS, a prova comportamental do script é inspeção estática dos
 marcadores e da matriz de casos documentada no relatório do slice.
+
+Slice 005 — Jornada médica nas filas especializadas (R1–R5):
+
+- R1: Pendentes filtra por DETECTADO com o universo do catálogo (Todos, EDA,
+  Colonoscopia, EDA + Colonoscopia, Ecoendoscopia, CPRE) e cards usam a
+  dimensão detectada.
+- R2: Decididos Hoje filtra por AUTORIZADO, preserva `Nenhum autorizado` e o
+  badge principal é o conjunto aprovado.
+- R3: busca, polling e seleção continuam compostos (filtro fora do alvo do
+  swap HTMX).
+- R4: cards especializados usam badge singleton e mostram a transformação
+  detectado → autorizado quando os conjuntos divergem.
+- R5: a seleção vem do atributo projetado no card — sem inferência por texto
+  de badge e sem lógica binária de "outro tipo".
 """
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 from typing import Any
 
@@ -28,6 +43,7 @@ from django.contrib.auth import get_user_model
 from django.utils import timezone
 
 from apps.cases.models import Case, CaseProcedure, CaseStatus
+from apps.cases.procedures import SUPPORTED_PROCEDURE_TYPES, selection_key
 
 User = get_user_model()
 
@@ -36,6 +52,18 @@ QUEUE_HTML = REPO_ROOT / "templates" / "doctor" / "queue.html"
 QUEUE_CONTENT_HTML = REPO_ROOT / "templates" / "doctor" / "_queue_content.html"
 QUEUE_FILTER_JS = REPO_ROOT / "static" / "js" / "doctor_queue_filter.js"
 DECISION_HTML = REPO_ROOT / "templates" / "doctor" / "decision.html"
+
+# Universo de filtros do catálogo (design D13): `all` + cada singleton +
+# o combinado exato EDA + Colonoscopia. Derivado dos helpers centrais para
+# não duplicar catálogo no teste.
+CATALOG_FILTER_VALUES = {"all", selection_key(("eda", "colonoscopy"))} | {
+    selection_key((procedure_type,)) for procedure_type in SUPPORTED_PROCEDURE_TYPES
+}
+
+
+def _radio_values(html: str, name: str) -> list[str]:
+    """Valores dos radios com `name` na ordem em que foram renderizados."""
+    return re.findall(rf'name="{name}"[^>]*?value="([^"]+)"', html)
 
 
 @pytest.mark.django_db
@@ -251,6 +279,181 @@ class TestDoctorQueueExamTypeFilters:
         assert f"/doctor/{c2.case_id}/" in content
         assert 'hx-get="/doctor/partials/queue/?tab=pending"' in content
 
+    # ── Slice 005 · R1: universo detectado inclui os tipos especializados ──
+
+    def test_pending_filter_universe_is_the_catalog(self, client) -> None:
+        """R1: Pendentes oferece Todos, EDA, Colonoscopia, combinado, Eco e CPRE.
+
+        O combina exatamente com o catálogo central + combinado (D13): nenhum
+        tipo é omitido e `none` não pertence a este universo.
+        """
+        self._login_as(client, "doctor")
+        response = client.get("/doctor/")
+        assert response.status_code == 200
+        content = response.content.decode()
+        values = _radio_values(content, "doctor-queue-exam-type")
+        assert values == ["all", "eda", "colonoscopy", "eda_colonoscopy", "echoendoscopy", "cpre"]
+        assert set(values) == CATALOG_FILTER_VALUES
+        assert 'id="doctor-queue-type-filter"' in content
+        assert 'data-exam-type-count="echoendoscopy"' in content
+        assert 'data-exam-type-count="cpre"' in content
+        assert "Ecoendoscopia" in content
+        assert "CPRE" in content
+
+    def test_decided_filter_universe_is_authorized_catalog_with_none(self, client) -> None:
+        """R2: Decididos Hoje filtra por autorizado e preserva Nenhum autorizado."""
+        self._login_as(client, "doctor")
+        response = client.get("/doctor/?tab=decided")
+        assert response.status_code == 200
+        content = response.content.decode()
+        values = _radio_values(content, "doctor-decided-exam-type")
+        assert values == ["all", "eda", "colonoscopy", "eda_colonoscopy", "echoendoscopy", "cpre", "none"]
+        assert set(values) == CATALOG_FILTER_VALUES | {"none"}
+        assert 'value="all" checked' in content
+        assert "Nenhum autorizado" in content
+        assert 'id="doctor-decided-type-filter"' in content
+
+    def test_pending_specialized_filter_keeps_search_and_polling(self, client) -> None:
+        """R3: o filtro especializado convive com busca e polling (sem perder params)."""
+        self._login_as(client, "doctor")
+        content = client.get("/doctor/?tab=pending").content.decode()
+        assert 'value="echoendoscopy"' in content
+        assert 'value="cpre"' in content
+        assert "data-doctor-queue-search" in content
+        # Filtro e busca ficam FORA do alvo do swap HTMX, então o polling não
+        # perde termo nem seleção.
+        assert 'hx-get="/doctor/partials/queue/?tab=pending"' in content
+        assert 'hx-trigger="every 20s"' in content
+
+    # ── Slice 005 · R4: badge singleton da dimensão correta por aba ──────
+
+    def test_pending_specialized_cards_use_detected_dimension(self, client) -> None:
+        """R1/R4: card Pendente projeta o DETECTADO (badge singleton), não a declaração."""
+        nir = self._login_as(client, "nir")
+        self._make_pending(
+            nir,
+            declared=("eda",),
+            detected=("echoendoscopy",),
+            name="Eco Pend",
+            record="2001",
+        )
+        self._make_pending(
+            nir,
+            declared=("eda", "colonoscopy"),
+            detected=("cpre",),
+            name="Cpre Pend",
+            record="2002",
+        )
+        self._login_as(client, "doctor")
+        content = client.get("/doctor/").content.decode()
+        assert 'data-proc-selection="echoendoscopy"' in content
+        assert 'data-proc-selection="cpre"' in content
+        assert 'data-exam-type="echoendoscopy"' in content
+        assert 'data-exam-type="cpre"' in content
+        assert ">Ecoendoscopia</span>" in content
+        assert ">CPRE</span>" in content
+
+    def test_pending_combined_card_uses_exact_pair_key(self, client) -> None:
+        """R1: EDA + Colonoscopia preserva a semântica exata do conjunto casado."""
+        nir = self._login_as(client, "nir")
+        self._make_pending(
+            nir,
+            declared=("eda", "colonoscopy"),
+            detected=("eda", "colonoscopy"),
+            name="Combinado Pend",
+            record="3001",
+        )
+        self._login_as(client, "doctor")
+        content = client.get("/doctor/").content.decode()
+        assert 'data-proc-selection="eda_colonoscopy"' in content
+        assert "EDA + Colonoscopia" in content
+
+    def test_decided_specialized_cards_show_detected_to_approved(self, client) -> None:
+        """R4: badge principal é o autorizado e a transformação detectado→autorizado aparece."""
+        doctor = self._login_as(client, "doctor")
+        nir = User.objects.create_user(username="nir-slice5@filters.test", password="testpass123")
+        nir.roles.add(self._create_role("nir"))
+        self._make_decided(
+            doctor,
+            nir,
+            declared=("eda",),
+            detected=("eda",),
+            approved=("cpre",),
+            name="Troca CPRE",
+        )
+        self._make_decided(
+            doctor,
+            nir,
+            declared=("eda",),
+            detected=("eda",),
+            approved=("echoendoscopy",),
+            name="Troca Eco",
+        )
+        content = client.get("/doctor/?tab=decided").content.decode()
+        # Badge principal = conjunto autorizado (singleton especializado).
+        assert 'data-proc-selection="cpre"' in content
+        assert ">CPRE</span>" in content
+        assert "Detectado: EDA · Autorizado: CPRE" in content
+        assert 'data-proc-selection="echoendoscopy"' in content
+        assert ">Ecoendoscopia</span>" in content
+        assert "Detectado: EDA · Autorizado: Ecoendoscopia" in content
+        # O badge principal não é mais o detectado.
+        assert ">EDA</span>" not in content
+
+    def test_decided_combined_partial_approval_keeps_transformation(self, client) -> None:
+        """R4: combinado detectado autorizado só como EDA expõe a transformação."""
+        doctor = self._login_as(client, "doctor")
+        nir = User.objects.create_user(username="nir-slice5b@filters.test", password="testpass123")
+        nir.roles.add(self._create_role("nir"))
+        self._make_decided(
+            doctor,
+            nir,
+            declared=("eda", "colonoscopy"),
+            detected=("eda", "colonoscopy"),
+            approved=("eda",),
+            denied=("colonoscopy",),
+            name="Combinado Parcial",
+        )
+        content = client.get("/doctor/?tab=decided").content.decode()
+        assert 'data-proc-selection="eda"' in content
+        assert ">EDA</span>" in content
+        assert "Detectado: EDA + Colonoscopia · Autorizado: EDA" in content
+
+    def test_decided_specialized_without_divergence_has_no_transformation(self, client) -> None:
+        """R4: sem divergência não há texto de transformação (badge principal basta)."""
+        doctor = self._login_as(client, "doctor")
+        nir = User.objects.create_user(username="nir-slice5c@filters.test", password="testpass123")
+        nir.roles.add(self._create_role("nir"))
+        self._make_decided(
+            doctor,
+            nir,
+            declared=("echoendoscopy",),
+            detected=("echoendoscopy",),
+            approved=("echoendoscopy",),
+            name="Eco Mantida",
+        )
+        content = client.get("/doctor/?tab=decided").content.decode()
+        assert 'data-proc-selection="echoendoscopy"' in content
+        assert ">Ecoendoscopia</span>" in content
+        assert "Autorizado:" not in content
+
+    def test_decided_denied_specialized_card_stays_nenhum_autorizado(self, client) -> None:
+        """R2: caso negado projeta `none`/Nenhum autorizado (sem cair na ponte)."""
+        doctor = self._login_as(client, "doctor")
+        nir = User.objects.create_user(username="nir-slice5d@filters.test", password="testpass123")
+        nir.roles.add(self._create_role("nir"))
+        self._make_decided(
+            doctor,
+            nir,
+            declared=("cpre",),
+            detected=("cpre",),
+            denied=("cpre",),
+            name="Cpre Negada",
+        )
+        content = client.get("/doctor/?tab=decided").content.decode()
+        assert 'data-proc-selection="none"' in content
+        assert "Nenhum autorizado" in content
+
 
 class TestDoctorQueueFilterStatic:
     """Inspeção estática do filtro composto (R3, R4) — sem runner JS.
@@ -292,6 +495,47 @@ class TestDoctorQueueFilterStatic:
         # Atributo projetado no contexto do card (selection key da dimensão),
         # nunca leitura de campo do ``Case``.
         assert 'data-exam-type="{{ c.exam_type }}"' in content_html
+
+    def test_html_projects_both_dimensions_and_transformation(self) -> None:
+        """R4/R5: cards consomem as duas dimensões projetadas, sem tipo hardcoded."""
+        content_html = self._read(QUEUE_CONTENT_HTML)
+        # Pendentes = detectado; Decididos Hoje = autorizado (D12).
+        assert 'data-proc-selection="{{ c.detected_selection_key }}"' in content_html
+        assert 'data-proc-selection="{{ c.approved_selection_key }}"' in content_html
+        assert "{{ c.detected_label }}" in content_html
+        assert "{{ c.approved_label }}" in content_html
+        # Transformação textual vem pronta do contexto (sem ramo por tipo).
+        assert "{{ c.transformation_detected }}" in content_html
+        assert "{{ c.transformation_approved }}" in content_html
+        # Nenhum label de tipo é fixado no template (sem lógica binária).
+        for hardcoded in ("Ecoendoscopia", "CPRE", "EDA", "Colonoscopia"):
+            assert hardcoded not in content_html
+
+    def test_js_counts_and_scope_cover_specialized_catalog(self) -> None:
+        """R1/R2: contadores e rótulo de escopo acompanham o catálogo (D13)."""
+        js = self._read(QUEUE_FILTER_JS)
+        counts = re.search(r"var counts = \{([^}]*)\}", js)
+        assert counts is not None, "objeto de contadores ausente no JS"
+        counts_keys = counts.group(1)
+        for key in ("all", "eda", "colonoscopy", "eda_colonoscopy", "echoendoscopy", "cpre", "none"):
+            assert f"{key}:" in counts_keys, f"contador ausente: {key}"
+        assert 'if (type === "echoendoscopy") return "Ecoendoscopia";' in js
+        assert 'if (type === "cpre") return "CPRE";' in js
+        assert 'if (type === "none") return "Nenhum autorizado";' in js
+
+    def test_js_has_no_text_inference_nor_binary_other_type(self) -> None:
+        """R5: seleção vem exclusivamente do atributo projetado (nunca do texto)."""
+        js = self._read(QUEUE_FILTER_JS)
+        # Fonte da verdade: atributo projetado no card.
+        assert 'card.getAttribute("data-proc-selection")' in js
+        # Sem leitura de texto/HTML de badge para inferir tipo.
+        assert ".badge" not in js
+        assert "exam-type-badge" not in js
+        assert "innerHTML" not in js
+        # Sem fallback binário "outro tipo" entre EDA e Colonoscopia.
+        assert "outro tipo" not in js
+        assert '"eda" ? "colonoscopy"' not in js
+        assert '"colonoscopy" : "eda"' not in js
 
 
 # ── Slice 009-A (R1): autoridade da projeção nos cards médicos ────────────

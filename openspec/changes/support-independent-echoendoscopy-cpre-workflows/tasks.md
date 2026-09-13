@@ -21,7 +21,7 @@
 
 ## 4. Jornadas operacionais por ator
 
-- [ ] 4.1 Implementar o Slice 005 (`slices/slice-005-doctor-specialized-queues.md`) e provar Pendentes/Decididos Hoje com filtros, badges e transformações especializadas pela dimensão correta.
+- [x] 4.1 Implementar o Slice 005 (`slices/slice-005-doctor-specialized-queues.md`) e provar Pendentes/Decididos Hoje com filtros, badges e transformações especializadas pela dimensão correta.
 - [ ] 4.2 Implementar o Slice 006 (`slices/slice-006-scheduler-specialized-queues-followup.md`) e provar filas/histórico CHD, agendamento casado exato e pós-procedimento por Ecoendoscopia/CPRE.
 - [ ] 4.3 Implementar o Slice 007 (`slices/slice-007-nir-specialized-queues.md`) e provar acompanhamento, correção, encerrados e filtros NIR pelos procedimentos declarados.
 - [ ] 4.4 Implementar o Slice 008 (`slices/slice-008-specialized-manager-analytics.md`) e provar categorias exclusivas, filtros e volumes gerenciais para os quatro tipos.

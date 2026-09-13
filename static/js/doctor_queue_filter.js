@@ -1,8 +1,10 @@
 /* doctor_queue_filter.js — Client-side filters for doctor queue cards.
  *
- * Pendentes tab: composed filter over exam type (Todos|EDA|Colonoscopia)
- * AND patient name / agency record number search.
- * Decididos Hoje tab: simple exam type filter without search.
+ * Pendentes tab: composed filter over exam type (Todos|EDA|Colonoscopia|
+ * EDA + Colonoscopia|Ecoendoscopia|CPRE) AND patient name / agency record
+ * number search.
+ * Decididos Hoje tab: simple exam type filter over the same catalog options
+ * plus Nenhum autorizado, without search.
  *
  * The type selection lives in radio buttons ([data-doctor-exam-filter]) and
  * the term in the search input; switching type never clears the term and
@@ -52,7 +54,8 @@
     return document.querySelectorAll("[data-doctor-queue-card]");
   }
 
-  /** Return the selected exam type: all | eda | colonoscopy | eda_colonoscopy | none. */
+  /** Return the selected exam type: all | eda | colonoscopy | eda_colonoscopy |
+   *  echoendoscopy | cpre | none. */
   function getSelectedType() {
     for (var i = 0; i < typeButtons.length; i++) {
       if (typeButtons[i].checked) {
@@ -67,6 +70,8 @@
     if (type === "eda") return "EDA";
     if (type === "colonoscopy") return "Colonoscopia";
     if (type === "eda_colonoscopy") return "EDA + Colonoscopia";
+    if (type === "echoendoscopy") return "Ecoendoscopia";
+    if (type === "cpre") return "CPRE";
     if (type === "none") return "Nenhum autorizado";
     return "Todos";
   }
@@ -89,7 +94,7 @@
   /** Recompute per-type counters from the persisted card attribute. */
   function updateCounts() {
     var cards = getCards();
-    var counts = { all: cards.length, eda: 0, colonoscopy: 0, eda_colonoscopy: 0, none: 0 };
+    var counts = { all: cards.length, eda: 0, colonoscopy: 0, eda_colonoscopy: 0, echoendoscopy: 0, cpre: 0, none: 0 };
     Array.prototype.forEach.call(cards, function (card) {
       var type = cardSelectionKey(card);
       if (counts[type] !== undefined) counts[type]++;

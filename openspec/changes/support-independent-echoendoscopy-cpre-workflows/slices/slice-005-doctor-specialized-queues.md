@@ -24,7 +24,8 @@ Permitir que o médico encontre e filtre Ecoendoscopia/CPRE em Pendentes e Decid
 expected_files:
   - apps/doctor/views.py
   - templates/doctor/_queue_content.html
-  - static/js/doctor-queue.js
+  - templates/doctor/queue.html
+  - static/js/doctor_queue_filter.js
   - apps/doctor/tests/test_queue_exam_type_filters.py
 allowed_incidental_files:
   - apps/doctor/tests/test_views.py
@@ -33,6 +34,8 @@ out_of_scope:
   - CHD/NIR/dashboard/follow-up
   - formulário de decisão
 ```
+
+**Emenda de ponteiros aprovada pelo parent (correção de planejamento, sem mudança de escopo comportamental):** o slice original nomeava `static/js/doctor-queue.js`, que não existe — o arquivo real é `static/js/doctor_queue_filter.js` (referenciado por `queue.html` e por `test_views.py:807`). Os dois grupos de rádio (`#doctor-queue-type-filter`, `#doctor-decided-type-filter`) estão em `templates/doctor/queue.html`, não em `_queue_content.html` (que contém somente os cards); sem editar `queue.html`, R1/R2 são inimplementáveis. Conjunto autorizado: exatamente 5 arquivos (= cap), `test_views.py` incidental não necessário.
 
 ## Matriz requisito → arquivo → teste/check
 

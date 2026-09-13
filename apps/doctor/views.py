@@ -230,6 +230,7 @@ def _build_case_card(
     if primary_types is None:
         primary_types = detected_types
     primary_label = format_procedure_selection(primary_types) if primary_types else ""
+    detected_label = format_procedure_selection(detected_types) if detected_types else ""
 
     card: dict[str, Any] = {
         "case_id": str(case.case_id),
@@ -258,7 +259,7 @@ def _build_case_card(
         # Decididos Hoje pelo autorizado. A ponte ``data-exam-type``
         # permanece para compatibilidade legada com o JS.
         "detected_selection_key": selection_key(detected_types) or "none",
-        "detected_label": format_procedure_selection(detected_types) if detected_types else "",
+        "detected_label": detected_label,
         "approved_selection_key": selection_key(approved_types) or "none",
         "approved_label": format_procedure_selection(approved_types) if approved_types else "Nenhum autorizado",
         # Transformação (cards): quando o conjunto da dimensão diverge.
@@ -267,8 +268,11 @@ def _build_case_card(
             if detected_types and detected_types != declared_types
             else ""
         ),
+        # R4 (Slice 005): a comparação acessível do card decidido traz os DOIS
+        # lados (detectado → autorizado), nunca só o autorizado. Mesma forma
+        # usada pelo CHD em ``apps/scheduler/views.py``.
         "transformation_approved": (
-            f"Autorizado: {format_procedure_selection(approved_types)}"
+            f"Detectado: {detected_label or 'Nenhum'} · Autorizado: {format_procedure_selection(approved_types)}"
             if approved_types and approved_types != detected_types
             else ""
         ),
