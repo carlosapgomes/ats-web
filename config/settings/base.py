@@ -120,11 +120,11 @@ COLONOSCOPY_INTAKE_ENABLED = os.environ.get("COLONOSCOPY_INTAKE_ENABLED", "false
     "yes",
 )
 
-# Flags de procedimentos especializados (Slice 002, R1/D4)
+# Flags de procedimentos especializados (Slice 002, R1/D4; rollout no Slice 009)
 # Independentes e web-only: bloqueiam APENAS novos uploads/correção/reenvio do
 # respectivo tipo. Default false. Nenhum worker/pipeline/fila/médico consulta
-# estas flags — caso existente sempre conclui. CPRE permanece oculta no intake
-# até o slice vertical próprio (Slice 004).
+# estas flags — caso existente sempre conclui. O rollout ativa Ecoendoscopia
+# antes de CPRE, cada uma em passo próprio e com aprovação humana.
 ECHOENDOSCOPY_INTAKE_ENABLED = os.environ.get("ECHOENDOSCOPY_INTAKE_ENABLED", "false").lower() in (
     "true",
     "1",

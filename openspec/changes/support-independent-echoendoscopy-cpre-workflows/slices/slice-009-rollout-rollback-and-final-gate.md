@@ -43,6 +43,12 @@ out_of_scope:
 
 `tasks.md` é metadata pós-review fora do ownership/cap do worker: somente o parent marca evidências comprovadas e inclui essa atualização no commit do slice.
 
+**Emenda pré-lançamento aprovada pelo parent (correção de planejamento estrutural, sem mudança de escopo comportamental; mesma classe das emendas dos Slices 001/002/004):** `apps/cases/management/` não existe no repo (padrão Django exige o pacote; `apps/accounts/management/{__init__.py,commands/__init__.py}` confirmam a convenção). Criar o command exige 2 arquivos estruturais vazios adicionais: `apps/cases/management/__init__.py` e `apps/cases/management/commands/__init__.py`. Cap 8→10 (7 esperados + 1 incidental aprovado + 2 estruturais). Nenhum outro arquivo além da lista emendada.
+
+**Segunda emenda (durante execução, escalonamento do worker; fatos verificados pelo parent):** as flags especializadas eram lidas de `os.environ` (base.py:128/133, default false) mas não eram repassadas ao serviço `web` em NENHUM compose (apenas `COLONOSCOPY_INTAKE_ENABLED` — prod:30, shared-postgres:76, dev:37; `.env` é dockerignored) — ativação/rollback do runbook seriam não-operáveis. Autorizado: acrescentar `ECHOENDOSCOPY_INTAKE_ENABLED: ${ECHOENDOSCOPY_INTAKE_ENABLED:-false}` e `CPRE_INTAKE_ENABLED: ${CPRE_INTAKE_ENABLED:-false}` ao `web` nos TRÊS compose (prod, shared-postgres, dev; precedente COLONOSCOPY inclui dev por paridade). Cap 10→13. Wiring de mecanismo já aprovado (flags web-only, default false); nenhuma ativação real, nenhum valor `true` no repo.
+
+**Terceira emenda (durante execução, escalonamento do worker; fatos verificados pelo parent):** `tests/test_colonoscopy_rollout_docs.py:204` (guard do change arquivado de colonoscopia, intocado por este branch) asserta `"cpre" not in manual.lower()` — premissa (CPRE fora de escopo) suplantada pelo R5 aprovado deste change (manual DEVE documentar CPRE). Mesma classe das correções de premissa dos Slices 004/007. Autorizado: substituir a proibição absoluta pelo invariante verdadeiro (menção a CPRE condicionada à habilitação operacional), preservando as asserções intactas de preparo intestinal e suspensão de medicamento. Arquivo entra como incidental (cap 13→14).
+
 ## Matriz requisito → arquivo → teste/check
 
 | Requisito | Arquivos esperados | Teste/check |

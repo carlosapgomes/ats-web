@@ -27,3 +27,11 @@ específica usam `<change-id>.md`, o mesmo ID de
     smoke matrix EDA/Colon/Combinado, flag web-only, monitoramento sem texto
     clínico, rollback preferencial mantendo a imagem nova e bridge binária
     fail-fast para imagem antiga com forward serializado.
+- [`support-independent-echoendoscopy-cpre-workflows.md`](./support-independent-echoendoscopy-cpre-workflows.md)
+  — Ecoendoscopia e CPRE independentes: cutover do writer strict 3.0, drain
+    de writers, verificação binária de prompts 3.0 e migration de choices,
+    smoke de regressão EDA/Colonoscopia antes das flags, ativação sequencial
+    (Ecoendoscopia antes de CPRE), precheck machine-readable de downgrade
+    (`check_specialized_procedure_downgrade`), monitoramento sem texto clínico
+    e rollback pela fronteira do primeiro write 3.0 (flags off + imagem/schema
+    3.0 + fix-forward; sem deleção para downgrade).

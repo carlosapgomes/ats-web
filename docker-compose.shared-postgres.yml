@@ -74,6 +74,8 @@ services:
       <<: *runtime-environment
       DB_APPLICATION_NAME: ats-web-web
       COLONOSCOPY_INTAKE_ENABLED: ${COLONOSCOPY_INTAKE_ENABLED:-false}
+      ECHOENDOSCOPY_INTAKE_ENABLED: ${ECHOENDOSCOPY_INTAKE_ENABLED:-false}
+      CPRE_INTAKE_ENABLED: ${CPRE_INTAKE_ENABLED:-false}
     ports:
       - "127.0.0.1:${WEB_HOST_PORT:-8000}:8000"
     networks:

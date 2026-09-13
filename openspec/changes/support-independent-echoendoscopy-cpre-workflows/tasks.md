@@ -28,8 +28,8 @@
 
 ## 5. Operação e encerramento
 
-- [ ] 5.1 Implementar o Slice 009 (`slices/slice-009-rollout-rollback-and-final-gate.md`) e verificar runbook, prompts ativos, flags, smoke Eco antes de CPRE, prechecks de rollback e alinhamento documental.
-- [ ] 5.2 Executar uma única vez o gate final `uv run ruff check . && uv run ruff format --check . && uv run mypy . && uv run pytest`, seguido de `openspec validate support-independent-echoendoscopy-cpre-workflows --strict`, `git diff --check` e `git status --short`; registrar resultados no relatório final.
+- [x] 5.1 Implementar o Slice 009 (`slices/slice-009-rollout-rollback-and-final-gate.md`) e verificar runbook, prompts ativos, flags, smoke Eco antes de CPRE, prechecks de rollback e alinhamento documental.
+- [x] 5.2 Executar uma única vez o gate final `uv run ruff check . && uv run ruff format --check . && uv run mypy . && uv run pytest`, seguido de `openspec validate support-independent-echoendoscopy-cpre-workflows --strict`, `git diff --check` e `git status --short`; registrar resultados no relatório final.
 - [ ] 5.3 Revisar evidências de todos os slices, atualizar apenas checkboxes comprovados, gerar `REPORT_PATH` final, commit/push rastreáveis e parar para aprovação humana antes de arquivar o change.
 
 ## Regra de execução

@@ -17,7 +17,7 @@ Resumo executivo para retomada rapida apos pausas e para onboarding de novos con
 - **Change ativo:** `openspec/changes/support-independent-echoendoscopy-cpre-workflows/`.
 - **Branch:** `feature/support-independent-echoendoscopy-cpre-workflows`.
 - **Decisão aceita:** ADR-0006 promove Ecoendoscopia e CPRE a procedimentos independentes e introduz writer LLM 3.0.
-- **Baseline atual do código:** continua funcionalmente em EDA/Colonoscopia e writer 2.0 até os slices correspondentes serem implementados.
+- **Estado do código:** Slices 001–008 implementados (catálogo/matriz dos quatro tipos `eda|colonoscopy|echoendoscopy|cpre`, writer strict 3.0, hard rule determinística de imagem abdominal e jornadas de médico/CHD/NIR/gestor); o Slice 009 entrega runbook de rollout/rollback, precheck de downgrade e gate final. As flags `ECHOENDOSCOPY_INTAKE_ENABLED` e `CPRE_INTAKE_ENABLED` existem, são independentes e web-only, e permanecem `false` em todos os ambientes até o rollout aprovado por humano.
 - **Regra de reentrada:** para este change, ADR-0006 + proposal + design + delta specs + **somente o próximo slice incompleto** são o override autoritativo sobre as descrições v2 abaixo. Não tratar o alvo 3.0 como já implementado nem usar o baseline v2 para negar requisitos do slice ativo.
 - **Ordem:** Ecoendoscopia é concluída antes de CPRE; cada slice exige RED → GREEN → REFACTOR, review e confirmação antes do seguinte.
 
@@ -137,7 +137,7 @@ static/          # css/app.css (paleta hospitalar), js/upload.js, js/password-to
 
 ## Contratos e Validações
 
-- **Baseline — procedimentos múltiplos e contrato LLM neutro (v2)**: o intake declara o conjunto **EDA**, **Colonoscopia** ou **EDA + Colonoscopia** por lote; o pipeline v2 extrai história comum uma única vez (`requested_procedures[]`), aplica policy determinística por procedimento e produz recomendação exata por componente; artefatos 1.1 permanecem legíveis sem rewrite. O LLM2 recebe uma projeção efêmera de `requested_procedures` limitada ao conjunto reconciliado, declarado no prompt como lista fechada; o artefato original do LLM1 permanece imutável. Mismatch de conjunto usa erro tipado e no máximo um retry corretivo, independente do retry pt-BR, com teto de três chamadas físicas e validação fail-closed. Single→combined com evidência forte recebe **upgrade automático** auditado (`PROCEDURE_SELECTION_AUTO_UPGRADED`) e segue ao médico sem ACK do NIR; combinado→single, troca entre tipos únicos e unknown/non-supported retornam ao NIR. Decisão médica por componente (aprovar/negar/incluir, razão por componente; inclusão não reexecuta LLM); um **agendamento casado** único para o conjunto autorizado; resposta final com solicitado/detectado/autorizado. Filtros por dimensão: NIR usa o **declarado**, médico usa o **detectado/autorizado**, CHD usa o **autorizado**. Flag `COLONOSCOPY_INTAKE_ENABLED` é web-only. Este parágrafo descreve o código antes do cutover; o override 3.0 está no bloco `Change Ativo` e nos artefatos do change.
+- **Baseline — procedimentos múltiplos e contrato LLM neutro (v2)**: o intake declara o conjunto **EDA**, **Colonoscopia** ou **EDA + Colonoscopia** por lote; o pipeline v2 extrai história comum uma única vez (`requested_procedures[]`), aplica policy determinística por procedimento e produz recomendação exata por componente; artefatos 1.1 permanecem legíveis sem rewrite. O LLM2 recebe uma projeção efêmera de `requested_procedures` limitada ao conjunto reconciliado, declarado no prompt como lista fechada; o artefato original do LLM1 permanece imutável. Mismatch de conjunto usa erro tipado e no máximo um retry corretivo, independente do retry pt-BR, com teto de três chamadas físicas e validação fail-closed. Single→combined com evidência forte recebe **upgrade automático** auditado (`PROCEDURE_SELECTION_AUTO_UPGRADED`) e segue ao médico sem ACK do NIR; combinado→single, troca entre tipos únicos e unknown/non-supported retornam ao NIR. Decisão médica por componente (aprovar/negar/incluir, razão por componente; inclusão não reexecuta LLM); um **agendamento casado** único para o conjunto autorizado; resposta final com solicitado/detectado/autorizado. Filtros por dimensão: NIR usa o **declarado**, médico usa o **detectado/autorizado**, CHD usa o **autorizado**. Flag `COLONOSCOPY_INTAKE_ENABLED` é web-only; as flags `ECHOENDOSCOPY_INTAKE_ENABLED` e `CPRE_INTAKE_ENABLED` são independentes, web-only e default `false` (ativação sequencial no rollout do Slice 009). Este parágrafo descreve o código antes do cutover; o override 3.0 está no bloco `Change Ativo` e nos artefatos do change.
 - **Prompts canônicos (v2 neutros)**: `exam_llm1_system`, `exam_llm1_user`, `exam_llm2_system`, `exam_llm2_user` são os quatro nomes canônicos do dispatch (Slice 007). `seed_prompts` garante **exatamente uma versão ativa por nome neutro** (cria v1 ativa quando ausente) e **desativa toda versão ativa dos oito nomes legados** (`llm1_*`, `llm2_*`, `colonoscopy_llm1_*`, `colonoscopy_llm2_*`) preservando linhas/versões históricas para auditoria/rollback; reexecutar é idempotente. Fallback de código usa os mesmos defaults.
 - **Validação Pydantic v2**: schemas `apps/pipeline/schemas/llm1.py` (StructuredData) e `llm2.py` (Suggestion)
   validam rigidamente as respostas LLM. Respostas fora do contrato geram falha explícita de pipeline com
@@ -181,8 +181,8 @@ static/          # css/app.css (paleta hospitalar), js/upload.js, js/password-to
 
 ## State do Sistema
 
-- **Fase atual**: change HIGH/ARCH de procedimentos especializados em planejamento aprovado, ainda sem código runtime implementado.
-- **Change ativo**: `openspec/changes/support-independent-echoendoscopy-cpre-workflows/`; ADR-0006 e planejamento aprovados, aguardando início explícito do Slice 001.
+- **Fase atual**: change HIGH/ARCH de procedimentos especializados com Slices 001–008 implementados e Slice 009 (runbook, precheck de downgrade e gate final) em review; **rollout pendente de aprovação humana**, com as flags `ECHOENDOSCOPY_INTAKE_ENABLED` e `CPRE_INTAKE_ENABLED` em `false`.
+- **Change ativo**: `openspec/changes/support-independent-echoendoscopy-cpre-workflows/`; ADR-0006 aceita, writer 3.0 ativo no código e runbook de operação em `docs/deploy/support-independent-echoendoscopy-cpre-workflows.md`.
 - **Último baseline concluído relevante**: hotfix `openspec/archive/fix-llm2-reconciled-procedure-set/`, com promoção da spec `procedure-neutral-analysis`.
 - **Changes concluídos**:
   - `openspec/archive/bootstrap-django-ats-core/` (7 slices, Fase 0)
@@ -234,9 +234,10 @@ static/          # css/app.css (paleta hospitalar), js/upload.js, js/password-to
   - `openspec/archive/restore-isolated-deterministic-test-baseline/` (1 slice — baseline de testes isolado e determinístico restaurado e endurecido (gates baseline-vs-final)).
 - **Apps criados**: `apps/accounts/`, `apps/cases/`, `apps/llm/`, `apps/intake/`, `apps/pipeline/`,
   `apps/doctor/`, `apps/scheduler/`, `apps/dashboard/`, `apps/admin_ui/`
-- **Testes**: 3184 passando (gate final do hotfix
-  `fix-llm2-reconciled-procedure-set`; inclui cobertura EDA-only,
-  Colonoscopia-only, combinado, retries tipados e preservação do artefato LLM1),
+- **Testes**: 3709 passando (gate final do change
+  `support-independent-echoendoscopy-cpre-workflows`, Slice 009; inclui cobertura
+  EDA-only, Colonoscopia-only, combinado, especializados Eco/CPRE, retries
+  tipados e preservação do artefato LLM1),
   quality gate verde (ruff + mypy + pytest)
 - **Templates**: base.html com tema hospitalar, login, switch-role, perfil, password reset/change,
   intake (home, my_cases, case_detail), doctor (queue, decision)

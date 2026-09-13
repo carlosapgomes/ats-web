@@ -198,10 +198,21 @@ class TestManualCorrectionEligibility:
         )
 
     def test_manual_does_not_promise_cpre_or_bowel_prep_or_medication_decision(self) -> None:
-        """Sem promessas de CPRE, preparo intestinal ou decisão medicamentosa."""
+        """CPRE só condicionada à habilitação; sem preparo intestinal/decisão medicamentosa.
+
+        CPRE passou a ser suportada pelo change
+        ``support-independent-echoendoscopy-cpre-workflows`` (ADR-0006), então o
+        manual pode nomeá-la. O que continua proibido é prometer CPRE como
+        disponibilidade incondicional: o manual precisa declarar a habilitação
+        pela operação. Os invariantes de preparo intestinal e de suspensão de
+        medicamento permanecem.
+        """
         manual = _read(MANUAL_PATH)
         lower = manual.lower()
-        assert "cpre" not in lower, "Manual não pode prometer CPRE"
+        if "cpre" in lower:
+            assert "habilitad" in lower or "disponib" in lower, (
+                "Manual só pode citar CPRE condicionada à habilitação pela operação"
+            )
         assert "preparo intestinal" not in lower, "Manual não pode prometer avaliação de preparo intestinal"
         # Suspensão de medicamento só pode aparecer como negação explícita
         for para in manual.split("\n\n"):

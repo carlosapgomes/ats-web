@@ -247,6 +247,82 @@ seleção declarada.
 
 ---
 
+### 1.10 Fluxo especializado: Ecoendoscopia e CPRE
+
+**Ecoendoscopia** e **CPRE** são **procedimentos independentes**: cada um é
+enviado, analisado, decidido e agendado como um caso próprio. Não existe
+combinação deles com EDA nem com Colonoscopia, e não existe agendamento casado
+para eles.
+
+1. **NIR** enviar o PDF e declarar **Ecoendoscopia** ou **CPRE** na seleção (a
+   opção aparece quando a operação habilita o procedimento).
+2. O sistema analisa o **relatório principal** (o PDF do pedido) e mantém três
+   dimensões separadas por procedimento:
+   - **Solicitado** — o que o NIR declarou;
+   - **Detectado** — o que a análise identificou na solicitação atual;
+   - **Autorizado** — o que o médico aprovou.
+3. Se a análise encontrar um procedimento diferente do declarado, o caso vai
+   para **Revisão Manual** do NIR: não existe conversão automática entre EDA e
+   procedimento especializado, nem o contrário.
+4. **Médico** avalia a sugestão e decide.
+5. **CHD** confirma ou nega o agendamento quando o fluxo escolhido tiver agenda.
+6. O resultado volta ao **NIR** com as três dimensões; o NIR confirma o
+   recebimento e insere a resposta no SUREM.
+
+#### Sugestão automática do procedimento especializado
+
+- Reutiliza os critérios pré-operatórios comuns da EDA, **sem** a exceção de
+  corpo estranho.
+- Exige **imagem com conclusão ou achado de laudo** no relatório principal:
+  - **Ecoendoscopia**: TC ou RM de abdome/abdome superior;
+  - **CPRE**: USG de abdome, abdome superior ou hepatobiliar; TC ou RM de
+    abdome/abdome superior; ou CPRM/colangiorressonância.
+- Mera **solicitação**, **agendamento**, menção ao nome do exame ou imagem sem
+  localização compatível **não** satisfazem o requisito.
+- Todas as pendências aplicáveis aparecem **juntas** e a sugestão vira
+  **negativa**. Isso é uma sugestão determinística: **a decisão continua sendo
+  do médico**, que pode aprovar com justificativa.
+
+#### Anexos não entram na automação
+
+A análise usa **somente o relatório principal**. Os anexos disponíveis na tela
+**não** participam da sugestão automática — o relatório médico exibe esse aviso.
+O médico pode consultar os anexos e decidir de forma divergente: a limitação é
+técnica (o que a automação leu), não um julgamento clínico sobre o anexo.
+
+#### Trocar e aprovar
+
+Quando o médico entende que o procedimento correto é outro, ele registra a
+troca na própria tela de decisão: **nega** o procedimento detectado com motivo e
+**aprova** o procedimento de destino com justificativa. A troca **é** a
+aprovação médica:
+
+- não há nova análise automática (nem nova sugestão);
+- não há novo caso, novo documento ou agendamento separado;
+- o sistema registra a transformação **Detectado → Autorizado** na linha do
+tempo e publica um aviso automático (mensagem de **Sistema**) na comunicação do
+caso;
+- o conjunto final autorizado precisa ser um procedimento único permitido.
+
+#### Comunicação
+
+A comunicação operacional entre NIR, médico e CHD acontece **dentro do
+sistema**, na própria página do caso (seção 2). O aviso automático da troca é
+apenas contexto registrado pelo sistema — ele não cria notificação de badge nem
+substitui a comunicação entre as equipes.
+
+#### O que o sistema não faz
+
+- Não cria **regra clínica nova** além dos critérios pré-operatórios já
+  aprovados; a sugestão não bloqueia a decisão médica.
+- Não modela nem valida **sala**: o local do agendamento continua texto livre e
+  a coordenação de sala permanece com o CHD.
+- Não divide um caso em dois nem cria agendamento casado para procedimentos
+  especializados.
+- Não ativa ou desativa procedimentos por ação de usuário (ver 8.2).
+
+---
+
 ## 2. Comunicação operacional e notificações
 
 A **Comunicação operacional** aparece dentro da página de detalhes do caso.
@@ -601,7 +677,8 @@ Se a mensagem do CHD for apenas informativa e não exigir mudança no agendament
 Quando o sistema identifica divergência entre a seleção declarada no upload e
 o conteúdo do relatório, o caso vai para **Revisão Manual** e o NIR pode
 corrigir o conjunto de procedimentos declarado (**EDA**, **Colonoscopia** ou
-**EDA + Colonoscopia**).
+**EDA + Colonoscopia** e, quando habilitados pela operação, **Ecoendoscopia** ou
+**CPRE**).
 
 A correção está disponível **somente** quando o caso está exatamente nesta
 situação:
@@ -621,8 +698,8 @@ Passo a passo:
 1. abrir o caso em **Meus Casos**;
 2. localizar a seção de **correção da seleção de procedimentos** (visível
    apenas quando o caso está em revisão manual, conforme as condições acima);
-3. selecionar a seleção correta (**EDA**, **Colonoscopia** ou
-   **EDA + Colonoscopia**);
+3. selecionar a seleção correta (**EDA**, **Colonoscopia**, **EDA +
+   Colonoscopia** e, quando habilitados, **Ecoendoscopia** ou **CPRE**);
 4. confirmar a correção.
 
 O sistema reprocessa o caso com a seleção corrigida, sem novo upload e sem
@@ -638,8 +715,8 @@ decisão médica (que não existe nesta etapa).
 Quando o caso termina, a resposta final mostra as três dimensões do caso,
 separadas por procedimento:
 
-- **Solicitado** — o que o NIR declarou no envio (EDA, Colonoscopia ou
-  EDA + Colonoscopia);
+- **Solicitado** — o que o NIR declarou no envio (EDA, Colonoscopia,
+  EDA + Colonoscopia, Ecoendoscopia ou CPRE);
 - **Detectado** — o que a análise do relatório identificou como solicitação
   atual;
 - **Autorizado** — o que o médico aprovou, com as razões registradas.
@@ -1279,10 +1356,12 @@ Neste manual:
 - usamos `@medico` e `@chd` como menções preferenciais;
 - as menções devem ser digitadas sem acento.
 
-## 8.2 Ativação da colonoscopia e do combinado é assunto da operação
+## 8.2 Ativação de Colonoscopia, combinado, Ecoendoscopia e CPRE é assunto da operação
 
-A disponibilidade da **Colonoscopia** e da seleção **EDA + Colonoscopia** no
-upload é controlada pela operação (flag de configuração). Esse controle não é
-assunto de usuário comum: o usuário apenas vê as opções habilitadas quando o
-sistema as liberar, ou desabilitadas com explicação quando não. Nenhuma ação
-individual ativa ou desativa os procedimentos.
+A disponibilidade da **Colonoscopia**, da seleção **EDA + Colonoscopia** e dos
+procedimentos **Ecoendoscopia** e **CPRE** no upload é controlada pela operação
+(flags de configuração, uma por procedimento). Esse controle não é assunto de
+usuário comum: o usuário apenas vê as opções habilitadas quando o sistema as
+liberar, ou desabilitadas com explicação quando não. Nenhuma ação individual
+ativa ou desativa os procedimentos, e cada flag é ligada de forma independente
+(a operação libera Ecoendoscopia antes de CPRE).
