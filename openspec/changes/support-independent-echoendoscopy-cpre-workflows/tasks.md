@@ -4,7 +4,7 @@
 
 - [x] 0.1 Registrar e aceitar `docs/adr/ADR-0006-ecoendoscopia-e-cpre-como-procedimentos-independentes.md`, com índice e relação de supersessão parcial da ADR-0004 revisados.
 - [x] 0.2 Atualizar `PROJECT_CONTEXT.md` com o change ativo e o override 3.0, distinguindo explicitamente baseline atual de alvo ainda não implementado.
-- [ ] 0.3 Na branch `feature/support-independent-echoendoscopy-cpre-workflows`, registrar `BASE_REF`, confirmar working tree adequada e executar baseline global uma única vez quando o HEAD não tiver CI verde confiável.
+- [x] 0.3 Na branch `feature/support-independent-echoendoscopy-cpre-workflows`, registrar `BASE_REF`, confirmar working tree adequada e executar baseline global uma única vez quando o HEAD não tiver CI verde confiável. *(Marcado retroativamente com evidência verificada: BASE_REF = `2e9eb40` (merge-base com `main`); tree limpa confirmada no início de cada slice; sem CI no repo, baseline global = 3462 testes verdes no gate do Slice 001 `2100d09`, seguido de gates registrados por slice até 3709.)*
 
 ## 1. Cutover vertical do fluxo existente
 
@@ -30,7 +30,7 @@
 
 - [x] 5.1 Implementar o Slice 009 (`slices/slice-009-rollout-rollback-and-final-gate.md`) e verificar runbook, prompts ativos, flags, smoke Eco antes de CPRE, prechecks de rollback e alinhamento documental.
 - [x] 5.2 Executar uma única vez o gate final `uv run ruff check . && uv run ruff format --check . && uv run mypy . && uv run pytest`, seguido de `openspec validate support-independent-echoendoscopy-cpre-workflows --strict`, `git diff --check` e `git status --short`; registrar resultados no relatório final.
-- [ ] 5.3 Revisar evidências de todos os slices, atualizar apenas checkboxes comprovados, gerar `REPORT_PATH` final, commit/push rastreáveis e parar para aprovação humana antes de arquivar o change.
+- [x] 5.3 Revisar evidências de todos os slices, atualizar apenas checkboxes comprovados, gerar `REPORT_PATH` final, commit/push rastreáveis e parar para aprovação humana antes de arquivar o change. *(Evidências revisadas slice a slice sob review independente; relatório final em `/tmp/support-independent-echoendoscopy-cpre-final-report.md`; arquivamento aprovado explicitamente pelo usuário após o push.)*
 
 ## Regra de execução
 
