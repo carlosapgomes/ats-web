@@ -3,8 +3,9 @@
 Follow-up é registro puro (informativo/métrica): não altera a FSM do caso,
 não abre intercorrência e não gera mensagem operacional. Cada gravação cria
 uma nova versão append-only (``CaseFollowUp`` + ``ProcedureFollowUp`` por
-procedimento) espelhada em ``CaseEvent`` (``FOLLOWUP_RECORDED`` quando
-versão 1, ``FOLLOWUP_UPDATED`` nas seguintes).
+procedimento autorizado) espelhada em ``CaseEvent`` (``FOLLOWUP_RECORDED``
+quando versão 1, ``FOLLOWUP_UPDATED`` nas seguintes). A cobertura é restrita
+às rows ``doctor_disposition == "approved"`` (ADR-0007).
 """
 
 from __future__ import annotations
@@ -21,6 +22,7 @@ from apps.cases.models import (
     Case,
     CaseEvent,
     CaseFollowUp,
+    DoctorDisposition,
     FollowUpNonPerformanceReason,
     FollowUpResourceShortageDetail,
     ProcedureFollowUp,
@@ -78,23 +80,36 @@ def is_followup_eligible(case: Case) -> bool:
 def _validate_outcomes(case: Case, outcomes: Sequence[ProcedureOutcomeInput]) -> dict[int, Any]:
     """Valida cobertura, pertencimento e regras condicionais de causa.
 
-    Retorna o mapa ``procedure_id -> CaseProcedure`` para reuso na gravação.
+    O universo do follow-up é o subconjunto autorizado
+    (``doctor_disposition == "approved"``, ADR-0007): rows negadas/pendentes
+    ficam isentas de desfecho e um desfecho informado para elas é rejeitado
+    (fail-closed). Sem rows autorizadas (estado defensivo) a gravação é
+    rejeitada. Retorna o mapa ``procedure_id -> CaseProcedure`` autorizado
+    para reuso na gravação; as regras condicionais de causa permanecem
+    idênticas.
     """
     procedures_by_id = {procedure.id: procedure for procedure in case.procedures.all()}
-    if not procedures_by_id:
-        raise ValueError("Caso não possui procedimentos declarados para pós-procedimento.")
+    approved_by_id = {
+        procedure_id: procedure
+        for procedure_id, procedure in procedures_by_id.items()
+        if procedure.doctor_disposition == DoctorDisposition.APPROVED
+    }
+    if not approved_by_id:
+        raise ValueError("Caso não possui procedimentos autorizados para pós-procedimento.")
 
     seen: set[int] = set()
     for outcome in outcomes:
-        if outcome.procedure_id not in procedures_by_id:
+        if outcome.procedure_id not in approved_by_id:
+            if outcome.procedure_id in procedures_by_id:
+                raise ValueError("Procedimento informado não está autorizado para pós-procedimento.")
             raise ValueError("Procedimento informado não pertence ao caso.")
         if outcome.procedure_id in seen:
             raise ValueError("Procedimento duplicado no pós-procedimento.")
         seen.add(outcome.procedure_id)
 
-    missing = set(procedures_by_id) - seen
+    missing = set(approved_by_id) - seen
     if missing:
-        raise ValueError("O pós-procedimento deve cobrir todos os procedimentos do caso.")
+        raise ValueError("O pós-procedimento deve cobrir todos os procedimentos autorizados do caso.")
 
     for outcome in outcomes:
         if outcome.performed:
@@ -115,7 +130,7 @@ def _validate_outcomes(case: Case, outcomes: Sequence[ProcedureOutcomeInput]) ->
         elif outcome.other_reason.strip():
             raise ValueError("Texto de outras causas só deve ser informado quando a causa é 'Outras causas'.")
 
-    return procedures_by_id
+    return approved_by_id
 
 
 def record_case_follow_up(

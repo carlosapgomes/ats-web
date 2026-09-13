@@ -89,8 +89,13 @@ def _create_ineligible_case(user, *, arn: str, name: str) -> Case:
     return case
 
 
-def _add_procedure(case: Case, procedure_type: str = "eda") -> CaseProcedure:
-    return CaseProcedure.objects.create(case=case, procedure_type=procedure_type)
+def _add_procedure(case: Case, procedure_type: str = "eda", *, disposition: str = "approved") -> CaseProcedure:
+    """Row ``CaseProcedure`` autorizada por padrão (universo do follow-up)."""
+    return CaseProcedure.objects.create(
+        case=case,
+        procedure_type=procedure_type,
+        doctor_disposition=disposition,
+    )
 
 
 def _form_url(case: Case) -> str:
@@ -705,6 +710,98 @@ class TestFollowUpFormSpecializedProcedures:
         assert outcome.procedure_id == cpre.id
         assert outcome.performed is False
         assert outcome.non_performance_reason == "absenteeism"
+
+
+# ── Cobertura restrita às rows autorizadas (ADR-0007 / R2, R3) ─────────
+
+
+class TestFollowUpFormAuthorizedOnly:
+    """O formulário projeta somente rows autorizadas; o resto é rejeitado."""
+
+    def test_get_shows_only_authorized_block_after_swap(self, client) -> None:
+        """Troca (EDA negada + Ecoendoscopia autorizada): só o bloco autorizado."""
+        user = _login_as(client, "manager")
+        case = _create_case(user, arn="AUTH-SWAP-GET", name="Troca GET")
+        eda = _add_procedure(case, "eda", disposition="denied")
+        echo = _add_procedure(case, "echoendoscopy", disposition="approved")
+
+        content = client.get(_form_url(case)).content.decode()
+
+        assert f'name="proc_{echo.id}-performed"' in content
+        assert f'name="proc_{eda.id}-performed"' not in content
+
+    def test_post_swap_records_only_authorized_row(self, client) -> None:
+        """POST cobrindo a Ecoendoscopia cria v1 e evento só com a autorizada."""
+        user = _login_as(client, "manager")
+        case = _create_case(user, arn="AUTH-SWAP-POST", name="Troca POST")
+        _add_procedure(case, "eda", disposition="denied")
+        echo = _add_procedure(case, "echoendoscopy", disposition="approved")
+
+        response = client.post(_form_url(case), data=_valid_payload(echo))
+
+        assert response.status_code == 302
+        follow_up = CaseFollowUp.objects.get(case=case)
+        assert follow_up.version == 1
+        assert [row.procedure_id for row in follow_up.procedure_outcomes.all()] == [echo.id]
+        event = CaseEvent.objects.get(case=case, event_type="FOLLOWUP_RECORDED")
+        assert [payload["procedure_id"] for payload in event.payload["outcomes"]] == [echo.id]
+        assert not CaseEvent.objects.filter(case=case, event_type="FOLLOWUP_UPDATED").exists()
+
+    def test_get_shows_only_authorized_block_partial_approval(self, client) -> None:
+        """Aprovação parcial (EDA autorizada + Colonoscopia negada): só a EDA."""
+        user = _login_as(client, "manager")
+        case = _create_case(user, arn="AUTH-PARTIAL-GET", name="Parcial GET")
+        eda = _add_procedure(case, "eda", disposition="approved")
+        colon = _add_procedure(case, "colonoscopy", disposition="denied")
+
+        content = client.get(_form_url(case)).content.decode()
+
+        assert f'name="proc_{eda.id}-performed"' in content
+        assert f'name="proc_{colon.id}-performed"' not in content
+
+    def test_post_partial_approval_records_only_authorized(self, client) -> None:
+        """POST cobrindo só a EDA é aceito sem exigir desfecho da negada."""
+        user = _login_as(client, "manager")
+        case = _create_case(user, arn="AUTH-PARTIAL-POST", name="Parcial POST")
+        eda = _add_procedure(case, "eda", disposition="approved")
+        _add_procedure(case, "colonoscopy", disposition="denied")
+
+        response = client.post(_form_url(case), data=_valid_payload(eda))
+
+        assert response.status_code == 302
+        follow_up = CaseFollowUp.objects.get(case=case)
+        assert [row.procedure_id for row in follow_up.procedure_outcomes.all()] == [eda.id]
+
+    def test_zero_approved_shows_warning_and_rejects_post(self, client) -> None:
+        """Sem rows autorizadas (defensivo): aviso, sem campos, POST rejeitado."""
+        user = _login_as(client, "manager")
+        case = _create_case(user, arn="AUTH-ZERO", name="Zero Autorizada")
+        _add_procedure(case, "eda", disposition="denied")
+
+        response = client.get(_form_url(case))
+        assert response.status_code == 200
+        content = response.content.decode()
+        assert "sem procedimentos" in content.lower()
+        assert "proc_" not in content
+
+        response = client.post(_form_url(case), data={"patient_admitted": "yes"})
+        assert response.status_code == 200
+        assert not CaseFollowUp.objects.filter(case=case).exists()
+        assert not CaseEvent.objects.filter(case=case, event_type__startswith="FOLLOWUP").exists()
+
+    def test_post_with_outcome_for_denied_row_rejected(self, client) -> None:
+        """Desfecho para row negada no POST é rejeitado fail-closed."""
+        user = _login_as(client, "manager")
+        case = _create_case(user, arn="AUTH-DENIED-POST", name="Negada POST")
+        eda = _add_procedure(case, "eda", disposition="approved")
+        colon = _add_procedure(case, "colonoscopy", disposition="denied")
+
+        payload = _valid_payload(eda)
+        payload[f"proc_{colon.id}-performed"] = "yes"
+        response = client.post(_form_url(case), data=payload)
+
+        assert response.status_code == 200
+        assert not CaseFollowUp.objects.filter(case=case).exists()
 
 
 # ── R5: JS apenas show/hide, incluído pelo template ────────────────────

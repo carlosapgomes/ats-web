@@ -20,6 +20,7 @@ from apps.cases.models import (
     CaseEvent,
     CaseFollowUp,
     CaseProcedure,
+    DoctorDisposition,
     ProcedureFollowUp,
 )
 
@@ -33,9 +34,14 @@ def _case_with_procedures(
     user: Any,
     types: tuple[str, ...] = ("eda",),
 ) -> Case:
+    """Caso elegível com rows declaradas e autorizadas (universo do follow-up)."""
     case = case_factory(user)
     for procedure_type in types:
-        CaseProcedure.objects.create(case=case, procedure_type=procedure_type)
+        CaseProcedure.objects.create(
+            case=case,
+            procedure_type=procedure_type,
+            doctor_disposition=DoctorDisposition.APPROVED,
+        )
     return case
 
 
@@ -267,8 +273,8 @@ class TestValidacoes:
             pytest.param(
                 (),
                 lambda case: [],
-                "Caso não possui procedimentos declarados para pós-procedimento.",
-                id="sem-procedimentos-declarados",
+                "Caso não possui procedimentos autorizados para pós-procedimento.",
+                id="sem-procedimentos-autorizados",
             ),
             pytest.param(
                 ("eda",),
@@ -279,7 +285,7 @@ class TestValidacoes:
             pytest.param(
                 ("eda", "colonoscopy"),
                 lambda case: [ProcedureOutcomeInput(procedure_id=_procedure_ids(case)[1], performed=True)],
-                "O pós-procedimento deve cobrir todos os procedimentos do caso.",
+                "O pós-procedimento deve cobrir todos os procedimentos autorizados do caso.",
                 id="cobertura-incompleta",
             ),
         ],
@@ -536,6 +542,118 @@ class TestPreparoInadequado:
                 procedure_outcomes=[
                     _outcome(case, performed=False, reason="inadequate_prep", other="jejum incompleto"),
                 ],
+            )
+        assert not CaseFollowUp.objects.filter(case=case).exists()
+        assert not CaseEvent.objects.filter(case=case, event_type__startswith="FOLLOWUP").exists()
+
+
+# ── Cobertura restrita às rows autorizadas (ADR-0007 / R1) ───────────────
+
+
+def _row(case: Case, procedure_type: str, disposition: str) -> CaseProcedure:
+    """Row ``CaseProcedure`` com disposição médica explícita (dimensão de decisão)."""
+    return CaseProcedure.objects.create(
+        case=case,
+        procedure_type=procedure_type,
+        doctor_disposition=disposition,
+    )
+
+
+class TestCoberturaRestritaAutorizadas:
+    """O universo do follow-up é o subconjunto ``doctor_disposition == approved``."""
+
+    def _assert_rejeitado(self, case: Case, user: Any, outcomes: list[ProcedureOutcomeInput]) -> None:
+        with pytest.raises(ValueError):
+            record_case_follow_up(
+                case=case,
+                performed_by=user,
+                patient_admitted=False,
+                procedure_outcomes=outcomes,
+            )
+        assert not CaseFollowUp.objects.filter(case=case).exists()
+        assert not CaseEvent.objects.filter(case=case, event_type__startswith="FOLLOWUP").exists()
+
+    def test_troca_aceita_sem_desfecho_da_row_negada(self, user, case_factory) -> None:
+        """Troca (EDA negada + Ecoendoscopia autorizada): só a autorizada é coberta."""
+        case = case_factory(user)
+        _row(case, "eda", DoctorDisposition.DENIED)
+        autorizada = _row(case, "echoendoscopy", DoctorDisposition.APPROVED)
+
+        follow_up = record_case_follow_up(
+            case=case,
+            performed_by=user,
+            patient_admitted=True,
+            procedure_outcomes=[ProcedureOutcomeInput(procedure_id=autorizada.id, performed=True)],
+        )
+
+        assert follow_up.version == 1
+        assert [row.procedure_id for row in follow_up.procedure_outcomes.all()] == [autorizada.id]
+        event = CaseEvent.objects.get(case=case, event_type="FOLLOWUP_RECORDED")
+        assert [payload["procedure_id"] for payload in event.payload["outcomes"]] == [autorizada.id]
+        assert event.payload["outcomes"][0]["procedure_type"] == "echoendoscopy"
+
+    def test_aprovacao_parcial_aceita_sem_desfecho_da_row_negada(self, user, case_factory) -> None:
+        """Aprovação parcial (EDA aprovada + Colonoscopia negada): só a EDA é coberta."""
+        case = case_factory(user)
+        autorizada = _row(case, "eda", DoctorDisposition.APPROVED)
+        _row(case, "colonoscopy", DoctorDisposition.DENIED)
+
+        follow_up = record_case_follow_up(
+            case=case,
+            performed_by=user,
+            patient_admitted=False,
+            procedure_outcomes=[
+                ProcedureOutcomeInput(
+                    procedure_id=autorizada.id,
+                    performed=False,
+                    non_performance_reason="absenteeism",
+                )
+            ],
+        )
+
+        assert [row.procedure_id for row in follow_up.procedure_outcomes.all()] == [autorizada.id]
+
+    def test_desfecho_para_row_negada_rejeitado(self, user, case_factory) -> None:
+        """Desfecho informado para row negada é rejeitado (fail-closed)."""
+        case = case_factory(user)
+        autorizada = _row(case, "eda", DoctorDisposition.APPROVED)
+        negada = _row(case, "colonoscopy", DoctorDisposition.DENIED)
+
+        self._assert_rejeitado(
+            case,
+            user,
+            [
+                ProcedureOutcomeInput(procedure_id=autorizada.id, performed=True),
+                ProcedureOutcomeInput(procedure_id=negada.id, performed=True),
+            ],
+        )
+
+    def test_desfecho_para_row_pendente_rejeitado(self, user, case_factory) -> None:
+        """Desfecho para row ainda pendente (não autorizada) é rejeitado."""
+        case = case_factory(user)
+        autorizada = _row(case, "eda", DoctorDisposition.APPROVED)
+        pendente = _row(case, "colonoscopy", DoctorDisposition.PENDING)
+
+        self._assert_rejeitado(
+            case,
+            user,
+            [
+                ProcedureOutcomeInput(procedure_id=autorizada.id, performed=True),
+                ProcedureOutcomeInput(procedure_id=pendente.id, performed=True),
+            ],
+        )
+
+    def test_caso_sem_rows_autorizadas_rejeitado(self, user, case_factory) -> None:
+        """Sem rows autorizadas (defensivo): erro explícito, nada gravado."""
+        case = case_factory(user)
+        _row(case, "eda", DoctorDisposition.DENIED)
+
+        with pytest.raises(ValueError, match="Caso não possui procedimentos autorizados para pós-procedimento."):
+            record_case_follow_up(
+                case=case,
+                performed_by=user,
+                patient_admitted=False,
+                procedure_outcomes=[],
             )
         assert not CaseFollowUp.objects.filter(case=case).exists()
         assert not CaseEvent.objects.filter(case=case, event_type__startswith="FOLLOWUP").exists()

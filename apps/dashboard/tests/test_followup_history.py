@@ -10,7 +10,7 @@ from django.urls import reverse
 from django.utils import timezone
 
 from apps.cases.followup import ProcedureOutcomeInput, record_case_follow_up
-from apps.cases.models import Case, CaseEvent, CaseFollowUp, CaseProcedure
+from apps.cases.models import Case, CaseEvent, CaseFollowUp, CaseProcedure, DoctorDisposition, ProcedureFollowUp
 
 pytestmark = pytest.mark.django_db
 
@@ -116,7 +116,11 @@ def _outcome_inputs(
     """Inputs de desfecho para os tipos informados (cria CaseProcedure se faltar)."""
     outcomes: list[ProcedureOutcomeInput] = []
     for procedure_type in procedure_types:
-        procedure, _ = CaseProcedure.objects.get_or_create(case=case, procedure_type=procedure_type)
+        procedure, _ = CaseProcedure.objects.get_or_create(
+            case=case,
+            procedure_type=procedure_type,
+            defaults={"doctor_disposition": DoctorDisposition.APPROVED},
+        )
         outcomes.append(
             ProcedureOutcomeInput(
                 procedure_id=procedure.id,
@@ -204,8 +208,12 @@ def _filter_scenario(client) -> dict[str, Case]:
     user = _login_as(client, "manager")
     when = _local_dt(day_offset=0, hour=9)
     misto = _create_scheduled_case(user, arn="FILT-MIX", name="Misto", when=when)
-    eda, _ = CaseProcedure.objects.get_or_create(case=misto, procedure_type="eda")
-    colonoscopia, _ = CaseProcedure.objects.get_or_create(case=misto, procedure_type="colonoscopy")
+    eda, _ = CaseProcedure.objects.get_or_create(
+        case=misto, procedure_type="eda", defaults={"doctor_disposition": DoctorDisposition.APPROVED}
+    )
+    colonoscopia, _ = CaseProcedure.objects.get_or_create(
+        case=misto, procedure_type="colonoscopy", defaults={"doctor_disposition": DoctorDisposition.APPROVED}
+    )
     record_case_follow_up(
         case=misto,
         performed_by=user,
@@ -731,8 +739,12 @@ class TestHistoryExportRows:
         case = _create_scheduled_case(user, arn="CSV-001", name="Maria Export", when=when)
         _record(case, user, performed=False, reason="other", other="Equipe indisponível")  # v1 — fora da população
 
-        procedure_eda, _ = CaseProcedure.objects.get_or_create(case=case, procedure_type="eda")
-        procedure_colo, _ = CaseProcedure.objects.get_or_create(case=case, procedure_type="colonoscopy")
+        procedure_eda, _ = CaseProcedure.objects.get_or_create(
+            case=case, procedure_type="eda", defaults={"doctor_disposition": DoctorDisposition.APPROVED}
+        )
+        procedure_colo, _ = CaseProcedure.objects.get_or_create(
+            case=case, procedure_type="colonoscopy", defaults={"doctor_disposition": DoctorDisposition.APPROVED}
+        )
         v2 = record_case_follow_up(
             case=case,
             performed_by=user,
@@ -1306,3 +1318,76 @@ class TestHistorySpecializedProcedures:
         assert [(proc["label"], proc["performed"], proc["total"]) for proc in summary["procedures"]] == [
             ("Ecoendoscopia", 1, 1)
         ]
+
+
+# ── R4: eras mistas — versão legada exaustiva vs. regra nova (ADR-0007) ──
+
+
+def _legacy_exhaustive_follow_up(case: Case, user, *, eda: CaseProcedure, denied: CaseProcedure) -> CaseFollowUp:
+    """Versão 1 gravada antes da mudança: cobre rows autorizadas E negadas.
+
+    Simula o dado append-only de outra era sem passar pelo validador atual
+    (a regra nova restringe a cobertura ao subconjunto autorizado).
+    """
+    legacy = CaseFollowUp.objects.create(case=case, version=1, patient_admitted=True, recorded_by=user)
+    ProcedureFollowUp.objects.create(follow_up=legacy, procedure=eda, performed=True)
+    ProcedureFollowUp.objects.create(
+        follow_up=legacy,
+        procedure=denied,
+        performed=False,
+        non_performance_reason="other",
+        other_reason="Row negada enquadrada na era exaustiva",
+    )
+    return legacy
+
+
+class TestHistoryMixedEras:
+    """Versões legadas exaustivas renderizam como gravadas; novas versões seguem a regra nova."""
+
+    def _legacy_case(self, user, *, arn: str) -> tuple[Case, CaseProcedure, CaseProcedure]:
+        case = _create_scheduled_case(user, arn=arn, name="Era Mista", when=_local_dt(day_offset=0, hour=9))
+        eda = CaseProcedure.objects.create(case=case, procedure_type="eda", doctor_disposition="approved")
+        denied = CaseProcedure.objects.create(case=case, procedure_type="colonoscopy", doctor_disposition="denied")
+        _legacy_exhaustive_follow_up(case, user, eda=eda, denied=denied)
+        return case, eda, denied
+
+    def test_legacy_exhaustive_version_renders_fully_in_history_and_csv(self, client) -> None:
+        """Versão legada cobrindo row negada continua íntegra (tabela e CSV)."""
+        user = _login_as(client, "manager")
+        case, _, denied = self._legacy_case(user, arn="ERA-HIST-LEGACY")
+
+        response = client.get(HISTORY_URL)
+        assert response.status_code == 200
+        rows = [row for row in response.context["page_obj"].object_list if row["case"].pk == case.pk]
+        assert sorted(row["procedure_label"] for row in rows) == ["Colonoscopia", "EDA"]
+        denied_row = next(row for row in rows if row["procedure_type"] == denied.procedure_type)
+        assert denied_row["performed"] is False
+        assert denied_row["detail_label"] == "Row negada enquadrada na era exaustiva"
+
+        records = _export_csv(client)
+        csv_rows = [row for row in records[1:] if row[CSV_COL["Ocorrência"]] == "ERA-HIST-LEGACY"]
+        assert sorted(row[CSV_COL["Procedimento"]] for row in csv_rows) == ["Colonoscopia", "EDA"]
+        colon_row = next(row for row in csv_rows if row[CSV_COL["Procedimento"]] == "Colonoscopia")
+        assert colon_row[CSV_COL["Outra causa (texto)"]] == "Row negada enquadrada na era exaustiva"
+        assert colon_row[CSV_COL["Versão"]] == "1"
+
+    def test_new_version_of_legacy_case_records_only_authorized_rows(self, client) -> None:
+        """Update de caso legado grava nova versão cobrindo só rows autorizadas."""
+        user = _login_as(client, "manager")
+        case, eda, _ = self._legacy_case(user, arn="ERA-HIST-UPDATE")
+
+        record_case_follow_up(
+            case=case,
+            performed_by=user,
+            patient_admitted=False,
+            procedure_outcomes=[ProcedureOutcomeInput(procedure_id=eda.id, performed=True)],
+        )
+
+        v1 = CaseFollowUp.objects.get(case=case, version=1)
+        v2 = CaseFollowUp.objects.get(case=case, version=2)
+        assert v1.procedure_outcomes.count() == 2  # legado intacto (append-only)
+        assert [row.procedure_id for row in v2.procedure_outcomes.all()] == [eda.id]
+
+        # A leitura é da versão corrente (v2) — só a row autorizada.
+        rows = [row for row in client.get(HISTORY_URL).context["page_obj"].object_list if row["case"].pk == case.pk]
+        assert [row["procedure_type"] for row in rows] == ["eda"]

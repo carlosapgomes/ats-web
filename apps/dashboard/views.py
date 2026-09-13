@@ -44,6 +44,7 @@ from apps.cases.models import (
     CaseFollowUp,
     CaseProcedure,
     CaseStatus,
+    DoctorDisposition,
     FollowUpNonPerformanceReason,
     FollowUpResourceShortageDetail,
     SupervisorSummary,
@@ -1911,7 +1912,12 @@ def _followup_history(case: Case) -> list[dict[str, Any]]:
 
 
 def _foreign_procedure_ids(post: QueryDict, procedures: list[CaseProcedure]) -> list[int]:
-    """IDs de procedimento recebidos no POST que não pertencem ao caso."""
+    """IDs de procedimento recebidos no POST fora do conjunto elegível.
+
+    O conjunto ``procedures`` é o subconjunto AUTORIZADO do caso (ADR-0007),
+    então IDs de rows negadas/pendentes contam como fora do universo: o POST
+    que traz desfecho para uma delas é rejeitado fail-closed.
+    """
     known_ids = {procedure.id for procedure in procedures}
     foreign: list[int] = []
     for key in post:
@@ -1929,8 +1935,9 @@ def _followup_form_context(
 ) -> dict[str, Any]:
     """Contexto de renderização do formulário de follow-up (GET e POST inválido).
 
-    ``blocks`` carrega um par ``{"procedure", "form"}`` por ``CaseProcedure``;
-    lista vazia indica caso elegível sem procedimentos (aviso, sem campos).
+    ``blocks`` carrega um par ``{"procedure", "form"}`` por ``CaseProcedure``
+    autorizada; lista vazia indica caso elegível sem procedimentos autorizados
+    (aviso, sem campos).
 
     ``is_immediate`` segue a precedência de ramo de ``is_followup_eligible``:
     agendamento confirmado com horário apresenta o caso como AGENDADO; a vinda
@@ -1973,9 +1980,18 @@ def followup_form(request: HttpRequest, case_id: uuid.UUID) -> HttpResponse:
         raise Http404("Caso não está elegível para pós-procedimento.")
 
     # R4 (Slice 006): blocos na ordem canônica de exibição do catálogo
-    # (EDA → Colonoscopia → Ecoendoscopia → CPRE). O modelo de follow-up não
-    # muda: continua uma row por ``CaseProcedure`` do caso.
-    procedures = sorted(case.procedures.all(), key=_followup_procedure_order)
+    # (EDA → Colonoscopia → Ecoendoscopia → CPRE). O universo é o subconjunto
+    # AUTORIZADO (``doctor_disposition == "approved"``, ADR-0007): rows
+    # negadas/pendentes não geram bloco nem exigem desfecho. O modelo de
+    # follow-up não muda: continua uma row por ``CaseProcedure`` autorizada.
+    procedures = sorted(
+        (
+            procedure
+            for procedure in case.procedures.all()
+            if procedure.doctor_disposition == DoctorDisposition.APPROVED
+        ),
+        key=_followup_procedure_order,
+    )
     is_post = request.method == "POST"
     post_data: QueryDict | None = request.POST if is_post else None
     blocks: list[dict[str, Any]] = [

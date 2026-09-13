@@ -339,7 +339,7 @@ class TestFollowUpListCardBadges:
     """Cards exibem ocorrência, nome, data/hora ou fluxo, e badge de pós-procedimento."""
 
     def _record_follow_up(self, case: Case, user) -> None:
-        procedure = CaseProcedure.objects.create(case=case, procedure_type="eda")
+        procedure = CaseProcedure.objects.create(case=case, procedure_type="eda", doctor_disposition="approved")
         record_case_follow_up(
             case=case,
             performed_by=user,
@@ -573,7 +573,7 @@ class TestNoFollowupAnglicismVisible:
     """Páginas-chave do Pós-Procedimento sem o anglicismo no texto visível."""
 
     def _record_follow_up(self, case: Case, user) -> None:
-        procedure = CaseProcedure.objects.create(case=case, procedure_type="eda")
+        procedure = CaseProcedure.objects.create(case=case, procedure_type="eda", doctor_disposition="approved")
         record_case_follow_up(
             case=case,
             performed_by=user,
