@@ -629,6 +629,84 @@ class TestFollowUpSecondVersion:
         assert current.version == 2
 
 
+# ── R4 (Slice 006): procedimentos especializados no formulário ────────
+
+
+class TestFollowUpFormSpecializedProcedures:
+    """Formulário de follow-up lista e grava Ecoendoscopia/CPRE por row.
+
+    O modelo de follow-up permanece intacto: um ``ProcedureFollowUp`` por
+    ``CaseProcedure`` do caso, com o label do catálogo; o que a jornada
+    especializada exige é que o bloco apareça na ordem canônica de exibição e
+    que o desfecho seja gravado para a row especializada.
+    """
+
+    def test_get_lists_specialized_block_with_catalog_label(self, client) -> None:
+        user = _login_as(client, "manager")
+        case = _create_case(user, arn="SPEC-FORM-ECHO", name="Paciente Eco Form")
+        echo = _add_procedure(case, "echoendoscopy")
+
+        response = client.get(_form_url(case))
+
+        assert response.status_code == 200
+        content = response.content.decode()
+        assert "🔬 Ecoendoscopia" in content
+        assert f'name="proc_{echo.id}-performed"' in content
+
+    def test_get_lists_cpre_block_with_catalog_label(self, client) -> None:
+        user = _login_as(client, "manager")
+        case = _create_case(user, arn="SPEC-FORM-CPRE", name="Paciente CPRE Form")
+        cpre = _add_procedure(case, "cpre")
+
+        content = client.get(_form_url(case)).content.decode()
+
+        assert "🔬 CPRE" in content
+        assert f'name="proc_{cpre.id}-performed"' in content
+
+    def test_get_orders_blocks_in_catalog_display_order(self, client) -> None:
+        """Ordem canônica do catálogo: EDA → Colonoscopia → Ecoendoscopia → CPRE."""
+        user = _login_as(client, "manager")
+        case = _create_case(user, arn="SPEC-FORM-ORDER", name="Ordem Catalogo")
+        cpre = _add_procedure(case, "cpre")
+        echo = _add_procedure(case, "echoendoscopy")
+        colon = _add_procedure(case, "colonoscopy")
+        eda = _add_procedure(case, "eda")
+
+        content = client.get(_form_url(case)).content.decode()
+
+        positions = [content.index(f'data-followup-proc-id="{p.id}"') for p in (eda, colon, echo, cpre)]
+        assert positions == sorted(positions)
+
+    def test_post_records_outcome_for_echoendoscopy_row(self, client) -> None:
+        user = _login_as(client, "manager")
+        case = _create_case(user, arn="SPEC-FORM-POST-ECHO", name="Registro Eco")
+        echo = _add_procedure(case, "echoendoscopy")
+
+        response = client.post(_form_url(case), data=_valid_payload(echo))
+
+        assert response.status_code == 302
+        outcome = CaseFollowUp.objects.get(case=case).procedure_outcomes.get()
+        assert outcome.procedure_id == echo.id
+        assert outcome.performed is True
+        event = CaseEvent.objects.get(case=case, event_type="FOLLOWUP_RECORDED")
+        assert event.payload["outcomes"][0]["procedure_type"] == "echoendoscopy"
+
+    def test_post_records_non_performance_for_cpre_row(self, client) -> None:
+        user = _login_as(client, "manager")
+        case = _create_case(user, arn="SPEC-FORM-POST-CPRE", name="Registro CPRE")
+        cpre = _add_procedure(case, "cpre")
+
+        payload = _valid_payload(cpre, performed="no")
+        payload[f"proc_{cpre.id}-non_performance_reason"] = "absenteeism"
+        response = client.post(_form_url(case), data=payload)
+
+        assert response.status_code == 302
+        outcome = CaseFollowUp.objects.get(case=case).procedure_outcomes.get()
+        assert outcome.procedure_id == cpre.id
+        assert outcome.performed is False
+        assert outcome.non_performance_reason == "absenteeism"
+
+
 # ── R5: JS apenas show/hide, incluído pelo template ────────────────────
 
 

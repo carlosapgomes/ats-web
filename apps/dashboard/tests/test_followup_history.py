@@ -1258,3 +1258,51 @@ class TestPreparoInadequadoHistory:
         assert row[CSV_COL["Causa"]] == "Preparo inadequado"
         assert row[CSV_COL["Submotivo"]] == ""
         assert row[CSV_COL["Outra causa (texto)"]] == ""
+
+
+# ── R4 (Slice 006): procedimentos especializados no histórico ───────────
+
+
+class TestHistorySpecializedProcedures:
+    """Histórico e exportação listam Ecoendoscopia/CPRE por row especializada.
+
+    R4 do Slice 006 sem mudança de modelo: uma ``ProcedureFollowUp`` por
+    ``CaseProcedure`` e o label do catálogo nas superfícies derivadas.
+    """
+
+    def test_history_rows_and_csv_use_specialized_catalog_labels(self, client) -> None:
+        user = _login_as(client, "manager")
+        echo = _create_scheduled_case(
+            user, arn="SPEC-HIST-ECHO", name="EcoHistorico", when=_local_dt(day_offset=0, hour=9)
+        )
+        _record(echo, user, procedure_types=("echoendoscopy",))
+        cpre = _create_scheduled_case(
+            user, arn="SPEC-HIST-CPRE", name="CPREHistorico", when=_local_dt(day_offset=0, hour=10)
+        )
+        _record(cpre, user, performed=False, reason="absenteeism", procedure_types=("cpre",))
+
+        response = client.get(HISTORY_URL)
+        assert response.status_code == 200
+        rows = {row["case"].agency_record_number: row for row in response.context["page_obj"].object_list}
+        assert rows["SPEC-HIST-ECHO"]["procedure_label"] == "Ecoendoscopia"
+        assert rows["SPEC-HIST-CPRE"]["procedure_label"] == "CPRE"
+        content = response.content.decode()
+        assert "Ecoendoscopia" in content
+        assert "CPRE" in content
+        assert "Absenteísmo" in content
+
+        records = _export_csv(client)
+        assert sorted(row[CSV_COL["Procedimento"]] for row in records[1:]) == ["CPRE", "Ecoendoscopia"]
+
+    def test_summary_rates_include_specialized_procedures(self, client) -> None:
+        user = _login_as(client, "manager")
+        case = _create_scheduled_case(
+            user, arn="SPEC-HIST-SUM", name="EcoResumo", when=_local_dt(day_offset=0, hour=11)
+        )
+        _record(case, user, procedure_types=("echoendoscopy",))
+
+        summary = client.get(HISTORY_URL).context["summary"]
+        assert summary["cases"] == 1
+        assert [(proc["label"], proc["performed"], proc["total"]) for proc in summary["procedures"]] == [
+            ("Ecoendoscopia", 1, 1)
+        ]

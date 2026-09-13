@@ -6,10 +6,10 @@
  *
  * Slice 004: the scheduler queue filters by the AUTHORIZED procedure set
  * (R5/D13). Every filterable card exposes the projected selection via
- * data-approved-selection (eda | colonoscopy | eda_colonoscopy); the legacy
- * bridge data-exam-type remains as fallback until cutover. HTMX polling
- * re-applies the filter on htmx:afterSwap because the controls live outside
- * #scheduler-queue-content.
+ * data-approved-selection (eda | colonoscopy | eda_colonoscopy |
+ * echoendoscopy | cpre); the legacy bridge data-exam-type remains as fallback
+ * until cutover. HTMX polling re-applies the filter on htmx:afterSwap because
+ * the controls live outside #scheduler-queue-content.
  *
  * No dependencies, no persistence (no URL, storage, cookie or session).
  * No action depends on this filter — ACK forms and schedule links stay intact.
@@ -39,7 +39,8 @@
     );
   }
 
-  /** Return the selected exam type: "all" | "eda" | "colonoscopy". */
+  /** Return the selected exam type: "all" | "eda" | "colonoscopy" |
+   *  "eda_colonoscopy" | "echoendoscopy" | "cpre". */
   function getSelectedType() {
     for (var i = 0; i < typeButtons.length; i++) {
       if (typeButtons[i].checked) {
@@ -54,6 +55,8 @@
     if (type === "eda") return "EDA";
     if (type === "colonoscopy") return "Colonoscopia";
     if (type === "eda_colonoscopy") return "EDA + Colonoscopia";
+    if (type === "echoendoscopy") return "Ecoendoscopia";
+    if (type === "cpre") return "CPRE";
     return "Todos";
   }
 
@@ -78,7 +81,7 @@
   /** Recompute per-type counters from the projected card attribute. */
   function updateCounts() {
     var cards = getCards();
-    var counts = { all: cards.length, eda: 0, colonoscopy: 0, eda_colonoscopy: 0 };
+    var counts = { all: cards.length, eda: 0, colonoscopy: 0, eda_colonoscopy: 0, echoendoscopy: 0, cpre: 0 };
     Array.prototype.forEach.call(cards, function (card) {
       var selection = cardSelection(card);
       if (counts[selection] !== undefined) counts[selection]++;

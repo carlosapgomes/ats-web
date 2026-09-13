@@ -8,7 +8,7 @@ from typing import Any
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
 from django.db import models
-from django.db.models import Exists, F, OuterRef, QuerySet
+from django.db.models import Count, Exists, F, OuterRef, QuerySet
 from django.http import FileResponse, Http404, HttpRequest, HttpResponse, HttpResponseBase, JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
@@ -26,7 +26,6 @@ from apps.cases.admission import (
     get_admission_flow_notice_copy,
 )
 from apps.cases.models import (
-    EDA_COLONOSCOPY,
     Case,
     CaseEvent,
     CaseProcedure,
@@ -37,6 +36,10 @@ from apps.cases.models import (
 from apps.cases.navigation import resolve_safe_next_url
 from apps.cases.priority_signals import build_priority_signal_badges
 from apps.cases.procedures import (
+    ALLOWED_PROCEDURE_SETS,
+    PAIRED_APPOINTMENT_SET,
+    PROCEDURE_ORDER,
+    SUPPORTED_PROCEDURE_TYPES,
     format_procedure_selection,
     get_approved_procedure_types,
     get_detected_procedure_types,
@@ -393,18 +396,15 @@ def _scheduler_queue_context(user: Any = None, tab: str = "pending") -> dict[str
 
     processed_today_count = len(processed_today)
 
-    # ── Contagens por dimensão autorizada (R5/D13, Slice 004) ────────
+    # ── Contagens por dimensão autorizada (R3/D13, Slice 004/006) ────
     # Pendentes soma os MESMOS três grupos do badge primário
     # (WAIT_APPT + notices iniciais + issues operacionais); Processados Hoje
-    # soma apenas os cards processados do dia. Cada card pertence a EXATAMENTE
-    # um bucket (eda | colonoscopy | eda_colonoscopy) pela dimensão autorizada;
-    # combinado conta uma vez. Nenhum contador inclui Histórico/ciências
-    # reconhecidas.
-    pending_selection_counts = _sum_approved_selection_counts(
-        [pending_cards, immediate_notice_cards, operational_issue_cards]
-    )
-    processed_selection_counts = _sum_approved_selection_counts([processed_today])
-
+    # soma apenas os cards processados do dia. Os dois contadores usam o MESMO
+    # universo de buckets (catálogo + ``all``); cada card pertence a EXATAMENTE
+    # um bucket (eda | colonoscopy | eda_colonoscopy | echoendoscopy | cpre)
+    # pela dimensão autorizada, então combinado conta uma vez e um procedimento
+    # especializado nunca conta como casado. Nenhum contador inclui
+    # Histórico/ciências reconhecidas.
     context: dict[str, Any] = {
         "active_tab": tab,
         "pending_cases": pending_cards,
@@ -418,11 +418,10 @@ def _scheduler_queue_context(user: Any = None, tab: str = "pending") -> dict[str
         "processed_today_count": processed_today_count,
         "acknowledged_notice_count": len(acknowledged_notice_cards),
         "total_notice_count": pending_count + immediate_notice_count + operational_issue_count,
-        "exam_type_counts": {
-            "all": pending_count + immediate_notice_count + operational_issue_count,
-            **pending_selection_counts,
-        },
-        "processed_exam_type_counts": {"all": processed_today_count, **processed_selection_counts},
+        "exam_type_counts": _sum_approved_selection_counts(
+            [pending_cards, immediate_notice_cards, operational_issue_cards]
+        ),
+        "processed_exam_type_counts": _sum_approved_selection_counts([processed_today]),
     }
 
     return context
@@ -431,14 +430,15 @@ def _scheduler_queue_context(user: Any = None, tab: str = "pending") -> dict[str
 def _sum_approved_selection_counts(card_groups: list[list[dict[str, Any]]]) -> dict[str, int]:
     """Soma contagens da dimensão autorizada sobre grupos de cards prontos.
 
-    Cada card contribui para exatamente um bucket (``eda``, ``colonoscopy`` ou
-    ``eda_colonoscopy``) pela chave projetada ``approved_selection_key`` —
-    combinado conta uma vez (R5). Chaves desconhecidas são ignoradas (nunca
-    inventadas).
+    Cada card contribui para exatamente um bucket (uma chave por conjunto
+    válido do catálogo — inclusive ``echoendoscopy`` e ``cpre``) pela chave
+    projetada ``approved_selection_key``; combinado conta uma vez (R3/R6).
+    Chaves desconhecidas são ignoradas (nunca inventadas).
     """
-    counts: dict[str, int] = {"eda": 0, "colonoscopy": 0, "eda_colonoscopy": 0}
+    counts = _empty_approved_selection_buckets()
     for cards in card_groups:
         for card in cards:
+            counts["all"] += 1
             selection_key_value = card.get("approved_selection_key")
             if selection_key_value in counts:
                 counts[selection_key_value] += 1
@@ -1231,40 +1231,79 @@ def scheduler_lock_release(request: HttpRequest, case_id: uuid.UUID) -> HttpResp
 
 # ── Historical search ───────────────────────────────────────────────────────
 
-# Opções da dimensão autorizada no histórico (R5/D13): além dos tipos
-# simples, ``eda_colonoscopy`` (Combinado) — chave de seleção derivada da
-# projeção (``ProcedureType``/``EDA_COLONOSCOPY``), validada explicitamente
-# aqui.
-_HISTORICAL_DIMENSION_CHOICES: tuple[str, ...] = ("all", "eda", "colonoscopy", EDA_COLONOSCOPY)
+# ── Dimensão autorizada do CHD (R1/R3/R5/R6) ───────────────────────────────
+# Universo único de buckets derivado do catálogo central
+# (``apps/cases/procedures.py``): EDA, Colonoscopia, casado, Ecoendoscopia e
+# CPRE. Nenhum bucket é inferido por "outro tipo" nem por ``len == 2``; o
+# filtro do Histórico exige igualdade exata de conjunto aprovado.
+
+
+def _ordered_allowed_procedure_sets() -> tuple[tuple[str, ...], ...]:
+    """Conjuntos válidos do catálogo em ordem canônica de exibição.
+
+    Fonte: catálogo fechado (``ALLOWED_PROCEDURE_SETS``). Os conjuntos simples
+    seguem a ordem de exibição do catálogo (``SUPPORTED_PROCEDURE_TYPES``) e o
+    casado (``PAIRED_APPOINTMENT_SET``, único conjunto de dois componentes)
+    entra logo após o último de seus componentes — mesma ordem dos controles
+    de filtro das abas CHD e do seletor do Histórico.
+    """
+    paired = tuple(sorted(PAIRED_APPOINTMENT_SET, key=lambda procedure_type: PROCEDURE_ORDER[procedure_type]))
+    singles = [
+        (procedure_type,)
+        for procedure_type in SUPPORTED_PROCEDURE_TYPES
+        if frozenset({procedure_type}) in ALLOWED_PROCEDURE_SETS
+    ]
+    last_paired_index = max(SUPPORTED_PROCEDURE_TYPES.index(procedure_type) for procedure_type in paired)
+    return (*singles[: last_paired_index + 1], paired, *singles[last_paired_index + 1 :])
+
+
+_ORDERED_ALLOWED_PROCEDURE_SETS: tuple[tuple[str, ...], ...] = _ordered_allowed_procedure_sets()
+
+# Chave de seleção projetada → conjunto aprovado exigido pelo bucket (R1/R6).
+_APPROVED_TYPES_BY_SELECTION_KEY: dict[str, frozenset[str]] = {
+    selection_key(procedure_types): frozenset(procedure_types) for procedure_types in _ORDERED_ALLOWED_PROCEDURE_SETS
+}
+
+# Opções do filtro do Histórico (R1/D13): ``all`` + uma chave por conjunto
+# válido do catálogo, incluindo Ecoendoscopia e CPRE. Valor inválido cai em
+# ``all`` na view.
+_HISTORICAL_DIMENSION_CHOICES: tuple[str, ...] = (
+    "all",
+    *(selection_key(procedure_types) for procedure_types in _ORDERED_ALLOWED_PROCEDURE_SETS),
+)
+
+
+def _empty_approved_selection_buckets() -> dict[str, int]:
+    """Buckets zerados do contador CHD no mesmo universo dos filtros (R3).
+
+    ``all`` (universo do grupo) + uma chave por conjunto válido do catálogo —
+    o MESMO universo para Pendentes, Processados Hoje e Histórico.
+    """
+    buckets: dict[str, int] = {"all": 0}
+    for procedure_types in _ORDERED_ALLOWED_PROCEDURE_SETS:
+        buckets[selection_key(procedure_types)] = 0
+    return buckets
 
 
 def _filter_by_approved_dimension(qs: QuerySet[Case], dimension: str) -> QuerySet[Case]:
-    """Filtra um queryset pela dimensão autorizada (R5/D13).
+    """Restringe um queryset à dimensão autorizada exata (R1/R5/R6).
 
-    Slice 009 (R4): somente rows ``doctor_disposition=approved``.
-    ``eda``/``colonoscopy`` são EXCLUSIVOS (um caso só pertence a um bucket);
-    combinado exige as duas rows aprovadas. O fallback legado
-    ``filter(exam_type=..., procedures__isnull=True)`` foi removido — caso sem
-    autorização projetada não aparece nos buckets (fail-closed).
+    Igualdade exata de conjunto sobre as rows ``doctor_disposition=approved``:
+    o caso entra no bucket quando possui exatamente o conjunto do catálogo
+    correspondente (Ecoendoscopia autorizada exige nenhum outro procedimento
+    aprovado; combinado exige EDA + Colonoscopia e nenhum terceiro). Não há
+    exclusão por "outro tipo" nem combinado por ``len == 2``; dimensão fora do
+    catálogo devolve o queryset intacto.
     """
-    other = ProcedureType.COLONOSCOPY if dimension == ProcedureType.EDA else ProcedureType.EDA
-    row_matches = qs.filter(
-        procedures__procedure_type=dimension,
-        procedures__doctor_disposition=DoctorDisposition.APPROVED,
-    ).exclude(
-        procedures__procedure_type=other,
-        procedures__doctor_disposition=DoctorDisposition.APPROVED,
-    )
-    if dimension == EDA_COLONOSCOPY:
-        combined = qs.filter(
-            procedures__procedure_type=ProcedureType.EDA,
-            procedures__doctor_disposition=DoctorDisposition.APPROVED,
-        ).filter(
-            procedures__procedure_type=ProcedureType.COLONOSCOPY,
-            procedures__doctor_disposition=DoctorDisposition.APPROVED,
-        )
-        return combined.distinct()
-    return row_matches.distinct()
+    procedure_types = _APPROVED_TYPES_BY_SELECTION_KEY.get(dimension)
+    if procedure_types is None:
+        return qs
+    approved_rows = models.Q(procedures__doctor_disposition=DoctorDisposition.APPROVED)
+    outside_selection = approved_rows & ~models.Q(procedures__procedure_type__in=procedure_types)
+    return qs.annotate(
+        _approved_matching_rows=Count("procedures", filter=approved_rows, distinct=True),
+        _approved_other_rows=Count("procedures", filter=outside_selection, distinct=True),
+    ).filter(_approved_matching_rows=len(procedure_types), _approved_other_rows=0)
 
 
 @login_required

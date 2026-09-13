@@ -25,8 +25,9 @@ Permitir que o CHD filtre/agende/consulte Ecoendoscopia e CPRE e registre seu p�
 expected_files:
   - apps/scheduler/views.py
   - templates/scheduler/_queue_content.html
+  - templates/scheduler/queue.html
   - templates/scheduler/historical_search.html
-  - static/js/scheduler-queue.js
+  - static/js/scheduler_queue_filter.js
   - apps/dashboard/views.py
   - templates/dashboard/followup_form.html
   - apps/scheduler/tests/test_exam_type_filters.py
@@ -34,7 +35,7 @@ expected_files:
   - apps/dashboard/tests/test_followup_form_view.py
 allowed_incidental_files:
   - apps/dashboard/tests/test_followup_history.py
-file_cap: 10
+file_cap: 11
 out_of_scope:
   - NIR/doctor/analytics summary
   - mudança no modelo de follow-up
@@ -42,6 +43,8 @@ out_of_scope:
 ```
 
 Escalar antes de alterar migrations de follow-up ou cruzar o cap.
+
+**Emenda de ponteiros e cap aprovada pelo parent (correção de planejamento, sem mudança de escopo comportamental; mesma classe da emenda do Slice 005):** `static/js/scheduler-queue.js` não existe — o arquivo real é `static/js/scheduler_queue_filter.js` (referenciado por `queue.html`). Os grupos de rádio de Pendentes/Processados vivem em `templates/scheduler/queue.html`, não em `_queue_content.html` (que contém os cards); sem editar `queue.html`, R1/R3 são inimplementáveis — por isso `queue.html` entra em expected_files e o cap sobe de 10 para 11 (o esquecimento do arquivo separado subcontabilizou o blast radius). Se `_queue_content.html` não precisar de edição (como ocorreu no Slice 005), o total real ficará ≤ 10. `historical_search.html` está corretamente listado (contém o `<select id="exam-type-select">` próprio do Histórico).
 
 ## Matriz requisito → arquivo → teste/check
 

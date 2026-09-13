@@ -49,6 +49,7 @@ from apps.cases.models import (
     SupervisorSummary,
 )
 from apps.cases.navigation import resolve_safe_next_url
+from apps.cases.procedures import PROCEDURE_ORDER
 from apps.cases.services import (
     ADMINISTRATIVE_CLOSURE_REASON_CHOICES,
     administratively_close_case,
@@ -1882,6 +1883,15 @@ def _followup_patient_name(case: Case) -> str:
     return str(patient.get("name") or "")
 
 
+def _followup_procedure_order(procedure: CaseProcedure) -> int:
+    """Posição de exibição do procedimento na ordem canônica do catálogo (D1).
+
+    Tipos fora do catálogo (dado defensivo) vão para o fim, preservando a
+    ordenação determinística; nunca derruba a renderização do formulário.
+    """
+    return PROCEDURE_ORDER.get(procedure.procedure_type, len(PROCEDURE_ORDER))
+
+
 def _followup_history(case: Case) -> list[dict[str, Any]]:
     """Histórico compacto (ascendente) das versões de follow-up do caso."""
     rows: list[dict[str, Any]] = []
@@ -1962,7 +1972,10 @@ def followup_form(request: HttpRequest, case_id: uuid.UUID) -> HttpResponse:
     if not is_followup_eligible(case):
         raise Http404("Caso não está elegível para pós-procedimento.")
 
-    procedures = list(case.procedures.order_by("procedure_type"))
+    # R4 (Slice 006): blocos na ordem canônica de exibição do catálogo
+    # (EDA → Colonoscopia → Ecoendoscopia → CPRE). O modelo de follow-up não
+    # muda: continua uma row por ``CaseProcedure`` do caso.
+    procedures = sorted(case.procedures.all(), key=_followup_procedure_order)
     is_post = request.method == "POST"
     post_data: QueryDict | None = request.POST if is_post else None
     blocks: list[dict[str, Any]] = [

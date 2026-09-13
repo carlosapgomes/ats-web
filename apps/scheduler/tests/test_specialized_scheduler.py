@@ -17,6 +17,7 @@ from typing import Any
 
 import pytest
 from django.contrib.auth import get_user_model
+from django.utils import timezone
 
 from apps.cases.models import (
     Case,
@@ -397,3 +398,91 @@ class TestSpecializedSchedulerQueue:
         assert "Detectado: EDA · Autorizado: CPRE" in content
         assert "Troca para avaliacao de via biliar" in content
         assert "Agendamento casado" not in content
+
+    # ── Slice 006 (R2): especializado confirmado tem 1 agenda, nunca casado ──
+
+    def test_cpre_confirm_form_has_single_appointment_fields(self, client) -> None:
+        """R2: confirmação especializada expõe um único conjunto data/hora/local."""
+        nir = self._login_as(client, "nir")
+        case = self._make_case(
+            nir,
+            approved=(ProcedureType.CPRE,),
+            detected=(ProcedureType.CPRE,),
+        )
+        self._login_as(client, "scheduler")
+
+        content = client.get(f"/scheduler/{case.case_id}/").content.decode()
+
+        assert content.count('name="appointment_date"') == 1
+        assert content.count('name="appointment_time"') == 1
+        assert content.count('name="appointment_location"') == 1
+        assert "Agendamento casado" not in content
+
+    def test_cpre_processed_card_has_single_appointment_and_no_paired_counter(self, client) -> None:
+        """R2: Processados Hoje do especializado conta no próprio bucket, uma agenda."""
+        nir = self._login_as(client, "nir")
+        case = self._make_case(
+            nir,
+            approved=(ProcedureType.CPRE,),
+            detected=(ProcedureType.CPRE,),
+        )
+        scheduler = self._login_as(client, "scheduler")
+        token = self._claim_lock(case.case_id, scheduler)
+
+        response = client.post(
+            f"/scheduler/{case.case_id}/submit/",
+            data={
+                "decision": "confirm",
+                "appointment_date": "2026-08-20",
+                "appointment_time": "09:15",
+                "appointment_location": "Hospital Central - Sala de Endoscopia",
+                "notes": "",
+                "reason": "",
+                "lock_token": token,
+            },
+        )
+        assert response.status_code == 302
+        confirmed = Case.objects.get(pk=case.pk)
+        assert confirmed.appointment_at is not None
+
+        content = client.get("/scheduler/?tab=processed").content.decode()
+
+        assert 'data-approved-selection="cpre"' in content
+        assert "CPRE" in content
+        assert "Agendamento casado" not in content
+        assert 'data-exam-type-count="cpre">1<' in content
+        assert 'data-exam-type-count="eda_colonoscopy">0<' in content
+        appointment_label = timezone.localtime(confirmed.appointment_at).strftime("%d/%m/%Y %H:%M")
+        assert content.count(appointment_label) == 1
+
+    def test_cpre_confirmation_is_found_by_specialized_history_filter(self, client) -> None:
+        """R1/R2: jornada CHD ponta a ponta — histórico filtra o CPRE confirmado."""
+        nir = self._login_as(client, "nir")
+        case = self._make_case(
+            nir,
+            approved=(ProcedureType.CPRE,),
+            detected=(ProcedureType.CPRE,),
+            agency_record_number="HC-SPEC-CPRE",
+        )
+        scheduler = self._login_as(client, "scheduler")
+        token = self._claim_lock(case.case_id, scheduler)
+        client.post(
+            f"/scheduler/{case.case_id}/submit/",
+            data={
+                "decision": "confirm",
+                "appointment_date": "2026-08-21",
+                "appointment_time": "08:45",
+                "appointment_location": "Hospital Central - Sala de Endoscopia",
+                "notes": "",
+                "reason": "",
+                "lock_token": token,
+            },
+        )
+
+        content = client.get("/scheduler/historical/?exam_type=cpre").content.decode()
+
+        assert "HC-SPEC-CPRE" in content
+        assert ">CPRE</span>" in content
+        # Especializado nunca casa: a busca por combinado não o lista.
+        combined = client.get("/scheduler/historical/?exam_type=eda_colonoscopy").content.decode()
+        assert "HC-SPEC-CPRE" not in combined

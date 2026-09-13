@@ -1,4 +1,4 @@
-"""Slice 005 — Filtros CHD por tipo em Pendentes, Processados Hoje e Histórico.
+"""Slice 005/006 — Filtros CHD por tipo em Pendentes, Processados Hoje e Histórico.
 
 Proves R1–R5:
 
@@ -18,6 +18,12 @@ Proves R1–R5:
 
 Sem runner JS, o comportamento do filtro client-side é provado por inspeção
 estática dos marcadores e pela matriz documentada no relatório do slice.
+
+Slice 006 acrescenta os buckets especializados: Pendentes/Processados Hoje
+oferecem Ecoendoscopia e CPRE com contadores no MESMO universo do catálogo
+(R1/R3); o Histórico aceita ``all|eda|colonoscopy|eda_colonoscopy|
+echoendoscopy|cpre`` e filtra por igualdade exata do conjunto autorizado
+(R1/R6); especializado nunca recebe label nem contador casado (R2).
 """
 
 from __future__ import annotations
@@ -263,6 +269,95 @@ class TestSchedulerQueueExamTypeFilters:
         assert ">EDA</span>" in content
         assert ">Colonoscopia</span>" in content
 
+    # ── R1/R3 (Slice 006): buckets especializados no mesmo universo ────
+
+    def test_pending_counts_include_specialized_buckets(self, client) -> None:
+        """Pendentes conta Ecoendoscopia e CPRE além dos três buckets legados."""
+        nir = self._login_as(client, "nir")
+        self._make_wait_appt(nir, selection="eda", name="EDA", record="S-EDA")
+        self._make_wait_appt(nir, selection="colonoscopy", name="COL", record="S-COL")
+        self._make_wait_appt(nir, selection="eda_colonoscopy", name="COMB", record="S-COMB")
+        self._make_wait_appt(nir, selection="echoendoscopy", name="ECO", record="S-ECO")
+        self._make_wait_appt(nir, selection="cpre", name="CPRE", record="S-CPRE")
+        self._login_as(client, "scheduler")
+        content = client.get("/scheduler/").content.decode()
+        assert 'data-exam-type-count="all">5<' in content
+        assert 'data-exam-type-count="eda">1<' in content
+        assert 'data-exam-type-count="colonoscopy">1<' in content
+        assert 'data-exam-type-count="eda_colonoscopy">1<' in content
+        assert 'data-exam-type-count="echoendoscopy">1<' in content
+        assert 'data-exam-type-count="cpre">1<' in content
+
+    def test_pending_counter_universe_is_the_same_for_all_three_groups(self, client) -> None:
+        """R3: WAIT_APPT, notices e issues fecham no MESMO universo de buckets."""
+        nir = self._login_as(client, "nir")
+        self._make_wait_appt(nir, selection="echoendoscopy", name="Eco Wait", record="G-ECO")
+        self._make_immediate_notice(nir, selection="cpre", name="CPRE Notice", record="G-CPRE")
+        self._make_operational_issue(nir, selection="eda_colonoscopy", name="Comb Issue", record="G-COMB")
+        self._login_as(client, "scheduler")
+        content = client.get("/scheduler/").content.decode()
+        assert 'data-exam-type-count="all">3<' in content
+        assert 'data-exam-type-count="echoendoscopy">1<' in content
+        assert 'data-exam-type-count="cpre">1<' in content
+        assert 'data-exam-type-count="eda_colonoscopy">1<' in content
+        assert 'data-exam-type-count="eda">0<' in content
+        assert 'data-exam-type-count="colonoscopy">0<' in content
+        # Os cards dos três grupos expõem a chave aprovada do bucket.
+        assert content.count('data-approved-selection="echoendoscopy"') == 1
+        assert content.count('data-approved-selection="cpre"') == 1
+        assert content.count('data-approved-selection="eda_colonoscopy"') == 1
+
+    def test_pending_filter_lists_specialized_options(self, client) -> None:
+        """R1: o controle de Pendentes oferece Ecoendoscopia e CPRE."""
+        nir = self._login_as(client, "nir")
+        self._make_wait_appt(nir, selection="cpre", name="CPRE Filtro", record="F-CPRE")
+        self._login_as(client, "scheduler")
+        content = client.get("/scheduler/").content.decode()
+        filter_html = content[
+            content.index('id="scheduler-queue-type-filter"') : content.index('id="scheduler-queue-content"')
+        ]
+        assert 'value="echoendoscopy"' in filter_html
+        assert 'value="cpre"' in filter_html
+        assert "Ecoendoscopia" in filter_html
+        assert "CPRE" in filter_html
+        assert 'data-exam-type-count="echoendoscopy"' in filter_html
+        assert 'data-exam-type-count="cpre"' in filter_html
+
+    def test_pending_specialized_cards_never_get_paired_label_or_bucket(self, client) -> None:
+        """R2: card especializado não recebe label nem contador de casado."""
+        nir = self._login_as(client, "nir")
+        self._make_wait_appt(nir, selection="echoendoscopy", name="Eco Nunca Casado", record="N-ECO")
+        self._make_wait_appt(nir, selection="cpre", name="CPRE Nunca Casado", record="N-CPRE")
+        self._login_as(client, "scheduler")
+        content = client.get("/scheduler/").content.decode()
+        assert "Ecoendoscopia" in content
+        assert "CPRE" in content
+        assert "Agendamento casado" not in content
+        assert 'data-exam-type-count="eda_colonoscopy">0<' in content
+
+    def test_processed_filter_lists_specialized_options_and_counts(self, client) -> None:
+        """R1/R2/R3: Processados Hoje tem Eco/CPRE, contadores e cards próprios."""
+        scheduler_user = self._login_as(client, "scheduler")
+        nir = User.objects.create_user(username="nir-schfilter-spec@test.com", password="testpass123")
+        nir.roles.add(self._create_role("nir"))
+        self._make_processed(scheduler_user, nir, selection="echoendoscopy", name="Eco Proc", record="P-ECO")
+        self._make_processed(scheduler_user, nir, selection="cpre", name="CPRE Proc", record="P-CPRE")
+        content = client.get("/scheduler/?tab=processed").content.decode()
+        filter_html = content[
+            content.index('id="scheduler-processed-type-filter"') : content.index('id="scheduler-queue-content"')
+        ]
+        assert 'value="echoendoscopy"' in filter_html
+        assert 'value="cpre"' in filter_html
+        assert "Ecoendoscopia" in filter_html
+        assert "CPRE" in filter_html
+        assert 'data-exam-type-count="all">2<' in content
+        assert 'data-exam-type-count="echoendoscopy">1<' in content
+        assert 'data-exam-type-count="cpre">1<' in content
+        assert 'data-exam-type-count="eda_colonoscopy">0<' in content
+        assert content.count('data-approved-selection="echoendoscopy"') == 1
+        assert content.count('data-approved-selection="cpre"') == 1
+        assert "Agendamento casado" not in content
+
     # ── R5: ACK e acesso preservados ──────────────────────────────────
 
     def test_immediate_ack_still_works_for_colonoscopy(self, client) -> None:
@@ -414,6 +509,93 @@ class TestSchedulerHistoricalExamType:
         assert 'value="colonoscopy"' in content
         assert "Limpar" in content
 
+    # ── R1/R6 (Slice 006): Histórico por dimensão autorizada exata ────
+
+    def test_historical_form_lists_specialized_type_options(self, client) -> None:
+        """R1: o seletor do Histórico oferece Ecoendoscopia e CPRE."""
+        self._login_as(client, "scheduler")
+        content = client.get("/scheduler/historical/").content.decode()
+        select_html = content[content.index('id="exam-type-select"') : content.index("</select>")]
+        assert 'value="echoendoscopy"' in select_html
+        assert "Ecoendoscopia" in select_html
+        assert 'value="cpre"' in select_html
+        assert "CPRE" in select_html
+
+    def test_historical_specialized_type_filters_exact_approved_set(self, client) -> None:
+        """R1/R6: tipo especializado exige conjunto aprovado exatamente igual."""
+        self._login_as(client, "scheduler")
+        nir = User.objects.create_user(username="nir-schhist-spec@test.com")
+        nir.roles.add(self._create_role("nir"))
+        self._make_historical(nir, selection="echoendoscopy", name="Eco Hist", record="HS-ECO")
+        self._make_historical(nir, selection="cpre", name="CPRE Hist", record="HS-CPRE")
+        self._make_historical(nir, selection="eda_colonoscopy", name="Comb Hist", record="HS-COMB")
+
+        content = client.get("/scheduler/historical/?exam_type=echoendoscopy").content.decode()
+        assert "HS-ECO" in content
+        assert ">Ecoendoscopia</span>" in content
+        assert "HS-CPRE" not in content
+        assert "HS-COMB" not in content
+
+        content = client.get("/scheduler/historical/?exam_type=cpre").content.decode()
+        assert "HS-CPRE" in content
+        assert ">CPRE</span>" in content
+        assert "HS-ECO" not in content
+        assert "HS-COMB" not in content
+
+    def test_historical_buckets_are_exact_sets_not_other_type_inference(self, client) -> None:
+        """R6: singleton não pega casado; casado exige os dois componentes."""
+        self._login_as(client, "scheduler")
+        nir = User.objects.create_user(username="nir-schhist-exact@test.com")
+        nir.roles.add(self._create_role("nir"))
+        self._make_historical(nir, selection="eda", name="So EDA", record="HX-EDA")
+        self._make_historical(nir, selection="eda_colonoscopy", name="Casado", record="HX-COMB")
+
+        content = client.get("/scheduler/historical/?exam_type=eda").content.decode()
+        assert "HX-EDA" in content
+        assert "HX-COMB" not in content
+
+        content = client.get("/scheduler/historical/?exam_type=colonoscopy").content.decode()
+        assert "HX-EDA" not in content
+        assert "HX-COMB" not in content
+
+        content = client.get("/scheduler/historical/?exam_type=eda_colonoscopy").content.decode()
+        assert "HX-COMB" in content
+        assert "HX-EDA" not in content
+
+    def test_historical_specialized_type_composes_with_term(self, client) -> None:
+        """R5: termo e tipo especializado continuam compostos com AND."""
+        self._login_as(client, "scheduler")
+        nir = User.objects.create_user(username="nir-schhist-speccomp@test.com")
+        nir.roles.add(self._create_role("nir"))
+        self._make_historical(nir, selection="cpre", name="Maria CPRE", record="HC-MARIA", patient_name="Maria CPRE")
+        self._make_historical(nir, selection="cpre", name="Joao CPRE", record="HC-JOAO", patient_name="Joao CPRE")
+
+        content = client.get("/scheduler/historical/?exam_type=cpre&q=Maria").content.decode()
+        assert "HC-MARIA" in content
+        assert "HC-JOAO" not in content
+
+    def test_historical_bucket_rejects_out_of_matrix_extra_approval(self, client) -> None:
+        """R6: aprovação extra não casa nenhum bucket — igualdade exata de conjunto.
+
+        Estado fora da matriz (EDA + Colonoscopia + Ecoendoscopia aprovadas)
+        só é alcançável por escrita direta (defensivo): nenhum bucket do
+        catálogo pode casá-lo, o que prova que combinado não é "tem os dois"
+        nem singleton é "tem o tipo".
+        """
+        from apps.cases.models import CaseProcedure, DoctorDisposition
+
+        self._login_as(client, "scheduler")
+        nir = User.objects.create_user(username="nir-schhist-extra@test.com")
+        nir.roles.add(self._create_role("nir"))
+        case = self._make_historical(nir, selection="eda_colonoscopy", name="Extra", record="HX-EXTRA")
+        CaseProcedure.objects.create(
+            case=case, procedure_type="echoendoscopy", doctor_disposition=DoctorDisposition.APPROVED
+        )
+
+        for dimension in ("eda", "colonoscopy", "eda_colonoscopy", "echoendoscopy", "cpre"):
+            content = client.get(f"/scheduler/historical/?exam_type={dimension}").content.decode()
+            assert "HX-EXTRA" not in content, f"bucket {dimension} casou conjunto fora da matriz"
+
 
 class TestSchedulerQueueFilterStatic:
     """Inspeção estática do filtro client-side (R2/R3) — sem runner JS.
@@ -457,3 +639,38 @@ class TestSchedulerQueueFilterStatic:
         assert 'name="exam_type"' in html
         assert "Limpar" in html
         assert "exam_type_label" in html
+
+    def test_js_counts_and_scope_cover_specialized_catalog(self) -> None:
+        """R1/R2/R3: o filtro client-side conhece Ecoendoscopia e CPRE."""
+        js = self._read(QUEUE_FILTER_JS)
+        assert "echoendoscopy: 0, cpre: 0" in js
+        assert 'if (type === "echoendoscopy") return "Ecoendoscopia";' in js
+        assert 'if (type === "cpre") return "CPRE";' in js
+
+
+class TestSchedulerApprovedDimensionSource:
+    """R6: a dimensão autorizada do CHD é orientada ao catálogo (sem par binário).
+
+    Inspeção estática do único ponto que continha a inferência residual
+    (``other = COLONOSCOPY if dimension == EDA else EDA``) e do predicado de
+    combinado por contagem: a view deve consumir o catálogo central.
+    """
+
+    def test_views_have_no_other_type_inference(self) -> None:
+        source = (REPO_ROOT / "apps" / "scheduler" / "views.py").read_text(encoding="utf-8")
+        assert "other = ProcedureType.COLONOSCOPY" not in source
+        assert "ALLOWED_PROCEDURE_SETS" in source
+        assert "SUPPORTED_PROCEDURE_TYPES" in source
+
+    def test_bucket_universe_matches_the_closed_catalog(self) -> None:
+        """R1/R3/R6: buckets = catálogo fechado (5 conjuntos válidos) + all."""
+        from apps.cases.procedures import ALLOWED_PROCEDURE_SETS, selection_key
+        from apps.scheduler.views import _HISTORICAL_DIMENSION_CHOICES, _empty_approved_selection_buckets
+
+        buckets = _empty_approved_selection_buckets()
+
+        assert set(buckets) == set(_HISTORICAL_DIMENSION_CHOICES)
+        assert set(buckets) == {"all"} | {
+            selection_key(tuple(procedure_types)) for procedure_types in ALLOWED_PROCEDURE_SETS
+        }
+        assert buckets["all"] == 0
