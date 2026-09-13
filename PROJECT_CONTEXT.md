@@ -12,14 +12,14 @@ Resumo executivo para retomada rapida apos pausas e para onboarding de novos con
 - `openspec/changes/` — changes ativos com proposals, designs e slices
 - Em caso de conflito: artefatos mais recentes no Git prevalecem.
 
-## Change Ativo e Override de Implementação
+## Change Concluído e Estado 3.0
 
-- **Change ativo:** `openspec/changes/support-independent-echoendoscopy-cpre-workflows/`.
-- **Branch:** `feature/support-independent-echoendoscopy-cpre-workflows`.
+- **Change arquivado:** `openspec/archive/support-independent-echoendoscopy-cpre-workflows/` (14/14 tasks; deltas aplicados às specs canônicas, incluindo a nova `procedure-combination-policy`).
+- **Branch:** `feature/support-independent-echoendoscopy-cpre-workflows` (push em `1f8b41d`).
 - **Decisão aceita:** ADR-0006 promove Ecoendoscopia e CPRE a procedimentos independentes e introduz writer LLM 3.0.
-- **Estado do código:** Slices 001–008 implementados (catálogo/matriz dos quatro tipos `eda|colonoscopy|echoendoscopy|cpre`, writer strict 3.0, hard rule determinística de imagem abdominal e jornadas de médico/CHD/NIR/gestor); o Slice 009 entrega runbook de rollout/rollback, precheck de downgrade e gate final. As flags `ECHOENDOSCOPY_INTAKE_ENABLED` e `CPRE_INTAKE_ENABLED` existem, são independentes e web-only, e permanecem `false` em todos os ambientes até o rollout aprovado por humano.
-- **Regra de reentrada:** para este change, ADR-0006 + proposal + design + delta specs + **somente o próximo slice incompleto** são o override autoritativo sobre as descrições v2 abaixo. Não tratar o alvo 3.0 como já implementado nem usar o baseline v2 para negar requisitos do slice ativo.
-- **Ordem:** Ecoendoscopia é concluída antes de CPRE; cada slice exige RED → GREEN → REFACTOR, review e confirmação antes do seguinte.
+- **Estado do código:** Slices 001–009 implementados (catálogo/matriz dos quatro tipos `eda|colonoscopy|echoendoscopy|cpre`, writer strict 3.0, hard rule determinística de imagem abdominal, jornadas de médico/CHD/NIR/gestor e runbook de rollout/rollback com precheck de downgrade). As flags `ECHOENDOSCOPY_INTAKE_ENABLED` e `CPRE_INTAKE_ENABLED` existem, são independentes e web-only, e permanecem `false` em todos os ambientes até o rollout aprovado por humano (runbook: `docs/deploy/support-independent-echoendoscopy-cpre-workflows.md`).
+- **Regra de reentrada:** o change foi concluído e arquivado; os artefatos em `openspec/archive/support-independent-echoendoscopy-cpre-workflows/` (ADR-0006 + proposal + design + slices) e as specs canônicas atualizadas são a referência histórica do 3.0. O baseline v2 abaixo permanece apenas como histórico.
+- **Ordem:** no rollout, Ecoendoscopia é liberada antes de CPRE (flags independentes).
 
 Alvo aprovado do change: tipos `eda|colonoscopy|echoendoscopy|cpre`; únicos conjuntos permitidos EDA, Colonoscopia, EDA+Colonoscopia, Ecoendoscopia e CPRE; contrato gravável 3.0; troca médica é `trocar e aprovar` sem rerun/repolicy; sem backfill especializado, split ou regra de sala.
 
@@ -181,8 +181,8 @@ static/          # css/app.css (paleta hospitalar), js/upload.js, js/password-to
 
 ## State do Sistema
 
-- **Fase atual**: change HIGH/ARCH de procedimentos especializados com Slices 001–008 implementados e Slice 009 (runbook, precheck de downgrade e gate final) em review; **rollout pendente de aprovação humana**, com as flags `ECHOENDOSCOPY_INTAKE_ENABLED` e `CPRE_INTAKE_ENABLED` em `false`.
-- **Change ativo**: `openspec/changes/support-independent-echoendoscopy-cpre-workflows/`; ADR-0006 aceita, writer 3.0 ativo no código e runbook de operação em `docs/deploy/support-independent-echoendoscopy-cpre-workflows.md`.
+- **Fase atual**: change HIGH/ARCH de procedimentos especializados **concluído e arquivado** (Slices 001–009, 14/14 tasks); **rollout pendente de aprovação humana**, com as flags `ECHOENDOSCOPY_INTAKE_ENABLED` e `CPRE_INTAKE_ENABLED` em `false`.
+- **Change concluído**: `openspec/archive/support-independent-echoendoscopy-cpre-workflows/`; ADR-0006 aceita, writer 3.0 ativo no código e runbook de operação em `docs/deploy/support-independent-echoendoscopy-cpre-workflows.md`.
 - **Último baseline concluído relevante**: hotfix `openspec/archive/fix-llm2-reconciled-procedure-set/`, com promoção da spec `procedure-neutral-analysis`.
 - **Changes concluídos**:
   - `openspec/archive/bootstrap-django-ats-core/` (7 slices, Fase 0)
