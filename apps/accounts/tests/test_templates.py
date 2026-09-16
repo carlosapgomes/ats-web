@@ -206,6 +206,44 @@ class TestBaseTemplate:
             "form-select (without :focus), reusing var(--hospital-border)"
         )
 
+    def test_global_radio_border_rule_exists(self) -> None:
+        """Unchecked radios have a stronger resting border in the light theme."""
+        import re
+
+        css_path = Path(settings.BASE_DIR) / "static" / "css" / "app.css"
+        css_content = css_path.read_text()
+
+        rule = re.search(
+            r'\.hospital-shell\s+\.form-check-input\[type=["\']radio["\']\]\s*\{(?P<body>[^}]*)\}',
+            css_content,
+        )
+
+        assert rule is not None, "app.css must define a global resting-state rule for radio inputs"
+        assert "border: 2px solid var(--hospital-control-border)" in rule.group("body"), (
+            "radio inputs must use a 2px border backed by --hospital-control-border"
+        )
+
+    def test_global_radio_border_has_non_text_contrast(self) -> None:
+        """The radio outline reaches WCAG's 3:1 non-text contrast threshold."""
+        import re
+
+        css_path = Path(settings.BASE_DIR) / "static" / "css" / "app.css"
+        css_content = css_path.read_text()
+        token = re.search(r"--hospital-control-border:\s*(#[0-9a-fA-F]{6})", css_content)
+
+        assert token is not None, "app.css must define --hospital-control-border"
+
+        def relative_luminance(color: str) -> float:
+            channels = [int(color[index : index + 2], 16) / 255 for index in (1, 3, 5)]
+            linear = [value / 12.92 if value <= 0.04045 else ((value + 0.055) / 1.055) ** 2.4 for value in channels]
+            return 0.2126 * linear[0] + 0.7152 * linear[1] + 0.0722 * linear[2]
+
+        border_luminance = relative_luminance(token.group(1))
+        white_luminance = relative_luminance("#ffffff")
+        contrast_ratio = (white_luminance + 0.05) / (border_luminance + 0.05)
+
+        assert contrast_ratio >= 3, f"radio border contrast is only {contrast_ratio:.2f}:1"
+
     def test_toggle_password_border_matches_input(self) -> None:
         """The show/hide password toggle uses the same border color as the input.
 

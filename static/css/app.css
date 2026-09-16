@@ -11,6 +11,7 @@
   --hospital-bg: #f3f8fb;
   --hospital-surface: #ffffff;
   --hospital-border: #c7d8e2;
+  --hospital-control-border: #78909c;
   --hospital-text: #1f2f3a;
   --hospital-muted: #4c6677;
   --hospital-success: #1b7a4a;
@@ -512,6 +513,12 @@ body.hospital-shell h6 {
 .hospital-shell .form-select:focus {
   border-color: var(--hospital-accent);
   box-shadow: 0 0 0 0.2rem rgba(47, 143, 157, 0.25);
+}
+
+/* Radio controls need a stronger resting outline than generic field borders:
+   this blue-gray reaches 3:1 non-text contrast against the white surface. */
+.hospital-shell .form-check-input[type="radio"] {
+  border: 2px solid var(--hospital-control-border);
 }
 
 .hospital-shell .form-check-input:checked {
