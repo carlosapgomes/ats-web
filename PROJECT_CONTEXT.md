@@ -12,6 +12,15 @@ Resumo executivo para retomada rapida apos pausas e para onboarding de novos con
 - `openspec/changes/` — changes ativos com proposals, designs e slices
 - Em caso de conflito: artefatos mais recentes no Git prevalecem.
 
+## Change Concluído — Taxonomia oficial de causas do pós-procedimento
+
+- **Change arquivado:** `openspec/archive/align-followup-causes-with-suspension-form/`.
+- **Branch de implementação:** `feature/align-followup-causes-with-suspension-form`.
+- **Risco:** CRÍTICO / HIGH-ARCH; ADR-0009 aceita e supera parcialmente a descrição de causas da ADR-0007, preservando sua decisão de cobertura por procedimentos autorizados.
+- **Estado:** Slices 001–002 implementados, aceitos por review independente, arquivados com duas specs canônicas promovidas e gate global verde (**3835 testes**); prerelease `v0.9.0-rc.2` em preparação, sem deploy.
+- **Comportamento:** novas gravações aceitam somente as 23 causas oficiais + **Outras causas**, em select compacto e sem submotivo; códigos legados permanecem legíveis, mas não graváveis. Histórico, cards, filtro e CSV projetam exatamente quatro pares legados confirmados para causas oficiais sem reescrever rows/eventos; combinações desconhecidas caem em `legacy_unmapped` e bloqueiam o preflight.
+- **Migration:** `cases.0020` altera somente metadata de choices e foi validada em `0019 → 0020 → 0019 → 0020` sem mudança de dados.
+
 ## Change Concluído — Precedência de procedimentos especializados
 
 - **Change arquivado:** `openspec/archive/prioritize-specialized-procedure-requests/`.
@@ -127,6 +136,7 @@ static/          # css/app.css (paleta hospitalar), js/upload.js, js/password-to
 - **Role**: nir, doctor, scheduler, manager, admin
 - **Case**: FSM 17 estados, 30+ campos (PDF, LLM artifacts, decisao medica, agendamento). A coluna ponte `Case.exam_type` foi **removida** (migration `0016`); a dimensão de procedimento vive exclusivamente em `CaseProcedure`. Vínculo opcional de reenvio corrigido: `corrects_case` (self-FK) + `correction_reason`/`correction_created_by`/`correction_created_at`.
 - **CaseProcedure**: componente normalizado do caso, no máximo uma row por `(case, procedure_type)` (constraint `uniq_case_procedure_type`), sem row genérica `combined`. O baseline persistido usa `eda|colonoscopy`; o change ativo adicionará `echoendoscopy|cpre` sob matriz fechada. Três dimensões autoritativas por componente: `declared_by_nir` (declaração do NIR), `detection_status` (`pending|detected|not_detected`) e `doctor_disposition` (`pending|approved|denied`) com `doctor_reason`. Fonte única das projeções de filas/filtros/dashboard; `CaseEvent` preserva os fatos append-only.
+- **CaseFollowUp / ProcedureFollowUp**: versões append-only do desfecho pós-procedimento. Novas rows usam a taxonomia oficial fechada; rows legadas preservam códigos/detalhes originais e são projetadas apenas na leitura analítica. Cada gravação gera `FOLLOWUP_RECORDED`/`FOLLOWUP_UPDATED`; Histórico e exportação nunca reescrevem rows ou eventos.
 - **CaseEvent**: auditoria append-only (~40 tipos de evento)
 - **CaseCommunicationMessage**: thread operacional append-only vinculada a um `Case` (comunicação entre NIR/médico/scheduler para esclarecimentos; NÃO substitui decisão/agendamento/eventos estruturados). Suporta `message_type="user"` (manual, com autor) e `message_type="system"` (projeção automática de `CaseEvent`, sem autor) via `source_event` OneToOne idempotente + `system_event_type`.
 - **UserNotification**: notificação in-app user-scoped criada por menções explícitas (`@role`/`@username`) em `CaseCommunicationMessage`; badge SSR + inbox “Minhas notificações” + polling Vanilla JS do badge
@@ -146,6 +156,7 @@ static/          # css/app.css (paleta hospitalar), js/upload.js, js/password-to
 
 ## Contratos e Validações
 
+- **Pós-procedimento — taxonomia oficial e legado:** novas gravações aceitam exatamente as 23 causas da ficha oficial + `other`; `other` exige texto e as demais causas o rejeitam; qualquer `resource_shortage_detail` é inválido para write novo. O storage continua reconhecendo `absenteeism`/`resource_shortage` para leitura. `project_non_performance_reason` mapeia somente `absenteeism → patient_no_show` e os três pares confirmados de falta de recursos; causa atual só passa com detalhe vazio. Qualquer outro par retorna `legacy_unmapped`, fica fora do filtro oficial e faz `unmapped_legacy_follow_up_ids()` bloquear rollout. `CaseFollowUp`, `ProcedureFollowUp` e `CaseEvent` históricos permanecem append-only.
 - **Baseline — procedimentos múltiplos e contrato LLM neutro (v2)**: o intake declara o conjunto **EDA**, **Colonoscopia** ou **EDA + Colonoscopia** por lote; o pipeline v2 extrai história comum uma única vez (`requested_procedures[]`), aplica policy determinística por procedimento e produz recomendação exata por componente; artefatos 1.1 permanecem legíveis sem rewrite. O LLM2 recebe uma projeção efêmera de `requested_procedures` limitada ao conjunto reconciliado, declarado no prompt como lista fechada; o artefato original do LLM1 permanece imutável. Mismatch de conjunto usa erro tipado e no máximo um retry corretivo, independente do retry pt-BR, com teto de três chamadas físicas e validação fail-closed. Single→combined com evidência forte recebe **upgrade automático** auditado (`PROCEDURE_SELECTION_AUTO_UPGRADED`) e segue ao médico sem ACK do NIR; combinado→single, troca entre tipos únicos e unknown/non-supported retornam ao NIR. Decisão médica por componente (aprovar/negar/incluir, razão por componente; inclusão não reexecuta LLM); um **agendamento casado** único para o conjunto autorizado; resposta final com solicitado/detectado/autorizado. Filtros por dimensão: NIR usa o **declarado**, médico usa o **detectado/autorizado**, CHD usa o **autorizado**. Flag `COLONOSCOPY_INTAKE_ENABLED` é web-only; as flags `ECHOENDOSCOPY_INTAKE_ENABLED` e `CPRE_INTAKE_ENABLED` são independentes, web-only e default `false` (ativação sequencial no rollout do Slice 009). Este parágrafo descreve o código antes do cutover; o override 3.0 está no bloco `Change Ativo` e nos artefatos do change.
 - **Prompts canônicos (v2 neutros)**: `exam_llm1_system`, `exam_llm1_user`, `exam_llm2_system`, `exam_llm2_user` são os quatro nomes canônicos do dispatch (Slice 007). `seed_prompts` garante **exatamente uma versão ativa por nome neutro** (cria v1 ativa quando ausente) e **desativa toda versão ativa dos oito nomes legados** (`llm1_*`, `llm2_*`, `colonoscopy_llm1_*`, `colonoscopy_llm2_*`) preservando linhas/versões históricas para auditoria/rollback; reexecutar é idempotente. Fallback de código usa os mesmos defaults.
 - **Validação Pydantic v2**: schemas `apps/pipeline/schemas/llm1.py` (StructuredData) e `llm2.py` (Suggestion)
@@ -190,12 +201,15 @@ static/          # css/app.css (paleta hospitalar), js/upload.js, js/password-to
 
 ## State do Sistema
 
-- **Fase atual:** preparação da release candidata `v0.9.0-rc.1`; change CRÍTICO `prioritize-specialized-procedure-requests` implementado, aceito, arquivado e com spec canônica promovida; deploy pendente.
+- **Fase atual:** preparação da prerelease `v0.9.0-rc.2`; change CRÍTICO `align-followup-causes-with-suspension-form` implementado, aceito, arquivado e com specs canônicas promovidas; deploy/staging pendentes.
+- **Change concluído:** `openspec/archive/align-followup-causes-with-suspension-form/`; taxonomia oficial de follow-up e projeção histórica implementadas, ainda sem deploy.
+- **Release anterior:** `v0.9.0-rc.1`, com `prioritize-specialized-procedure-requests` arquivado e publicado como candidata.
 - **Change concluído:** `openspec/archive/prioritize-specialized-procedure-requests/`; comportamento-alvo implementado e ainda não deployado.
 - **Baseline anterior:** change HIGH/ARCH de procedimentos especializados **concluído e arquivado** (Slices 001–009, 14/14 tasks); **rollout pendente de aprovação humana**, com as flags `ECHOENDOSCOPY_INTAKE_ENABLED` e `CPRE_INTAKE_ENABLED` em `false`.
 - **Change concluído:** `openspec/archive/support-independent-echoendoscopy-cpre-workflows/`; ADR-0006 aceita, writer 3.0 ativo no código e runbook de operação em `docs/deploy/support-independent-echoendoscopy-cpre-workflows.md`.
 - **Último baseline concluído relevante**: hotfix `openspec/archive/fix-llm2-reconciled-procedure-set/`, com promoção da spec `procedure-neutral-analysis`.
 - **Changes concluídos**:
+  - `openspec/archive/align-followup-causes-with-suspension-form/` (2 slices — catálogo oficial com 23 causas + Outras causas, select compacto, rejeição de writes legados/submotivo, migration metadata-only e projeção histórica dos quatro mapeamentos confirmados em tabela/cards/filtro/CSV; fallback/preflight fail-closed `legacy_unmapped`; manual atualizado; sem backfill ou reescrita de eventos).
   - `openspec/archive/bootstrap-django-ats-core/` (7 slices, Fase 0)
   - `openspec/archive/intake-nir/` (6 slices, Fase 1)
   - `openspec/archive/pipeline-llm/` (7 slices, Fase 2)
@@ -245,16 +259,12 @@ static/          # css/app.css (paleta hospitalar), js/upload.js, js/password-to
   - `openspec/archive/restore-isolated-deterministic-test-baseline/` (1 slice — baseline de testes isolado e determinístico restaurado e endurecido (gates baseline-vs-final)).
 - **Apps criados**: `apps/accounts/`, `apps/cases/`, `apps/llm/`, `apps/intake/`, `apps/pipeline/`,
   `apps/doctor/`, `apps/scheduler/`, `apps/dashboard/`, `apps/admin_ui/`
-- **Testes**: 3709 passando (gate final do change
-  `support-independent-echoendoscopy-cpre-workflows`, Slice 009; inclui cobertura
-  EDA-only, Colonoscopia-only, combinado, especializados Eco/CPRE, retries
-  tipados e preservação do artefato LLM1),
-  quality gate verde (ruff + mypy + pytest)
+- **Testes**: 3835 passando (gate final de `align-followup-causes-with-suspension-form`; inclui catálogo oficial, validação fail-closed, migration reversível, quatro projeções legadas, Histórico/cards/filtro/CSV append-only e manual), quality gate verde (ruff + mypy + pytest).
 - **Templates**: base.html com tema hospitalar, login, switch-role, perfil, password reset/change,
   intake (home, my_cases, case_detail), doctor (queue, decision)
 - **Documentacao de dominio**: `docs/DOMAIN_ANALYSIS.md`
 - **Investigações**: `docs/investigations/2026-05-18-nir-to-doctor-flow-review.md`
-- **ADR ativas**: ADR-0001 (arquitetura Django SSR), ADR-0002 (emails transacionais de conta/autenticação), ADR-0003 (perfis de procedimento e tipo de exame explícito — **Accepted**, parcialmente superada pela ADR-0004), ADR-0004 (procedimentos múltiplos e contrato LLM neutro — **Accepted**, parcialmente superada pela ADR-0006), ADR-0006 (Ecoendoscopia e CPRE independentes + writer 3.0 — **Accepted**, 2026-09-12).
+- **ADR ativas**: ADR-0001 (arquitetura Django SSR), ADR-0002 (emails transacionais de conta/autenticação), ADR-0003 (perfis de procedimento e tipo de exame explícito — **Accepted**, parcialmente superada pela ADR-0004), ADR-0004 (procedimentos múltiplos e contrato LLM neutro — **Accepted**, parcialmente superada pela ADR-0006), ADR-0006 (Ecoendoscopia e CPRE independentes + writer 3.0 — **Accepted**, 2026-09-12), ADR-0007 (follow-up restrito a procedimentos autorizados — **Accepted**, causas parcialmente superadas pela ADR-0009) e ADR-0009 (taxonomia oficial e compatibilidade histórica das causas — **Accepted**, 2026-09-18).
 - **Dívida técnica**: `django-fsm` deprecated → `viewflow.fsm` (não urgente); observabilidade de logs do gunicorn / falha SMTP (candidato a change de hardening)
 
 ## Quality Bar
