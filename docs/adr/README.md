@@ -11,8 +11,9 @@ Registros de decisoes arquiteturais importantes do projeto.
 | [ADR-0004](ADR-0004-procedimentos-multiplos-e-contrato-llm-neutro.md) | Procedimentos múltiplos e contrato LLM neutro | Accepted — parcialmente superada pela [ADR-0006](ADR-0006-ecoendoscopia-e-cpre-como-procedimentos-independentes.md) nas decisões que limitavam os tipos e o contrato gravável a EDA/Colonoscopia e mantinham CPRE fora de escopo. | 2026-09-12 |
 | [ADR-0005](ADR-0005-local-de-archive-openspec.md) | Local de archive dos changes OpenSpec | Accepted | 2026-08-18 |
 | [ADR-0006](ADR-0006-ecoendoscopia-e-cpre-como-procedimentos-independentes.md) | Ecoendoscopia e CPRE como procedimentos independentes | Accepted — precedência especializada parcialmente superada pela [ADR-0008](ADR-0008-precedencia-procedimentos-especializados-reconciliacao.md) | 2026-09-12 |
-| [ADR-0007](ADR-0007-cobertura-de-follow-up-restrita-a-procedimentos-autorizados.md) | Cobertura de follow-up restrita a procedimentos autorizados | Accepted | 2026-09-13 |
+| [ADR-0007](ADR-0007-cobertura-de-follow-up-restrita-a-procedimentos-autorizados.md) | Cobertura de follow-up restrita a procedimentos autorizados | Accepted — referências à taxonomia de causas parcialmente superadas pela [ADR-0009](ADR-0009-taxonomia-oficial-causas-nao-realizacao.md); decisão de cobertura permanece válida. | 2026-09-13 |
 | [ADR-0008](ADR-0008-precedencia-procedimentos-especializados-reconciliacao.md) | Precedência de procedimentos especializados na reconciliação | Accepted | 2026-09-18 |
+| [ADR-0009](ADR-0009-taxonomia-oficial-causas-nao-realizacao.md) | Taxonomia oficial e compatibilidade histórica das causas de não realização | Accepted | 2026-09-18 |
 
 ## ADRs Deprecated/Superseded
 | Numero | Titulo | Status | Data |

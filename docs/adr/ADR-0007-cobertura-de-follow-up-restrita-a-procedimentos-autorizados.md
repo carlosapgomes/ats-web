@@ -2,7 +2,7 @@
 
 ## Status
 
-Accepted
+Accepted — as referências à taxonomia de causas foram parcialmente superadas pela ADR-0009; a decisão de cobertura restrita a procedimentos autorizados permanece válida.
 
 ## Contexto
 
@@ -127,6 +127,7 @@ portanto o formulário nunca fica vazio por construção; o erro defensivo
 
 ## Referências
 
+- ADR-0009: `docs/adr/ADR-0009-taxonomia-oficial-causas-nao-realizacao.md` (supera somente a taxonomia de causas)
 - Change: `openspec/changes/followup-authorized-procedures-only/`
 - Supersede (parcial): cláusula final de D13 em
   `openspec/changes/support-independent-echoendoscopy-cpre-workflows/design.md`
@@ -137,3 +138,4 @@ portanto o formulário nunca fica vazio por construção; o erro defensivo
 
 - 2026-09-12: Criada com status Accepted (decisão do produto durante a
   execução do change de Ecoendoscopia/CPRE, pós-Slice 006).
+- 2026-09-18: Referências à taxonomia antiga de causas parcialmente superadas pela ADR-0009; decisão de cobertura inalterada.
