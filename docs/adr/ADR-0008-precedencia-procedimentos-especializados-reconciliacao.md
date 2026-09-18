@@ -27,17 +27,18 @@ A operação confirmou que combinações envolvendo Ecoendoscopia ou CPRE são e
 
 ## Decisão
 
-Depois de o detector existente qualificar ocorrências como solicitação atual, histórica, negada ou mera menção, a reconciliação seguirá estas regras:
+Como `detect_requested_procedures_v3()` une o `requested_procedures` estruturado às ocorrências textuais atuais, o conjunto `strong/any` sozinho não comprova deterministicamente a atualidade do especializado. A reconciliação seguirá estas regras:
 
-1. Se houver **exatamente um tipo especializado atual** (`echoendoscopy` ou `cpre`), ele predomina sobre qualquer EDA e/ou Colonoscopia também detectadas.
-2. A precedência independe de os termos estarem ligados por `com/e` ou em trechos distintos.
-3. Se Ecoendoscopia e CPRE estiverem ambas presentes como solicitações atuais, o sistema não escolhe entre elas: o caso continua fail-closed em revisão NIR.
-4. Tipo desconhecido e duplicata continuam fail-closed antes da precedência.
-5. EDA + Colonoscopia permanece a única combinação reconciliada/autorizável e não muda quando nenhum especializado atual existe.
-6. A precedência altera apenas o conjunto detectado bruto. A declaração NIR não é sobrescrita: se não coincidir com o especializado reconciliado, o caso continua em mismatch/revisão NIR. Não há auto-upgrade convencional→especializado.
-7. O artefato LLM1 original permanece imutável. Rows detectadas, policy e LLM2 usam o singleton reconciliado.
-8. Quando EDA/Colonoscopia forem suprimidas, `CASE_PROCEDURES_DETECTED` e `suggested_action` registram regra, especializado selecionado e tipos convencionais suprimidos, sem texto clínico integral.
-9. O relatório médico exibe aviso informativo e não bloqueante sobre a precedência, orientando revisar o texto original e ajustar a decisão se necessário.
+1. Se houver **exatamente um tipo especializado detectado** (`echoendoscopy` ou `cpre`) e uma ocorrência textual do mesmo tipo qualificada como `current_request`, ele predomina sobre qualquer EDA e/ou Colonoscopia também detectadas.
+2. A ocorrência atual especializada pode estar ligada por `com/e` ou em trecho distinto; vínculo local com EDA deixa de ser requisito.
+3. Item especializado em `requested_procedures`, isoladamente, não autoriza suprimir convencionais. Sem ocorrência textual atual correspondente, o conjunto misto permanece incompatível e segue fail-closed ao NIR.
+4. Se Ecoendoscopia e CPRE estiverem ambas presentes, o sistema não escolhe entre elas: o caso continua fail-closed em revisão NIR.
+5. Tipo desconhecido e duplicata continuam fail-closed antes da precedência.
+6. EDA + Colonoscopia permanece a única combinação reconciliada/autorizável e não muda quando nenhum especializado elegível à precedência existe.
+7. A precedência altera apenas o conjunto detectado bruto. A declaração NIR não é sobrescrita: se não coincidir com o especializado reconciliado, o caso continua em mismatch/revisão NIR. Não há auto-upgrade convencional→especializado.
+8. O artefato LLM1 original permanece imutável. Rows detectadas, policy e LLM2 usam o singleton reconciliado.
+9. Quando EDA/Colonoscopia forem suprimidas, `CASE_PROCEDURES_DETECTED` e `suggested_action` registram regra, especializado selecionado e tipos convencionais suprimidos, sem texto clínico integral.
+10. O relatório médico exibe aviso informativo e não bloqueante com label canônico para Ecoendoscopia ou CPRE, orientando revisar o texto original e ajustar a decisão se necessário.
 
 A matriz final permanece:
 
@@ -81,20 +82,20 @@ A matriz final permanece:
 
 - Casos corretamente declarados como Ecoendoscopia/CPRE deixam de retornar ao NIR apenas por menções convencionais concorrentes.
 - O médico recebe o caso e pode confirmar, negar, trocar ou registrar observação pelo fluxo existente.
-- Regra determinística independente do formato/seção do relatório.
+- Regra determinística independente de o pedido atual estar na mesma seção do convencional, desde que exista ocorrência textual especializada qualificada como atual.
 - Evidência original e tipos suprimidos permanecem auditáveis.
 - EDA, Colonoscopia e EDA + Colonoscopia mantêm o comportamento conhecido.
 
 ### Negativas/Trade-offs
 
 - Uma solicitação convencional realmente simultânea a um único especializado não será projetada como segundo componente automático.
-- O sistema passa a confiar na classificação existente de “solicitação atual”; um falso positivo nessa etapa pode acionar precedência.
+- Uma solicitação especializada atual cuja redação não seja reconhecida pelo detector de ocorrências não aciona a precedência e permanece em revisão NIR.
 - Evento e `suggested_action` ganham metadado aditivo que consumidores devem ignorar quando não utilizarem.
 
 ### Riscos e Mitigações
 
-- **Risco:** mera menção/histórico de especializado dominar EDA/Colonoscopia.
-  **Mitigação:** precedência ocorre depois da qualificação existente; testes negativos de histórico, negação e singleton sem supressão.
+- **Risco:** item estruturado indevido, mera menção ou histórico de especializado dominar EDA/Colonoscopia.
+  **Mitigação:** precedência exige ocorrência textual correspondente com `qualification == "current_request"`; testes cobrem structured item com texto histórico/negado, além de singleton sem supressão.
 - **Risco:** escolher arbitrariamente entre Ecoendoscopia e CPRE.
   **Mitigação:** exigir exatamente um tipo especializado; ambos continuam revisão NIR.
 - **Risco:** esconder uma combinação excepcional real.
@@ -113,3 +114,4 @@ A matriz final permanece:
 ## Histórico de Mudanças
 
 - 2026-09-18: ADR criada e aceita após validação do processo com a equipe operacional; precedência especializada ampliada para trechos independentes.
+- 2026-09-18: Após review independente, adicionado gate de ocorrência textual `current_request`; item estruturado isolado não autoriza supressão de convencionais.

@@ -4,16 +4,17 @@
 
 ### Requirement: Matriz de conjuntos SHALL ser fechada
 
-Somente `{eda}`, `{colonoscopy}`, `{eda, colonoscopy}`, `{echoendoscopy}` e `{cpre}` SHALL ser válidos após a reconciliação e na declaração/autorização persistidas. A mesma matriz MUST proteger intake/reenvio/correção, detecção reconciliada e conjunto autorizado final no backend. Antes de validar a matriz detectada, o sistema SHALL aplicar a precedência de um único procedimento especializado atual sobre procedimentos convencionais; essa redução semântica não cria uma combinação autorizável nova.
+Somente `{eda}`, `{colonoscopy}`, `{eda, colonoscopy}`, `{echoendoscopy}` e `{cpre}` SHALL ser válidos após a reconciliação e na declaração/autorização persistidas. A mesma matriz MUST proteger intake/reenvio/correção, detecção reconciliada e conjunto autorizado final no backend. Antes de validar a matriz detectada, o sistema SHALL aplicar a precedência de um único procedimento especializado sobre procedimentos convencionais somente quando existir ocorrência textual correspondente qualificada como `current_request`; essa redução semântica não cria uma combinação autorizável nova.
 
 #### Scenario: Única combinação permitida
 
 - **WHEN** o conjunto reconciliado contém exatamente EDA e Colonoscopia
 - **THEN** ele é válido e pode ser identificado como combinado/agendamento casado.
 
-#### Scenario: Um especializado com procedimentos convencionais
+#### Scenario: Um especializado atual com procedimentos convencionais
 
-- **WHEN** o conjunto bruto de solicitações atuais contém exatamente um tipo especializado e também EDA e/ou Colonoscopia
+- **WHEN** o conjunto bruto detectado contém exatamente um tipo especializado e também EDA e/ou Colonoscopia
+- **AND** há ocorrência textual do mesmo especializado qualificada como `current_request`
 - **THEN** a precedência especializada é aplicada antes da matriz
 - **AND** o conjunto reconciliado contém somente o tipo especializado.
 
@@ -32,7 +33,7 @@ Somente `{eda}`, `{colonoscopy}`, `{eda, colonoscopy}`, `{echoendoscopy}` e `{cp
 
 ### Requirement: Precedência especializada SHALL colapsar expressões de EDA
 
-Depois de histórico, negação e mera menção terem sido excluídos pelo detector, a reconciliação SHALL fazer exatamente uma Ecoendoscopia ou exatamente uma CPRE solicitada atualmente predominar sobre EDA e/ou Colonoscopia também solicitadas/detectadas. A precedência SHALL funcionar tanto em expressão ligada quanto em seções ou frases independentes e SHALL preservar a evidência original no artefato LLM1.
+A reconciliação SHALL fazer exatamente uma Ecoendoscopia ou exatamente uma CPRE detectada predominar sobre EDA e/ou Colonoscopia somente quando `detect_procedure_occurrences()` também produzir ocorrência do mesmo especializado qualificada como `current_request`. `requested_procedures` estruturado, isoladamente, SHALL NOT autorizar a supressão. A ocorrência atual MAY estar em expressão ligada ou em seção/frase independente, e a evidência original SHALL permanecer no artefato LLM1.
 
 #### Scenario: Cabeçalho EDA e Ecoendoscopia solicitada em outro trecho
 
@@ -65,11 +66,20 @@ Depois de histórico, negação e mera menção terem sido excluídos pelo detec
 - **THEN** o conjunto detectado reconciliado é `{cpre}`
 - **AND** `{eda, cpre}` não é persistido.
 
-#### Scenario: Histórico e negação não acionam precedência
+#### Scenario: Item estruturado sem ocorrência atual não autoriza supressão
+
+- **GIVEN** `requested_procedures` contém Ecoendoscopia ou CPRE junto de EDA e/ou Colonoscopia
+- **AND** o especializado aparece no texto somente como exame histórico, negado ou mera menção
+- **WHEN** detecção e reconciliação executam
+- **THEN** o especializado não elimina EDA/Colonoscopia
+- **AND** o conjunto misto permanece incompatível e segue à revisão NIR.
+
+#### Scenario: Histórico e negação sem item estruturado preservam convencional
 
 - **GIVEN** Ecoendoscopia ou CPRE aparece somente como exame histórico, negado ou mera menção
+- **AND** não integra o conjunto estruturado detectado
 - **WHEN** detecção e reconciliação executam
-- **THEN** o especializado não elimina EDA/Colonoscopia atuais
+- **THEN** o especializado não integra o conjunto detectado
 - **AND** o comportamento convencional existente é preservado.
 
 ### Requirement: Mismatch especializado SHALL retornar ao NIR
@@ -101,11 +111,11 @@ Quando a precedência suprimir EDA e/ou Colonoscopia, o sistema SHALL registrar 
 - **AND** `Case.structured_data` preserva os itens extraídos originalmente
 - **AND** o LLM2 recebe somente Ecoendoscopia como lista fechada.
 
-#### Scenario: Médico recebe aviso não bloqueante
+#### Scenario: Médico recebe aviso não bloqueante para cada especializado
 
-- **GIVEN** a precedência especializada foi aplicada
+- **GIVEN** a precedência de Ecoendoscopia ou CPRE foi aplicada
 - **WHEN** o médico abre a avaliação
-- **THEN** o relatório informa que procedimento(s) convencional(is) também foram identificados e que o especializado predominou
+- **THEN** o relatório informa com label canônico que procedimento(s) convencional(is) também foram identificados e que o especializado predominou
 - **AND** orienta revisar o texto original e ajustar a decisão se necessário
 - **AND** o aviso não altera policy, formulário, validação ou FSM.
 

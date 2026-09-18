@@ -4,8 +4,8 @@
 
 A ADR-0006 introduziu Ecoendoscopia e CPRE como procedimentos independentes e definiu matriz fechada. A implementação atual separa:
 
-1. `detect_requested_procedures_v3()` — produz evidência `strong/any` somente depois de qualificar solicitação atual, histórico e negação;
-2. `detect_procedure_occurrences()` — preserva proveniência por ocorrência e vínculo local `EDA com/e especializado`;
+1. `detect_requested_procedures_v3()` — produz evidência `strong/any` pela união do `requested_procedures` estruturado com ocorrências textuais atuais;
+2. `detect_procedure_occurrences()` — qualifica deterministicamente ocorrências textuais como `current_request|historical|negated|mention` e preserva o vínculo local `EDA com/e especializado`;
 3. `reconcile_detected_procedures()` — valida catálogo/duplicatas, aplica precedência ligada, valida matriz e compara detectado×declarado;
 4. orchestrator — projeta `CaseProcedure`, registra `CASE_PROCEDURES_DETECTED`, filtra a visão efêmera do LLM2 e encaminha a `WAIT_DOCTOR` ou revisão NIR.
 
@@ -15,8 +15,8 @@ A regra ligada é estreita demais para relatórios de regulação: cabeçalho ad
 
 **Goals:**
 
-- priorizar exatamente um procedimento especializado atual sobre procedimentos convencionais detectados;
-- manter histórico/negação fora do conjunto atual;
+- priorizar exatamente um procedimento especializado sobre procedimentos convencionais detectados somente com ocorrência textual correspondente qualificada como atual;
+- impedir que item estruturado especializado, sem ocorrência textual atual, acione a supressão de EDA/Colonoscopia;
 - preservar declaração NIR, artefato LLM1 e evidências originais;
 - deixar a aplicação da precedência explícita em auditoria e no relatório médico;
 - manter todos os conflitos realmente ambíguos fail-closed.
@@ -32,39 +32,41 @@ A regra ligada é estreita demais para relatórios de regulação: cabeçalho ad
 
 ## Decisions
 
-### D1. A precedência ocorre após qualificação de solicitação atual e antes da matriz
+### D1. A precedência exige ocorrência textual atual e ocorre antes da matriz
 
-A reconciliação continuará validando catálogo, valores desconhecidos e duplicatas antes de qualquer redução. Em seguida aplicará:
+A reconciliação continuará validando catálogo, valores desconhecidos e duplicatas antes de qualquer redução. Como `detect_requested_procedures_v3()` aceita tanto o `requested_procedures` estruturado quanto ocorrências textuais atuais, o conjunto `strong/any` sozinho não comprova deterministicamente a atualidade do especializado. A redução aplicará um segundo gate usando as ocorrências já produzidas pelo detector:
 
 ```text
-raw_current = conjunto detectado por strong/any
-specialized = raw_current ∩ {echoendoscopy, cpre}
-conventional = raw_current ∩ {eda, colonoscopy}
+raw_detected = conjunto detectado por strong/any
+specialized = raw_detected ∩ {echoendoscopy, cpre}
+conventional = raw_detected ∩ {eda, colonoscopy}
+current_occurrence_types = tipos com occurrence.qualification == current_request
 
-se len(specialized) == 1:
+se len(specialized) == 1 e specialized ⊆ current_occurrence_types:
     reconciled = specialized
     suppressed = conventional
 senão:
-    reconciled = raw_current
+    reconciled = raw_detected
     suppressed = ∅
 ```
 
-A precedência é considerada **aplicada** somente quando `suppressed` não é vazio. Um singleton especializado sem EDA/Colonoscopia já é válido, mas não gera aviso.
+A precedência é considerada **aplicada** somente quando `suppressed` não é vazio. Um singleton especializado sem EDA/Colonoscopia já é válido pelo comportamento existente, mas não gera aviso. Um item especializado estruturado sem ocorrência textual atual correspondente não pode suprimir EDA/Colonoscopia; o conjunto misto permanece fora da matriz e segue fail-closed.
 
 Consequências determinísticas:
 
-| Conjunto bruto atual | Resultado antes da comparação com NIR |
-| --- | --- |
-| `{eda, echoendoscopy}` | `{echoendoscopy}` |
-| `{colonoscopy, echoendoscopy}` | `{echoendoscopy}` |
-| `{eda, colonoscopy, echoendoscopy}` | `{echoendoscopy}` |
-| `{eda, cpre}` | `{cpre}` |
-| `{eda, colonoscopy, cpre}` | `{cpre}` |
-| `{eda, colonoscopy}` | `{eda, colonoscopy}` |
-| `{echoendoscopy, cpre}` | incompatível → revisão NIR |
-| `{eda, echoendoscopy, cpre}` | incompatível → revisão NIR |
+| Conjunto bruto | Ocorrência especializada | Resultado antes da comparação com NIR |
+| --- | --- | --- |
+| `{eda, echoendoscopy}` | Eco `current_request` | `{echoendoscopy}` |
+| `{colonoscopy, echoendoscopy}` | Eco `current_request` | `{echoendoscopy}` |
+| `{eda, colonoscopy, echoendoscopy}` | Eco `current_request` | `{echoendoscopy}` |
+| `{eda, cpre}` | CPRE `current_request` | `{cpre}` |
+| `{eda, colonoscopy, cpre}` | CPRE `current_request` | `{cpre}` |
+| `{eda, echoendoscopy}` | Eco somente histórica/negada/menção ou ausente | incompatível → revisão NIR |
+| `{eda, colonoscopy}` | nenhuma especializada | `{eda, colonoscopy}` |
+| `{echoendoscopy, cpre}` | qualquer | incompatível → revisão NIR |
+| `{eda, echoendoscopy, cpre}` | qualquer | incompatível → revisão NIR |
 
-O vínculo `linked_eda` deixa de ser condição para precedência. As ocorrências continuam existindo e não serão removidas neste change para evitar alteração desnecessária do contrato de detecção/proveniência.
+O vínculo `linked_eda` deixa de ser condição para precedência, mas `qualification == "current_request"` da ocorrência do especializado permanece obrigatório. As ocorrências já existem no contrato atual; nenhuma regex ou classificação será alterada.
 
 ### D2. Declaração NIR continua sendo gate independente
 
@@ -124,7 +126,7 @@ O aviso:
 
 ### D6. Detector, prompts e matriz final permanecem fechados
 
-Nenhuma regex ou classificação de `current_request|historical|negated|mention` será alterada. A precedência só recebe o conjunto já qualificado. Os schemas LLM continuam permitindo a extração bruta de até quatro tipos para que a reconciliação enxergue conflito em vez de falhar no parse.
+Nenhuma regex ou classificação de `current_request|historical|negated|mention` será alterada. A reconciliação reutiliza `occurrences` para exigir prova textual atual antes de suprimir convencionais; o item estruturado do LLM1, isoladamente, não satisfaz esse gate. Os schemas LLM continuam permitindo a extração bruta de até quatro tipos para que a reconciliação enxergue conflito em vez de falhar no parse.
 
 A matriz persistida/autorizável continua exatamente:
 
@@ -138,7 +140,7 @@ A matriz persistida/autorizável continua exatamente:
 
 ## Riscos e mitigações
 
-- **Menção especializada indevida dominar convencionais:** a regra consome apenas o conjunto que o detector atual qualificou como solicitação atual; histórico/negação têm testes de regressão. Este change não amplia aliases nem transforma mera menção em pedido.
+- **Menção especializada indevida dominar convencionais:** a redução exige ocorrência textual do especializado com `qualification == "current_request"`; item estruturado isolado, histórico, negação ou menção não suprime convencionais. Este change não amplia aliases nem transforma mera menção em pedido.
 - **Ecoendoscopia e CPRE simultâneas serem escolhidas arbitrariamente:** precedência exige exatamente um tipo especializado; dois especializados continuam fail-closed.
 - **Declaração do NIR ser sobrescrita:** comparação declarado×reconciliado permanece depois da precedência; mismatch continua revisão manual.
 - **Perda da evidência convencional:** `structured_data` permanece imutável e o evento registra tipos suprimidos; nenhum dado clínico é removido do artefato.
@@ -160,8 +162,8 @@ Um único slice vertical entrega valor completo:
 
 ```text
 relatório com convencional + especializado
-→ detecção atual existente
-→ precedência determinística
+→ detecção strong/any + ocorrência textual atual existente
+→ precedência determinística com gate de proveniência
 → singleton especializado auditado
 → LLM2/policy do especializado
 → WAIT_DOCTOR

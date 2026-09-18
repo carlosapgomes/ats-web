@@ -2,7 +2,7 @@
 
 ## Objetivo
 
-Quando o NIR declarou Ecoendoscopia ou CPRE e o relatório produz uma solicitação atual desse especializado junto de EDA e/ou Colonoscopia, reconciliar somente o especializado, preservar a evidência bruta, avançar o caso a `WAIT_DOCTOR` e informar ao médico, sem bloqueio, que a precedência foi aplicada.
+Quando o NIR declarou Ecoendoscopia ou CPRE, o conjunto detectado contém esse especializado junto de EDA e/ou Colonoscopia e há ocorrência textual do especializado qualificada como `current_request`, reconciliar somente o especializado, preservar a evidência bruta, avançar o caso a `WAIT_DOCTOR` e informar ao médico, sem bloqueio, que a precedência foi aplicada.
 
 ## Contexto necessário
 
@@ -19,7 +19,8 @@ Leia antes de editar:
 
 Premissas que não devem ser reabertas neste slice:
 
-- o detector atual já decide `current_request|historical|negated|mention`;
+- `detect_requested_procedures_v3()` combina `requested_procedures` estruturado com ocorrências textuais atuais; por isso `strong/any` sozinho não autoriza supressão;
+- `detect_procedure_occurrences()` já decide `current_request|historical|negated|mention`, e essa qualificação textual é o gate determinístico da precedência;
 - a declaração NIR continua separada da detecção;
 - Ecoendoscopia + CPRE continua incompatível;
 - EDA + Colonoscopia continua sendo a única combinação válida;
@@ -27,12 +28,12 @@ Premissas que não devem ser reabertas neste slice:
 
 ## Requisitos verificáveis
 
-- **R1:** exatamente um tipo especializado detectado como solicitação atual elimina EDA e/ou Colonoscopia do conjunto reconciliado, com ou sem vínculo textual `com/e`.
+- **R1:** exatamente um tipo especializado no conjunto detectado elimina EDA e/ou Colonoscopia somente quando existe ocorrência textual do mesmo tipo com `qualification == "current_request"`; não é necessário vínculo local `com/e`.
 - **R2:** dois tipos especializados, valor desconhecido ou duplicata continuam fail-closed em revisão NIR; nenhum especializado é escolhido arbitrariamente.
-- **R3:** sem especializado atual, EDA-only, Colonoscopia-only e EDA + Colonoscopia preservam o comportamento existente; histórico/negação/mera menção especializada não acionam a regra.
+- **R3:** item especializado estruturado sem ocorrência textual atual correspondente não suprime convencionais; o conjunto misto permanece fail-closed. Sem especializado elegível, EDA-only, Colonoscopia-only e EDA + Colonoscopia preservam o comportamento existente.
 - **R4:** a precedência não altera a declaração NIR: declarado=especializado prossegue; declarado divergente continua mismatch, sem auto-upgrade especializado.
 - **R5:** quando aplicada, a regra projeta somente o especializado, envia somente ele ao LLM2, mantém `Case.structured_data` original e registra `procedure_precedence` enxuto em `CASE_PROCEDURES_DETECTED` e `suggested_action`.
-- **R6:** o caso coincidente chega a `WAIT_DOCTOR`; o presenter acrescenta aviso não bloqueante com labels canônicos apenas quando houve supressão. Singleton especializado normal não recebe esse aviso.
+- **R6:** o caso coincidente chega a `WAIT_DOCTOR`; o presenter acrescenta aviso não bloqueante com label canônico de Ecoendoscopia ou CPRE apenas quando houve supressão. Os dois tipos são testados; singleton especializado normal não recebe esse aviso.
 - **R7:** detector/regex, prompts, schemas, policy clínica, models, migrations, FSM, flags, forms e templates permanecem inalterados.
 
 ## Escopo e expected blast radius
@@ -63,10 +64,10 @@ Pare e escale antes de tocar qualquer arquivo funcional fora da lista, mesmo que
 
 | Requisito | Arquivo(s) esperado(s) | Teste/check |
 | --- | --- | --- |
-| R1/R2/R4 | `procedure_reconciliation.py`, dois testes especializados | unitários para conjuntos convencional+Eco, convencional+CPRE, Eco+CPRE, mismatch declarado |
-| R3 | `procedure_reconciliation.py`, dois testes especializados | EDA+Colon preservado; Eco/CPRE histórica/negada não domina |
+| R1/R2/R4 | `procedure_reconciliation.py`, dois testes especializados | unitários para conjuntos convencional+Eco, convencional+CPRE, Eco+CPRE, ocorrência atual obrigatória e mismatch declarado |
+| R3 | `procedure_reconciliation.py`, dois testes especializados | EDA+Colon preservado; structured Eco/CPRE com texto histórico/negado não suprime |
 | R5 | `orchestrator.py`, dois testes especializados | E2E: rows detectadas, prompt LLM2, `structured_data`, evento e `suggested_action` |
-| R6 | `presenters.py`, teste de Ecoendoscopia | `WAIT_DOCTOR`; notice com precedência e ausência no singleton normal |
+| R6 | `presenters.py`, ambos os testes especializados | `WAIT_DOCTOR`; notice canônico de Eco e CPRE; ausência no singleton normal. Os testes novos ficam nos dois arquivos de pipeline permitidos; `apps/doctor/tests/*` roda somente como regressão, sem edição |
 | R7 | nenhum produto adicional | inspeção Git contra `BASE_REF` e `git diff --check` |
 
 ## Plano TDD
@@ -78,10 +79,14 @@ Edite primeiro somente os dois arquivos de teste esperados e adicione fixtures s
 - `test_independent_eda_and_echo_requests_prioritize_echoendoscopy`;
 - `test_independent_eda_and_cpre_requests_prioritize_cpre`;
 - `test_unique_specialized_suppresses_all_conventional_types`;
+- `test_structured_historical_echo_does_not_authorize_suppression`;
+- `test_structured_negated_cpre_does_not_authorize_suppression`;
 - `test_both_specialized_still_require_nir_review`;
 - `test_eda_colonoscopy_remains_combined`;
 - `test_specialized_precedence_reaches_doctor_with_audit_metadata`;
-- `test_doctor_notice_exists_only_when_precedence_was_applied`.
+- `test_echo_precedence_notice_uses_canonical_label`;
+- `test_cpre_precedence_notice_uses_canonical_label`;
+- `test_specialized_singleton_does_not_add_precedence_notice`.
 
 Comando:
 
@@ -89,16 +94,16 @@ Comando:
 uv run pytest \
   apps/pipeline/tests/test_echoendoscopy_pipeline_v3.py \
   apps/pipeline/tests/test_cpre_pipeline_v3.py \
-  -v -k 'prioritize or precedence or both_specialized or remains_combined'
+  -v
 ```
 
-RED válido: falha de assertion mostrando que solicitações independentes ainda retornam `nir_review`, que os metadados/notice não existem ou que o conjunto bruto não é reduzido. Erro de sintaxe, import, fixture, banco, collection ou respostas fake insuficientes não vale como RED.
+RED válido: os testes novos são coletados; falhas de assertion mostram que solicitações independentes atuais ainda retornam `nir_review` ou que metadados/notices não existem. Os casos negativos de item estruturado sem ocorrência atual devem continuar verdes desde o RED e proteger o gate. Erro de sintaxe, import, fixture, banco, collection ou respostas fake insuficientes não vale como RED.
 
 ### GREEN
 
 Implemente o mínimo em:
 
-1. `procedure_reconciliation.py`: precedência por exatamente um especializado e metadados imutáveis;
+1. `procedure_reconciliation.py`: precedência por exatamente um especializado corroborado por ocorrência `current_request` e metadados imutáveis;
 2. `orchestrator.py`: propagar metadados ao evento/sugestão sem mutar LLM1;
 3. `presenters.py`: notice informativo via `report.notices`.
 
@@ -106,7 +111,7 @@ Rode o mesmo comando RED até exit code 0.
 
 ### REFACTOR e verificação local
 
-- Remova ou renomeie a semântica antiga de “linked-only” no reconciler; não remova o contrato de ocorrências do detector.
+- Remova ou renomeie a semântica antiga de “linked-only” no reconciler; preserve e reutilize o contrato de ocorrências como gate `current_request` do especializado.
 - Centralize a serialização de `procedure_precedence` em helper pequeno se isso evitar duplicação entre evento e sugestão.
 - Não crie abstração genérica, novo módulo ou enum persistido.
 - Rode:
@@ -164,29 +169,30 @@ rg -n 'procedure_precedence|specialized_over_conventional|suppressed|precedence_
 ## Critérios de aceitação
 
 - [ ] R1–R7 comprovados por testes/checks mapeados.
-- [ ] Caso sintético equivalente ao incidente — cabeçalho EDA, EDA anterior e solicitação repetida de Ecoendoscopia — chega a `WAIT_DOCTOR` como singleton Ecoendoscopia quando o NIR declarou Ecoendoscopia.
-- [ ] Cenário equivalente de CPRE também chega a `WAIT_DOCTOR`.
+- [ ] Caso sintético equivalente ao incidente — cabeçalho EDA, EDA anterior e ocorrência textual repetida de solicitação atual de Ecoendoscopia — chega a `WAIT_DOCTOR` como singleton Ecoendoscopia quando o NIR declarou Ecoendoscopia.
+- [ ] Cenário equivalente de CPRE, com ocorrência `current_request`, também chega a `WAIT_DOCTOR`.
+- [ ] Item estruturado de Ecoendoscopia/CPRE sem ocorrência textual atual correspondente não suprime convencionais e permanece em revisão NIR.
 - [ ] Ecoendoscopia + CPRE continua em revisão NIR.
 - [ ] Mismatch da declaração NIR continua em revisão, sem swap silencioso.
 - [ ] `structured_data` original contém os itens extraídos; LLM2 e rows detectadas contêm somente o especializado.
 - [ ] Evento e `suggested_action` contêm regra/selecionado/suprimidos e nenhum trecho clínico integral.
-- [ ] Aviso médico aparece somente quando a precedência foi aplicada e não bloqueia a decisão.
+- [ ] Aviso médico com label canônico é comprovado para Ecoendoscopia e CPRE, aparece somente quando a precedência foi aplicada e não bloqueia a decisão.
 - [ ] Nenhum arquivo/área fora do blast radius mudou.
 
 ## Gates de autoavaliação
 
 Responda no relatório com teste, linha ou comando:
 
-1. Em que ponto a regra recebe somente solicitações já qualificadas como atuais?
-2. Quais conjuntos brutos são reduzidos e qual condição impede escolher entre Ecoendoscopia e CPRE?
+1. Onde a reconciliação cruza o conjunto `strong/any` com ocorrência especializada `current_request`, impedindo que item estruturado isolado autorize supressão?
+2. Quais conjuntos brutos são reduzidos, qual condição exige exatamente um especializado e como Ecoendoscopia+CPRE permanece fail-closed?
 3. Qual teste prova que `EDA + Colonoscopia` não mudou?
-4. Qual teste prova que histórico/negação especializada não domina?
+4. Quais testes provam que item estruturado especializado com texto somente histórico/negado não domina?
 5. Qual teste prova que declaração EDA + detecção Eco continua mismatch?
 6. O que permanece em `Case.structured_data` e o que chega ao LLM2?
 7. Quais chaves exatas são gravadas no evento e na sugestão? Há texto clínico/PII nelas?
-8. Como o presenter evita aviso em singleton normal e conflito fail-closed?
+8. Quais testes comprovam labels canônicos de Ecoendoscopia e CPRE e ausência do aviso em singleton normal/conflito fail-closed?
 9. Algum detector, prompt, schema, policy, model, migration, FSM, form ou template mudou? A resposta esperada é não, com diff.
-10. Qual risco residual permanece? Cite que uma classificação incorreta do detector como solicitação atual pode acionar precedência; este slice não muda essa classificação.
+10. Qual risco residual permanece? Cite que falso positivo da classificação textual `current_request` ainda pode acionar precedência e que falso negativo pode manter revisão NIR; este slice não muda regex/classificação.
 
 ## Handoff
 
@@ -205,9 +211,9 @@ O worker não altera `tasks.md`, não faz commit/push e para após entregar o re
 ```text
 Leia AGENTS.md, PROJECT_CONTEXT.md, ADR-0006, ADR-0008 e todos os artefatos de openspec/changes/prioritize-specialized-procedure-requests, depois leia os arquivos fonte/teste listados no Slice 001. Implemente SOMENTE o Slice 001 em RED → GREEN → REFACTOR.
 
-Aplique precedência após a qualificação atual existente: quando o conjunto detectado contém exatamente um especializado (echoendoscopy ou cpre), remova EDA/Colonoscopia do conjunto reconciliado mesmo em trechos independentes. Não escolha quando ambos os especializados estão presentes. Preserve EDA+Colonoscopia, unknown/duplicata fail-closed, mismatch da declaração NIR e ausência de auto-upgrade especializado.
+Aplique precedência somente quando o conjunto `strong/any` contém exatamente um especializado (echoendoscopy ou cpre) E `occurrences` contém o mesmo tipo com `qualification == "current_request"`; então remova EDA/Colonoscopia mesmo que estejam em trechos independentes. `requested_procedures` estruturado isolado não autoriza supressão. Não escolha quando ambos os especializados estão presentes. Preserve EDA+Colonoscopia, unknown/duplicata fail-closed, mismatch da declaração NIR e ausência de auto-upgrade especializado.
 
-Preserve Case.structured_data original; use somente o singleton reconciliado nas rows/policy/LLM2. Registre metadado procedure_precedence enxuto no CASE_PROCEDURES_DETECTED e suggested_action e exponha aviso não bloqueante pelo report.notices existente. Não altere detector/regex, prompts, schemas, policy clínica, models, migrations, FSM, flags, forms ou templates.
+Preserve Case.structured_data original; use somente o singleton reconciliado nas rows/policy/LLM2. Registre metadado procedure_precedence enxuto no CASE_PROCEDURES_DETECTED e suggested_action e exponha aviso não bloqueante pelo report.notices existente. Teste o notice e label canônico para Ecoendoscopia e CPRE nos dois arquivos especializados permitidos, além da ausência no singleton normal. Não altere detector/regex, prompts, schemas, policy clínica, models, migrations, FSM, flags, forms ou templates.
 
 Escreva primeiro os testes e capture RED semântico com o comando do slice. Execute GREEN, regressões locais, Ruff focado, git diff --check e inspeções de áreas protegidas. Se precisar de arquivo fora dos cinco permitidos, pare como INCOMPLETE/BLOQUEADO. Gere /tmp/prioritize-specialized-procedure-requests-slice-001-report.md, não altere tasks.md, não faça commit/push e pare para review.
 ```

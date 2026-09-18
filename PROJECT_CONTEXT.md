@@ -18,7 +18,7 @@ Resumo executivo para retomada rapida apos pausas e para onboarding de novos con
 - **Branch de planejamento/implementação:** `feature/prioritize-specialized-procedure-requests`.
 - **Risco:** CRÍTICO / HIGH-ARCH; ADR-0008 aceita e supera parcialmente a precedência restrita da ADR-0006.
 - **Estado:** somente artefatos de planejamento preparados; Slice 001 ainda não implementado. Não assumir o comportamento-alvo no código até os testes e gates serem concluídos.
-- **Alvo:** depois da qualificação atual existente, exatamente uma Ecoendoscopia ou uma CPRE predomina sobre EDA/Colonoscopia detectadas, inclusive em trechos independentes; Ecoendoscopia+CPRE e mismatch da declaração NIR permanecem fail-closed; EDA+Colonoscopia não muda.
+- **Alvo:** exatamente uma Ecoendoscopia ou uma CPRE detectada predomina sobre EDA/Colonoscopia somente com ocorrência textual do mesmo tipo qualificada como `current_request`, inclusive em trecho independente; item estruturado isolado não autoriza supressão; Ecoendoscopia+CPRE e mismatch NIR permanecem fail-closed; EDA+Colonoscopia não muda.
 - **Entrega prevista:** um slice vertical, sem migration/FSM/schema/prompt, com auditoria enxuta e aviso médico não bloqueante.
 
 ## Change Concluído e Estado 3.0
