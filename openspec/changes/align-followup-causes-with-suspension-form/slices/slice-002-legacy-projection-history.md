@@ -87,18 +87,21 @@ uv run ruff check apps/cases/followup.py apps/cases/tests/test_followup_services
 uv run ruff format --check apps/cases/followup.py apps/cases/tests/test_followup_services.py apps/dashboard/views.py apps/dashboard/tests/test_followup_history.py tests/test_user_manual_artifacts.py
 ```
 
-Executar também o preflight read-only abaixo no banco de teste/staging. Ele deve sair `0`; saída não zero bloqueia rollout e exige escalonamento. Ajustar apenas o módulo de settings ao ambiente, nunca os conjuntos permitidos:
+Executar também o preflight read-only abaixo no banco de teste/staging. Ele deve sair `0`; saída não zero bloqueia rollout e exige escalonamento. Ajustar apenas o módulo de settings ao ambiente, nunca os conjuntos permitidos — o preflight delega à projeção do domínio (`unmapped_legacy_follow_up_ids`) para aceitar exatamente as combinações lidas como causas oficiais, sem um conjunto `Q` paralelo que possa divergir:
 
 ```bash
 uv run python manage.py shell --settings=config.settings.test -c '
-from django.db.models import Q
-from apps.cases.models import CURRENT_FOLLOWUP_NON_PERFORMANCE_REASON_VALUES, ProcedureFollowUp
-current = set(CURRENT_FOLLOWUP_NON_PERFORMANCE_REASON_VALUES)
-known = Q(non_performance_reason__in=current | {"absenteeism"}) | Q(non_performance_reason="resource_shortage", resource_shortage_detail__in={"emergency_occupied", "insufficient_time", "equipment_unavailable"})
-unknown = ProcedureFollowUp.objects.filter(performed=False).exclude(known)
-print({"unmapped_count": unknown.count(), "sample_ids": list(unknown.values_list("pk", flat=True)[:20])})
-raise SystemExit(1 if unknown.exists() else 0)
+from apps.cases.followup import unmapped_legacy_follow_up_ids
+unmapped = unmapped_legacy_follow_up_ids()
+print({"unmapped_count": len(unmapped), "sample_ids": unmapped[:20]})
+raise SystemExit(1 if unmapped else 0)
 '
+```
+
+Check executável do preflight (row sintética `absenteeism` + detalhe não vazio → exit 1):
+
+```bash
+uv run pytest apps/cases/tests/test_followup_services.py -k "PreflightLegadoNaoMapeado" -q
 ```
 
 Inspeção complementar do manual limitada à seção de pós-procedimento:

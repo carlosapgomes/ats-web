@@ -1200,13 +1200,31 @@ agendamento, não na data antiga.
 2. para **cada procedimento** do caso (EDA, Colonoscopia ou os dois),
    informar o desfecho:
    - **Realizado** — o exame foi realizado;
-   - **Não realizado** — informar a causa:
-     - **Absenteísmo** — o paciente não compareceu;
+   - **Não realizado** — selecionar a causa na lista **Causa**:
+     - **Ausência do preenchimento do TCLE para realização de exame**;
+     - **Ausência do preenchimento do TCLE anestésico**;
+     - **Condições clínicas desfavoráveis**;
+     - **Erro na programação do procedimento**;
+     - **Falta de médico gastroenterologista**;
+     - **Falta de anestesiologista**;
+     - **Falta de equipamentos**;
+     - **Falta de exames**;
+     - **Falta de hemoderivados**;
+     - **Falta de jejum**;
+     - **Falta de material/OPME**;
+     - **Falta de vaga na UTI**;
      - **Preparo inadequado** — o exame não foi realizado ou foi interrompido
        porque o preparo do paciente estava inadequado;
-     - **Cancelamento por falta de recursos no dia** — informar o submotivo:
-       urgências que ocuparam o horário, falta de tempo hábil ou equipamento
-       quebrado/não disponível;
+     - **Intubação difícil**;
+     - **Mudança de conduta médica**;
+     - **Não comparecimento do paciente**;
+     - **Paciente foi a óbito**;
+     - **Prioridade para urgência**;
+     - **Tempo excedido**;
+     - **Transferência para outro hospital**;
+     - **Atraso do paciente**;
+     - **Relatório divergente**;
+     - **Recusa do paciente**;
      - **Outras causas** — descrever a causa no campo de texto;
 3. responder se **o paciente foi internado** — a pergunta é sempre exibida e
    é obrigatória em todos os casos;
@@ -1214,12 +1232,11 @@ agendamento, não na data antiga.
 
 Regras do formulário:
 
-- procedimento **realizado** dispensa causa;
-- procedimento **não realizado** exige a causa — sem causa, o envio é
-  bloqueado;
-- **Cancelamento por falta de recursos no dia** exige um dos submotivos;
-- **Preparo inadequado** — sem submotivo e sem texto: basta marcar a causa;
-- **Outras causas** exige a descrição (obrigatória).
+- procedimento **realizado** dispensa causa e desabilita a lista de causas;
+- procedimento **não realizado** exige a causa selecionada na lista — sem
+  causa, o envio é bloqueado;
+- **Outras causas** exige a descrição no campo de texto (obrigatória);
+- as demais causas não usam campo de texto.
 
 ### Versões do pós-procedimento
 
@@ -1261,15 +1278,15 @@ Não é a data em que o registro foi feito.
   consulta dentro da janela;
 - os **cards-resumo do período** mostram os casos com pós-procedimento, as
   internações, a taxa de realização por procedimento e as causas de não
-  realização, com o detalhe dos submotivos;
+  realização;
 - os cards refletem a janela e a busca informadas.
 
 ### Tabela de desfechos e filtros de linha
 
 A tabela lista **uma linha por desfecho de procedimento** — ocorrência,
-paciente, data do grupo, procedimento, desfecho, causa (com submotivo ou
-texto), internação, versão, autor e data/hora do registro. A tabela é
-paginada, com **25 linhas por página**.
+paciente, data do grupo, procedimento, desfecho, causa (com o texto de
+**Outras causas**, quando houver), internação, versão, autor e data/hora do
+registro. A tabela é paginada, com **25 linhas por página**.
 
 Os filtros **Desfecho**, **Causa** e **Internação** refinam as linhas:
 

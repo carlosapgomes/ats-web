@@ -5,7 +5,9 @@ não abre intercorrência e não gera mensagem operacional. Cada gravação cria
 uma nova versão append-only (``CaseFollowUp`` + ``ProcedureFollowUp`` por
 procedimento autorizado) espelhada em ``CaseEvent`` (``FOLLOWUP_RECORDED``
 quando versão 1, ``FOLLOWUP_UPDATED`` nas seguintes). A cobertura é restrita
-às rows ``doctor_disposition == "approved"`` (ADR-0007).
+às rows ``doctor_disposition == "approved"`` (ADR-0007). A leitura analítica
+(Histórico) projeta as causas legadas para a taxonomia oficial por
+``project_non_performance_reason``, sem tocar rows nem eventos.
 """
 
 from __future__ import annotations
@@ -25,6 +27,7 @@ from apps.cases.models import (
     CaseFollowUp,
     DoctorDisposition,
     FollowUpNonPerformanceReason,
+    FollowUpResourceShortageDetail,
     ProcedureFollowUp,
 )
 
@@ -42,6 +45,87 @@ class ProcedureOutcomeInput:
     non_performance_reason: str = ""
     resource_shortage_detail: str = ""
     other_reason: str = ""
+
+
+# Categoria técnica de leitura (design D5): agrupa causa/detalhe persistido
+# fora dos quatro mapeamentos confirmados. Não é causa de negócio — nunca
+# integra choices de model/form nem as opções do filtro oficial.
+LEGACY_UNMAPPED_REASON = "legacy_unmapped"
+LEGACY_UNMAPPED_REASON_LABEL = "Causa legada não mapeada"
+
+# Mapeamento aprovado (design D5): par persistido → causa oficial equivalente.
+_LEGACY_REASON_PROJECTIONS: dict[tuple[str, str], str] = {
+    (FollowUpNonPerformanceReason.ABSENTEEISM.value, ""): FollowUpNonPerformanceReason.PATIENT_NO_SHOW.value,
+    (
+        FollowUpNonPerformanceReason.RESOURCE_SHORTAGE.value,
+        FollowUpResourceShortageDetail.EMERGENCY_OCCUPIED.value,
+    ): FollowUpNonPerformanceReason.EMERGENCY_PRIORITY.value,
+    (
+        FollowUpNonPerformanceReason.RESOURCE_SHORTAGE.value,
+        FollowUpResourceShortageDetail.INSUFFICIENT_TIME.value,
+    ): FollowUpNonPerformanceReason.TIME_EXCEEDED.value,
+    (
+        FollowUpNonPerformanceReason.RESOURCE_SHORTAGE.value,
+        FollowUpResourceShortageDetail.EQUIPMENT_UNAVAILABLE.value,
+    ): FollowUpNonPerformanceReason.MISSING_EQUIPMENT.value,
+}
+
+
+def project_non_performance_reason(*, non_performance_reason: str, resource_shortage_detail: str = "") -> str:
+    """Código oficial de leitura do desfecho não realizado (design D5).
+
+    Projeção canônica única consumida por tabela, cards, filtro e CSV do
+    Histórico: lê os dois campos persistidos e devolve a causa oficial
+    equivalente. Causa do catálogo atual passa sem mudança somente com detalhe
+    vazio (design D5) e os quatro mapeamentos legados confirmados são
+    convertidos; qualquer outro estado persistido — inclusive causa atual com
+    detalhe não vazio ou causa vazia — devolve ``legacy_unmapped``.
+
+    Função pura: não grava nem consulta nada — rows e ``CaseEvent`` históricos
+    permanecem intactos por construção.
+    """
+    if resource_shortage_detail == "" and non_performance_reason in CURRENT_FOLLOWUP_NON_PERFORMANCE_REASON_VALUES:
+        return non_performance_reason
+    return _LEGACY_REASON_PROJECTIONS.get(
+        (non_performance_reason, resource_shortage_detail),
+        LEGACY_UNMAPPED_REASON,
+    )
+
+
+def is_unmapped_legacy_follow_up(*, non_performance_reason: str, resource_shortage_detail: str = "") -> bool:
+    """Causa/detalhe persistido fora dos mapeamentos da projeção (preflight R7).
+
+    Decide o fail-closed do preflight delegando a
+    ``project_non_performance_reason``: o preflight aceita exatamente as
+    combinações que a projeção lê como causa oficial, sem um conjunto paralelo
+    que possa divergir (ex.: ``absenteeism`` com detalhe técnico não vazio cai
+    fora do par mapeado e é sinalizado). Puro: não grava nem consulta nada.
+    """
+    return (
+        project_non_performance_reason(
+            non_performance_reason=non_performance_reason,
+            resource_shortage_detail=resource_shortage_detail,
+        )
+        == LEGACY_UNMAPPED_REASON
+    )
+
+
+def unmapped_legacy_follow_up_ids() -> list[int]:
+    """IDs de desfechos ``performed=False`` sem equivalente na projeção (R7).
+
+    Fonte única do preflight fail-closed de rollout: percorre as rows
+    persistidas aplicando ``is_unmapped_legacy_follow_up``, de modo que o
+    preflight nunca divirja da leitura do Histórico. Lista vazia libera o
+    rollout; qualquer id bloqueia até análise humana. Read-only: não altera
+    rows nem ``CaseEvent``.
+    """
+    return [
+        follow_up_id
+        for follow_up_id, reason, detail in ProcedureFollowUp.objects.filter(performed=False).values_list(
+            "pk", "non_performance_reason", "resource_shortage_detail"
+        )
+        if is_unmapped_legacy_follow_up(non_performance_reason=reason, resource_shortage_detail=detail)
+    ]
 
 
 def get_current_follow_up(case: Case) -> CaseFollowUp | None:

@@ -10,10 +10,14 @@ from django.db import IntegrityError, connection, transaction
 from django.test.utils import CaptureQueriesContext
 
 from apps.cases.followup import (
+    LEGACY_UNMAPPED_REASON,
     ProcedureOutcomeInput,
     current_follow_ups,
     get_current_follow_up,
+    is_unmapped_legacy_follow_up,
+    project_non_performance_reason,
     record_case_follow_up,
+    unmapped_legacy_follow_up_ids,
 )
 from apps.cases.models import (
     CURRENT_FOLLOWUP_NON_PERFORMANCE_REASON_CHOICES,
@@ -126,6 +130,176 @@ class TestCatalogoOficial:
     def test_nenhum_codigo_excede_o_max_length_do_field(self) -> None:
         field = ProcedureFollowUp._meta.get_field("non_performance_reason")
         assert max(len(value) for value in FollowUpNonPerformanceReason.values) <= field.max_length
+
+
+# ── R1 (Slice 002): projeção pura das causas legadas ─────────────────────
+
+
+class TestProjecaoCausasLegadas:
+    """R1 — a projeção de leitura é a fonte única das eras no Histórico.
+
+    Pina os quatro mapeamentos confirmados pelo owner e o pass-through das
+    causas atuais (design D5). Estado persistido fora deles vira a categoria
+    técnica ``legacy_unmapped`` (fail-closed): nunca uma equivalência nova.
+    """
+
+    @pytest.mark.parametrize(
+        ("reason", "detail", "expected"),
+        [
+            ("absenteeism", "", "patient_no_show"),
+            ("resource_shortage", "emergency_occupied", "emergency_priority"),
+            ("resource_shortage", "insufficient_time", "time_exceeded"),
+            ("resource_shortage", "equipment_unavailable", "missing_equipment"),
+        ],
+        ids=["absenteeism", "emergency_occupied", "insufficient_time", "equipment_unavailable"],
+    )
+    def test_legacy_reason_projection(self, reason: str, detail: str, expected: str) -> None:
+        assert (
+            project_non_performance_reason(
+                non_performance_reason=reason,
+                resource_shortage_detail=detail,
+            )
+            == expected
+        )
+
+    @pytest.mark.parametrize("reason", _OFFICIAL_REASON_IDS, ids=_OFFICIAL_REASON_IDS)
+    def test_current_reason_passa_sem_mudanca(self, reason: str) -> None:
+        assert project_non_performance_reason(non_performance_reason=reason) == reason
+
+    @pytest.mark.parametrize("reason", ["patient_no_show", "other"], ids=["patient_no_show", "other"])
+    def test_current_reason_com_detalhe_nao_vazio_vira_legacy_unmapped(self, reason: str) -> None:
+        """Regressão: causa atual exige detalhe vazio (design D5).
+
+        Uma causa do catálogo oficial persistida com detalhe não vazio não é
+        lida como a causa atual — cai em ``legacy_unmapped`` e a decisão do
+        preflight (``is_unmapped_legacy_follow_up``) a sinaliza (R7).
+        """
+        assert (
+            project_non_performance_reason(
+                non_performance_reason=reason,
+                resource_shortage_detail="emergency_occupied",
+            )
+            == LEGACY_UNMAPPED_REASON
+        )
+        assert is_unmapped_legacy_follow_up(
+            non_performance_reason=reason,
+            resource_shortage_detail="emergency_occupied",
+        )
+
+    @pytest.mark.parametrize(
+        ("reason", "detail"),
+        [
+            ("resource_shortage", ""),
+            ("resource_shortage", "submotivo_desconhecido"),
+            ("absenteeism", "detalhe_inesperado"),
+            ("causa_desconhecida", ""),
+            ("", ""),
+        ],
+        ids=[
+            "resource-shortage-sem-detalhe",
+            "resource-shortage-detalhe-desconhecido",
+            "absenteeism-com-detalhe",
+            "causa-desconhecida",
+            "causa-vazia",
+        ],
+    )
+    def test_legacy_unmapped_fail_closed(self, reason: str, detail: str) -> None:
+        assert (
+            project_non_performance_reason(
+                non_performance_reason=reason,
+                resource_shortage_detail=detail,
+            )
+            == LEGACY_UNMAPPED_REASON
+        )
+        assert LEGACY_UNMAPPED_REASON not in CURRENT_FOLLOWUP_NON_PERFORMANCE_REASON_VALUES
+        assert LEGACY_UNMAPPED_REASON not in FollowUpNonPerformanceReason.values
+
+    def test_projecao_e_pura_sem_consultar_banco(self) -> None:
+        """A projeção não faz writes nem leituras: só transforma os dois campos."""
+        with CaptureQueriesContext(connection) as ctx:
+            assert (
+                project_non_performance_reason(
+                    non_performance_reason="resource_shortage",
+                    resource_shortage_detail="equipment_unavailable",
+                )
+                == "missing_equipment"
+            )
+        assert len(ctx) == 0
+
+
+# ── R7 (Slice 002): preflight fail-closed de legados não mapeados ─────────
+
+
+class TestPreflightLegadoNaoMapeado:
+    """R7 — o preflight lista exatamente as rows que a projeção não lê.
+
+    Substitui o conjunto ``Q`` paralelo do slice: o preflight delega à projeção
+    (``is_unmapped_legacy_follow_up``), então um par fora dos mapeamentos —
+    como ``absenteeism`` com detalhe não vazio — bloqueia o rollout, enquanto
+    as combinações confirmadas liberam.
+    """
+
+    def _legacy_follow_up(self, case: Case, user: Any, *, reason: str, detail: str = "") -> ProcedureFollowUp:
+        follow_up = CaseFollowUp.objects.create(
+            case=case,
+            version=case.follow_ups.count() + 1,
+            patient_admitted=False,
+            recorded_by=user,
+        )
+        return ProcedureFollowUp.objects.create(
+            follow_up=follow_up,
+            procedure=case.procedures.get(),
+            performed=False,
+            non_performance_reason=reason,
+            resource_shortage_detail=detail,
+        )
+
+    def test_dataset_mapeado_libera_rollout(self, user, case_factory) -> None:
+        case = _case_with_procedures(case_factory, user)
+        self._legacy_follow_up(case, user, reason="absenteeism")
+        self._legacy_follow_up(case, user, reason="resource_shortage", detail="emergency_occupied")
+
+        assert unmapped_legacy_follow_up_ids() == []
+
+    def test_resource_shortage_com_detalhe_desconhecido_bloqueia(self, user, case_factory) -> None:
+        case = _case_with_procedures(case_factory, user)
+        row = self._legacy_follow_up(case, user, reason="resource_shortage", detail="detalhe_desconhecido")
+
+        assert unmapped_legacy_follow_up_ids() == [row.pk]
+
+    def test_causa_fora_do_catalogo_bloqueia(self, user, case_factory) -> None:
+        case = _case_with_procedures(case_factory, user)
+        row = self._legacy_follow_up(case, user, reason="causa_fora_do_catalogo")
+
+        assert unmapped_legacy_follow_up_ids() == [row.pk]
+
+    def test_absenteeism_com_detalhe_nao_vazio_bloqueia(self) -> None:
+        """Row sintética: o par só não persiste porque o check 0017 o proíbe.
+
+        A decisão do preflight é a mesma usada sobre rows persistidas, então a
+        combinação fora do mapeamento é sinalizada (exit 1) mesmo sem poder
+        existir no banco.
+        """
+        synthetic = ProcedureFollowUp(
+            non_performance_reason="absenteeism",
+            resource_shortage_detail="emergency_occupied",
+        )
+
+        assert is_unmapped_legacy_follow_up(
+            non_performance_reason=synthetic.non_performance_reason,
+            resource_shortage_detail=synthetic.resource_shortage_detail,
+        )
+
+    def test_realizado_nao_entra_no_preflight(self, user, case_factory) -> None:
+        case = _case_with_procedures(case_factory, user)
+        follow_up = CaseFollowUp.objects.create(case=case, version=1, patient_admitted=False, recorded_by=user)
+        ProcedureFollowUp.objects.create(
+            follow_up=follow_up,
+            procedure=case.procedures.get(),
+            performed=True,
+        )
+
+        assert unmapped_legacy_follow_up_ids() == []
 
 
 # ── R2: causas oficiais, `other` e códigos legados ────────────────────────

@@ -2,7 +2,9 @@
 
 import csv
 import io
+import re
 from datetime import date, datetime, time, timedelta
+from typing import Any
 
 import pytest
 from django.contrib.auth import get_user_model
@@ -10,8 +12,16 @@ from django.db.models import Max
 from django.urls import reverse
 from django.utils import timezone
 
-from apps.cases.followup import ProcedureOutcomeInput, record_case_follow_up
-from apps.cases.models import Case, CaseEvent, CaseFollowUp, CaseProcedure, DoctorDisposition, ProcedureFollowUp
+from apps.cases.followup import LEGACY_UNMAPPED_REASON, ProcedureOutcomeInput, record_case_follow_up
+from apps.cases.models import (
+    CURRENT_FOLLOWUP_NON_PERFORMANCE_REASON_CHOICES,
+    Case,
+    CaseEvent,
+    CaseFollowUp,
+    CaseProcedure,
+    DoctorDisposition,
+    ProcedureFollowUp,
+)
 
 pytestmark = pytest.mark.django_db
 
@@ -226,17 +236,27 @@ def _export_csv(client, **params) -> list[list[str]]:
     return list(csv.reader(io.StringIO(body), delimiter=";"))
 
 
+def _reason_options(content: str) -> list[str]:
+    """Valores das opções do select de causa da página ('' = opção Todos)."""
+    start = content.index('<select name="reason"')
+    snippet = content[start : content.index("</select>", start)]
+    return re.findall(r'<option value="([^"]*)"', snippet)
+
+
 def _filter_scenario(client) -> dict[str, Case]:
     """Cenário do Slice 003: 4 casos na janela default com desfechos variados.
 
     - FILT-MIX (Misto): internado, v2 com EDA realizada e colonoscopia não
-      realizada por absentismo (2 linhas — o caso mistura desfechos para
+      realizada por absentismo legado (2 linhas — o caso mistura desfechos para
       provar que performed/reason filtram LINHA e não caso);
-    - FILT-RS (Recurso): não internado, EDA não realizada por falta de recursos;
+    - FILT-RS (Recurso): não internado, EDA não realizada por falta de recursos
+      legada (submotivo urgências que ocuparam o horário);
     - FILT-OK (Realizado): não internado, EDA realizada;
     - FILT-OT (Outra Causa): não internado, EDA não realizada por "outras causas".
 
-    População default = 5 linhas de desfecho em 4 casos; 1 internação.
+    As duas causas legadas são projetadas para as causas oficiais equivalentes
+    na leitura (Slice 002 R2/R3). População default = 5 linhas de desfecho em 4
+    casos; 1 internação.
     """
     user = _login_as(client, "manager")
     when = _local_dt(day_offset=0, hour=9)
@@ -391,10 +411,12 @@ class TestHistoryPopulation:
         content = response.content.decode()
         assert content.count("VERSAO-001") == 1
         assert "v2" in content
-        # Dados da v1 (absentismo) fora da população: a linha/cards não exibem a causa;
-        # o label "Absenteísmo" só pode vir do controle de filtro de linha (Slice 003).
-        assert content.count("Absenteísmo") == 1
-        assert '<option value="absenteeism">Absenteísmo</option>' in content
+        # Dados da v1 (absentismo) fora da população: a linha/cards não exibem a
+        # causa e o vocabulário legado saiu do filtro (Slice 002 R3), que oferece
+        # apenas as 24 causas atuais.
+        assert "Absenteísmo" not in content
+        assert '<option value="absenteeism"' not in content
+        assert response.context["summary"]["reasons"] == []
 
 
 # ── R4/R4b: janela por data de grupo (nunca recorded_at) ────────────────
@@ -552,8 +574,11 @@ class TestHistoryCards:
         assert "Causas de não realização" in content
         assert "1 de 2 realizados (50%)" in content
         assert "width: 50%" in content
-        assert "Cancelamento por falta de recursos no dia" in content
-        assert "Urgências que ocuparam o horário" in content
+        # A row legada projeta para a causa oficial: label oficial no card, sem
+        # submotivo e sem o vocabulário legado como categoria paralela.
+        assert "Prioridade para urgência" in content
+        assert "Cancelamento por falta de recursos no dia" not in content
+        assert "Urgências que ocuparam o horário" not in content
 
         summary = response.context["summary"]
         assert summary["cases"] == 2
@@ -565,10 +590,10 @@ class TestHistoryCards:
         assert (proc["performed"], proc["total"], proc["percent"]) == (1, 2, 50)
         assert len(summary["reasons"]) == 1
         reason = summary["reasons"][0]
-        assert reason["reason"] == "resource_shortage"
+        assert reason["reason"] == "emergency_priority"
+        assert reason["label"] == "Prioridade para urgência"
         assert reason["count"] == 1
-        assert reason["details"][0]["label"] == "Urgências que ocuparam o horário"
-        assert reason["details"][0]["count"] == 1
+        assert reason["details"] == []
 
     def test_cards_respeitam_janela_e_busca(self, client) -> None:
         user = _login_as(client, "manager")
@@ -634,8 +659,9 @@ class TestHistoryTable:
         assert "Paciente Tabela" in content
         assert _local_day(0).strftime("%d/%m/%Y") in content
         assert "Não realizado" in content
-        assert "Cancelamento por falta de recursos no dia" in content
-        assert "Equipamento quebrado/não disponível" in content
+        assert {row["reason_label"] for row in rows} == {"Falta de equipamentos"}
+        assert "Cancelamento por falta de recursos no dia" not in content
+        assert "Equipamento quebrado/não disponível" not in content
         assert "v2" in content
         assert user.username in content  # registrado por (author_label)
         expected_recorded = timezone.localtime(v2.recorded_at).strftime("%d/%m/%Y %H:%M")
@@ -827,8 +853,8 @@ class TestHistoryExportRows:
 
         not_performed_row = by_procedure["Colonoscopia"]
         assert not_performed_row[CSV_COL["Desfecho"]] == "Não realizado"
-        assert not_performed_row[CSV_COL["Causa"]] == "Cancelamento por falta de recursos no dia"
-        assert not_performed_row[CSV_COL["Submotivo"]] == "Equipamento quebrado/não disponível"
+        assert not_performed_row[CSV_COL["Causa"]] == "Falta de equipamentos"
+        assert not_performed_row[CSV_COL["Submotivo"]] == ""
         assert not_performed_row[CSV_COL["Outra causa (texto)"]] == ""
 
     def test_outra_causa_texto_e_nao_realizado_nao_internado(self, client) -> None:
@@ -1015,12 +1041,13 @@ class TestHistoryLineFilters:
     @pytest.mark.parametrize(
         ("reason", "expected_arn", "expected_label"),
         [
-            ("absenteeism", "FILT-MIX", "Absenteísmo"),
-            ("resource_shortage", "FILT-RS", "Cancelamento por falta de recursos no dia"),
+            ("patient_no_show", "FILT-MIX", "Não comparecimento do paciente"),
+            ("emergency_priority", "FILT-RS", "Prioridade para urgência"),
             ("other", "FILT-OT", "Outras causas"),
         ],
     )
     def test_filter_reason_filtra_por_causa(self, client, reason: str, expected_arn: str, expected_label: str) -> None:
+        """R3: o filtro usa a causa oficial, alcançando a row legada equivalente."""
         _filter_scenario(client)
         response = client.get(HISTORY_URL, {"reason": reason})
         (row,) = response.context["page_obj"].object_list
@@ -1030,7 +1057,7 @@ class TestHistoryLineFilters:
 
     def test_filter_reason_exclui_linhas_realizadas_e_outras_causas(self, client) -> None:
         _filter_scenario(client)
-        response = client.get(HISTORY_URL, {"reason": "absenteeism"})
+        response = client.get(HISTORY_URL, {"reason": "patient_no_show"})
         rows = list(response.context["page_obj"].object_list)
         assert len(rows) == 1  # só a colonoscopia do FILT-MIX; EDA realizada não tem causa
         assert rows[0]["procedure_label"] == "Colonoscopia"
@@ -1055,10 +1082,17 @@ class TestHistoryLineFilters:
 
     @pytest.mark.parametrize(
         "params",
-        [{"performed": "banana"}, {"reason": "xyz"}, {"admitted": "talvez"}],
+        [
+            {"performed": "banana"},
+            {"reason": "xyz"},
+            {"admitted": "talvez"},
+            {"reason": "absenteeism"},
+            {"reason": "resource_shortage"},
+            {"reason": LEGACY_UNMAPPED_REASON},
+        ],
     )
     def test_filter_invalid_values_sao_ignorados(self, client, params: dict[str, str]) -> None:
-        """Valores inválidos equivalem a "todos": tabela, cards e CSV idênticos."""
+        """Valores inválidos (inclusive legados e técnicos) equivalem a "todos"."""
         _filter_scenario(client)
         base = client.get(HISTORY_URL)
         response = client.get(HISTORY_URL, params)
@@ -1084,9 +1118,9 @@ class TestHistoryLineFilters:
         combos = (
             {"performed": "yes"},
             {"performed": "no"},
-            {"reason": "absenteeism"},
+            {"reason": "patient_no_show"},
             {"admitted": "yes"},
-            {"performed": "no", "reason": "absenteeism", "admitted": "yes"},
+            {"performed": "no", "reason": "patient_no_show", "admitted": "yes"},
         )
         for params in combos:
             response = client.get(HISTORY_URL, params)
@@ -1124,9 +1158,16 @@ class TestHistoryLineFilterControls:
 
         reason = self._select_snippet(form, "reason")
         assert '<option value="">Todos</option>' in reason
-        assert 'value="absenteeism"' in reason and "Absenteísmo" in reason
-        assert 'value="resource_shortage"' in reason and "Cancelamento por falta de recursos no dia" in reason
-        assert 'value="other"' in reason and "Outras causas" in reason
+        # R3: somente as 24 causas atuais, na ordem oficial (design D1) — nenhum
+        # código legado ou categoria técnica é oferecido como opção de filtro.
+        assert '<option value="other">Outras causas</option>' in reason
+        assert '<option value="absenteeism"' not in reason
+        assert '<option value="resource_shortage"' not in reason
+        assert '<option value="legacy_unmapped"' not in reason
+        assert _reason_options(form) == [
+            "",
+            *[value for value, _label in CURRENT_FOLLOWUP_NON_PERFORMANCE_REASON_CHOICES],
+        ]
 
         admitted = self._select_snippet(form, "admitted")
         assert '<option value="">Todos</option>' in admitted
@@ -1145,12 +1186,15 @@ class TestHistoryLineFilterControls:
             "end": end_day.isoformat(),
             "q": "misto",
             "performed": "no",
-            "reason": "absenteeism",
+            "reason": "patient_no_show",
             "admitted": "yes",
         }
         content = client.get(HISTORY_URL, params).content.decode()
         assert '<option value="no" selected>Não realizado</option>' in self._select_snippet(content, "performed")
-        assert '<option value="absenteeism" selected>Absenteísmo</option>' in self._select_snippet(content, "reason")
+        assert (
+            '<option value="patient_no_show" selected>Não comparecimento do paciente</option>'
+            in self._select_snippet(content, "reason")
+        )
         assert '<option value="yes" selected>Sim</option>' in self._select_snippet(content, "admitted")
         # submeter mantém janela e busca (GET no mesmo form)
         assert f'value="{start_day.isoformat()}"' in content
@@ -1171,13 +1215,14 @@ class TestHistoryFilterCombo:
 
     def test_filter_combo_performed_e_reason_filtram_a_mesma_linha(self, client) -> None:
         _filter_scenario(client)
-        page_arns, csv_arns, records = self._page_and_csv(client, {"performed": "no", "reason": "absenteeism"})
+        page_arns, csv_arns, records = self._page_and_csv(client, {"performed": "no", "reason": "patient_no_show"})
         assert page_arns == ["FILT-MIX"]
         assert csv_arns == page_arns
         (row,) = records[1:]
         assert row[CSV_COL["Procedimento"]] == "Colonoscopia"
         assert row[CSV_COL["Desfecho"]] == "Não realizado"
-        assert row[CSV_COL["Causa"]] == "Absenteísmo"
+        assert row[CSV_COL["Causa"]] == "Não comparecimento do paciente"
+        assert row[CSV_COL["Submotivo"]] == ""
         assert row[CSV_COL["Internação"]] == "Sim"
 
     def test_filter_combo_admitted_remove_caso_e_performed_filtra_linha(self, client) -> None:
@@ -1203,7 +1248,7 @@ class TestHistoryFilterCombo:
             "end": end_day.isoformat(),
             "q": "filt",
             "performed": "no",
-            "reason": "absenteeism",
+            "reason": "patient_no_show",
         }
         page_arns, csv_arns, records = self._page_and_csv(client, params)
         assert page_arns == ["FILT-MIX"]
@@ -1217,7 +1262,7 @@ class TestHistoryFilterCombo:
                 "end": "2020-01-05",
                 "q": "filt",
                 "performed": "no",
-                "reason": "absenteeism",
+                "reason": "patient_no_show",
             },
         )
         assert antigo_arns == []
@@ -1225,8 +1270,8 @@ class TestHistoryFilterCombo:
 
     def test_filter_combo_export_paginacao_nao_trunca_csv(self, client) -> None:
         _filter_scenario(client)
-        records_no_page = _export_csv(client, performed="no", reason="absenteeism")
-        records_page_1 = _export_csv(client, performed="no", reason="absenteeism", page="2")
+        records_no_page = _export_csv(client, performed="no", reason="patient_no_show")
+        records_page_1 = _export_csv(client, performed="no", reason="patient_no_show", page="2")
         assert records_no_page == records_page_1
 
     def test_filter_combo_paginacao_preserva_filtros(self, client) -> None:
@@ -1237,19 +1282,19 @@ class TestHistoryFilterCombo:
             case = _create_scheduled_case(user, arn=f"PG-FILT-{i:02d}", name=f"Filler {i:02d}", when=when)
             _legacy_record(case, user, outcomes=_outcome_inputs(case, performed=False, reason="absenteeism"))
 
-        params = {"performed": "no", "reason": "absenteeism"}
+        params = {"performed": "no", "reason": "patient_no_show"}
         response = client.get(HISTORY_URL, params)
         page_obj = response.context["page_obj"]
         assert len(page_obj.object_list) == 25
         assert response.context["rows_total"] == 26
         content = response.content.decode()
         assert "performed=no" in content
-        assert "reason=absenteeism" in content
+        assert "reason=patient_no_show" in content
 
         second = client.get(HISTORY_URL, dict(params, page="2"))
         second_rows = list(second.context["page_obj"].object_list)
         assert len(second_rows) == 1
-        assert all(r["reason"] == "absenteeism" and r["performed"] is False for r in second_rows)
+        assert all(r["reason"] == "patient_no_show" and r["performed"] is False for r in second_rows)
         assert second_rows[0]["case"].agency_record_number == "PG-FILT-25"
 
     def test_export_filters_concordam_com_a_tabela(self, client) -> None:
@@ -1257,10 +1302,10 @@ class TestHistoryFilterCombo:
         for params in (
             {"performed": "yes"},
             {"performed": "no"},
-            {"reason": "absenteeism"},
+            {"reason": "patient_no_show"},
             {"admitted": "yes"},
             {"performed": "no", "admitted": "no"},
-            {"performed": "yes", "reason": "absenteeism"},
+            {"performed": "yes", "reason": "patient_no_show"},
         ):
             page = client.get(HISTORY_URL, params)
             records = _export_csv(client, **params)
@@ -1342,7 +1387,9 @@ class TestHistorySpecializedProcedures:
         content = response.content.decode()
         assert "Ecoendoscopia" in content
         assert "CPRE" in content
-        assert "Absenteísmo" in content
+        assert rows["SPEC-HIST-CPRE"]["reason"] == "patient_no_show"
+        assert rows["SPEC-HIST-CPRE"]["reason_label"] == "Não comparecimento do paciente"
+        assert "Absenteísmo" not in content
 
         records = _export_csv(client)
         assert sorted(row[CSV_COL["Procedimento"]] for row in records[1:]) == ["CPRE", "Ecoendoscopia"]
@@ -1432,3 +1479,271 @@ class TestHistoryMixedEras:
         # A leitura é da versão corrente (v2) — só a row autorizada.
         rows = [row for row in client.get(HISTORY_URL).context["page_obj"].object_list if row["case"].pk == case.pk]
         assert [row["procedure_type"] for row in rows] == ["eda"]
+
+
+# ── Slice 002: projeção única das causas legadas (R1–R7) ────────────────
+
+# Mapeamento aprovado (design D5): persistido → causa oficial + label oficial.
+_LEGACY_PROJECTIONS = (
+    ("absenteeism", "", "patient_no_show", "Não comparecimento do paciente"),
+    ("resource_shortage", "emergency_occupied", "emergency_priority", "Prioridade para urgência"),
+    ("resource_shortage", "insufficient_time", "time_exceeded", "Tempo excedido"),
+    ("resource_shortage", "equipment_unavailable", "missing_equipment", "Falta de equipamentos"),
+)
+_LEGACY_PROJECTION_IDS = ["absenteeism", "emergency_occupied", "insufficient_time", "equipment_unavailable"]
+
+
+class TestLegacyProjectionSurfaces:
+    """R2/R3/R6: eras diferentes viram uma única causa oficial na leitura."""
+
+    @pytest.mark.parametrize(
+        ("reason", "detail", "expected_code", "expected_label"),
+        _LEGACY_PROJECTIONS,
+        ids=_LEGACY_PROJECTION_IDS,
+    )
+    def test_quatro_mapeamentos_em_rows_cards_e_csv(
+        self, client, reason: str, detail: str, expected_code: str, expected_label: str
+    ) -> None:
+        """Row legada mostra label oficial, sem submotivo, em tabela/cards/CSV."""
+        user = _login_as(client, "manager")
+        case = _create_scheduled_case(
+            user, arn="PROJ-001", name="Paciente Projetado", when=_local_dt(day_offset=0, hour=9)
+        )
+        _legacy_record(case, user, outcomes=_outcome_inputs(case, performed=False, reason=reason, detail=detail))
+
+        response = client.get(HISTORY_URL)
+        (row,) = response.context["page_obj"].object_list
+        assert row["reason"] == expected_code
+        assert row["reason_label"] == expected_label
+        assert row["detail_label"] == ""
+        assert row["submotivo_label"] == ""
+
+        summary = response.context["summary"]
+        assert summary["not_performed"] == 1
+        assert [(item["reason"], item["label"], item["count"]) for item in summary["reasons"]] == [
+            (expected_code, expected_label, 1)
+        ]
+        assert summary["reasons"][0]["details"] == []
+
+        content = response.content.decode()
+        assert expected_label in content
+        assert "Absenteísmo" not in content
+        assert "Cancelamento por falta de recursos no dia" not in content
+
+        (csv_row,) = _export_csv(client)[1:]
+        assert csv_row[CSV_COL["Desfecho"]] == "Não realizado"
+        assert csv_row[CSV_COL["Causa"]] == expected_label
+        assert csv_row[CSV_COL["Submotivo"]] == ""
+        assert csv_row[CSV_COL["Outra causa (texto)"]] == ""
+
+    def test_eras_equivalentes_agregam_em_uma_causa_oficial(self, client) -> None:
+        """R2: card soma current + legada na mesma causa, sem categoria paralela."""
+        user = _login_as(client, "manager")
+        atual = _create_scheduled_case(user, arn="ERA-ATUAL", name="Atual", when=_local_dt(day_offset=0, hour=9))
+        _record(atual, user, performed=False, reason="patient_no_show")
+        legada = _create_scheduled_case(user, arn="ERA-LEGADA", name="Legada", when=_local_dt(day_offset=0, hour=10))
+        _legacy_record(legada, user, outcomes=_outcome_inputs(legada, performed=False, reason="absenteeism"))
+
+        response = client.get(HISTORY_URL)
+        rows = {row["case"].agency_record_number: row for row in response.context["page_obj"].object_list}
+        assert rows["ERA-ATUAL"]["reason"] == rows["ERA-LEGADA"]["reason"] == "patient_no_show"
+        assert {row["reason_label"] for row in rows.values()} == {"Não comparecimento do paciente"}
+
+        (reason,) = response.context["summary"]["reasons"]
+        assert (reason["reason"], reason["label"], reason["count"]) == (
+            "patient_no_show",
+            "Não comparecimento do paciente",
+            2,
+        )
+        assert "Absenteísmo" not in response.content.decode()
+
+        csv_rows = _export_csv(client)[1:]
+        assert {row[CSV_COL["Causa"]] for row in csv_rows} == {"Não comparecimento do paciente"}
+
+    def test_filtro_oficial_inclui_row_legada_equivalente(self, client) -> None:
+        """R3: ?reason=<oficial> traz a era atual e a legada equivalente, sem mudar cards."""
+        user = _login_as(client, "manager")
+        atual = _create_scheduled_case(user, arn="FILT-ATUAL", name="Atual", when=_local_dt(day_offset=0, hour=9))
+        _record(atual, user, performed=False, reason="patient_no_show")
+        legada = _create_scheduled_case(user, arn="FILT-LEGADA", name="Legada", when=_local_dt(day_offset=0, hour=10))
+        _legacy_record(legada, user, outcomes=_outcome_inputs(legada, performed=False, reason="absenteeism"))
+        outra_era = _create_scheduled_case(
+            user, arn="FILT-OUTRA", name="Outra Era", when=_local_dt(day_offset=0, hour=11)
+        )
+        _legacy_record(
+            outra_era,
+            user,
+            outcomes=_outcome_inputs(
+                outra_era,
+                performed=False,
+                reason="resource_shortage",
+                detail="insufficient_time",
+            ),
+        )
+
+        base = client.get(HISTORY_URL)
+        response = client.get(HISTORY_URL, {"reason": "patient_no_show"})
+        assert sorted(_history_arns(response)) == ["FILT-ATUAL", "FILT-LEGADA"]
+        assert response.context["rows_total"] == 2
+        assert response.context["summary"] == base.context["summary"]
+
+        csv_arns = [row[CSV_COL["Ocorrência"]] for row in _export_csv(client, reason="patient_no_show")[1:]]
+        assert csv_arns == _history_arns(response)
+
+    @pytest.mark.parametrize("legacy_reason", ["absenteeism", "resource_shortage"])
+    def test_querystring_legada_e_invalida_e_equivale_a_sem_filtro(self, client, legacy_reason: str) -> None:
+        """R3: códigos legados no ?reason= são ignorados, como se o filtro faltasse."""
+        _filter_scenario(client)
+        base = client.get(HISTORY_URL)
+        response = client.get(HISTORY_URL, {"reason": legacy_reason})
+
+        assert response.context["rows_total"] == base.context["rows_total"]
+        assert _history_arns(response) == _history_arns(base)
+        assert response.context["summary"] == base.context["summary"]
+        assert response.context["reason_value"] == ""
+        assert "reason=" not in response.context["pagination_qs"]
+        assert sorted(map(tuple, _export_csv(client, reason=legacy_reason))) == sorted(map(tuple, _export_csv(client)))
+
+    def test_opcoes_do_filtro_sao_somente_as_24_causas_atuais(self, client) -> None:
+        """R3: o select de causa oferece apenas o catálogo atual, na ordem D1."""
+        _login_as(client, "manager")
+        content = client.get(HISTORY_URL).content.decode()
+        assert _reason_options(content) == [
+            "",
+            *[value for value, _label in CURRENT_FOLLOWUP_NON_PERFORMANCE_REASON_CHOICES],
+        ]
+
+
+class TestHistoryReadOnly:
+    """R4: abrir, filtrar e exportar não altera rows nem eventos (append-only)."""
+
+    @staticmethod
+    def _snapshot() -> tuple[list[Any], list[Any], list[Any]]:
+        rows = sorted(
+            ProcedureFollowUp.objects.values_list(
+                "pk",
+                "follow_up_id",
+                "procedure_id",
+                "performed",
+                "non_performance_reason",
+                "resource_shortage_detail",
+                "other_reason",
+            )
+        )
+        follow_ups = sorted(CaseFollowUp.objects.values_list("pk", "case_id", "version", "patient_admitted"))
+        events = sorted(CaseEvent.objects.values_list("pk", "case_id", "event_type", "payload"))
+        return rows, follow_ups, events
+
+    def test_historico_filtro_e_exportacao_preservam_rows_e_eventos(self, client) -> None:
+        user = _login_as(client, "manager")
+        case = _create_scheduled_case(user, arn="RO-001", name="Read Only", when=_local_dt(day_offset=0, hour=9))
+        eda, _ = CaseProcedure.objects.get_or_create(
+            case=case, procedure_type="eda", defaults={"doctor_disposition": DoctorDisposition.APPROVED}
+        )
+        colonoscopia, _ = CaseProcedure.objects.get_or_create(
+            case=case, procedure_type="colonoscopy", defaults={"doctor_disposition": DoctorDisposition.APPROVED}
+        )
+        _legacy_record(
+            case,
+            user,
+            admitted=True,
+            outcomes=[
+                ProcedureOutcomeInput(procedure_id=eda.id, performed=False, non_performance_reason="absenteeism"),
+                ProcedureOutcomeInput(
+                    procedure_id=colonoscopia.id,
+                    performed=False,
+                    non_performance_reason="resource_shortage",
+                    resource_shortage_detail="detalhe_nao_mapeado",
+                ),
+            ],
+        )
+        outro = _create_scheduled_case(user, arn="RO-002", name="Outra", when=_local_dt(day_offset=0, hour=10))
+        _record(outro, user, performed=False, reason="other", other="Motivo com ; e quebra")
+
+        before = self._snapshot()
+        assert client.get(HISTORY_URL).status_code == 200
+        assert client.get(HISTORY_URL, {"reason": "patient_no_show"}).status_code == 200
+        assert client.get(HISTORY_URL, {"reason": "absenteeism"}).status_code == 200
+        assert client.get(EXPORT_URL).status_code == 200
+        assert client.get(EXPORT_URL, {"reason": "patient_no_show"}).status_code == 200
+        assert self._snapshot() == before
+
+
+class TestLegacyUnmappedFallback:
+    """R7: dado fora dos quatro mapeamentos usa a categoria técnica não filtrável."""
+
+    @staticmethod
+    def _unmapped_case(user, *, arn: str, reason: str, detail: str = "") -> Case:
+        case = _create_scheduled_case(user, arn=arn, name=f"Paciente {arn}", when=_local_dt(day_offset=0, hour=9))
+        _legacy_record(case, user, outcomes=_outcome_inputs(case, performed=False, reason=reason, detail=detail))
+        return case
+
+    def test_detalhe_desconhecido_em_tabela_cards_e_csv(self, client) -> None:
+        user = _login_as(client, "manager")
+        self._unmapped_case(user, arn="UNM-DET", reason="resource_shortage", detail="submotivo_desconhecido")
+
+        response = client.get(HISTORY_URL)
+        (row,) = response.context["page_obj"].object_list
+        assert row["reason"] == LEGACY_UNMAPPED_REASON
+        assert row["reason_label"] == "Causa legada não mapeada"
+        assert row["detail_label"] == "resource_shortage / submotivo_desconhecido"
+        assert row["submotivo_label"] == "resource_shortage / submotivo_desconhecido"
+
+        summary = response.context["summary"]
+        (reason,) = summary["reasons"]
+        assert (reason["reason"], reason["label"], reason["count"]) == (
+            LEGACY_UNMAPPED_REASON,
+            "Causa legada não mapeada",
+            1,
+        )
+        assert [(detail["label"], detail["count"]) for detail in reason["details"]] == [
+            ("resource_shortage / submotivo_desconhecido", 1)
+        ]
+
+        content = response.content.decode()
+        assert "Causa legada não mapeada" in content
+        assert "submotivo_desconhecido" in content  # código bruto preservado para diagnóstico
+        assert "Cancelamento por falta de recursos no dia" not in content
+
+        (csv_row,) = _export_csv(client)[1:]
+        assert csv_row[CSV_COL["Causa"]] == "Causa legada não mapeada"
+        assert csv_row[CSV_COL["Submotivo"]] == "resource_shortage / submotivo_desconhecido"
+        assert csv_row[CSV_COL["Outra causa (texto)"]] == ""
+
+    def test_causa_desconhecida_preserva_o_proprio_codigo(self, client) -> None:
+        user = _login_as(client, "manager")
+        self._unmapped_case(user, arn="UNM-CAUSA", reason="causa_fora_do_catalogo")
+
+        response = client.get(HISTORY_URL)
+        (row,) = response.context["page_obj"].object_list
+        assert row["reason"] == LEGACY_UNMAPPED_REASON
+        assert row["reason_label"] == "Causa legada não mapeada"
+        assert row["detail_label"] == "causa_fora_do_catalogo"
+
+        (csv_row,) = _export_csv(client)[1:]
+        assert csv_row[CSV_COL["Causa"]] == "Causa legada não mapeada"
+        assert csv_row[CSV_COL["Submotivo"]] == "causa_fora_do_catalogo"
+
+    def test_categoria_tecnica_nao_e_opcao_nem_recebe_equivalencia(self, client) -> None:
+        user = _login_as(client, "manager")
+        self._unmapped_case(user, arn="UNM-1", reason="resource_shortage", detail="submotivo_desconhecido")
+        oficial = _create_scheduled_case(user, arn="OFICIAL", name="Oficial", when=_local_dt(day_offset=0, hour=11))
+        _record(oficial, user, performed=False, reason="missing_equipment")
+
+        content = client.get(HISTORY_URL).content.decode()
+        assert '<option value="legacy_unmapped"' not in content
+        assert _reason_options(content) == [
+            "",
+            *[value for value, _label in CURRENT_FOLLOWUP_NON_PERFORMANCE_REASON_CHOICES],
+        ]
+
+        # Nenhuma equivalência é inventada: o filtro por causa oficial não alcança a row.
+        response = client.get(HISTORY_URL, {"reason": "missing_equipment"})
+        assert _history_arns(response) == ["OFICIAL"]
+
+        # A categoria técnica na querystring é inválida → equivale a filtro ausente.
+        base = client.get(HISTORY_URL)
+        tecnico = client.get(HISTORY_URL, {"reason": LEGACY_UNMAPPED_REASON})
+        assert _history_arns(tecnico) == _history_arns(base)
+        assert tecnico.context["rows_total"] == base.context["rows_total"]
+        assert tecnico.context["reason_value"] == ""

@@ -13,8 +13,8 @@
 
 ## 2. Compatibilidade histórica e documentação
 
-- [ ] 2.1 Implementar o Slice 002 (`slices/slice-002-legacy-projection-history.md`) em RED → GREEN → REFACTOR; verificar os quatro mapeamentos e o fallback técnico `legacy_unmapped` em tabela/cards/filtro/CSV, imutabilidade append-only, preflight fail-closed e manual atualizado; obter review independente aceito.
-- [ ] 2.2 Após aceite do Slice 002, atualizar `tasks.md`, gerar relatório temporário com evidências/snippets, informar `REPORT_PATH`, criar commit/push rastreáveis e parar até confirmação explícita para o gate final.
+- [x] 2.1 Implementar o Slice 002 (`slices/slice-002-legacy-projection-history.md`) em RED → GREEN → REFACTOR; quatro mapeamentos, fallback `legacy_unmapped`, superfícies, imutabilidade, preflight e manual verificados. Review 3 excepcional autorizado pelo owner aceitou o fix final D5/R7 sem P0/P1/P2.
+- [x] 2.2 `tasks.md` atualizado e relatório gerado em `/tmp/align-followup-causes-slice-002-report.md`; commit atômico criado sem push, conforme instrução atual do owner. A autorização da execução sequencial e do único gate final substitui a parada intermediária antes desse gate.
 
 ## 3. Gate final e entrega
 

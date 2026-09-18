@@ -31,13 +31,18 @@ from apps.cases.admission import (
     is_scheduled_admission_flow,
 )
 from apps.cases.followup import (
+    LEGACY_UNMAPPED_REASON,
+    LEGACY_UNMAPPED_REASON_LABEL,
     ProcedureOutcomeInput,
     current_follow_ups,
     get_current_follow_up,
     is_followup_eligible,
+    project_non_performance_reason,
     record_case_follow_up,
 )
 from apps.cases.models import (
+    CURRENT_FOLLOWUP_NON_PERFORMANCE_REASON_CHOICES,
+    CURRENT_FOLLOWUP_NON_PERFORMANCE_REASON_VALUES,
     Case,
     CaseAttachment,
     CaseEvent,
@@ -46,7 +51,6 @@ from apps.cases.models import (
     CaseStatus,
     DoctorDisposition,
     FollowUpNonPerformanceReason,
-    FollowUpResourceShortageDetail,
     SupervisorSummary,
 )
 from apps.cases.navigation import resolve_safe_next_url
@@ -1510,15 +1514,27 @@ def followup_list(request: HttpRequest) -> HttpResponse:
 
 _HISTORY_PAGE_SIZE = 25
 
-_FOLLOWUP_REASON_LABELS = {value: label for value, label in FollowUpNonPerformanceReason.choices}
-_FOLLOWUP_DETAIL_LABELS = {value: label for value, label in FollowUpResourceShortageDetail.choices}
-_FOLLOWUP_REASON_ORDER = {value: index for index, (value, _) in enumerate(FollowUpNonPerformanceReason.choices)}
-_FOLLOWUP_DETAIL_ORDER = {value: index for index, (value, _) in enumerate(FollowUpResourceShortageDetail.choices)}
+# O Histórico lê a taxonomia oficial atual (design D2): a projeção das causas
+# legadas roda antes de compor label, filtro, cards e CSV.
+_FOLLOWUP_REASON_LABELS = {value: label for value, label in CURRENT_FOLLOWUP_NON_PERFORMANCE_REASON_CHOICES}
+_FOLLOWUP_REASON_LABELS[LEGACY_UNMAPPED_REASON] = LEGACY_UNMAPPED_REASON_LABEL
+_FOLLOWUP_REASON_ORDER = {
+    value: index for index, (value, _label) in enumerate(CURRENT_FOLLOWUP_NON_PERFORMANCE_REASON_CHOICES)
+}
 
 # Filtros de linha (Slice 003, design D4): performed/reason filtram desfechos
 # (linhas); admitted filtra casos inteiros. Valores inválidos equivalem a "Todos".
-_FOLLOWUP_REASON_OPTIONS = [{"value": value, "label": label} for value, label in FollowUpNonPerformanceReason.choices]
-_FOLLOWUP_REASON_VALUES = frozenset(FollowUpNonPerformanceReason.values)
+# O filtro de causa aceita somente as 24 causas atuais (design D5): códigos
+# legados e a categoria técnica não são valores válidos.
+_FOLLOWUP_REASON_OPTIONS = [
+    {"value": value, "label": label} for value, label in CURRENT_FOLLOWUP_NON_PERFORMANCE_REASON_CHOICES
+]
+_FOLLOWUP_REASON_VALUES = CURRENT_FOLLOWUP_NON_PERFORMANCE_REASON_VALUES
+
+
+def _legacy_unmapped_diagnostic(non_performance_reason: str, resource_shortage_detail: str) -> str:
+    """Códigos persistidos da row não mapeada, preservados para diagnóstico (design D5)."""
+    return " / ".join(part for part in (non_performance_reason, resource_shortage_detail) if part)
 
 
 def _parse_yes_no_filter(raw: str) -> bool | None:
@@ -1535,7 +1551,11 @@ def _parse_yes_no_filter(raw: str) -> bool | None:
 
 
 def _parse_reason_filter(raw: str) -> str | None:
-    """Retorna o código da causa apenas para values válidas das choices; senão None."""
+    """Retorna o código apenas para as causas oficiais atuais; senão ``None``.
+
+    Códigos legados (``absenteeism``/``resource_shortage``) e a categoria
+    técnica ``legacy_unmapped`` não são oficiais: equivalem a filtro ausente.
+    """
     return raw if raw in _FOLLOWUP_REASON_VALUES else None
 
 
@@ -1597,23 +1617,28 @@ def _followup_history_rows(
         author_label = (author.get_full_name() or author.username) if author else "—"
         for outcome in follow_up.procedure_outcomes.all():
             if outcome.performed:
-                reason = reason_code = reason_label = ""
+                reason = reason_label = detail_code = ""
                 submotivo_label = other_reason_text = detail_label = ""
             else:
-                reason = outcome.non_performance_reason
-                reason_label = _FOLLOWUP_REASON_LABELS.get(reason, "")
-                reason_code = outcome.resource_shortage_detail
-                # Submotivo existe só para resource_shortage; texto só para other
-                # (CheckConstraints do model) — campos granulares também servem ao CSV.
-                if reason == FollowUpNonPerformanceReason.RESOURCE_SHORTAGE:
-                    submotivo_label = _FOLLOWUP_DETAIL_LABELS.get(outcome.resource_shortage_detail, "")
-                    other_reason_text = ""
+                # Projeção canônica (design D5) sobre os valores persistidos:
+                # eras equivalentes viram uma única causa oficial na leitura.
+                reason = project_non_performance_reason(
+                    non_performance_reason=outcome.non_performance_reason,
+                    resource_shortage_detail=outcome.resource_shortage_detail,
+                )
+                reason_label = _FOLLOWUP_REASON_LABELS[reason]
+                detail_code = ""
+                submotivo_label = other_reason_text = ""
+                if reason == LEGACY_UNMAPPED_REASON:
+                    # Categoria técnica: preserva os códigos brutos no detalhe
+                    # diagnóstico (tabela e CSV), sem equivalência inventada.
+                    detail_code = _legacy_unmapped_diagnostic(
+                        outcome.non_performance_reason,
+                        outcome.resource_shortage_detail,
+                    )
+                    submotivo_label = detail_code
                 elif reason == FollowUpNonPerformanceReason.OTHER:
-                    submotivo_label = ""
                     other_reason_text = outcome.other_reason.strip()
-                else:  # absenteeism/inadequate_prep
-                    submotivo_label = ""
-                    other_reason_text = ""
                 detail_label = submotivo_label or other_reason_text
             rows.append(
                 {
@@ -1625,7 +1650,7 @@ def _followup_history_rows(
                     "procedure_label": outcome.procedure.get_procedure_type_display(),
                     "performed": outcome.performed,
                     "reason": reason,
-                    "detail_code": reason_code,
+                    "detail_code": detail_code,
                     "reason_label": reason_label,
                     "detail_label": detail_label,
                     "submotivo_label": submotivo_label,
@@ -1702,7 +1727,8 @@ def _followup_history_summary(rows: list[dict[str, Any]]) -> dict[str, Any]:
             reasons_by_code[reason_code] = reason
         reason["count"] += 1
         detail_code = row["detail_code"]
-        if reason_code == FollowUpNonPerformanceReason.RESOURCE_SHORTAGE and detail_code:
+        if reason_code == LEGACY_UNMAPPED_REASON and detail_code:
+            # A categoria técnica agrupa os códigos brutos por detalhe de diagnóstico.
             details_by_code = {item["code"]: item for item in reason["details"]}
             detail = details_by_code.get(detail_code)
             if detail is None:
@@ -1716,7 +1742,7 @@ def _followup_history_summary(rows: list[dict[str, Any]]) -> dict[str, Any]:
     reasons = sorted(reasons_by_code.values(), key=lambda item: _FOLLOWUP_REASON_ORDER.get(item["reason"], 99))
     for reason in reasons:
         reason["percent"] = round(reason["count"] / not_performed * 100) if not_performed else 0
-        reason["details"].sort(key=lambda item: _FOLLOWUP_DETAIL_ORDER.get(item["code"], 99))
+        reason["details"].sort(key=lambda item: item["label"])
         for detail in reason["details"]:
             detail["percent"] = round(detail["count"] / reason["count"] * 100)
     return {

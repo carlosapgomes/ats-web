@@ -7,6 +7,8 @@ import subprocess
 import sys
 from pathlib import Path
 
+from apps.cases.models import CURRENT_FOLLOWUP_NON_PERFORMANCE_REASON_CHOICES
+
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 MANUAL_PATH = PROJECT_ROOT / "docs" / "manual" / "manual-usuarios.md"
 SCRIPT_PATH = PROJECT_ROOT / "scripts" / "build_user_manual_pdf.py"
@@ -225,3 +227,55 @@ class TestUserManualSection6Supervisor:
         section = self._section6()
         assert "**Preparo inadequado**" in section
         assert "não foi realizado ou foi interrompido" in section
+
+
+# ── R5 (Slice 002): catálogo oficial de causas no §6.1 ───────────────────
+
+
+class TestUserManualSection61CauseCatalog:
+    """§6.1 pina o catálogo oficial de causas e remove as instruções legadas."""
+
+    @staticmethod
+    def _section61() -> str:
+        content = MANUAL_PATH.read_text(encoding="utf-8")
+        start = content.index("## 6.1 ")
+        end = content.index("## 6.2 ", start)
+        return content[start:end]
+
+    @staticmethod
+    def _cause_labels(section: str) -> list[str]:
+        """Labels em negrito da lista de causas que segue a opção 'Não realizado'.
+
+        Linhas de continuação indentadas pertencem ao bullet anterior; a lista
+        termina na primeira linha seguinte no nível da seção (ex.: o passo 3).
+        """
+        lines = section.splitlines()
+        start = next(index for index, line in enumerate(lines) if "**Não realizado**" in line)
+        labels: list[str] = []
+        for line in lines[start + 1 :]:
+            match = re.match(r"\s+- \*\*(?P<label>[^*]+)\*\*", line)
+            if match is not None:
+                labels.append(match.group("label").strip())
+            elif labels and line.strip() and not line.startswith(" "):
+                break
+        return labels
+
+    def test_section61_lista_exatamente_as_24_causas_atuais(self) -> None:
+        """Lista = catálogo atual (23 causas + Outras causas), na ordem de D1."""
+        expected = [label for _value, label in CURRENT_FOLLOWUP_NON_PERFORMANCE_REASON_CHOICES]
+        assert len(expected) == 24
+        assert expected[-1] == "Outras causas"
+        assert self._cause_labels(self._section61()) == expected
+
+    def test_section61_explica_selecao_da_causa_e_texto_obrigatorio(self) -> None:
+        """§6.1 descreve a seleção da causa e o texto obrigatório de Outras causas."""
+        section = self._section61()
+        assert "selecionar a causa" in section
+        assert "**Outras causas** exige a descrição" in section
+        assert "obrigatória" in section
+
+    def test_section61_nao_orienta_causas_legadas_nem_submotivo(self) -> None:
+        """Nenhuma instrução legada de causa/submotivo sobrevive na seção."""
+        section = self._section61().lower()
+        for legacy_term in ("absenteísmo", "cancelamento por falta de recursos", "submotivo"):
+            assert legacy_term not in section, f"§6.1 ainda orienta {legacy_term!r}"
