@@ -2,7 +2,7 @@
 
 ## Status
 
-Accepted — cláusula de cobertura de follow-up (D13) parcialmente superada pela ADR-0007
+Accepted — cláusula de cobertura de follow-up (D13) parcialmente superada pela ADR-0007; precedência restrita a expressões `EDA com/e especializado` parcialmente superada pela ADR-0008
 
 **Aceita em:** 2026-09-12
 
@@ -201,3 +201,4 @@ Rollback operacional preferencial: desligar ambas as flags, preservar a imagem/s
 
 - 2026-09-12: ADR criada e aceita para o change `support-independent-echoendoscopy-cpre-workflows`.
 - 2026-09-12: Cláusula de D13 sobre follow-up ("sem mudar o modelo ou a semântica de desfecho" na cobertura) parcialmente superada pela ADR-0007 (cobertura restrita a rows autorizadas). O restante do D13 (filtros/analytics orientados ao catálogo) permanece vigente.
+- 2026-09-18: Regra de precedência em D4, antes restrita a expressões locais `EDA com/e Ecoendoscopia/CPRE`, parcialmente superada pela ADR-0008: exatamente um especializado com ocorrência textual `current_request` predomina sobre EDA/Colonoscopia também em trechos independentes; item estruturado isolado não autoriza supressão, e mismatch NIR/conflito Ecoendoscopia+CPRE permanecem fail-closed.

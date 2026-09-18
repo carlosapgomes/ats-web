@@ -13,6 +13,16 @@ Cobre:
 - R6: o caso chega a ``WAIT_DOCTOR`` como singleton e o sinal legado
   ``echoendoscopy`` não é duplicado em artefatos 3.0 (D14).
 - R7: payload legado 1.1/2.0 continua legível, sem nova row/backfill.
+
+Slice 001 do change ``prioritize-specialized-procedure-requests`` (ADR-0008):
+
+- R1: exatamente um especializado detectado com ocorrência textual
+  ``current_request`` suprime EDA/Colonoscopia mesmo em trechos independentes;
+- R2: dois especializados, tipo desconhecido e duplicata continuam fail-closed;
+- R3: item estruturado sem ocorrência atual correspondente não autoriza
+  supressão e EDA + Colonoscopia permanece combinado;
+- R5/R6: precedência auditada em evento/sugestão, ``structured_data`` original
+  preservado, LLM2 só com o especializado e aviso médico informativo.
 """
 
 from __future__ import annotations
@@ -289,19 +299,74 @@ class TestSpecializedPrecedence:
         assert result.action == "proceed"
         assert result.detected_procedure_types == (ProcedureType.ECHOENDOSCOPY,)
 
-    def test_independent_requests_do_not_collapse(self) -> None:
+    def test_independent_eda_and_echo_requests_prioritize_echoendoscopy(self) -> None:
+        """R1: solicitações independentes priorizam o especializado quando ele é atual."""
         occurrences = detect_procedure_occurrences(
             llm1_structured_data={},
             cleaned_text="Solicito EDA. Solicito ecoendoscopia.",
         )
         result = reconcile_detected_procedures(
             declared=("echoendoscopy",),
-            strong=("eda", "echoendoscopy"),
+            strong=("echoendoscopy",),
             any_evidence=("eda", "echoendoscopy"),
             occurrences=occurrences,
         )
+        assert result.action == "proceed"
+        assert result.detected_procedure_types == (ProcedureType.ECHOENDOSCOPY,)
+        assert result.precedence_applied is True
+        assert result.selected_specialized_type == ProcedureType.ECHOENDOSCOPY
+        assert result.suppressed_conventional_types == (ProcedureType.EDA,)
+
+    def test_unique_specialized_suppresses_all_conventional_types(self) -> None:
+        """R1: o especializado único suprime EDA e Colonoscopia detectadas."""
+        occurrences = detect_procedure_occurrences(
+            llm1_structured_data={},
+            cleaned_text="Solicito EDA. Solicito colonoscopia. Solicito ecoendoscopia.",
+        )
+        result = reconcile_detected_procedures(
+            declared=("echoendoscopy",),
+            strong=("echoendoscopy",),
+            any_evidence=("eda", "colonoscopy", "echoendoscopy"),
+            occurrences=occurrences,
+        )
+        assert result.action == "proceed"
+        assert result.detected_procedure_types == (ProcedureType.ECHOENDOSCOPY,)
+        assert result.suppressed_conventional_types == (ProcedureType.EDA, ProcedureType.COLONOSCOPY)
+
+    def test_both_specialized_still_require_nir_review(self) -> None:
+        """R2: dois especializados atuais nunca escolhem um tipo arbitrariamente."""
+        occurrences = detect_procedure_occurrences(
+            llm1_structured_data={},
+            cleaned_text="Solicito ecoendoscopia. Solicito CPRE.",
+        )
+        result = reconcile_detected_procedures(
+            declared=("echoendoscopy",),
+            strong=("echoendoscopy", "cpre"),
+            any_evidence=("echoendoscopy", "cpre"),
+            occurrences=occurrences,
+        )
         assert result.action == "nir_review"
-        assert result.reason_code in {"unsupported_procedure_combination", "mixed_exam_request"}
+        assert result.reason_code == "unsupported_procedure_combination"
+        assert result.precedence_applied is False
+        assert result.suppressed_conventional_types == ()
+        assert set(result.detected_procedure_types) == {ProcedureType.ECHOENDOSCOPY, ProcedureType.CPRE}
+
+    def test_eda_colonoscopy_remains_combined(self) -> None:
+        """R3: sem especializado elegível, EDA + Colonoscopia não muda."""
+        occurrences = detect_procedure_occurrences(
+            llm1_structured_data={},
+            cleaned_text="Solicito EDA. Solicito colonoscopia.",
+        )
+        result = reconcile_detected_procedures(
+            declared=("eda", "colonoscopy"),
+            strong=("eda", "colonoscopy"),
+            any_evidence=("eda", "colonoscopy"),
+            occurrences=occurrences,
+        )
+        assert result.action == "proceed"
+        assert result.detected_procedure_types == (ProcedureType.EDA, ProcedureType.COLONOSCOPY)
+        assert result.precedence_applied is False
+        assert result.suppressed_conventional_types == ()
 
     def test_no_auto_upgrade_for_specialized(self) -> None:
         """Declarado EDA + detectado Eco nunca faz upgrade automático (D2/D3)."""
@@ -425,17 +490,13 @@ class TestEchoendoscopyEndToEnd:
         run_pipeline(case.case_id, llm_client=client)
         assert len(client.calls) == 1
 
-    def test_independent_eda_and_echo_requests_reach_nir_review_without_pipeline_failure(
-        self, django_user_model
-    ) -> None:
-        """R3 (dívida herdada do Slice 004): conjunto detectado fora da matriz → NIR.
+    def test_declared_eda_with_echo_precedence_returns_to_nir_as_mismatch(self, django_user_model) -> None:
+        """R4: a precedência não reescreve a declaração do NIR (mismatch real).
 
-        Declarado EDA + duas solicitações independentes (``Solicito EDA.
-        Solicito ecoendoscopia.``) formam ``{eda, echoendoscopy}``, que não
-        pertence a ``ALLOWED_PROCEDURE_SETS``: o caso deve chegar à revisão
-        manual (``EDA_SCOPE_GATED_MANUAL_REVIEW`` + ``scope_gate_bypass``) com
-        motivo explícito, sem tentar projetar o conjunto e cair em
-        ``PIPELINE_FAILED``.
+        Declarado EDA + solicitações independentes (``Solicito EDA. Solicito
+        ecoendoscopia.``): a precedência reduz o conjunto bruto a
+        ``{echoendoscopy}``, mas isso diverge da declaração — o caso retorna à
+        revisão NIR como mismatch, sem auto-upgrade especializado.
         """
         user = django_user_model.objects.create_user(username="nir-eda-echo-independent")
         report = "Solicito EDA. Solicito ecoendoscopia para avaliacao de lesao pancreatica."
@@ -449,18 +510,28 @@ class TestEchoendoscopyEndToEnd:
         events = list(CaseEvent.objects.filter(case=reloaded).values_list("event_type", flat=True))
         assert "EDA_SCOPE_GATED_MANUAL_REVIEW" in events
         assert "SCOPE_GATE_BYPASS" in events
+        assert "PROCEDURE_SELECTION_AUTO_UPGRADED" not in events
         assert "PIPELINE_FAILED" not in events
 
         suggested = reloaded.suggested_action
         assert isinstance(suggested, dict)
-        assert suggested["reason_code"] == "unsupported_procedure_combination"
-        assert set(suggested["detected_procedures"]) == {ProcedureType.EDA, ProcedureType.ECHOENDOSCOPY}
+        assert suggested["reason_code"] == "exam_type_mismatch"
+        assert suggested["detected_procedures"] == [ProcedureType.ECHOENDOSCOPY]
+        assert suggested["procedure_precedence"] == {
+            "rule": "specialized_over_conventional",
+            "selected": ProcedureType.ECHOENDOSCOPY,
+            "suppressed": [ProcedureType.EDA],
+        }
 
-        # Declaração intacta e nenhuma projeção de detecção inválida.
+        # Declaração intacta; a projeção de detecção contém somente o especializado.
         assert set(
             CaseProcedure.objects.filter(case=reloaded, declared_by_nir=True).values_list("procedure_type", flat=True)
         ) == {ProcedureType.EDA}
-        assert not CaseProcedure.objects.filter(case=reloaded, detection_status=DetectionStatus.DETECTED).exists()
+        assert set(
+            CaseProcedure.objects.filter(case=reloaded, detection_status=DetectionStatus.DETECTED).values_list(
+                "procedure_type", flat=True
+            )
+        ) == {ProcedureType.ECHOENDOSCOPY}
 
     def test_mismatch_singleton_echoendoscopy_is_still_projected(self, django_user_model) -> None:
         """Regressão: singleton válido de mismatch continua projetado e revisado."""
@@ -483,6 +554,135 @@ class TestEchoendoscopyEndToEnd:
         suggested = reloaded.suggested_action
         assert isinstance(suggested, dict)
         assert suggested["reason_code"] == "exam_type_mismatch"
+
+
+# ── Slice 001: precedência do especializado até a avaliação médica ───────────
+
+
+# Cenário equivalente ao incidente: cabeçalho administrativo de EDA, EDA já
+# realizada no histórico e solicitação atual de Ecoendoscopia em outro trecho.
+_INCIDENT_REPORT = "Motivo da Solicitacao: EDA.\nEDA realizada em 2019.\nSolicito ecoendoscopia via regulacao."
+
+
+def _run_echo_precedence_case(user) -> tuple[Case, RecordingLlmClient]:
+    """Roda o pipeline do cenário incidente com declaração de Ecoendoscopia."""
+    case = _make_case(user, procedure_types=(ProcedureType.ECHOENDOSCOPY,), extracted_text=_INCIDENT_REPORT)
+    client = RecordingLlmClient(
+        responses=[
+            _llm1_json(procedures=[_eda_procedure(), _echo_procedure()]),
+            _llm2_json(str(case.case_id), procedure_type="echoendoscopy"),
+        ]
+    )
+    run_pipeline(case.case_id, llm_client=client)
+    return _reload(case), client
+
+
+def _doctor_notices(case: Case) -> list[str]:
+    """Notices do relatório médico real (mesmo caminho da tela do médico)."""
+    from apps.doctor.reporting import prepare_doctor_case_report
+
+    report = prepare_doctor_case_report(case).presenter.build_report()
+    notices = report["notices"]
+    assert isinstance(notices, list)
+    return notices
+
+
+class TestSpecializedPrecedenceToDoctor:
+    def test_specialized_precedence_reaches_doctor_with_audit_metadata(self, django_user_model) -> None:
+        """R5: projeção só do especializado, artefato original e auditoria enxuta."""
+        user = django_user_model.objects.create_user(username="nir-precedence-echo")
+        reloaded, client = _run_echo_precedence_case(user)
+
+        assert reloaded.status == CaseStatus.WAIT_DOCTOR
+        assert set(
+            CaseProcedure.objects.filter(case=reloaded, detection_status=DetectionStatus.DETECTED).values_list(
+                "procedure_type", flat=True
+            )
+        ) == {ProcedureType.ECHOENDOSCOPY}
+        assert set(
+            CaseProcedure.objects.filter(case=reloaded, declared_by_nir=True).values_list("procedure_type", flat=True)
+        ) == {ProcedureType.ECHOENDOSCOPY}
+
+        # Artefato LLM1 original preservado com os dois itens extraídos.
+        structured = reloaded.structured_data
+        assert isinstance(structured, dict)
+        assert {item["procedure_type"] for item in structured["requested_procedures"]} == {
+            "eda",
+            "echoendoscopy",
+        }
+
+        # LLM2 recebeu a lista fechada com o especializado apenas.
+        llm2_prompt = client.calls[1]["user_prompt"]
+        assert '["echoendoscopy"]' in llm2_prompt
+        assert '"procedure_type": "eda"' not in llm2_prompt
+
+        # Auditoria enxuta (regra/selecionado/suprimidos), sem texto clínico.
+        expected_metadata = {
+            "rule": "specialized_over_conventional",
+            "selected": ProcedureType.ECHOENDOSCOPY,
+            "suppressed": [ProcedureType.EDA],
+        }
+        detection_event = CaseEvent.objects.get(case=reloaded, event_type="CASE_PROCEDURES_DETECTED")
+        assert detection_event.payload["procedure_precedence"] == expected_metadata
+        suggested = reloaded.suggested_action
+        assert isinstance(suggested, dict)
+        assert suggested["procedure_precedence"] == expected_metadata
+        assert [item["procedure_type"] for item in _recommendations(reloaded)] == [ProcedureType.ECHOENDOSCOPY]
+
+    def test_echo_precedence_notice_uses_canonical_label(self, django_user_model) -> None:
+        """R6: aviso médico informativo com label canônico de Ecoendoscopia."""
+        user = django_user_model.objects.create_user(username="nir-precedence-echo-notice")
+        reloaded, _ = _run_echo_precedence_case(user)
+
+        notices = _doctor_notices(reloaded)
+        precedence_notices = [notice for notice in notices if "precedência" in notice]
+        assert len(precedence_notices) == 1
+        assert "Ecoendoscopia" in precedence_notices[0]
+        assert "EDA" in precedence_notices[0]
+        # Informativo: a sugestão automática permanece disponível ao médico.
+        assert _recommendations(reloaded)
+
+    def test_specialized_singleton_does_not_add_precedence_notice(self, django_user_model) -> None:
+        """R6: singleton especializado normal não recebe aviso de supressão."""
+        user = django_user_model.objects.create_user(username="nir-precedence-echo-singleton")
+        report = "Solicito ecoendoscopia para avaliacao de lesao pancreatica."
+        case = _make_case(user, procedure_types=(ProcedureType.ECHOENDOSCOPY,), extracted_text=report)
+        client = RecordingLlmClient(
+            responses=[
+                _llm1_json(procedures=[_echo_procedure()]),
+                _llm2_json(str(case.case_id), procedure_type="echoendoscopy"),
+            ]
+        )
+        run_pipeline(case.case_id, llm_client=client)
+
+        reloaded = _reload(case)
+        assert reloaded.status == CaseStatus.WAIT_DOCTOR
+        assert all("precedência" not in notice for notice in _doctor_notices(reloaded))
+        suggested = reloaded.suggested_action
+        assert isinstance(suggested, dict)
+        assert "procedure_precedence" not in suggested
+
+    def test_structured_historical_echo_does_not_authorize_suppression(self, django_user_model) -> None:
+        """R3: item estruturado de Eco sem ocorrência atual não suprime convencionais."""
+        user = django_user_model.objects.create_user(username="nir-precedence-echo-historical")
+        report = "Historico de ecoendoscopia realizada em 2019. Solicito EDA."
+        case = _make_case(user, procedure_types=(ProcedureType.ECHOENDOSCOPY,), extracted_text=report)
+        client = RecordingLlmClient(responses=[_llm1_json(procedures=[_eda_procedure(), _echo_procedure()])])
+        run_pipeline(case.case_id, llm_client=client)
+
+        reloaded = _reload(case)
+        assert len(client.calls) == 1
+        events = list(CaseEvent.objects.filter(case=reloaded).values_list("event_type", flat=True))
+        assert "EDA_SCOPE_GATED_MANUAL_REVIEW" in events
+        assert "PIPELINE_FAILED" not in events
+
+        suggested = reloaded.suggested_action
+        assert isinstance(suggested, dict)
+        assert suggested["reason_code"] == "unsupported_procedure_combination"
+        assert set(suggested["detected_procedures"]) == {ProcedureType.EDA, ProcedureType.ECHOENDOSCOPY}
+        assert "procedure_precedence" not in suggested
+        detection_event = CaseEvent.objects.get(case=reloaded, event_type="CASE_PROCEDURES_DETECTED")
+        assert "procedure_precedence" not in detection_event.payload
 
 
 # ── R7: legado permanece legível ────────────────────────────────────────────

@@ -1,19 +1,6 @@
-# procedure-combination-policy Specification
+# procedure-combination-policy Spec Delta
 
-## Purpose
-Define o catálogo autoritativo de procedimentos e a matriz fechada de conjuntos permitidos em declaração, detecção reconciliada, autorização e agendamento.
-
-## Requirements
-
-### Requirement: Catálogo e ordem canônica SHALL conter quatro procedimentos
-
-O sistema SHALL reconhecer `eda`, `colonoscopy`, `echoendoscopy` e `cpre` como identidades independentes e SHALL usar ordem canônica única para persistência, eventos, labels, filtros e analytics.
-
-#### Scenario: Seleção especializada simples
-
-- **WHEN** uma seleção contém somente Ecoendoscopia ou somente CPRE
-- **THEN** ela é válida e recebe label próprio
-- **AND** não é projetada como subtipo de EDA.
+## MODIFIED Requirements
 
 ### Requirement: Matriz de conjuntos SHALL ser fechada
 
@@ -110,21 +97,7 @@ Não SHALL existir upgrade automático entre procedimento convencional e especia
 - **WHEN** NIR declarou Ecoendoscopia ou CPRE e a análise detectou somente EDA
 - **THEN** o caso retorna ao NIR como mismatch.
 
-### Requirement: Substituição médica SHALL preservar conjunto final permitido
-
-O médico SHALL poder substituir procedimentos e aprovar o destino sem reanálise, desde que o conjunto autorizado final pertença à matriz fechada. Uma troca parcial de caso combinado que retenha um componente e adicione procedimento especializado SHALL ser bloqueada; o sistema SHALL NOT dividir caso ou agendamento.
-
-#### Scenario: Troca integral para procedimento especializado
-
-- **WHEN** o médico nega todos os componentes detectados, inclui um único procedimento especializado, informa as razões e aprova o destino
-- **THEN** o conjunto final simples é aceito estruturalmente
-- **AND** nenhum segundo caso ou agendamento é criado.
-
-#### Scenario: Troca parcial incompatível de combinado
-
-- **WHEN** o médico tenta autorizar Colonoscopia + Ecoendoscopia ou qualquer outro conjunto proibido
-- **THEN** o submit é rejeitado sem persistência parcial
-- **AND** nenhum split automático é oferecido.
+## ADDED Requirements
 
 ### Requirement: Aplicação da precedência especializada SHALL ser auditável e visível ao médico
 

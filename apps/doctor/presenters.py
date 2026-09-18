@@ -16,7 +16,7 @@ from apps.cases.priority_signals import (
     build_priority_signal_badges,
     build_priority_signal_context_fragments,
 )
-from apps.cases.procedures import is_procedure_neutral_structured_data
+from apps.cases.procedures import SUPPORTED_PROCEDURE_TYPES, is_procedure_neutral_structured_data
 
 # Ordem canônica dos procedimentos detectados no relatório médico (D12).
 _DETECTED_PROCEDURE_ORDER: tuple[str, ...] = (
@@ -259,18 +259,56 @@ class DoctorReportPresenter:
         return isinstance(self.structured_data, dict) and self.structured_data.get("schema_version") == "3.0"
 
     def _build_notices(self) -> list[str]:
-        """Avisos operacionais do relatório (design D9).
+        """Avisos operacionais do relatório (design D9/D5).
 
         No contrato 3.0 a sugestão automática usa SOMENTE o relatório principal:
         o aviso descreve o limite técnico (anexos disponíveis na tela não
         participaram), sem afirmar invalidade clínica e sem bloquear decisão.
+        Quando a precedência especializada suprimiu EDA/Colonoscopia, um aviso
+        informativo adicional identifica o procedimento priorizado.
         """
         if not self._is_v3():
             return []
-        return [
+        notices = [
             "Anexos disponíveis na tela não participaram da sugestão automática; "
             "o médico pode consultá-los e decidir de forma divergente."
         ]
+        precedence_notice = self._build_precedence_notice()
+        if precedence_notice is not None:
+            notices.append(precedence_notice)
+        return notices
+
+    def _build_precedence_notice(self) -> str | None:
+        """Aviso da precedência especializada aplicada (D5/ADR-0008).
+
+        Informativo e não bloqueante: não altera policy, formulário, validação
+        nem FSM. Existe somente quando ``suggested_action.procedure_precedence``
+        registra a supressão de convencionais — singleton especializado normal,
+        conflito fail-closed e artefatos legados não geram aviso. Os labels vêm
+        do catálogo/perfis, nunca de valores técnicos crus.
+        """
+        metadata = self.suggested_action.get("procedure_precedence")
+        if not isinstance(metadata, dict):
+            return None
+        selected = metadata.get("selected")
+        suppressed = metadata.get("suppressed")
+        if not isinstance(selected, str) or selected not in SUPPORTED_PROCEDURE_TYPES:
+            return None
+        if not isinstance(suppressed, list):
+            return None
+        suppressed_labels = [
+            self._canonical_label_for_type(procedure_type)
+            for procedure_type in suppressed
+            if isinstance(procedure_type, str) and procedure_type in SUPPORTED_PROCEDURE_TYPES
+        ]
+        if not suppressed_labels:
+            return None
+        return (
+            f"O relatório apresentou também solicitação de {'/'.join(suppressed_labels)}. "
+            f"O sistema priorizou {self._canonical_label_for_type(selected)} pela regra de "
+            "precedência de procedimento especializado. Revise o texto original e ajuste a "
+            "decisão se necessário."
+        )
 
     def _detected_procedure_types(self) -> tuple[str, ...]:
         """Tipos reconciliados (detectados) na ordem do catálogo.
