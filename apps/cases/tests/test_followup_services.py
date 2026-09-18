@@ -129,7 +129,9 @@ class TestCatalogoOficial:
 
     def test_nenhum_codigo_excede_o_max_length_do_field(self) -> None:
         field = ProcedureFollowUp._meta.get_field("non_performance_reason")
-        assert max(len(value) for value in FollowUpNonPerformanceReason.values) <= field.max_length
+        max_length = field.max_length
+        assert max_length is not None
+        assert max(len(value) for value in FollowUpNonPerformanceReason.values) <= max_length
 
 
 # ── R1 (Slice 002): projeção pura das causas legadas ─────────────────────

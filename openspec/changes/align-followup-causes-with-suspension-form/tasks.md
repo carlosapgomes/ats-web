@@ -18,10 +18,10 @@
 
 ## 3. Gate final e entrega
 
-- [ ] 3.1 Executar uma única vez o quality gate global: `uv run ruff check . && uv run ruff format --check . && uv run mypy . && uv run pytest`.
-- [ ] 3.2 Executar `openspec validate align-followup-causes-with-suspension-form --strict`, `git diff --check`, `uv run python manage.py makemigrations --check --dry-run --settings=config.settings.test`, `uv run python manage.py showmigrations cases --plan --settings=config.settings.test`, teste de migration ida/volta e inspeção final de escopo/migration.
-- [ ] 3.3 Atualizar specs canônicas e `PROJECT_CONTEXT.md` no arquivamento conforme workflow, preservando a supersessão parcial ADR-0007→ADR-0009.
-- [ ] 3.4 Gerar relatório final temporário com snippets antes/depois, informar `REPORT_PATH`, criar commit/push rastreáveis e parar para aprovação humana antes de deploy/arquivo.
+- [x] 3.1 Quality gate global concluído. A primeira tentativa fail-fast encontrou um erro mypy test-only (`field.max_length: int | None`); após correção mínima, a repetição completa passou: Ruff check/format, mypy (292 source files) e pytest (3835 passed).
+- [x] 3.2 `openspec validate --strict`, `git diff --check`, `makemigrations --check --dry-run`, `showmigrations cases --plan`, teste de migration ida/volta (8 passed) e inspeção final de escopo/migration passaram.
+- [ ] 3.3 Atualizar specs canônicas e `PROJECT_CONTEXT.md` no arquivamento conforme workflow, preservando a supersessão parcial ADR-0007→ADR-0009. **Adiado:** archive não autorizado nesta execução.
+- [x] 3.4 Relatório final gerado em `/tmp/align-followup-causes-final-report.md`; commit de fechamento criado sem push e execução parada para aprovação humana antes de deploy/archive.
 - [ ] 3.5 Antes do deploy e sem writes concorrentes, executar o preflight de legados não mapeáveis (zero obrigatório) e ensaiar em staging `0019 → 0020 → 0019 → 0020`; qualquer divergência bloqueia rollout.
 - [ ] 3.6 Após aprovação e deploy, executar smoke de uma causa oficial, **Outras causas**, rejeição legada, fallback técnico sintético e dos quatro mapeamentos no Histórico/CSV; preferir forward-fix se já houver novas gravações.
 
