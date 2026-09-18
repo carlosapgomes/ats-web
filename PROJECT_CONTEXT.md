@@ -12,14 +12,14 @@ Resumo executivo para retomada rapida apos pausas e para onboarding de novos con
 - `openspec/changes/` — changes ativos com proposals, designs e slices
 - Em caso de conflito: artefatos mais recentes no Git prevalecem.
 
-## Change Ativo — Precedência de procedimentos especializados
+## Change Concluído — Precedência de procedimentos especializados
 
-- **Change:** `openspec/changes/prioritize-specialized-procedure-requests/`.
-- **Branch de planejamento/implementação:** `feature/prioritize-specialized-procedure-requests`.
+- **Change arquivado:** `openspec/archive/prioritize-specialized-procedure-requests/`.
+- **Branch de implementação:** `feature/prioritize-specialized-procedure-requests`.
 - **Risco:** CRÍTICO / HIGH-ARCH; ADR-0008 aceita e supera parcialmente a precedência restrita da ADR-0006.
-- **Estado:** Slice 001 implementado e aceito após review independente (`OK with notes`), com gate global verde; commit local preparado, ainda sem push/deploy/arquivamento.
-- **Alvo:** exatamente uma Ecoendoscopia ou uma CPRE detectada predomina sobre EDA/Colonoscopia somente com ocorrência textual do mesmo tipo qualificada como `current_request`, inclusive em trecho independente; item estruturado isolado não autoriza supressão; Ecoendoscopia+CPRE e mismatch NIR permanecem fail-closed; EDA+Colonoscopia não muda.
-- **Entrega prevista:** um slice vertical, sem migration/FSM/schema/prompt, com auditoria enxuta e aviso médico não bloqueante.
+- **Estado:** Slice 001 implementado, aceito após review independente (`OK with notes`), arquivado com spec canônica promovida e gate global verde; release candidata `v0.9.0-rc.1` em preparação, sem deploy.
+- **Comportamento:** exatamente uma Ecoendoscopia ou uma CPRE detectada predomina sobre EDA/Colonoscopia somente com ocorrência textual do mesmo tipo qualificada como `current_request`, inclusive em trecho independente; item estruturado isolado não autoriza supressão; Ecoendoscopia+CPRE e mismatch NIR permanecem fail-closed; EDA+Colonoscopia não muda.
+- **Entrega:** um slice vertical, sem migration/FSM/schema/prompt, com auditoria enxuta e aviso médico não bloqueante.
 
 ## Change Concluído e Estado 3.0
 
@@ -190,8 +190,8 @@ static/          # css/app.css (paleta hospitalar), js/upload.js, js/password-to
 
 ## State do Sistema
 
-- **Fase atual:** Slice 001 do change CRÍTICO `prioritize-specialized-procedure-requests` implementado e aceito após uma rodada de review independente; gate global verde, deploy/arquivamento pendentes.
-- **Change ativo:** `openspec/changes/prioritize-specialized-procedure-requests/`; comportamento-alvo está implementado na branch e ainda não foi publicado/deployado.
+- **Fase atual:** preparação da release candidata `v0.9.0-rc.1`; change CRÍTICO `prioritize-specialized-procedure-requests` implementado, aceito, arquivado e com spec canônica promovida; deploy pendente.
+- **Change concluído:** `openspec/archive/prioritize-specialized-procedure-requests/`; comportamento-alvo implementado e ainda não deployado.
 - **Baseline anterior:** change HIGH/ARCH de procedimentos especializados **concluído e arquivado** (Slices 001–009, 14/14 tasks); **rollout pendente de aprovação humana**, com as flags `ECHOENDOSCOPY_INTAKE_ENABLED` e `CPRE_INTAKE_ENABLED` em `false`.
 - **Change concluído:** `openspec/archive/support-independent-echoendoscopy-cpre-workflows/`; ADR-0006 aceita, writer 3.0 ativo no código e runbook de operação em `docs/deploy/support-independent-echoendoscopy-cpre-workflows.md`.
 - **Último baseline concluído relevante**: hotfix `openspec/archive/fix-llm2-reconciled-procedure-set/`, com promoção da spec `procedure-neutral-analysis`.

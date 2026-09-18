@@ -14,7 +14,7 @@
 
 - [x] 2.1 Executar uma única vez o gate final: `uv run ruff check . && uv run ruff format --check . && uv run mypy . && uv run pytest`.
 - [x] 2.2 Executar `openspec validate prioritize-specialized-procedure-requests --strict`, `git diff --check` e inspeção final de escopo.
-- [ ] 2.3 Atualizar specs canônicas/`PROJECT_CONTEXT.md` no arquivamento conforme workflow, gerar relatório final, commit/push rastreáveis e parar para aprovação humana antes de deploy/arquivo.
+- [x] 2.3 Atualizar specs canônicas/`PROJECT_CONTEXT.md` no arquivamento conforme workflow, gerar relatório final, commit/push rastreáveis e parar para aprovação humana antes de deploy/arquivo.
 - [ ] 2.4 Após aprovação e deploy, executar smoke de Ecoendoscopia antes de CPRE e monitorar os reason codes/eventos definidos no `proposal.md`.
 
 ## Regra de execução

@@ -8,7 +8,7 @@ Accepted
 
 **Supera parcialmente:** [ADR-0006 — Ecoendoscopia e CPRE como procedimentos independentes](ADR-0006-ecoendoscopia-e-cpre-como-procedimentos-independentes.md), na decisão que restringia a precedência a expressões locais `EDA com/e especializado` e tratava solicitações convencionais e especializadas em trechos independentes sempre como combinação incompatível.
 
-**Change associado:** [`prioritize-specialized-procedure-requests`](../../openspec/changes/prioritize-specialized-procedure-requests/proposal.md).
+**Change associado:** [`prioritize-specialized-procedure-requests`](../../openspec/archive/prioritize-specialized-procedure-requests/proposal.md).
 
 ## Contexto
 
@@ -107,7 +107,7 @@ A matriz final permanece:
 
 ## Referências
 
-- Change: `openspec/changes/prioritize-specialized-procedure-requests/`
+- Change arquivado: `openspec/archive/prioritize-specialized-procedure-requests/`
 - Spec: `openspec/specs/procedure-combination-policy/spec.md`
 - Código alvo: `apps/pipeline/procedure_reconciliation.py`
 
