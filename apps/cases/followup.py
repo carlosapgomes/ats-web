@@ -19,19 +19,23 @@ from django.db.models import OuterRef, Subquery
 
 from apps.cases.admission import is_operational_notice_flow
 from apps.cases.models import (
+    CURRENT_FOLLOWUP_NON_PERFORMANCE_REASON_VALUES,
     Case,
     CaseEvent,
     CaseFollowUp,
     DoctorDisposition,
     FollowUpNonPerformanceReason,
-    FollowUpResourceShortageDetail,
     ProcedureFollowUp,
 )
 
 
 @dataclass(frozen=True)
 class ProcedureOutcomeInput:
-    """Desfecho informado para um procedimento do caso."""
+    """Desfecho informado para um procedimento do caso.
+
+    ``resource_shortage_detail`` sobrevive apenas como entrada legada: o
+    service rejeita qualquer submotivo em novas gravações.
+    """
 
     procedure_id: int
     performed: bool
@@ -85,8 +89,11 @@ def _validate_outcomes(case: Case, outcomes: Sequence[ProcedureOutcomeInput]) ->
     ficam isentas de desfecho e um desfecho informado para elas é rejeitado
     (fail-closed). Sem rows autorizadas (estado defensivo) a gravação é
     rejeitada. Retorna o mapa ``procedure_id -> CaseProcedure`` autorizado
-    para reuso na gravação; as regras condicionais de causa permanecem
-    idênticas.
+    para reuso na gravação.
+
+    A causa é obrigatória e restrita ao catálogo oficial atual (design D2):
+    os códigos legados são reconhecidos pelo storage, mas rejeitados em novas
+    versões, assim como qualquer submotivo de falta de recursos.
     """
     procedures_by_id = {procedure.id: procedure for procedure in case.procedures.all()}
     approved_by_id = {
@@ -115,15 +122,10 @@ def _validate_outcomes(case: Case, outcomes: Sequence[ProcedureOutcomeInput]) ->
         if outcome.performed:
             continue
         reason = outcome.non_performance_reason
-        if reason not in FollowUpNonPerformanceReason.values:
+        if reason not in CURRENT_FOLLOWUP_NON_PERFORMANCE_REASON_VALUES:
             raise ValueError("Informe a causa do procedimento não realizado.")
-        if reason == FollowUpNonPerformanceReason.RESOURCE_SHORTAGE:
-            if not outcome.resource_shortage_detail:
-                raise ValueError("Informe o submotivo da falta de recursos.")
-            if outcome.resource_shortage_detail not in FollowUpResourceShortageDetail.values:
-                raise ValueError("Submotivo de falta de recursos inválido.")
-        elif outcome.resource_shortage_detail:
-            raise ValueError("Submotivo só deve ser informado quando a causa é falta de recursos.")
+        if outcome.resource_shortage_detail:
+            raise ValueError("Submotivo de falta de recursos não é aceito em novas gravações.")
         if reason == FollowUpNonPerformanceReason.OTHER:
             if not outcome.other_reason.strip():
                 raise ValueError("Descreva a outra causa da não realização.")

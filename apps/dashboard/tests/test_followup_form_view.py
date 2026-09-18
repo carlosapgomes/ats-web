@@ -9,7 +9,14 @@ from django.urls import reverse
 from django.utils import timezone
 
 from apps.cases.followup import get_current_follow_up
-from apps.cases.models import Case, CaseEvent, CaseFollowUp, CaseProcedure
+from apps.cases.models import (
+    CURRENT_FOLLOWUP_NON_PERFORMANCE_REASON_CHOICES,
+    Case,
+    CaseEvent,
+    CaseFollowUp,
+    CaseProcedure,
+)
+from apps.dashboard.forms import REASON_PLACEHOLDER
 
 pytestmark = pytest.mark.django_db
 
@@ -321,7 +328,9 @@ class TestFollowUpFormGet:
             performed_by=user,
             patient_admitted=False,
             procedure_outcomes=[
-                ProcedureOutcomeInput(procedure_id=procedure.id, performed=False, non_performance_reason="absenteeism")
+                ProcedureOutcomeInput(
+                    procedure_id=procedure.id, performed=False, non_performance_reason="patient_no_show"
+                )
             ],
         )
 
@@ -463,32 +472,36 @@ class TestFollowUpFormPostValid:
 
     def test_post_valid_not_performed_with_reason(self, client) -> None:
         user = _login_as(client, "manager")
-        case = _create_case(user, arn="POST-ABS-001", name="Absenteísmo")
+        case = _create_case(user, arn="POST-NOSHOW-001", name="Não Comparecimento")
         procedure = _add_procedure(case)
 
         payload = _valid_payload(procedure, performed="no")
-        payload[f"proc_{procedure.id}-non_performance_reason"] = "absenteeism"
+        payload[f"proc_{procedure.id}-non_performance_reason"] = "patient_no_show"
         response = client.post(_form_url(case), data=payload)
         self._assert_success_redirect(response)
 
         row = CaseFollowUp.objects.get(case=case).procedure_outcomes.get(procedure=procedure)
         assert row.performed is False
-        assert row.non_performance_reason == "absenteeism"
+        assert row.non_performance_reason == "patient_no_show"
+        assert row.resource_shortage_detail == ""
 
-    def test_post_valid_resource_shortage_with_detail(self, client) -> None:
+    def test_post_legacy_reason_rejeitado_sem_persistencia(self, client) -> None:
+        """R2/R3: código legado enviado no POST é rejeitado sem gravar rows/eventos."""
         user = _login_as(client, "manager")
-        case = _create_case(user, arn="POST-RS-001", name="Falta de recursos")
+        case = _create_case(user, arn="POST-LEGACY-001", name="Causa Legada")
         procedure = _add_procedure(case)
 
         payload = _valid_payload(procedure, performed="no")
         payload[f"proc_{procedure.id}-non_performance_reason"] = "resource_shortage"
         payload[f"proc_{procedure.id}-resource_shortage_detail"] = "equipment_unavailable"
         response = client.post(_form_url(case), data=payload)
-        self._assert_success_redirect(response)
 
-        row = CaseFollowUp.objects.get(case=case).procedure_outcomes.get(procedure=procedure)
-        assert row.performed is False
-        assert row.resource_shortage_detail == "equipment_unavailable"
+        assert response.status_code == 200
+        content = response.content.decode()
+        assert "Selecione uma causa da lista oficial." in content
+        assert "Informe a causa do procedimento não realizado." not in content
+        assert not CaseFollowUp.objects.filter(case=case).exists()
+        assert not CaseEvent.objects.filter(case=case, event_type__startswith="FOLLOWUP").exists()
 
     def test_post_valid_other_with_text(self, client) -> None:
         user = _login_as(client, "manager")
@@ -547,16 +560,24 @@ class TestFollowUpFormPostInvalid:
         assert "Informe a causa do procedimento não realizado." in response.content.decode()
         self._assert_nothing_persisted(case)
 
-    def test_post_invalid_resource_shortage_without_detail(self, client) -> None:
+    def test_post_invalid_submotivo_residual_nao_persiste(self, client) -> None:
+        """R2: submotivo residual no POST é rejeitado sem rows/eventos.
+
+        O form não renderiza o campo legado, mas o valor enviado é repassado ao
+        service (``record_case_follow_up``), autoridade final que recusa
+        qualquer submotivo em novas gravações (design D3).
+        """
         user = _login_as(client, "manager")
-        case = _create_case(user, arn="BAD-NODETAIL", name="Sem Submotivo")
+        case = _create_case(user, arn="POST-RSD-001", name="Submotivo Residual")
         procedure = _add_procedure(case)
 
         payload = _valid_payload(procedure, performed="no")
-        payload[f"proc_{procedure.id}-non_performance_reason"] = "resource_shortage"
+        payload[f"proc_{procedure.id}-non_performance_reason"] = "missing_equipment"
+        payload[f"proc_{procedure.id}-resource_shortage_detail"] = "equipment_unavailable"
         response = self._post(client, case, payload)
+
         assert response.status_code == 200
-        assert "Informe o submotivo da falta de recursos." in response.content.decode()
+        assert "Submotivo de falta de recursos não é aceito em novas gravações." in response.content.decode()
         self._assert_nothing_persisted(case)
 
     def test_post_invalid_other_without_text(self, client) -> None:
@@ -595,6 +616,128 @@ class TestFollowUpFormPostInvalid:
         self._assert_nothing_persisted(case)
 
 
+# ── R3: select compacto de causa (slice-001) ────────────────────────────
+
+
+class TestFollowUpFormCompactReasonSelect:
+    """R3 — um único ``select`` Bootstrap por bloco, com o catálogo oficial.
+
+    A ordem/labels exatos de D1 são pinados contra
+    ``CURRENT_FOLLOWUP_NON_PERFORMANCE_REASON_CHOICES`` aqui e contra a lista
+    literal da ficha em ``apps/cases/tests/test_followup_services.py``.
+    """
+
+    @staticmethod
+    def _reason_select(content: str, procedure: CaseProcedure) -> str:
+        start = content.index(f'<select name="proc_{procedure.id}-non_performance_reason"')
+        return content[start : content.index("</select>", start)]
+
+    @staticmethod
+    def _option_attr(snippet: str, attribute: str) -> list[str]:
+        return [option.split(f'{attribute}="', 1)[1].split('"', 1)[0] for option in snippet.split("<option ")[1:]]
+
+    @staticmethod
+    def _option_labels(snippet: str) -> list[str]:
+        return [option.split(">", 1)[1].split("<", 1)[0] for option in snippet.split("<option ")[1:]]
+
+    def test_compact_reason_select_unico_por_bloco_sem_radios(self, client) -> None:
+        user = _login_as(client, "manager")
+        case = _create_case(user, arn="RSN-SELECT-001", name="Select Compacto")
+        eda = _add_procedure(case, "eda")
+        colon = _add_procedure(case, "colonoscopy")
+
+        content = client.get(_form_url(case)).content.decode()
+
+        for procedure in (eda, colon):
+            name = f"proc_{procedure.id}-non_performance_reason"
+            assert content.count(f'name="{name}"') == 1
+            snippet = self._reason_select(content, procedure)
+            assert snippet.startswith(f'<select name="{name}"')
+            assert 'class="form-select"' in snippet
+
+            fieldset_start = content.rindex("data-followup-reason-section", 0, content.index(f'<select name="{name}"'))
+            fieldset = content[fieldset_start : content.index("</fieldset>", fieldset_start)]
+            assert fieldset.count("<select") == 1
+            assert 'type="radio"' not in fieldset
+            assert "form-check" not in fieldset
+
+    def test_compact_reason_select_placeholder_e_ordem_oficial_com_other_por_ultimo(self, client) -> None:
+        user = _login_as(client, "manager")
+        case = _create_case(user, arn="RSN-ORDER-001", name="Ordem Causa")
+        procedure = _add_procedure(case)
+
+        snippet = self._reason_select(client.get(_form_url(case)).content.decode(), procedure)
+
+        assert self._option_attr(snippet, "value")[0] == ""
+        assert self._option_labels(snippet)[0] == REASON_PLACEHOLDER
+        assert self._option_labels(snippet)[1:] == [
+            label for _value, label in CURRENT_FOLLOWUP_NON_PERFORMANCE_REASON_CHOICES
+        ]
+        assert self._option_labels(snippet)[-1] == "Outras causas"
+
+    def test_compact_reason_select_sem_legacy_reason_nem_submotivo(self, client) -> None:
+        user = _login_as(client, "manager")
+        case = _create_case(user, arn="RSN-NOLEGACY-001", name="Sem Legado")
+        procedure = _add_procedure(case)
+
+        content = client.get(_form_url(case)).content.decode()
+        snippet = self._reason_select(content, procedure)
+
+        assert 'value="absenteeism"' not in content
+        assert 'value="resource_shortage"' not in content
+        assert 'value="absenteeism"' not in snippet
+        assert 'value="resource_shortage"' not in snippet
+        assert f'name="proc_{procedure.id}-resource_shortage_detail"' not in content
+        assert "Submotivo da falta de recursos" not in content
+
+    def test_compact_reason_select_mantem_grupo_condicional_de_other(self, client) -> None:
+        user = _login_as(client, "manager")
+        case = _create_case(user, arn="RSN-GROUP-001", name="Grupo Other")
+        procedure = _add_procedure(case)
+
+        content = client.get(_form_url(case)).content.decode()
+        snippet = content[content.index(f"proc_{procedure.id}-performed") :]
+
+        assert '<fieldset class="mb-2" data-followup-reason-section>' in snippet
+        assert 'data-followup-detail="other"' in snippet
+        assert f'name="proc_{procedure.id}-other_reason"' in snippet
+        assert 'data-followup-detail="resource_shortage"' not in content
+
+    @pytest.mark.parametrize("reason", ["missing_exam_consent", "patient_no_show", "emergency_priority"])
+    def test_post_official_reason_por_http_grava_sem_texto(self, client, reason: str) -> None:
+        user = _login_as(client, "manager")
+        case = _create_case(user, arn="POST-OFFICIAL", name="Causa Oficial")
+        procedure = _add_procedure(case)
+
+        payload = _valid_payload(procedure, performed="no")
+        payload[f"proc_{procedure.id}-non_performance_reason"] = reason
+        response = client.post(_form_url(case), data=payload)
+
+        assert response.status_code == 302
+        row = CaseFollowUp.objects.get(case=case).procedure_outcomes.get(procedure=procedure)
+        assert row.non_performance_reason == reason
+        assert row.other_reason == ""
+
+    def test_compact_reason_select_rerender_pos_erro_preserva_estado(self, client) -> None:
+        user = _login_as(client, "manager")
+        case = _create_case(user, arn="RSN-RERENDER-001", name="Re-render")
+        procedure = _add_procedure(case)
+
+        payload = _valid_payload(procedure, performed="no")
+        payload[f"proc_{procedure.id}-non_performance_reason"] = "other"
+        response = client.post(_form_url(case), data=payload)
+
+        assert response.status_code == 200
+        content = response.content.decode()
+        assert "Descreva a outra causa da não realização." in content
+        snippet = self._reason_select(content, procedure)
+        assert '<option value="other" selected>Outras causas</option>' in snippet
+        no_radio_tag = content[content.index('value="no"') :]
+        assert "checked" in no_radio_tag[: no_radio_tag.index(">")]
+        assert 'data-followup-detail="other"' in content
+        assert not CaseFollowUp.objects.filter(case=case).exists()
+
+
 # ── R4: re-gravação cria versão 2 preservando v1 ───────────────────────
 
 
@@ -611,7 +754,7 @@ class TestFollowUpSecondVersion:
 
         payload = _valid_payload(procedure, performed="no")
         payload["patient_admitted"] = "no"
-        payload[f"proc_{procedure.id}-non_performance_reason"] = "absenteeism"
+        payload[f"proc_{procedure.id}-non_performance_reason"] = "patient_no_show"
         second = client.post(_form_url(case), data=payload)
         assert second.status_code == 302
 
@@ -702,14 +845,14 @@ class TestFollowUpFormSpecializedProcedures:
         cpre = _add_procedure(case, "cpre")
 
         payload = _valid_payload(cpre, performed="no")
-        payload[f"proc_{cpre.id}-non_performance_reason"] = "absenteeism"
+        payload[f"proc_{cpre.id}-non_performance_reason"] = "patient_no_show"
         response = client.post(_form_url(case), data=payload)
 
         assert response.status_code == 302
         outcome = CaseFollowUp.objects.get(case=case).procedure_outcomes.get()
         assert outcome.procedure_id == cpre.id
         assert outcome.performed is False
-        assert outcome.non_performance_reason == "absenteeism"
+        assert outcome.non_performance_reason == "patient_no_show"
 
 
 # ── Cobertura restrita às rows autorizadas (ADR-0007 / R2, R3) ─────────

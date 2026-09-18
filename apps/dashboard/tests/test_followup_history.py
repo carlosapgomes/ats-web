@@ -6,6 +6,7 @@ from datetime import date, datetime, time, timedelta
 
 import pytest
 from django.contrib.auth import get_user_model
+from django.db.models import Max
 from django.urls import reverse
 from django.utils import timezone
 
@@ -160,6 +161,38 @@ def _record(
     )
 
 
+def _legacy_record(
+    case: Case,
+    user,
+    *,
+    admitted: bool = False,
+    outcomes: list[ProcedureOutcomeInput],
+) -> CaseFollowUp:
+    """Grava uma versão da era legada direto no ORM (append-only).
+
+    Causas da era antiga (``absenteeism``/``resource_shortage``) não passam mais
+    pelo service de gravação, mas continuam existindo no storage; este slice
+    ainda as lê cruas (o Slice 002 projeta para a taxonomia oficial).
+    """
+    version = (case.follow_ups.aggregate(Max("version"))["version__max"] or 0) + 1
+    follow_up = CaseFollowUp.objects.create(
+        case=case,
+        version=version,
+        patient_admitted=admitted,
+        recorded_by=user,
+    )
+    for outcome in outcomes:
+        ProcedureFollowUp.objects.create(
+            follow_up=follow_up,
+            procedure_id=outcome.procedure_id,
+            performed=outcome.performed,
+            non_performance_reason=outcome.non_performance_reason,
+            resource_shortage_detail=outcome.resource_shortage_detail,
+            other_reason=outcome.other_reason,
+        )
+    return follow_up
+
+
 def _set_recorded_at(case: Case, when: datetime) -> None:
     """Reescreve o instante de gravação (para dissociá-lo da data de grupo)."""
     CaseFollowUp.objects.filter(case=case).update(recorded_at=when)
@@ -214,17 +247,21 @@ def _filter_scenario(client) -> dict[str, Case]:
     colonoscopia, _ = CaseProcedure.objects.get_or_create(
         case=misto, procedure_type="colonoscopy", defaults={"doctor_disposition": DoctorDisposition.APPROVED}
     )
-    record_case_follow_up(
-        case=misto,
-        performed_by=user,
-        patient_admitted=True,
-        procedure_outcomes=[
+    _legacy_record(
+        misto,
+        user,
+        admitted=True,
+        outcomes=[
             ProcedureOutcomeInput(procedure_id=eda.id, performed=True),
             ProcedureOutcomeInput(procedure_id=colonoscopia.id, performed=False, non_performance_reason="absenteeism"),
         ],
     )
     recurso = _create_scheduled_case(user, arn="FILT-RS", name="Recurso", when=when)
-    _record(recurso, user, performed=False, reason="resource_shortage", detail="emergency_occupied")
+    _legacy_record(
+        recurso,
+        user,
+        outcomes=_outcome_inputs(recurso, performed=False, reason="resource_shortage", detail="emergency_occupied"),
+    )
     realizado = _create_scheduled_case(user, arn="FILT-OK", name="Realizado", when=when)
     _record(realizado, user, performed=True)
     outra = _create_scheduled_case(user, arn="FILT-OT", name="Outra Causa", when=when)
@@ -340,7 +377,7 @@ class TestHistoryPopulation:
     def test_versao_corrente_aparece_uma_vez_com_dados_da_v2(self, client) -> None:
         user = _login_as(client, "manager")
         case = _create_scheduled_case(user, arn="VERSAO-001", name="Paciente Versão", when=_local_dt(day_offset=0))
-        _record(case, user, performed=False, reason="absenteeism")  # v1
+        _legacy_record(case, user, outcomes=_outcome_inputs(case, performed=False, reason="absenteeism"))  # v1
         _record(case, user, performed=True, admitted=True)  # v2
 
         response = client.get(HISTORY_URL)
@@ -499,13 +536,10 @@ class TestHistoryCards:
         caso_a = _create_scheduled_case(user, arn="CARDS-A", name="Paciente A", when=_local_dt(day_offset=0, hour=9))
         _record(caso_a, user, performed=True, admitted=True)
         caso_b = _create_scheduled_case(user, arn="CARDS-B", name="Paciente B", when=_local_dt(day_offset=0, hour=11))
-        _record(
+        _legacy_record(
             caso_b,
             user,
-            performed=False,
-            reason="resource_shortage",
-            detail="emergency_occupied",
-            admitted=False,
+            outcomes=_outcome_inputs(caso_b, performed=False, reason="resource_shortage", detail="emergency_occupied"),
         )
 
         response = client.get(HISTORY_URL)
@@ -574,14 +608,17 @@ class TestHistoryTable:
         when = _local_dt(day_offset=0, hour=9, minute=30)
         case = _create_scheduled_case(user, arn="TABELA-001", name="Paciente Tabela", when=when)
         _record(case, user, performed=False, reason="other", other="Equipe indisponível")  # v1 (não exibida)
-        v2 = _record(
+        v2 = _legacy_record(
             case,
             user,
             admitted=True,
-            procedure_types=("eda", "colonoscopy"),
-            performed=False,
-            reason="resource_shortage",
-            detail="equipment_unavailable",
+            outcomes=_outcome_inputs(
+                case,
+                procedure_types=("eda", "colonoscopy"),
+                performed=False,
+                reason="resource_shortage",
+                detail="equipment_unavailable",
+            ),
         )
 
         response = client.get(HISTORY_URL)
@@ -745,11 +782,11 @@ class TestHistoryExportRows:
         procedure_colo, _ = CaseProcedure.objects.get_or_create(
             case=case, procedure_type="colonoscopy", defaults={"doctor_disposition": DoctorDisposition.APPROVED}
         )
-        v2 = record_case_follow_up(
-            case=case,
-            performed_by=user,
-            patient_admitted=True,
-            procedure_outcomes=[
+        v2 = _legacy_record(
+            case,
+            user,
+            admitted=True,
+            outcomes=[
                 ProcedureOutcomeInput(procedure_id=procedure_eda.id, performed=True),
                 ProcedureOutcomeInput(
                     procedure_id=procedure_colo.id,
@@ -1157,7 +1194,7 @@ class TestHistoryFilterCombo:
         _filter_scenario(client)
         user = User.objects.get(username="followup-history-manager@test")
         antigo = _create_scheduled_case(user, arn="FILT-ANTIGO", name="Antigo", when=_local_dt(day_offset=-20, hour=9))
-        _record(antigo, user, performed=False, reason="absenteeism")
+        _legacy_record(antigo, user, outcomes=_outcome_inputs(antigo, performed=False, reason="absenteeism"))
 
         start_day = timezone.localdate() - timedelta(days=1)
         end_day = timezone.localdate() + timedelta(days=1)
@@ -1198,7 +1235,7 @@ class TestHistoryFilterCombo:
         for i in range(26):
             when = _local_dt(day_offset=0, hour=10)
             case = _create_scheduled_case(user, arn=f"PG-FILT-{i:02d}", name=f"Filler {i:02d}", when=when)
-            _record(case, user, performed=False, reason="absenteeism")
+            _legacy_record(case, user, outcomes=_outcome_inputs(case, performed=False, reason="absenteeism"))
 
         params = {"performed": "no", "reason": "absenteeism"}
         response = client.get(HISTORY_URL, params)
@@ -1291,7 +1328,11 @@ class TestHistorySpecializedProcedures:
         cpre = _create_scheduled_case(
             user, arn="SPEC-HIST-CPRE", name="CPREHistorico", when=_local_dt(day_offset=0, hour=10)
         )
-        _record(cpre, user, performed=False, reason="absenteeism", procedure_types=("cpre",))
+        _legacy_record(
+            cpre,
+            user,
+            outcomes=_outcome_inputs(cpre, performed=False, reason="absenteeism", procedure_types=("cpre",)),
+        )
 
         response = client.get(HISTORY_URL)
         assert response.status_code == 200

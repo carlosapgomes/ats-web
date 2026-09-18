@@ -5,11 +5,13 @@ from typing import Any
 from django import forms
 
 from apps.cases.models import (
+    CURRENT_FOLLOWUP_NON_PERFORMANCE_REASON_CHOICES,
     FollowUpNonPerformanceReason,
-    FollowUpResourceShortageDetail,
 )
 
 RADIO_CLASS = "form-check-input"
+
+REASON_PLACEHOLDER = "Selecione uma causa..."
 
 
 class FollowUpAdmissionForm(forms.Form):
@@ -29,6 +31,7 @@ class FollowUpForm(forms.Form):
     Uma instância por ``CaseProcedure``, instanciada com
     ``prefix="proc_<id>"``: os campos chegam no POST como
     ``proc_<id>-performed``, ``proc_<id>-non_performance_reason`` etc.
+    A causa é um ``select`` compacto com o catálogo oficial atual (design D4).
     As regras condicionais de causa espelham o service
     (``record_case_follow_up``) para feedback por campo; o service permanece
     a validação autoritativa do contrato.
@@ -41,43 +44,35 @@ class FollowUpForm(forms.Form):
         error_messages={"required": "Informe se o procedimento foi realizado."},
     )
     non_performance_reason = forms.ChoiceField(
-        choices=FollowUpNonPerformanceReason.choices,
+        choices=(("", REASON_PLACEHOLDER), *CURRENT_FOLLOWUP_NON_PERFORMANCE_REASON_CHOICES),
         required=False,
-        widget=forms.RadioSelect(attrs={"class": RADIO_CLASS}),
+        widget=forms.Select(attrs={"class": "form-select"}),
         label="Causa da não realização",
-    )
-    resource_shortage_detail = forms.ChoiceField(
-        choices=FollowUpResourceShortageDetail.choices,
-        required=False,
-        widget=forms.RadioSelect(attrs={"class": RADIO_CLASS}),
-        label="Submotivo da falta de recursos",
+        error_messages={"invalid_choice": "Selecione uma causa da lista oficial."},
     )
     other_reason = forms.CharField(
         required=False,
         widget=forms.Textarea(attrs={"rows": 2, "class": "form-control"}),
         label="Outra causa",
     )
+    # Campo legado nunca renderizado (design D3): existe apenas para que um
+    # ``resource_shortage_detail`` residual no POST chegue ao service, que é a
+    # autoridade final da rejeição de submotivo em novas gravações.
+    resource_shortage_detail = forms.CharField(required=False, widget=forms.HiddenInput())
 
     def clean(self) -> dict[str, Any]:
         cleaned = super().clean() or {}
         if cleaned.get("performed") != "no":
             return cleaned
+        if self.has_error("non_performance_reason"):
+            return cleaned
 
         reason = str(cleaned.get("non_performance_reason") or "")
-        detail = str(cleaned.get("resource_shortage_detail") or "")
         other = str(cleaned.get("other_reason") or "").strip()
 
         if not reason:
             self.add_error("non_performance_reason", "Informe a causa do procedimento não realizado.")
             return cleaned
-        if reason == FollowUpNonPerformanceReason.RESOURCE_SHORTAGE:
-            if not detail:
-                self.add_error("resource_shortage_detail", "Informe o submotivo da falta de recursos.")
-        elif detail:
-            self.add_error(
-                "resource_shortage_detail",
-                "Submotivo só deve ser informado quando a causa é falta de recursos.",
-            )
         if reason == FollowUpNonPerformanceReason.OTHER:
             if not other:
                 self.add_error("other_reason", "Descreva a outra causa da não realização.")

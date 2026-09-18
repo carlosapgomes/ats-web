@@ -16,15 +16,49 @@ from apps.cases.followup import (
     record_case_follow_up,
 )
 from apps.cases.models import (
+    CURRENT_FOLLOWUP_NON_PERFORMANCE_REASON_CHOICES,
+    CURRENT_FOLLOWUP_NON_PERFORMANCE_REASON_VALUES,
     Case,
     CaseEvent,
     CaseFollowUp,
     CaseProcedure,
     DoctorDisposition,
+    FollowUpNonPerformanceReason,
+    FollowUpResourceShortageDetail,
     ProcedureFollowUp,
 )
 
 pytestmark = pytest.mark.django_db
+
+# Catálogo oficial da ficha de suspensão (design D1): ordem e labels exatos.
+# É a expectativa literal que pina a constante usada pelo form e pelo service.
+_OFFICIAL_CATALOG: tuple[tuple[str, str], ...] = (
+    ("missing_exam_consent", "Ausência do preenchimento do TCLE para realização de exame"),
+    ("missing_anesthesia_consent", "Ausência do preenchimento do TCLE anestésico"),
+    ("clinical_conditions", "Condições clínicas desfavoráveis"),
+    ("scheduling_error", "Erro na programação do procedimento"),
+    ("missing_gastroenterologist", "Falta de médico gastroenterologista"),
+    ("missing_anesthesiologist", "Falta de anestesiologista"),
+    ("missing_equipment", "Falta de equipamentos"),
+    ("missing_tests", "Falta de exames"),
+    ("missing_blood_products", "Falta de hemoderivados"),
+    ("fasting_not_observed", "Falta de jejum"),
+    ("missing_material_opme", "Falta de material/OPME"),
+    ("missing_icu_bed", "Falta de vaga na UTI"),
+    ("inadequate_prep", "Preparo inadequado"),
+    ("difficult_intubation", "Intubação difícil"),
+    ("medical_plan_changed", "Mudança de conduta médica"),
+    ("patient_no_show", "Não comparecimento do paciente"),
+    ("patient_death", "Paciente foi a óbito"),
+    ("emergency_priority", "Prioridade para urgência"),
+    ("time_exceeded", "Tempo excedido"),
+    ("transferred_other_hospital", "Transferência para outro hospital"),
+    ("patient_delay", "Atraso do paciente"),
+    ("divergent_report", "Relatório divergente"),
+    ("patient_refusal", "Recusa do paciente"),
+    ("other", "Outras causas"),
+)
+_OFFICIAL_REASON_IDS = [value for value, _label in _OFFICIAL_CATALOG]
 
 # ── Helpers ──────────────────────────────────────────────────────────────
 
@@ -60,6 +94,129 @@ def _outcome(case: Case, *, performed: bool = True, reason: str = "", detail: st
     )
 
 
+# ── R1: catálogo oficial × eras persistidas ───────────────────────────────
+
+
+class TestCatalogoOficial:
+    """R1 — catálogo atual é a fonte única das choices de entrada.
+
+    O model state continua reconhecendo os códigos legados persistidos; apenas
+    as 24 choices atuais ordenadas podem ser gravadas (design D1/D2).
+    """
+
+    def test_current_choices_seguem_ordem_e_labels_oficiais(self) -> None:
+        assert CURRENT_FOLLOWUP_NON_PERFORMANCE_REASON_CHOICES == _OFFICIAL_CATALOG
+
+    def test_current_values_derivam_das_choices(self) -> None:
+        assert CURRENT_FOLLOWUP_NON_PERFORMANCE_REASON_VALUES == frozenset(_OFFICIAL_REASON_IDS)
+        assert len(CURRENT_FOLLOWUP_NON_PERFORMANCE_REASON_VALUES) == 24
+
+    def test_model_state_reconhece_eram_legada_e_atual(self) -> None:
+        persisted = set(FollowUpNonPerformanceReason.values)
+        assert set(CURRENT_FOLLOWUP_NON_PERFORMANCE_REASON_VALUES) <= persisted
+        assert persisted == set(CURRENT_FOLLOWUP_NON_PERFORMANCE_REASON_VALUES) | {
+            "absenteeism",
+            "resource_shortage",
+        }
+
+    def test_codigos_preservados_de_inadequate_prep_e_other(self) -> None:
+        assert FollowUpNonPerformanceReason.INADEQUATE_PREP.value == "inadequate_prep"
+        assert FollowUpNonPerformanceReason.OTHER.value == "other"
+
+    def test_nenhum_codigo_excede_o_max_length_do_field(self) -> None:
+        field = ProcedureFollowUp._meta.get_field("non_performance_reason")
+        assert max(len(value) for value in FollowUpNonPerformanceReason.values) <= field.max_length
+
+
+# ── R2: causas oficiais, `other` e códigos legados ────────────────────────
+
+
+class TestCausasOficiais:
+    """R2 — somente o catálogo atual grava; legados e submotivos são rejeitados."""
+
+    def _assert_nada_gravado(self, case: Case) -> None:
+        assert not CaseFollowUp.objects.filter(case=case).exists()
+        assert not CaseEvent.objects.filter(case=case, event_type__startswith="FOLLOWUP").exists()
+
+    @pytest.mark.parametrize(
+        "reason",
+        [value for value in _OFFICIAL_REASON_IDS if value != "other"],
+        ids=[value for value in _OFFICIAL_REASON_IDS if value != "other"],
+    )
+    def test_official_reason_gravada_sem_submotivo_nem_texto(self, user, case_factory, reason: str) -> None:
+        case = _case_with_procedures(case_factory, user)
+        follow_up = record_case_follow_up(
+            case=case,
+            performed_by=user,
+            patient_admitted=False,
+            procedure_outcomes=[_outcome(case, performed=False, reason=reason)],
+        )
+
+        row = ProcedureFollowUp.objects.get(follow_up=follow_up)
+        assert row.performed is False
+        assert row.non_performance_reason == reason
+        assert row.resource_shortage_detail == ""
+        assert row.other_reason == ""
+
+        (payload,) = CaseEvent.objects.get(case=case, event_type="FOLLOWUP_RECORDED").payload["outcomes"]
+        assert payload["non_performance_reason"] == reason
+        assert payload["resource_shortage_detail"] == ""
+        assert payload["other_reason"] == ""
+
+    @pytest.mark.parametrize("reason", ["absenteeism", "resource_shortage"])
+    def test_legacy_reason_rejeitada_sem_persistencia(self, user, case_factory, reason: str) -> None:
+        case = _case_with_procedures(case_factory, user)
+        with pytest.raises(ValueError, match="Informe a causa do procedimento não realizado."):
+            record_case_follow_up(
+                case=case,
+                performed_by=user,
+                patient_admitted=False,
+                procedure_outcomes=[_outcome(case, performed=False, reason=reason)],
+            )
+        self._assert_nada_gravado(case)
+
+    def test_legacy_resource_shortage_com_submotivo_rejeitado(self, user, case_factory) -> None:
+        case = _case_with_procedures(case_factory, user)
+        with pytest.raises(ValueError, match="Informe a causa do procedimento não realizado."):
+            record_case_follow_up(
+                case=case,
+                performed_by=user,
+                patient_admitted=False,
+                procedure_outcomes=[
+                    _outcome(case, performed=False, reason="resource_shortage", detail="emergency_occupied")
+                ],
+            )
+        self._assert_nada_gravado(case)
+
+    @pytest.mark.parametrize(
+        "detail",
+        list(FollowUpResourceShortageDetail.values),
+        ids=list(FollowUpResourceShortageDetail.values),
+    )
+    def test_submotivo_rejeitado_com_causa_oficial(self, user, case_factory, detail: str) -> None:
+        case = _case_with_procedures(case_factory, user)
+        with pytest.raises(ValueError, match="Submotivo de falta de recursos não é aceito em novas gravações."):
+            record_case_follow_up(
+                case=case,
+                performed_by=user,
+                patient_admitted=False,
+                procedure_outcomes=[_outcome(case, performed=False, reason="missing_equipment", detail=detail)],
+            )
+        self._assert_nada_gravado(case)
+
+    @pytest.mark.parametrize("reason", ["", "causa_inexistente", "ABSENTEEISM"])
+    def test_causa_vazia_desconhecida_ou_fora_do_catalogo_rejeitada(self, user, case_factory, reason: str) -> None:
+        case = _case_with_procedures(case_factory, user)
+        with pytest.raises(ValueError, match="Informe a causa do procedimento não realizado."):
+            record_case_follow_up(
+                case=case,
+                performed_by=user,
+                patient_admitted=False,
+                procedure_outcomes=[_outcome(case, performed=False, reason=reason)],
+            )
+        self._assert_nada_gravado(case)
+
+
 # ── R1: registro inicial ─────────────────────────────────────────────────
 
 
@@ -77,8 +234,7 @@ class TestRegistroInicial:
                 ProcedureOutcomeInput(
                     procedure_id=col_id,
                     performed=False,
-                    non_performance_reason="resource_shortage",
-                    resource_shortage_detail="emergency_occupied",
+                    non_performance_reason="missing_equipment",
                 ),
             ],
         )
@@ -93,8 +249,8 @@ class TestRegistroInicial:
 
         col_row = ProcedureFollowUp.objects.get(follow_up=follow_up, procedure_id=col_id)
         assert col_row.performed is False
-        assert col_row.non_performance_reason == "resource_shortage"
-        assert col_row.resource_shortage_detail == "emergency_occupied"
+        assert col_row.non_performance_reason == "missing_equipment"
+        assert col_row.resource_shortage_detail == ""
 
         event = CaseEvent.objects.get(case=case, event_type="FOLLOWUP_RECORDED")
         assert event.actor == user
@@ -103,14 +259,14 @@ class TestRegistroInicial:
         assert event.payload["patient_admitted"] is True
         assert len(event.payload["outcomes"]) == 2
 
-    def test_absenteismo_e_outras_causas_sao_gravados(self, user, case_factory) -> None:
+    def test_causa_oficial_e_outras_causas_sao_gravados(self, user, case_factory) -> None:
         case = _case_with_procedures(case_factory, user)
         record_case_follow_up(
             case=case,
             performed_by=user,
             patient_admitted=False,
             procedure_outcomes=[
-                _outcome(case, performed=False, reason="absenteeism"),
+                _outcome(case, performed=False, reason="patient_no_show"),
             ],
         )
         case2 = _case_with_procedures(case_factory, user)
@@ -123,7 +279,7 @@ class TestRegistroInicial:
             ],
         )
         row = ProcedureFollowUp.objects.get(follow_up__case=case)
-        assert row.non_performance_reason == "absenteeism"
+        assert row.non_performance_reason == "patient_no_show"
         row2 = ProcedureFollowUp.objects.get(follow_up__case=case2)
         assert row2.non_performance_reason == "other"
         assert row2.other_reason == "Paciente em jejum incompleto"
@@ -149,7 +305,7 @@ class TestVersionamento:
             case=case,
             performed_by=other_user,
             patient_admitted=True,
-            procedure_outcomes=[_outcome(case, performed=False, reason="absenteeism")],
+            procedure_outcomes=[_outcome(case, performed=False, reason="patient_no_show")],
         )
 
         assert CaseFollowUp.objects.filter(case=case).count() == 2
@@ -201,7 +357,7 @@ class TestCurrentFollowUps:
             case=case_b,
             performed_by=user,
             patient_admitted=True,
-            procedure_outcomes=[_outcome(case_b, performed=False, reason="absenteeism")],
+            procedure_outcomes=[_outcome(case_b, performed=False, reason="patient_no_show")],
         )
 
         rows = list(current_follow_ups())
@@ -225,8 +381,7 @@ class TestCurrentFollowUps:
                 ProcedureOutcomeInput(
                     procedure_id=col_id,
                     performed=False,
-                    non_performance_reason="resource_shortage",
-                    resource_shortage_detail="emergency_occupied",
+                    non_performance_reason="missing_equipment",
                 ),
             ],
         )
@@ -325,40 +480,16 @@ class TestValidacoes:
         case = _case_with_procedures(case_factory, user)
         self._assert_rejeitado(case, user, [_outcome(case, performed=False)])
 
-    def test_resource_shortage_sem_submotivo_rejeitado(self, user, case_factory) -> None:
-        case = _case_with_procedures(case_factory, user)
-        self._assert_rejeitado(
-            case,
-            user,
-            [_outcome(case, performed=False, reason="resource_shortage")],
-        )
-
     def test_outras_causas_sem_texto_rejeitado(self, user, case_factory) -> None:
         case = _case_with_procedures(case_factory, user)
         self._assert_rejeitado(case, user, [_outcome(case, performed=False, reason="other")])
-
-    def test_submotivo_fora_das_opcoes_rejeitado(self, user, case_factory) -> None:
-        case = _case_with_procedures(case_factory, user)
-        self._assert_rejeitado(
-            case,
-            user,
-            [_outcome(case, performed=False, reason="resource_shortage", detail="motivo_inexistente")],
-        )
-
-    def test_submotivo_com_causa_diferente_de_falta_de_recursos_rejeitado(self, user, case_factory) -> None:
-        case = _case_with_procedures(case_factory, user)
-        self._assert_rejeitado(
-            case,
-            user,
-            [_outcome(case, performed=False, reason="absenteeism", detail="emergency_occupied")],
-        )
 
     def test_texto_de_outras_causas_com_causa_diferente_rejeitado(self, user, case_factory) -> None:
         case = _case_with_procedures(case_factory, user)
         self._assert_rejeitado(
             case,
             user,
-            [_outcome(case, performed=False, reason="resource_shortage", detail="insufficient_time", other="x")],
+            [_outcome(case, performed=False, reason="patient_no_show", other="x")],
         )
 
     def test_performed_normaliza_campos_de_motivo(self, user, case_factory) -> None:
@@ -368,7 +499,7 @@ class TestValidacoes:
             performed_by=user,
             patient_admitted=False,
             procedure_outcomes=[
-                _outcome(case, performed=True, reason="absenteeism", detail="emergency_occupied", other="lixo"),
+                _outcome(case, performed=True, reason="patient_no_show", detail="emergency_occupied", other="lixo"),
             ],
         )
         row = ProcedureFollowUp.objects.get(follow_up__case=case)
@@ -430,7 +561,7 @@ class TestConstraints:
                     follow_up=follow_up,
                     procedure=case.procedures.get(),
                     performed=True,
-                    non_performance_reason="absenteeism",
+                    non_performance_reason="patient_no_show",
                 )
 
     def test_check_submotivo_exigido_quando_falta_de_recursos(self, user, case_factory) -> None:
@@ -455,7 +586,7 @@ class TestConstraints:
                     follow_up=follow_up,
                     procedure=case.procedures.get(),
                     performed=False,
-                    non_performance_reason="absenteeism",
+                    non_performance_reason="patient_no_show",
                     resource_shortage_detail="emergency_occupied",
                 )
 
@@ -481,7 +612,7 @@ class TestConstraints:
                     follow_up=follow_up,
                     procedure=case.procedures.get(),
                     performed=False,
-                    non_performance_reason="absenteeism",
+                    non_performance_reason="patient_no_show",
                     other_reason="texto indevido",
                 )
 
@@ -519,7 +650,7 @@ class TestPreparoInadequado:
         case = _case_with_procedures(case_factory, user)
         with pytest.raises(
             ValueError,
-            match="Submotivo só deve ser informado quando a causa é falta de recursos.",
+            match="Submotivo de falta de recursos não é aceito em novas gravações.",
         ):
             record_case_follow_up(
                 case=case,
@@ -606,7 +737,7 @@ class TestCoberturaRestritaAutorizadas:
                 ProcedureOutcomeInput(
                     procedure_id=autorizada.id,
                     performed=False,
-                    non_performance_reason="absenteeism",
+                    non_performance_reason="patient_no_show",
                 )
             ],
         )

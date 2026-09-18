@@ -823,12 +823,64 @@ class CaseCommunicationMessage(models.Model):
 
 
 class FollowUpNonPerformanceReason(models.TextChoices):
-    """Causa estruturada de procedimento não realizado (follow-up)."""
+    """Causa persistida de procedimento não realizado (follow-up).
 
-    ABSENTEEISM = "absenteeism", "Absenteísmo"
+    Reúne as duas eras do vocabulário: o catálogo oficial atual, na ordem da
+    ficha de suspensão do setor (design D1), e os códigos legados ainda
+    presentes em rows históricas. O model state precisa reconhecer tudo o que
+    pode existir no banco; novas gravações aceitam apenas
+    ``CURRENT_FOLLOWUP_NON_PERFORMANCE_REASON_VALUES`` (design D2).
+    """
+
+    # Catálogo oficial atual — ordem exata da ficha de suspensão (design D1).
+    MISSING_EXAM_CONSENT = "missing_exam_consent", "Ausência do preenchimento do TCLE para realização de exame"
+    MISSING_ANESTHESIA_CONSENT = "missing_anesthesia_consent", "Ausência do preenchimento do TCLE anestésico"
+    CLINICAL_CONDITIONS = "clinical_conditions", "Condições clínicas desfavoráveis"
+    SCHEDULING_ERROR = "scheduling_error", "Erro na programação do procedimento"
+    MISSING_GASTROENTEROLOGIST = "missing_gastroenterologist", "Falta de médico gastroenterologista"
+    MISSING_ANESTHESIOLOGIST = "missing_anesthesiologist", "Falta de anestesiologista"
+    MISSING_EQUIPMENT = "missing_equipment", "Falta de equipamentos"
+    MISSING_TESTS = "missing_tests", "Falta de exames"
+    MISSING_BLOOD_PRODUCTS = "missing_blood_products", "Falta de hemoderivados"
+    FASTING_NOT_OBSERVED = "fasting_not_observed", "Falta de jejum"
+    MISSING_MATERIAL_OPME = "missing_material_opme", "Falta de material/OPME"
+    MISSING_ICU_BED = "missing_icu_bed", "Falta de vaga na UTI"
     INADEQUATE_PREP = "inadequate_prep", "Preparo inadequado"
-    RESOURCE_SHORTAGE = "resource_shortage", "Cancelamento por falta de recursos no dia"
+    DIFFICULT_INTUBATION = "difficult_intubation", "Intubação difícil"
+    MEDICAL_PLAN_CHANGED = "medical_plan_changed", "Mudança de conduta médica"
+    PATIENT_NO_SHOW = "patient_no_show", "Não comparecimento do paciente"
+    PATIENT_DEATH = "patient_death", "Paciente foi a óbito"
+    EMERGENCY_PRIORITY = "emergency_priority", "Prioridade para urgência"
+    TIME_EXCEEDED = "time_exceeded", "Tempo excedido"
+    TRANSFERRED_OTHER_HOSPITAL = "transferred_other_hospital", "Transferência para outro hospital"
+    PATIENT_DELAY = "patient_delay", "Atraso do paciente"
+    DIVERGENT_REPORT = "divergent_report", "Relatório divergente"
+    PATIENT_REFUSAL = "patient_refusal", "Recusa do paciente"
     OTHER = "other", "Outras causas"
+
+    # Era legada: persistida apenas em rows anteriores à mudança, com leitura
+    # projetada pela taxonomia oficial no Histórico. Rejeitada em novas
+    # gravações.
+    ABSENTEEISM = "absenteeism", "Absenteísmo"
+    RESOURCE_SHORTAGE = "resource_shortage", "Cancelamento por falta de recursos no dia"
+
+
+_LEGACY_FOLLOWUP_NON_PERFORMANCE_REASON_VALUES = frozenset(
+    {
+        FollowUpNonPerformanceReason.ABSENTEEISM.value,
+        FollowUpNonPerformanceReason.RESOURCE_SHORTAGE.value,
+    }
+)
+
+# Fonte única das choices de entrada: catálogo oficial atual, ordenado (design D1).
+CURRENT_FOLLOWUP_NON_PERFORMANCE_REASON_CHOICES: tuple[tuple[str, str], ...] = tuple(
+    (member.value, member.label)
+    for member in FollowUpNonPerformanceReason
+    if member.value not in _LEGACY_FOLLOWUP_NON_PERFORMANCE_REASON_VALUES
+)
+CURRENT_FOLLOWUP_NON_PERFORMANCE_REASON_VALUES: frozenset[str] = frozenset(
+    value for value, _label in CURRENT_FOLLOWUP_NON_PERFORMANCE_REASON_CHOICES
+)
 
 
 class FollowUpResourceShortageDetail(models.TextChoices):
@@ -874,9 +926,11 @@ class CaseFollowUp(models.Model):
 class ProcedureFollowUp(models.Model):
     """Desfecho de um ``CaseProcedure`` dentro de uma versão de follow-up.
 
-    Integridade condicional (motivo exigido quando não realizado, submotivo
-    só em ``resource_shortage``, texto só em ``other`` e campos zerados
-    quando realizado) é validada no service e respaldada por checks no banco.
+    Integridade condicional (motivo exigido quando não realizado, texto só em
+    ``other`` e campos zerados quando realizado) é validada no service e
+    respaldada por checks no banco. ``resource_shortage_detail`` e seus checks
+    permanecem apenas para as rows legadas de ``resource_shortage``: nenhuma
+    nova gravação informa submotivo.
     """
 
     follow_up = models.ForeignKey(

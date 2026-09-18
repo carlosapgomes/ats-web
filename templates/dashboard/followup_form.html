@@ -127,29 +127,11 @@
           </div>
 
           <fieldset class="mb-2" data-followup-reason-section>
-            <span class="form-label d-block">{{ form.non_performance_reason.label }}</span>
-            {% for radio in form.non_performance_reason %}
-            <div class="form-check">
-              {{ radio.tag }}
-              <label class="form-check-label" for="{{ radio.id_for_label }}">{{ radio.choice_label }}</label>
-            </div>
-            {% endfor %}
+            <label class="form-label d-block" for="{{ form.non_performance_reason.id_for_label }}">{{ form.non_performance_reason.label }}</label>
+            {{ form.non_performance_reason }}
             {% for error in form.non_performance_reason.errors %}
             <div class="invalid-feedback d-block">{{ error }}</div>
             {% endfor %}
-
-            <div class="followup-detail-group ms-4 mt-3 border-start ps-3" data-followup-detail="resource_shortage" style="display:none;">
-              <span class="form-label d-block">{{ form.resource_shortage_detail.label }}</span>
-              {% for radio in form.resource_shortage_detail %}
-              <div class="form-check">
-                {{ radio.tag }}
-                <label class="form-check-label" for="{{ radio.id_for_label }}">{{ radio.choice_label }}</label>
-              </div>
-              {% endfor %}
-              {% for error in form.resource_shortage_detail.errors %}
-              <div class="invalid-feedback d-block">{{ error }}</div>
-              {% endfor %}
-            </div>
 
             <div class="followup-detail-group ms-4 mt-3 border-start ps-3" data-followup-detail="other" style="display:none;">
               <label class="form-label" for="{{ form.other_reason.id_for_label }}">{{ form.other_reason.label }}</label>

@@ -7,9 +7,9 @@
 
 ## 1. Registro oficial compacto
 
-- [ ] 1.1 Implementar o Slice 001 (`slices/slice-001-official-causes-compact-form.md`) em RED → GREEN → REFACTOR; verificar catálogo oficial, rejeição de códigos legados, migration metadata-only, select responsivo e evento persistido; obter review independente aceito.
-- [ ] 1.2 Após aceite do Slice 001, confirmar `apps/dashboard/tests/test_followup_history.py` verde com fixtures legadas diretas e registrar evidência da ida/volta `0019 → 0020 → 0019 → 0020` sem alteração de dados.
-- [ ] 1.3 Atualizar `tasks.md`, gerar relatório temporário com evidências/snippets, informar `REPORT_PATH`, criar commit/push rastreáveis e parar até confirmação explícita para o Slice 002.
+- [x] 1.1 Implementar o Slice 001 (`slices/slice-001-official-causes-compact-form.md`) em RED → GREEN → REFACTOR; catálogo oficial, rejeição legada, migration metadata-only, select compacto e eventos verificados; review aceito na rodada 2 após correção P1 do POST residual de submotivo.
+- [x] 1.2 `apps/dashboard/tests/test_followup_history.py` verde com fixtures legadas diretas (74 passed); teste de migration comprovou `0019 → 0020 → 0019 → 0020` sem alteração de rows/eventos.
+- [x] 1.3 `tasks.md` atualizado e relatório gerado em `/tmp/align-followup-causes-slice-001-report.md`; commit atômico criado sem push, conforme instrução atual do owner. A autorização desta execução sequencial substitui a parada intermediária antes do Slice 002.
 
 ## 2. Compatibilidade histórica e documentação
 
