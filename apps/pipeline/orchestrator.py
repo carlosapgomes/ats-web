@@ -53,6 +53,7 @@ from apps.pipeline.prior_case import PriorCaseContext, lookup_prior_case_context
 from apps.pipeline.procedure_reconciliation import (
     build_v2_review_payload,
     reconcile_detected_procedures,
+    serialize_procedure_precedence,
 )
 from apps.pipeline.schemas.adapters import project_v3_to_llm1_shape
 from apps.pipeline.scope_detection import detect_procedure_occurrences, detect_requested_procedures_v3
@@ -338,6 +339,10 @@ def _run_v3_pipeline(
     )
 
     # ── 4. Eventos de detecção (R8: versões de schema/prompt + conjuntos) ─
+    # D3/ADR-0008: quando a precedência especializada suprimiu EDA/Colonoscopia,
+    # o mesmo metadado enxuto (regra/selecionado/suprimidos, sem texto clínico)
+    # acompanha o evento de detecção, a sugestão final e o payload de revisão.
+    precedence_metadata = serialize_procedure_precedence(reconciliation)
     detection_payload: dict[str, object] = {
         "schema_version": _SCHEMA_VERSION,
         "declared_procedures": list(declared),
@@ -348,6 +353,8 @@ def _run_v3_pipeline(
         "prompt_user_name": result1.prompt_user_name,
         "prompt_user_version": result1.prompt_user_version,
     }
+    if precedence_metadata is not None:
+        detection_payload["procedure_precedence"] = precedence_metadata
     case._record_event("CASE_PROCEDURES_DETECTED", payload=detection_payload)
     case.save()
     if reconciliation.upgraded:
@@ -373,6 +380,8 @@ def _run_v3_pipeline(
             detected=reconciliation.detected_procedure_types,
             evidence_spans=_collect_v3_evidence_spans(result1.structured_data),
         )
+        if precedence_metadata is not None:
+            review_payload = {**review_payload, "procedure_precedence": precedence_metadata}
         case.suggested_action = review_payload
         case.save()
         case._record_event(
@@ -529,6 +538,8 @@ def _run_v3_pipeline(
         "procedure_recommendations": recommendations,
         "global_support_recommendation": global_support,
     }
+    if precedence_metadata is not None:
+        case.suggested_action["procedure_precedence"] = precedence_metadata
     case.save()
 
     # ── 11. Transições finais (LLM_SUGGEST → R2_POST_WIDGET → WAIT_DOCTOR) ─

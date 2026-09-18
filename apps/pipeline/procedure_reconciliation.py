@@ -9,10 +9,13 @@ R3: a validação ocorre ANTES de ordenar/filtrar — tipos desconhecidos,
 duplicatas ou conjuntos fora da matriz fechada falham fechado com motivo
 explícito e nunca são descartados para fazer o restante parecer válido.
 
-D3: a precedência ``EDA com/e Ecoendoscopia/CPRE → especializado`` depende de
-PROVENIÊNCIA POR OCORRÊNCIA (``occurrences``): só colapsa quando existe uma
-ocorrência atual do especializado vinculada textualmente a um EDA no mesmo
-contexto. Duas solicitações independentes nunca colapsam pelo conjunto.
+D3: a precedência de um único procedimento especializado sobre procedimentos
+convencionais depende de PROVENIÊNCIA POR OCORRÊNCIA (``occurrences``):
+somente exatamente uma Ecoendoscopia OU exatamente uma CPRE detectada com
+ocorrência textual do MESMO tipo qualificada como ``current_request`` suprime
+EDA e/ou Colonoscopia, mesmo em trechos independentes (ADR-0008). Item
+estruturado isolado, histórico, negação ou menção nunca suprimem; dois
+especializados, tipo desconhecido ou duplicata continuam fail-closed.
 """
 
 from __future__ import annotations
@@ -66,50 +69,87 @@ def _ordered(procedure_types: Any) -> tuple[str, ...]:
     return _partition_procedures(procedure_types).ordered
 
 
-# Especializados que podem colapsar uma expressão composta ``EDA com/e X``.
-_LINKED_COLLAPSIBLE_SPECIALIZED: frozenset[str] = frozenset({ProcedureType.ECHOENDOSCOPY, ProcedureType.CPRE})
+# Especializados que podem predominar sobre procedimentos convencionais (D1).
+_SPECIALIZED_PROCEDURE_TYPES: frozenset[str] = frozenset({ProcedureType.ECHOENDOSCOPY, ProcedureType.CPRE})
+# Convencionais suprimidos quando a precedência se aplica (R1).
+_CONVENTIONAL_PROCEDURE_TYPES: frozenset[str] = frozenset({ProcedureType.EDA, ProcedureType.COLONOSCOPY})
+# Qualificação textual que comprova solicitação ATUAL (contrato de
+# ``scope_detection``); não é reimplementada nem alterada neste slice.
+_QUALIFICATION_CURRENT_REQUEST = "current_request"
+# Identificador da regra registrado em evento/sugestão (D3).
+PROCEDURE_PRECEDENCE_RULE = "specialized_over_conventional"
 
 
-def _collapse_linked_specialized(*, any_set: set[str], occurrences: Any) -> set[str]:
-    """Colapsa ``{eda, especializado}`` apenas com vínculo textual comprovado.
+def _current_request_occurrence_types(occurrences: Any) -> set[str]:
+    """Tipos com ocorrência textual qualificada como solicitação atual (D1)."""
+    return {
+        str(getattr(occurrence, "procedure_type", ""))
+        for occurrence in occurrences or ()
+        if str(getattr(occurrence, "qualification", "")) == _QUALIFICATION_CURRENT_REQUEST
+    }
 
-    Exige uma ocorrência ATUAL do especializado marcada com ``linked_eda``
-    (``EDA com/e Ecoendoscopia`` no mesmo contexto). Decisão derivada da
-    proveniência, nunca do conjunto isolado (D3); a validação de catálogo já
-    ocorreu antes (R3).
+
+def _apply_specialized_precedence(*, any_set: set[str], occurrences: Any) -> tuple[set[str], str, tuple[str, ...]]:
+    """Precedência de especializado único sobre convencionais (D1/ADR-0008).
+
+    Exige exatamente um tipo especializado no conjunto detectado E ocorrência
+    textual do MESMO tipo qualificada como ``current_request``. Item
+    estruturado isolado, histórico, negação ou menção não autorizam supressão;
+    dois especializados (Eco + CPRE) mantêm o conjunto bruto e falham fechado
+    na matriz (R2). Retorna o conjunto reconciliado, o tipo especializado
+    selecionado e os convencionais suprimidos — vazios quando não houve
+    redução. Nenhum vínculo local ``com/e`` é exigido (ADR-0008).
     """
-    if not occurrences:
-        return any_set
-    if len(any_set) != 2 or ProcedureType.EDA not in any_set:
-        return any_set
-    for occurrence in occurrences:
-        if not getattr(occurrence, "linked_eda", False):
-            continue
-        if str(getattr(occurrence, "qualification", "")) != "current_request":
-            continue
-        specialized = str(getattr(occurrence, "procedure_type", ""))
-        if specialized in _LINKED_COLLAPSIBLE_SPECIALIZED and any_set == {ProcedureType.EDA, specialized}:
-            return {specialized}
-    return any_set
+    specialized = any_set & _SPECIALIZED_PROCEDURE_TYPES
+    if len(specialized) != 1:
+        return any_set, "", ()
+    selected = str(next(iter(specialized)))
+    if selected not in _current_request_occurrence_types(occurrences):
+        return any_set, "", ()
+    suppressed = tuple(
+        sorted(
+            (str(procedure_type) for procedure_type in any_set & _CONVENTIONAL_PROCEDURE_TYPES),
+            key=PROCEDURE_ORDER.__getitem__,
+        )
+    )
+    if not suppressed:
+        return any_set, "", ()
+    return {selected}, selected, suppressed
 
 
 @dataclass(frozen=True)
 class ProcedureReconciliationResult:
-    """Desfecho da matriz D7 para um caso."""
+    """Desfecho da matriz D7 para um caso.
+
+    ``precedence_applied``/``selected_specialized_type``/
+    ``suppressed_conventional_types`` carregam a precedência especializada
+    efetivamente aplicada (D3); são vazios quando não houve supressão.
+    """
 
     action: str  # "proceed" | "auto_upgrade" | "nir_review"
     detected_procedure_types: tuple[str, ...]
     reason_code: str
     reason_text: str
     upgraded: bool = False
+    precedence_applied: bool = False
+    selected_specialized_type: str = ""
+    suppressed_conventional_types: tuple[str, ...] = ()
 
 
-def _proceed(detected: tuple[str, ...]) -> ProcedureReconciliationResult:
+def _proceed(
+    detected: tuple[str, ...],
+    *,
+    selected_specialized_type: str = "",
+    suppressed_conventional_types: tuple[str, ...] = (),
+) -> ProcedureReconciliationResult:
     return ProcedureReconciliationResult(
         action="proceed",
         detected_procedure_types=detected,
         reason_code="",
         reason_text="",
+        precedence_applied=bool(selected_specialized_type and suppressed_conventional_types),
+        selected_specialized_type=selected_specialized_type,
+        suppressed_conventional_types=suppressed_conventional_types,
     )
 
 
@@ -123,12 +163,22 @@ def _auto_upgrade(detected: tuple[str, ...]) -> ProcedureReconciliationResult:
     )
 
 
-def _nir_review(*, reason_code: str, reason_text: str, detected: tuple[str, ...]) -> ProcedureReconciliationResult:
+def _nir_review(
+    *,
+    reason_code: str,
+    reason_text: str,
+    detected: tuple[str, ...],
+    selected_specialized_type: str = "",
+    suppressed_conventional_types: tuple[str, ...] = (),
+) -> ProcedureReconciliationResult:
     return ProcedureReconciliationResult(
         action="nir_review",
         detected_procedure_types=detected,
         reason_code=reason_code,
         reason_text=reason_text,
+        precedence_applied=bool(selected_specialized_type and suppressed_conventional_types),
+        selected_specialized_type=selected_specialized_type,
+        suppressed_conventional_types=suppressed_conventional_types,
     )
 
 
@@ -145,11 +195,12 @@ def reconcile_detected_procedures(
         declared: conjunto declarado pelo NIR (ordem canônica aplicada).
         strong: procedimentos com evidência forte de solicitação atual.
         any_evidence: procedimentos com qualquer evidência de solicitação atual.
-        occurrences: ocorrências qualificadas (``scope_detection``) que
-            carregam o vínculo ``com/e EDA``; sem elas não há colapso (D3).
+        occurrences: ocorrências qualificadas (``scope_detection``) que provam a
+            atualidade textual do especializado; sem ocorrência ``current_request``
+            do próprio tipo não há supressão de convencionais (D1/ADR-0008).
 
     Returns:
-        ``proceed`` (conjunto detectado = declarado), ``auto_upgrade``
+        ``proceed`` (conjunto reconciliado = declarado), ``auto_upgrade``
         (declarado único EDA/Colon + ambos detectados com evidência forte do
         segundo) ou ``nir_review`` (tipo desconhecido, combinação não
         suportada, combined→single, mismatch único ou evidência insuficiente).
@@ -185,19 +236,27 @@ def reconcile_detected_procedures(
             detected=_ordered(any_set),
         )
 
-    # D3 — precedência por ocorrência: ``EDA com/e Ecoendoscopia`` é UMA
-    # solicitação do especializado. O colapso acontece ANTES da validação da
-    # matriz do lado detectado, mas DEPOIS da validação de catálogo/duplicatas
-    # (R3). Só colapsa com proveniência vinculada no mesmo contexto; duas
-    # solicitações independentes seguem como combinação não suportada e vão
-    # ao NIR.
-    any_set = _collapse_linked_specialized(any_set=any_set, occurrences=occurrences)
+    # D1/ADR-0008 — precedência do especializado único: um tipo especializado
+    # com ocorrência textual ATUAL do MESMO tipo suprime EDA/Colonoscopia,
+    # inclusive em trechos independentes. A redução acontece ANTES da validação
+    # da matriz do lado detectado, mas DEPOIS da validação de
+    # catálogo/duplicatas (R3); dois especializados ou ausência de ocorrência
+    # atual mantêm o conjunto bruto e falham fechado na matriz.
+    any_set, selected_specialized_type, suppressed_conventional_types = _apply_specialized_precedence(
+        any_set=any_set,
+        occurrences=occurrences,
+    )
+    precedence_kwargs: dict[str, Any] = {
+        "selected_specialized_type": selected_specialized_type,
+        "suppressed_conventional_types": suppressed_conventional_types,
+    }
 
     if any_set and frozenset(any_set) not in ALLOWED_PROCEDURE_SETS:
         return _nir_review(
             reason_code="unsupported_procedure_combination",
             reason_text="Combinação de procedimentos não suportada; revisão manual obrigatória.",
             detected=_ordered(any_set),
+            **precedence_kwargs,
         )
 
     if not any_set:
@@ -205,11 +264,12 @@ def reconcile_detected_procedures(
             reason_code="unknown_exam_type",
             reason_text="Nenhum procedimento suportado detectado na solicitação atual; revisão manual obrigatória.",
             detected=(),
+            **precedence_kwargs,
         )
 
     if any_set == declared_set:
         # EDA | Colon | Eco | CPRE | Ambos | Ambos → prossegue.
-        return _proceed(_ordered(any_set))
+        return _proceed(_ordered(any_set), **precedence_kwargs)
 
     if declared_set == PAIRED_APPOINTMENT_SET and len(any_set) == 1:
         # Combinado declarado, somente um detectado → revisão NIR.
@@ -220,14 +280,15 @@ def reconcile_detected_procedures(
                 "detectado na solicitação atual; revisão manual obrigatória."
             ),
             detected=_ordered(any_set),
+            **precedence_kwargs,
         )
 
     if len(declared_set) == 1 and len(any_set) == 2:
         # Declarado único, ambos detectados → upgrade automático SOMENTE para o
         # par EDA+Colonoscopia com evidência forte do segundo procedimento.
-        # Qualquer conjunto contendo especializado retorna ao NIR (D3: a
-        # precedência ``EDA com/e Eco/CPRE`` exige proveniência por ocorrência
-        # e é implementada no slice vertical de Ecoendoscopia).
+        # Qualquer conjunto contendo especializado retorna ao NIR: a precedência
+        # do especializado único (acima) já removeu os convencionais quando
+        # havia ocorrência atual, e a declaração NIR nunca é sobrescrita (D2).
         if any_set == PAIRED_APPOINTMENT_SET and (any_set - declared_set).issubset(strong_set):
             return _auto_upgrade(_ordered(any_set))
         return _nir_review(
@@ -237,6 +298,7 @@ def reconcile_detected_procedures(
                 "possui evidência forte; revisão manual obrigatória."
             ),
             detected=_ordered(any_set),
+            **precedence_kwargs,
         )
 
     if len(declared_set) == 1 and len(any_set) == 1 and any_set != declared_set:
@@ -247,6 +309,7 @@ def reconcile_detected_procedures(
                 "Tipo de procedimento declarado difere do detectado na solicitação atual; revisão manual obrigatória."
             ),
             detected=_ordered(any_set),
+            **precedence_kwargs,
         )
 
     # Fallback conservador: qualquer outra divergência retorna ao NIR.
@@ -254,7 +317,25 @@ def reconcile_detected_procedures(
         reason_code="exam_type_mismatch",
         reason_text="Conjunto detectado diverge do declarado; revisão manual obrigatória.",
         detected=_ordered(any_set),
+        **precedence_kwargs,
     )
+
+
+def serialize_procedure_precedence(reconciliation: ProcedureReconciliationResult) -> dict[str, object] | None:
+    """Metadados enxutos de precedência para evento e sugestão (D3).
+
+    Retorna ``None`` quando a regra não foi aplicada (singleton especializado
+    normal, conflito fail-closed, legado), evitando confundir correção
+    determinística com operação normal. Nunca carrega excerpt ou texto
+    clínico: apenas regra, tipo selecionado e tipos suprimidos.
+    """
+    if not reconciliation.precedence_applied:
+        return None
+    return {
+        "rule": PROCEDURE_PRECEDENCE_RULE,
+        "selected": reconciliation.selected_specialized_type,
+        "suppressed": list(reconciliation.suppressed_conventional_types),
+    }
 
 
 def _project_review_evidence_spans(evidence_spans: list[dict[str, str]]) -> list[dict[str, str]]:
