@@ -17,7 +17,7 @@ Resumo executivo para retomada rapida apos pausas e para onboarding de novos con
 - **Change arquivado:** `openspec/archive/align-followup-causes-with-suspension-form/`.
 - **Branch de implementação:** `feature/align-followup-causes-with-suspension-form`.
 - **Risco:** CRÍTICO / HIGH-ARCH; ADR-0009 aceita e supera parcialmente a descrição de causas da ADR-0007, preservando sua decisão de cobertura por procedimentos autorizados.
-- **Estado:** Slices 001–002 implementados, aceitos por review independente, arquivados com duas specs canônicas promovidas e gate global verde (**3835 testes**); prerelease `v0.9.0-rc.2` em preparação, sem deploy.
+- **Estado:** Slices 001–002 implementados, aceitos por review independente, arquivados com duas specs canônicas promovidas e gate global verde (**3835 testes**); `v0.9.0-rc.2` validada e promoção estável `v0.9.0` em preparação, sem deploy.
 - **Comportamento:** novas gravações aceitam somente as 23 causas oficiais + **Outras causas**, em select compacto e sem submotivo; códigos legados permanecem legíveis, mas não graváveis. Histórico, cards, filtro e CSV projetam exatamente quatro pares legados confirmados para causas oficiais sem reescrever rows/eventos; combinações desconhecidas caem em `legacy_unmapped` e bloqueiam o preflight.
 - **Migration:** `cases.0020` altera somente metadata de choices e foi validada em `0019 → 0020 → 0019 → 0020` sem mudança de dados.
 
@@ -201,7 +201,7 @@ static/          # css/app.css (paleta hospitalar), js/upload.js, js/password-to
 
 ## State do Sistema
 
-- **Fase atual:** preparação da prerelease `v0.9.0-rc.2`; change CRÍTICO `align-followup-causes-with-suspension-form` implementado, aceito, arquivado e com specs canônicas promovidas; deploy/staging pendentes.
+- **Fase atual:** promoção estável `v0.9.0` a partir da candidata validada `v0.9.0-rc.2`; change CRÍTICO `align-followup-causes-with-suspension-form` implementado, aceito, arquivado e com specs canônicas promovidas; upgrade de produção pendente.
 - **Change concluído:** `openspec/archive/align-followup-causes-with-suspension-form/`; taxonomia oficial de follow-up e projeção histórica implementadas, ainda sem deploy.
 - **Release anterior:** `v0.9.0-rc.1`, com `prioritize-specialized-procedure-requests` arquivado e publicado como candidata.
 - **Change concluído:** `openspec/archive/prioritize-specialized-procedure-requests/`; comportamento-alvo implementado e ainda não deployado.
