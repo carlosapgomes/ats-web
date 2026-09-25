@@ -99,13 +99,37 @@ O médico SHALL poder substituir procedimentos e aprovar o destino sem reanális
 
 ### Requirement: Pacotes SHALL permanecer indivisíveis em todas as dimensões
 
-EDA + GTT, EDA + Cápsula, EDA + Dilatação, Retossigmoidoscopia + Dilatação e Retossigmoidoscopia + Argônio SHALL permanecer uma única identidade em declaração, detecção, policy, recomendação, autorização, histórico, fila, follow-up e analytics. Os termos GTT, cápsula, dilatação e argônio SHALL NOT gerar um segundo componente, e abreviações operacionais não aprovadas MUST NOT ser inventadas.
+EDA + GTT, EDA + Cápsula, EDA + Dilatação, Retossigmoidoscopia + Dilatação e Retossigmoidoscopia + Argônio SHALL permanecer uma única identidade em declaração, detecção, policy, recomendação, autorização, histórico, fila, follow-up e analytics. Os termos GTT, cápsula, dilatação e argônio SHALL NOT gerar um segundo componente, e abreviações operacionais não aprovadas MUST NOT ser inventadas. `GTT`/`gastrostomia` e `cápsula` são marcadores autoevidentes da família EDA e detectam o pacote por ocorrência atual mesmo isolada; `dilatação` e `argônio` exigem vínculo local com a base. Exatamente uma variação atual suprime a base detectada em qualquer trecho (mesma expressão ou independente), no mesmo regime de proveniência da precedência especializada; o item estruturado sem ocorrência textual atual não autoriza supressão.
 
 #### Scenario: EDA com GTT atual
 
 - **WHEN** uma solicitação atual sustentada pede EDA com GTT
 - **THEN** o conjunto reconciliado é `{eda_gastrostomy}`
 - **AND** `{eda, eda_gastrostomy}` não é persistido.
+
+#### Scenario: Cabeçalho EDA e GTT solicitada em outro trecho
+
+- **GIVEN** o NIR declarou `eda_gastrostomy`
+- **AND** o relatório contém cabeçalho administrativo ou solicitação atual de EDA em um trecho
+- **AND** outro trecho contém solicitação atual de GTT
+- **WHEN** a reconciliação executa
+- **THEN** o conjunto detectado reconciliado é `{eda_gastrostomy}`
+- **AND** o caso não retorna ao NIR por combinação incompatível
+- **AND** a supressão da base fica registrada como metadado auditável.
+
+#### Scenario: Marcador autoevidente sem base no documento
+
+- **WHEN** a solicitação atual sustentada contém somente GTT (ou somente cápsula endoscópica), sem menção a EDA
+- **THEN** o conjunto detectado é `{eda_gastrostomy}` (ou `{eda_capsule}`)
+- **AND** nenhuma row EDA base é criada.
+
+#### Scenario: Item estruturado sem ocorrência atual não autoriza supressão
+
+- **GIVEN** `requested_procedures` contém `eda_dilation` junto de EDA
+- **AND** dilatação aparece no texto somente como histórico, negação ou mera menção
+- **WHEN** detecção e reconciliação executam
+- **THEN** a variação não suprime a EDA base
+- **AND** o conjunto permanece incompatível e segue à revisão NIR.
 
 #### Scenario: Retossigmoidoscopia com dilatação atual
 
@@ -121,13 +145,21 @@ EDA + GTT, EDA + Cápsula, EDA + Dilatação, Retossigmoidoscopia + Dilatação 
 
 ### Requirement: Famílias SHALL reutilizar profiles sem compartilhar identidade
 
-`eda_gastrostomy`, `eda_capsule` e `eda_dilation` SHALL aplicar o profile pré-operatório de EDA. `rectosigmoidoscopy`, `rectosigmoidoscopy_dilation` e `rectosigmoidoscopy_argon` SHALL aplicar o profile pré-operatório de Colonoscopia. Reutilizar profile MUST NOT fazer uma identidade contar como histórico, filtro ou volume de outra.
+`eda_gastrostomy`, `eda_capsule` e `eda_dilation` SHALL aplicar o profile pré-operatório de EDA. `rectosigmoidoscopy`, `rectosigmoidoscopy_dilation` e `rectosigmoidoscopy_argon` SHALL aplicar o profile pré-operatório de Colonoscopia. Reutilizar profile MUST NOT fazer uma identidade contar como histórico, filtro ou volume de outra. Textos determinísticos persistidos pela policy (pendências e critérios atendidos) SHALL usar a label canônica da identidade; o profile da família contribui somente as regras clínicas.
 
 #### Scenario: Retossigmoidoscopia sem requisito da Colonoscopia
 
 - **WHEN** uma Retossigmoidoscopia não atende a requisito determinístico do profile de Colonoscopia
 - **THEN** a policy produz a mesma pendência aplicável
-- **AND** a recomendação continua identificada como Retossigmoidoscopia.
+- **AND** a recomendação continua identificada como Retossigmoidoscopia
+- **AND** o texto persistido da pendência menciona Retossigmoidoscopia, não Colonoscopia.
+
+#### Scenario: Pendência de pacote usa label do pacote
+
+- **GIVEN** `eda_gastrostomy` não atende a um requisito do profile de EDA
+- **WHEN** a policy executa
+- **THEN** o texto persistido da pendência usa a label de EDA + Gastrostomia (GTT)
+- **AND** a regra aplicada permanece exatamente a do profile de EDA.
 
 #### Scenario: EDA + Cápsula satisfaz profile EDA
 

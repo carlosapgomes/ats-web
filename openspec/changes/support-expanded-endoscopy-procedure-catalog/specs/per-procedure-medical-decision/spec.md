@@ -25,13 +25,6 @@ O médico MUST poder aprovar ou negar qualquer identidade atômica do catálogo,
 - **THEN** somente EDA compõe o conjunto autorizado
 - **AND** a negativa fica auditada na row própria.
 
-#### Scenario: Aprovação parcial de EDA + Colonoscopia
-
-- **GIVEN** EDA e Colonoscopia foram detectadas
-- **WHEN** o médico aprova EDA e nega Colonoscopia com motivo
-- **THEN** somente EDA compõe o conjunto autorizado
-- **AND** a negativa de Colonoscopia fica auditada na row própria.
-
 #### Scenario: Negativa integral
 
 - **GIVEN** um singleton ou EDA + Colonoscopia foi detectado
@@ -102,13 +95,7 @@ Backend MUST rejeitar decisão incompleta ou contraditória sem persistência pa
 - **GIVEN** o médico troca para uma nova identidade e preenche as razões
 - **WHEN** seleciona agendamento, vinda imediata, UTI ou pediátrico atualmente suportado
 - **THEN** o submit aceita o fluxo segundo as regras operacionais existentes
-- **AND** nenhuma restrição nova de sala é aplicada.
-
-#### Scenario: Troca válida usa fluxo existente
-
-- **GIVEN** o médico troca para uma nova identidade e preenche as razões
-- **WHEN** seleciona um fluxo atualmente suportado
-- **THEN** o submit aceita o fluxo sem executar policy do destino.
+- **AND** nenhuma restrição nova de sala é aplicada e nenhuma policy do destino é executada.
 
 #### Scenario: Componente negado sem motivo
 

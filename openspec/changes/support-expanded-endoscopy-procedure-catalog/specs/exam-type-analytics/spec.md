@@ -55,6 +55,7 @@ Gestor MUST escolher `solicitado`, `detectado` ou `autorizado` e ver categorias 
 - **GIVEN** dados inconsistentes contêm variação junto de Colonoscopia
 - **WHEN** o resumo é calculado
 - **THEN** o caso não é silenciosamente contado como uma categoria válida
+- **AND** é projetado sob a inconsistência explícita (`invalid`), nunca omitido
 - **AND** a inconsistência permanece detectável.
 
 ### Requirement: Tabela gerencial compõe filtro de tipo

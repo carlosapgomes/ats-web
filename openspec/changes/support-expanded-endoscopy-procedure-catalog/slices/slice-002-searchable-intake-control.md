@@ -15,7 +15,7 @@ Substituir os radios de procedimento do upload atual por combobox acessível e p
 
 ## Requisitos verificáveis
 
-- **R1:** upload SSR renderiza `<select name="exam_type">` sem opção real pré-selecionada e com exatamente as opções atualmente permitidas pelas flags.
+- **R1:** upload SSR renderiza `<select name="exam_type">` sem opção real pré-selecionada e com exatamente as opções atualmente permitidas pelas flags, fornecidas pelo helper de jornada de `apps/intake/services.py` (lista ordenada explícita composta com o catálogo).
 - **R2:** JS aprimora o select em combobox/listbox com ARIA, foco visível e teclado Arrow/Home/End/Enter/Escape/Tab; o select permanece o valor submetido.
 - **R3:** busca ignora caixa/acentos, encontra labels/aliases aprovados e nunca cria valor livre.
 - **R4:** sem JS, upload continua funcional; re-render inválido preserva seleção; `upload.js` habilita submit pela mudança do select.
@@ -31,6 +31,7 @@ expected_files:
   - static/js/upload.js
   - static/css/app.css
   - apps/intake/views.py
+  - apps/intake/services.py
   - apps/intake/tests/test_searchable_procedure_upload.py
   - static/js/tests/procedure_combobox.test.js
 allowed_incidental_files:
@@ -49,7 +50,7 @@ Novo vocabulário CSS exige `static/css/app.css` neste slice. Se o componente pr
 | Requisito | Arquivo(s) esperado(s) | Teste/check |
 | --- | --- | --- |
 | R1, R4–R6 | template/view/upload JS | `test_searchable_procedure_upload.py` |
-| R2–R3 | `procedure_combobox.js`, CSS | `node --test static/js/tests/procedure_combobox.test.js` |
+| R2–R3 | `procedure_combobox.js`, CSS | `node --test static/js/tests/procedure_combobox.test.js` (complementar; cobertura canônica é Django-side) |
 | R5 | view/service | POSTs manipulados no teste Django |
 
 ## RED

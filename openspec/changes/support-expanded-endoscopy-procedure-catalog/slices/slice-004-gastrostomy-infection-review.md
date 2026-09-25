@@ -10,7 +10,7 @@ Entregar EDA + GTT como pacote atômico do upload ao médico e exibir painel anc
 - `specs/gastrostomy-infection-review/spec.md` completo;
 - requisitos GTT nas specs de catálogo/intake/análise/decisão;
 - implementação 4.0 e padrão de ancoragem de imagem/dilatação;
-- `apps/pipeline/orchestrator.py`, `projections.py`, schemas 4.0;
+- `apps/pipeline/orchestrator.py`, `apps/pipeline/prior_case.py`, schemas 4.0;
 - `apps/cases/exam_profiles.py`, `priority_signals.py`;
 - `apps/doctor/presenters.py`, `templates/doctor/decision.html`.
 
@@ -29,9 +29,9 @@ Entregar EDA + GTT como pacote atômico do upload ao médico e exibir painel anc
 ```yaml
 expected_files:
   - apps/intake/views.py
+  - apps/intake/services.py
   - apps/pipeline/scope_detection.py
   - apps/pipeline/procedure_reconciliation.py
-  - apps/pipeline/schemas/llm1_v4.py
   - apps/pipeline/infection_review.py
   - apps/pipeline/orchestrator.py
   - apps/cases/exam_profiles.py
@@ -42,6 +42,7 @@ expected_files:
   - apps/pipeline/tests/test_gastrostomy_infection_review.py
   - apps/doctor/tests/test_gastrostomy_infection_panel.py
 allowed_incidental_files:
+  - apps/pipeline/schemas/llm1_v4.py (apenas ajuste mínimo de validator já entregue no Slice 001)
   - CSS existente para alerta/painel, somente se nenhuma classe Bootstrap suficiente atender
   - fixtures/helpers de teste
 out_of_scope:
@@ -49,6 +50,7 @@ out_of_scope:
   - hard rule/failed requirement de infecção
   - anexos como fonte
   - notificações, nova pendência, FSM ou campo persistente
+  - submit da decisão médica da nova identidade (deliberadamente postergado ao Slice 006; a branch só é implantável completa)
 ```
 
 Se qualquer implementação propuser threshold, inferir unidade, consultar anexo ou passar o DTO ao motor de policy como requisito, parar e escalar.

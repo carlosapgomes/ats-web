@@ -102,7 +102,7 @@ Processados Hoje MUST exibir o snapshot autorizado/agendado e permitir filtro po
 
 ### Requirement: Histórico CHD combina tipo e busca
 
-A busca histórica MUST aceitar `all`, cada código atômico e `eda_colonoscopy`, usar dimensão autorizada e manter limite/ordering atuais. O backend SHALL rejeitar filtros desconhecidos em vez de reclassificá-los.
+A busca histórica MUST aceitar `all`, cada código atômico e `eda_colonoscopy`, usar dimensão autorizada e manter limite/ordering atuais. O backend SHALL rejeitar filtros desconhecidos em vez de reclassificá-los — rejeição intencional e deliberadamente distinta do fallback para `all` mantido nos filtros NIR, que permanece inalterado.
 
 #### Scenario: CPRE sem termo
 

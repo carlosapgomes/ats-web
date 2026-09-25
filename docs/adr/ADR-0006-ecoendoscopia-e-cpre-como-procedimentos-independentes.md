@@ -2,7 +2,7 @@
 
 ## Status
 
-Accepted — cláusula de cobertura de follow-up (D13) parcialmente superada pela ADR-0007; precedência restrita a expressões `EDA com/e especializado` parcialmente superada pela ADR-0008
+Accepted — cláusula de cobertura de follow-up (D13) parcialmente superada pela ADR-0007; precedência restrita a expressões `EDA com/e especializado` parcialmente superada pela ADR-0008; catálogo de quatro tipos e contrato gravável 3.0 parcialmente superados pela ADR-0010
 
 **Aceita em:** 2026-09-12
 
@@ -202,3 +202,4 @@ Rollback operacional preferencial: desligar ambas as flags, preservar a imagem/s
 - 2026-09-12: ADR criada e aceita para o change `support-independent-echoendoscopy-cpre-workflows`.
 - 2026-09-12: Cláusula de D13 sobre follow-up ("sem mudar o modelo ou a semântica de desfecho" na cobertura) parcialmente superada pela ADR-0007 (cobertura restrita a rows autorizadas). O restante do D13 (filtros/analytics orientados ao catálogo) permanece vigente.
 - 2026-09-18: Regra de precedência em D4, antes restrita a expressões locais `EDA com/e Ecoendoscopia/CPRE`, parcialmente superada pela ADR-0008: exatamente um especializado com ocorrência textual `current_request` predomina sobre EDA/Colonoscopia também em trechos independentes; item estruturado isolado não autoriza supressão, e mismatch NIR/conflito Ecoendoscopia+CPRE permanecem fail-closed.
+- 2026-09-25: decisões 1–2 (catálogo fechado em quatro tipos) e 4 (contrato gravável 3.0) parcialmente superadas pela ADR-0010 (dez identidades atômicas e schema 4.0); precedência especializada, flags independentes de intake, matriz fail-closed e rollback fix-forward permanecem.

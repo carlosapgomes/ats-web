@@ -9,7 +9,7 @@ Permitir ao médico aprovar/negar qualquer identidade, incluir ou substituir por
 - `design.md`: D2, D9–D11;
 - specs `per-procedure-medical-decision`, `searchable-procedure-selection` e matriz do catálogo;
 - `apps/doctor/forms.py`, `views.py`, `presenters.py`, `templates/doctor/decision.html`;
-- `apps/pipeline/projections.py` e `apps/pipeline/tests/test_prior_case.py`;
+- `apps/pipeline/prior_case.py` e `apps/pipeline/tests/test_prior_case.py`;
 - `apps/cases/procedures.py` e serviço transacional de decisões;
 - testes `test_specialized_procedure_swap.py`, `test_slice_003_procedure_decision.py` e lock/FSM.
 
@@ -31,7 +31,7 @@ expected_files:
   - apps/doctor/views.py
   - apps/doctor/presenters.py
   - templates/doctor/decision.html
-  - apps/pipeline/projections.py
+  - apps/pipeline/prior_case.py
   - apps/cases/procedures.py
   - static/js/procedure_combobox.js
   - apps/doctor/tests/test_expanded_procedure_decision.py
@@ -53,7 +53,7 @@ Se a implementação precisar rerun, nova ação FSM, evento novo ou equivalênc
 | Requisito | Arquivo(s) esperado(s) | Teste/check |
 | --- | --- | --- |
 | R1–R4 | form/view/service/template | `test_expanded_procedure_decision.py` |
-| R2 | combobox/template | teste JS + teste HTML/POST |
+| R2 | combobox/template | teste HTML/POST (canônico) + teste JS complementar |
 | R5 | projections/presenter | `test_exact_procedure_history.py` |
 | R6–R7 | view/presenter | spies de no-rerun + regressões lock/FSM |
 

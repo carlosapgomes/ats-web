@@ -2,7 +2,7 @@
 
 ## Status
 
-Accepted — parcialmente superada pela [ADR-0006](ADR-0006-ecoendoscopia-e-cpre-como-procedimentos-independentes.md) nas decisões que limitavam os tipos e o contrato gravável a EDA/Colonoscopia e mantinham CPRE fora de escopo.
+Accepted — parcialmente superada pela [ADR-0006](ADR-0006-ecoendoscopia-e-cpre-como-procedimentos-independentes.md) nas decisões que limitavam os tipos e o contrato gravável a EDA/Colonoscopia e mantinham CPRE fora de escopo, e pela [ADR-0010](ADR-0010-catalogo-ampliado-e-pacotes-atomicos-de-procedimentos-endoscopicos.md) nas decisões que limitavam o catálogo a quatro tipos e o contrato gravável ao schema 3.0.
 
 **Aceita em:** 2026-08-06
 
@@ -119,3 +119,4 @@ Permanecem válidas as decisões 4 (profiles/policy com exceções explícitas),
 
 - 2026-08-06: ADR criada, revisada e aceita como pré-condição do Slice 001 do change `support-combined-eda-colonoscopy-workflow`.
 - 2026-09-12: parcialmente superada pela ADR-0006 quanto ao catálogo limitado a EDA/Colonoscopia, ao contrato gravável 2.0 e à exclusão de CPRE; os invariantes de `CaseProcedure`, três dimensões e combinação EDA + Colonoscopia permanecem.
+- 2026-09-25: parcialmente superada pela ADR-0010 quanto ao catálogo de quatro tipos e ao contrato gravável 3.0 (agora dez identidades atômicas e schema 4.0); os invariantes de `CaseProcedure`, três dimensões e combinação EDA + Colonoscopia permanecem válidos.

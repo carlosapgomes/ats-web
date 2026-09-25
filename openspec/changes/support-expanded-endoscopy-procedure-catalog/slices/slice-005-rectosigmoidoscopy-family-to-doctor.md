@@ -27,6 +27,7 @@ Entregar Retossigmoidoscopia, Retossigmoidoscopia + Dilatação e Retossigmoidos
 ```yaml
 expected_files:
   - apps/intake/views.py
+  - apps/intake/services.py
   - apps/cases/exam_profiles.py
   - apps/pipeline/scope_detection.py
   - apps/pipeline/procedure_reconciliation.py
@@ -43,6 +44,7 @@ out_of_scope:
   - detalhe anatômico novo para Retossigmoidoscopia + Dilatação
   - regra clínica adicional de argônio/dilatação
   - troca médica, filas e analytics
+  - submit da decisão médica das novas identidades (deliberadamente postergado ao Slice 006; a branch só é implantável completa)
 ```
 
 Não inventar siglas/aliases. Se surgir requisito clínico diferente de Colonoscopia ou persistência de detalhe adicional, parar e escalar.

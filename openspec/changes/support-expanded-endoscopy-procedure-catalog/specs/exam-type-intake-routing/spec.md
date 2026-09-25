@@ -101,7 +101,7 @@ Interfaces MUST formar labels a partir do conjunto da dimensão relevante e SHAL
 
 ### Requirement: Intake SHALL reconhecer pacotes somente como solicitações atuais sustentadas
 
-O detector SHALL reconhecer nomes canônicos e somente os aliases aprovados `GTT`, `cápsula` e `dilatação` quando ligados localmente à família correta em uma solicitação atual. Histórico, negação, procedimento realizado, mera menção e achado anatômico SHALL NOT criar uma nova identidade. O sistema MUST NOT inventar abreviações operacionais adicionais.
+O detector SHALL reconhecer nomes canônicos e somente os aliases aprovados `GTT`, `cápsula` e `dilatação` em solicitações atuais, em dois regimes: `GTT`/`gastrostomia` e `cápsula` são marcadores autoevidentes da família EDA e detectam o pacote por ocorrência atual mesmo isolada em trecho próprio; `dilatação` e `argônio`/`plasma de argônio` são ambíguos e exigem vínculo local (mesma expressão) com EDA ou Retossigmoidoscopia solicitada. Histórico, negação, procedimento realizado, mera menção e achado anatômico SHALL NOT criar uma nova identidade. O sistema MUST NOT inventar abreviações operacionais adicionais.
 
 #### Scenario: Dilatação ligada à EDA
 
@@ -123,6 +123,24 @@ O detector SHALL reconhecer nomes canônicos e somente os aliases aprovados `GTT
 
 - **WHEN** a palavra dilatação aparece sem vínculo local inequívoco com EDA ou Retossigmoidoscopia solicitada
 - **THEN** nenhuma variação é inferida
+- **AND** a ambiguidade não é resolvida por proximidade global no documento.
+
+#### Scenario: GTT solicitada isoladamente
+
+- **WHEN** o texto contém solicitação atual de GTT sem menção a EDA
+- **THEN** `eda_gastrostomy` é candidata à detecção
+- **AND** nenhuma row EDA base é criada.
+
+#### Scenario: Cápsula solicitada isoladamente
+
+- **WHEN** o texto contém solicitação atual de cápsula endoscópica sem menção a EDA
+- **THEN** `eda_capsule` é candidata à detecção
+- **AND** nenhuma row EDA base é criada.
+
+#### Scenario: Argônio sem vínculo com Retossigmoidoscopia
+
+- **WHEN** plasma de argônio aparece em solicitação atual sem vínculo local com Retossigmoidoscopia
+- **THEN** `rectosigmoidoscopy_argon` não é inferida
 - **AND** a ambiguidade não é resolvida por proximidade global no documento.
 
 ### Requirement: Retossigmoidoscopia SHALL ser distinta de Colonoscopia

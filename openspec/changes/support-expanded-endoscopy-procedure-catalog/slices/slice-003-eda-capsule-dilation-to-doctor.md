@@ -9,7 +9,7 @@ Entregar EDA + Cápsula e EDA + Dilatação como pacotes atômicos do upload NIR
 - `design.md`: D2–D6, D10 e D13;
 - specs `procedure-combination-policy`, `exam-type-intake-routing`, `procedure-neutral-analysis` e `per-procedure-medical-decision`;
 - catálogo/schema 4.0 entregues no Slice 001 e combobox do Slice 002;
-- `apps/pipeline/scope_detection.py`, `procedure_reconciliation.py`, `orchestrator.py`, `projections.py`;
+- `apps/pipeline/scope_detection.py`, `procedure_reconciliation.py`, `orchestrator.py`, `prior_case.py`;
 - `apps/cases/exam_profiles.py`, `priority_signals.py`;
 - `apps/doctor/presenters.py`, `templates/doctor/decision.html`;
 - testes de scope/reconciliation/policy/presenter existentes.
@@ -21,13 +21,14 @@ Entregar EDA + Cápsula e EDA + Dilatação como pacotes atômicos do upload NIR
 - **R3:** duas variações atuais ou variação + Colonoscopia seguem fail-closed à revisão NIR; nenhum valor é descartado.
 - **R4:** ambas usam o profile EDA, mas recommendation/history/eventos mantêm o código exato; não emitem sinais legados equivalentes em writes 4.0.
 - **R5:** `eda_dilation` extrai/ancora `esophagus|pylorus|duodenum|anastomosis|jejunum|other|unknown`; local ausente/inventado resulta `unknown` e nunca muda policy.
-- **R6:** relatório médico mostra uma seção por pacote e o local traduzido apenas para EDA + Dilatação; EDA + Colonoscopia continua com duas rows.
+- **R6:** relatório médico mostra uma seção por pacote e o local traduzido apenas para EDA + Dilatação; EDA + Colonoscopia continua com duas rows. Badges das novas identidades usam o agrupamento CSS por família (edição única em `app.css` cobrindo os dez códigos de uma vez, sem cores por variação — os Slices 004/005 não voltam a tocar CSS).
 
 ## Escopo e expected blast radius
 
 ```yaml
 expected_files:
   - apps/intake/views.py
+  - apps/intake/services.py
   - apps/pipeline/scope_detection.py
   - apps/pipeline/procedure_reconciliation.py
   - apps/pipeline/orchestrator.py
@@ -35,6 +36,7 @@ expected_files:
   - apps/cases/priority_signals.py
   - apps/doctor/presenters.py
   - templates/doctor/decision.html
+  - static/css/app.css
   - apps/intake/tests/test_eda_package_intake.py
   - apps/pipeline/tests/test_eda_package_pipeline_v4.py
   - apps/doctor/tests/test_eda_package_report.py
@@ -45,9 +47,10 @@ out_of_scope:
   - EDA + GTT e revisão infecciosa
   - Retossigmoidoscopia
   - troca médica/correção NIR/filas/analytics
+  - submit da decisão médica das novas identidades (deliberadamente postergado ao Slice 006; a branch só é implantável completa)
 ```
 
-Cap esperado: até 13 arquivos pela travessia intake → pipeline → médico. Se for necessária coluna nova, threshold, alias não aprovado ou mudança de FSM, parar e escalar.
+Cap esperado: até 15 arquivos pela travessia intake → pipeline → médico (inclui o agrupamento CSS por família). Se for necessária coluna nova, threshold, alias não aprovado ou mudança de FSM, parar e escalar.
 
 ## Matriz requisito → arquivo → teste/check
 

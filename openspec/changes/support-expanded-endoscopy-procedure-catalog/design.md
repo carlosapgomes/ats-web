@@ -58,7 +58,20 @@ class ProcedureDefinition:
     search_aliases: tuple[str, ...] = ()
     detail_kind: Literal["none", "dilation_site", "infection_review"] = "none"
 
-PROCEDURE_CATALOG: tuple[ProcedureDefinition, ...] = (...dez entradas...)
+PROCEDURE_CATALOG: tuple[ProcedureDefinition, ...] = (
+    # Ordem canônica única (a mesma do proposal): EDA e pacotes, depois
+    # Colonoscopia e Retossigmoidoscopias, depois especializados.
+    ProcedureDefinition(code="eda", ...),
+    ProcedureDefinition(code="eda_gastrostomy", ...),
+    ProcedureDefinition(code="eda_capsule", ...),
+    ProcedureDefinition(code="eda_dilation", ...),
+    ProcedureDefinition(code="colonoscopy", ...),
+    ProcedureDefinition(code="rectosigmoidoscopy", ...),
+    ProcedureDefinition(code="rectosigmoidoscopy_dilation", ...),
+    ProcedureDefinition(code="rectosigmoidoscopy_argon", ...),
+    ProcedureDefinition(code="echoendoscopy", ...),
+    ProcedureDefinition(code="cpre", ...),
+)
 ```
 
 Mapas/tuplas públicos (`SUPPORTED_PROCEDURE_TYPES`, ordem, labels, escolhas de UI) serão derivados desse registro. `ALLOWED_PROCEDURE_SETS` será `{singleton por código} ∪ {{eda, colonoscopy}}`; `SELECTIONS` adicionará `eda_colonoscopy` como chave derivada. O catálogo não conterá flags de rollout.
@@ -79,23 +92,25 @@ Retossigmoidoscopia + Argônio -> {rectosigmoidoscopy_argon} -> 1 row
 EDA + Colonoscopia            -> {eda, colonoscopy}      -> 2 rows
 ```
 
-`selection_key()` primeiro validará/normalizará e só devolverá `eda_colonoscopy` para igualdade exata com `PAIRED_APPOINTMENT_SET`; singleton sempre devolve seu código, mesmo se a label contém `+`. Sets vazios continuam com o comportamento de leitura já contratado. `is_paired_appointment_set()` permanece a única autoridade de agendamento casado.
+`selection_key()` permanece uma função total (nunca levanta, pois leitores tolerantes a consomem): igualdade exata com `PAIRED_APPOINTMENT_SET` devolve `eda_colonoscopy`; singleton devolve seu próprio código, mesmo que a label contenha `+`; conjunto vazio devolve `""` conforme o comportamento de leitura já contratado; e conjunto não-vazio fora da matriz devolve o sentinela reservado `"invalid"` — nunca o primeiro elemento, nunca uma categoria válida. Writers continuam exigindo `normalize_procedure_selection()`/`format_procedure_selection()`, que falham fechado. `is_paired_appointment_set()` permanece a única autoridade de agendamento casado.
 
 A migration altera `choices` e `max_length`, sem `RunPython`, backfill ou remoção de sinais.
 
-### D3. Precedência de pacote exige ocorrência atual da mesma expressão
+### D3. Detecção e precedência de pacote exigem ocorrência atual qualificada
 
-O detector textual produzirá ocorrências com `procedure_type`, qualificação (`current_request|historical|negated|mention`) e trecho local. Regras por ocorrência precedem a matriz:
+O detector textual produzirá ocorrências com `procedure_type`, qualificação (`current_request|historical|negated|mention`) e trecho local. A detecção do pacote distingue dois grupos de termos:
 
-- EDA + GTT/Cápsula/Dilatação atual colapsa a EDA base da mesma expressão;
-- Retossigmoidoscopia + Dilatação/Argônio atual colapsa a base da mesma expressão;
-- uma única variação atual pode suprimir o cabeçalho/base detectado, preservando metadado auditável de selecionado/suprimido;
-- duas variações atuais, variação + Colonoscopia ou dois especializados permanecem incompatíveis;
-- o `requested_procedures` do LLM sem ocorrência textual atual não autoriza supressão.
+- **Marcadores autoevidentes da família EDA:** `GTT`/`gastrostomia` e o nome canônico/alias `cápsula` identificam por si o pacote; uma ocorrência qualificada como atual, mesmo isolada em trecho próprio, já detecta `eda_gastrostomy`/`eda_capsule` (espelha o comportamento legado em que a palavra-chave de GTT já classificava o documento como família EDA).
+- **Termos ambíguos:** `dilatação` e `argônio`/`plasma` exigem vínculo local (mesma expressão) com EDA ou Retossigmoidoscopia de solicitação atual. “Dilatação de colédoco”, anatomia dilatada como achado, histórico e negação são negativos obrigatórios; a ambiguidade nunca é resolvida por proximidade global no documento.
 
-Para dilatação, a janela local precisa conter intenção de procedimento e EDA ou Retossigmoidoscopia. “Dilatação de colédoco”, anatomia dilatada como achado, histórico e negação são negativos obrigatórios. O vocabulário não adicionará siglas operacionais. `GTT`, `cápsula` e `dilatação` são aliases aprovados; nomes canônicos completos permanecem reconhecidos.
+Sobre a base, dois mecanismos precedem a matriz:
 
-**Alternativa rejeitada:** colapsar pelo conjunto bruto do LLM. Isso permitiria que história ou achado anatômico alterasse identidade.
+- **Colapso na mesma expressão:** “EDA com GTT”, “Retossigmoidoscopia com dilatação” etc. colapsam a base da própria expressão imediatamente.
+- **Supressão em trechos independentes:** exatamente uma variação com ocorrência textual atual suprime a EDA/Retossigmoidoscopia base detectada em qualquer outro trecho (inclusive cabeçalho administrativo), espelhando o regime de proveniência da precedência especializada da ADR-0008 — clinicamente o pacote já contém a base. O item estruturado de `requested_procedures` sem ocorrência textual atual NÃO autoriza a supressão; nesse caso o conjunto permanece misto e falha fechado na matriz.
+
+Toda supressão registra metadado auditável de selecionado/suprimidos, no mesmo formato da precedência especializada. Permanecem incompatíveis, sem descartar valores: duas variações atuais, variação + Colonoscopia, dois especializados ou qualquer conjunto fora da matriz. O vocabulário não adicionará siglas operacionais; nomes canônicos completos permanecem reconhecidos.
+
+**Alternativa rejeitada:** colapsar pelo conjunto bruto do LLM. Isso permitiria que história ou achado anatômico alterasse identidade. **Segunda alternativa rejeitada:** exigir vínculo local também para GTT/cápsula em trechos independentes — abandonaria a base detectada como conjunto misto e criaria retornos ao NIR para solicitações que o pacote já cobre integralmente.
 
 ### D4. Profiles serão reutilizados por chave, não por herança de identidade
 
@@ -111,6 +126,11 @@ O catálogo mapeará:
 A policy receberá sempre o código de identidade e resolverá o profile para regras clínicas, mas retornará recomendação/pendência sob o código original. Histórico, filtros, eventos e volumes nunca consultam `profile_key` para equivalência.
 
 Nos writes 4.0, `gastrostomy` e `esophageal_dilation` não serão persistidos como sinais prioritários quando já constituem a identidade. Leitores históricos continuam exibindo os sinais antigos.
+
+Duas precisões de resolução e apresentação:
+
+- **Resolução de profile:** `apps/cases/exam_profiles.py` passará a resolver explicitamente os dez códigos para o profile da família via `profile_key` do catálogo. O fallback silencioso para EDA permanece exclusivamente nos adapters/leitores de artefatos legados (1.1/2.0/3.0 com tipo ausente/desconhecido); em writers 4.0, código que não resolve profile falha fechado (`ValueError`), nunca cai silenciosamente em EDA.
+- **Label nos textos determinísticos:** reason texts persistidos pela policy (pendências, `criteria_met`, thresholds) usarão a label canônica da identidade (ex.: “Retossigmoidoscopia”, “EDA + Gastrostomia (GTT)”), não a label do profile/família; o profile contribui somente as regras clínicas. Assim, um caso de Retossigmoidoscopia nunca exibe pendência afirmada “para Colonoscopia”.
 
 ### D5. LLM1/LLM2 4.0 ampliam tipos sem reescrever versões antigas
 
@@ -201,17 +221,17 @@ Na decisão médica, o catálogo continua gerando decisões das rows detectadas;
 
 **Alternativa rejeitada:** `<input list>`; suporte/semântica visual e controle de opção ativa são inconsistentes e não permitem o contrato completo de listbox.
 
+Cobertura de testes: a cobertura **canônica** do combobox é Django-side — contrato HTML/POST, re-render com erro, fallback SSR e validação backend — e é ela que integra o quality gate global (AGENTS.md §2). O teste Node (`node --test static/js/tests/procedure_combobox.test.js`) é **complementar**, cobrindo teclado/normalização em isolamento nos slices que o criaram; não integra o gate final, não cria `package.json` e não introduz dependência de toolchain.
+
 ### D10. Intake/correção compartilham chaves de seleção do catálogo
 
-Um helper devolve opções disponíveis por jornada:
+As chaves de seleção e sua conversão vivem no domínio; a exposição por jornada vive no intake:
 
-- todos os novos pacotes/Retossigmoidoscopias disponíveis no cutover;
-- EDA sempre conforme regra atual;
-- Colonoscopia e `eda_colonoscopy` obedecem `COLONOSCOPY_INTAKE_ENABLED`;
-- Ecoendoscopia/CPRE obedecem suas flags preexistentes;
-- médico vê todas as identidades, pois flags de intake não limitam substituição.
+- `apps/cases/procedures.py` expõe `SELECTION_KEYS` (derivado: cada código atômico + `eda_colonoscopy`) e a função pública `procedure_types_for_selection(selection_key)` — valida e levanta para chave desconhecida; aliases e labels nunca são valores válidos.
+- `apps/intake/services.py` deriva `_DECLARED_SELECTION_VALUES` de `SELECTION_KEYS` e delega a conversão à função pública; os gates de flag continuam referenciando explicitamente Colonoscopia/Ecoendoscopia/CPRE (regra intencional de rollout, não lista de catálogo) e a mensagem de erro de `validate_exam_type` passa a ser gerada a partir das labels do catálogo. Após o Slice 001 o backend aceita as dez chaves em POST manipulado antes da UI expô-las — comportamento inofensivo e fail-closed (a detecção ainda não reconhece pacotes; mismatch retorna ao NIR) — e evita reabrir `services.py` em cada slice de identidade.
+- O helper de opções por jornada (upload/correção/reenvio) fica em `apps/intake/services.py`, compondo catálogo + flags sobre uma lista ordenada explícita de códigos expostos no intake; os Slices 003/004/005 apenas acrescentam seus códigos a essa lista. Sem flags novas.
 
-O POST converte uma chave por `procedure_types_for_selection()`; aliases e labels nunca são valores válidos. Upload e reenvio criam rows pela mesma função transacional. Correção mantém UUID/documentos, invalida derivados e agenda uma análise 4.0.
+Regras de exposição preservadas: EDA sempre; Colonoscopia e `eda_colonoscopy` obedecem `COLONOSCOPY_INTAKE_ENABLED`; Ecoendoscopia/CPRE obedecem suas flags preexistentes; médico vê todas as identidades, pois flags de intake não limitam substituição. Upload e reenvio criam rows pela mesma função transacional. Correção mantém UUID/documentos, invalida derivados e agenda uma análise 4.0.
 
 ### D11. Histórico e detalhes usam código exato
 
@@ -221,6 +241,8 @@ A consulta de prior case receberá o `procedure_type` original e filtrará igual
 
 Views projetarão `procedure_filter_options` e mapas de contagem a partir das selection keys válidas, adicionando `all`/`none` conforme contexto. Templates iteram opções em vez de repetir radios. Os scripts de filtro inicializam contagens dinamicamente pelos `data-*`, sem objetos literais de quatro tipos.
 
+Badges de identidade usam classes CSS **agrupadas por família** em `static/css/app.css`: os seletores dos quatro códigos da família EDA (`eda`, `eda_gastrostomy`, `eda_capsule`, `eda_dilation`) compartilham o bloco visual da EDA; os quatro da família Colonoscopia (`colonoscopy`, `rectosigmoidoscopy`, `rectosigmoidoscopy_dilation`, `rectosigmoidoscopy_argon`) compartilham o bloco da Colonoscopia; Ecoendoscopia, CPRE e `eda_colonoscopy` mantêm os blocos próprios atuais. Nenhuma variação ganha cor própria; os templates continuam emitindo `exam-type-{{ key }}` sem lógica de família, e o agrupamento completo (dez códigos de uma vez) entra no slice que primeiro renderizar badges das novas identidades — os seguintes não voltam a tocar CSS.
+
 Predicado de singleton exige conjunto exato daquela dimensão; `eda_colonoscopy` exige igualdade com o par. Follow-up mantém uma row por `CaseProcedure` autorizado e ganha labels automaticamente pelo catálogo.
 
 Analytics manterá:
@@ -229,7 +251,7 @@ Analytics manterá:
 - volume por componente = contagem por código atômico;
 - `paired_confirmed` = caso autorizado exatamente `{eda, colonoscopy}`.
 
-Conjunto persistido inválido não será reduzido a singleton e deverá aparecer como erro/inconsistência testável, não como categoria inventada.
+Conjunto persistido inválido não será reduzido a singleton: `category_key` projetará o sentinela `invalid` de `selection_key` como inconsistência explícita (bucket próprio, nunca somado a categoria válida e nunca omitido em silêncio), mantendo o desvio testável.
 
 ### D13. Sinais legados permanecem legíveis, mas não são writers de identidade
 

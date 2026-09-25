@@ -12,6 +12,17 @@ Resumo executivo para retomada rapida apos pausas e para onboarding de novos con
 - `openspec/changes/` — changes ativos com proposals, designs e slices
 - Em caso de conflito: artefatos mais recentes no Git prevalecem.
 
+## Change Ativo — Catálogo ampliado de procedimentos endoscópicos
+
+- **Change:** `openspec/changes/support-expanded-endoscopy-procedure-catalog/` — proposal, design (D1–D15), 9 specs e 10 slices; **implementação CONCLUÍDA na branch em 2026-09-25** (10 slices verticais aceitos com reviewer independente; gate final verde 4445 testes), aguardando smoke em ambiente real (R4/R5 do Slice 010) e aprovação humana para arquivar/deployar.
+- **Branch:** `feature/support-expanded-endoscopy-procedure-catalog` (BASE_REF `38cbd0f`; commits `cc23754`…`1303723`); baseline global registrado em `.pi/reports/baseline-support-expanded-endoscopy-procedure-catalog-2026-09-25.md` (3835 testes) → gate final 4445. Runbook de cutover: `docs/deploy/expanded-endoscopy-procedure-catalog-cutover.md`; precheck de downgrade evoluiu para a fronteira `first_4_0_write` (3.0/eco-CPRE = baseline informacional).
+- **Risco:** CRÍTICO / HIGH-ARCH — **ADR-0010 aceita em 2026-09-25**; supera parcialmente ADR-0004 e ADR-0006 somente onde limitavam o catálogo a quatro tipos e o contrato gravável ao schema 3.0.
+- **Baseline atual do código:** writer 3.0, catálogo `eda|colonoscopy|echoendoscopy|cpre` (quatro tipos).
+- **Objetivo 4.0/dez tipos:** `eda`, `eda_gastrostomy`, `eda_capsule`, `eda_dilation`, `colonoscopy`, `rectosigmoidoscopy`, `rectosigmoidoscopy_dilation`, `rectosigmoidoscopy_argon`, `echoendoscopy`, `cpre`. Pacotes com `+` são identidades indivisíveis (uma row, uma decisão, uma recomendação); EDA + Colonoscopia permanece duas rows com decisão independente e agendamento casado. Perfis reutilizados por família (variações de EDA → profile EDA; Retossigmoidoscopias → profile Colonoscopia) sem equivalência de histórico/filtro/analytics (código exato). Local anatômico informativo em EDA + Dilatação; painel consultivo de possível infecção sistêmica em EDA + GTT (resultados presentes — inclusive normais — visíveis; alerta apenas com preocupação explicitamente documentada; nunca altera policy/recomendação/decisão/FSM).
+- **UI:** seletores de procedimento viram combobox pesquisável (fallback SSR `<select>`, validação backend por código exato); badges CSS por família.
+- **Operação:** sem flags novas, sem backfill, sem rollout gradual — cutover único de web/workers/prompts 4.0 (drenar jobs 3.0); após o primeiro write 4.0, rollback suportado é fix-forward.
+- **Regra de reentrada:** implementar um slice vertical por vez conforme `tasks.md`; nenhuma implantação de estados intermediários da branch.
+
 ## Change Concluído — Taxonomia oficial de causas do pós-procedimento
 
 - **Change arquivado:** `openspec/archive/align-followup-causes-with-suspension-form/`.
@@ -43,7 +54,7 @@ Alvo aprovado do change: tipos `eda|colonoscopy|echoendoscopy|cpre`; únicos con
 
 ## Objetivo do Sistema
 
-No baseline atual, o sistema faz **triagem automatizada para EDA e Colonoscopia** (Endoscopia Digestiva Alta e Baixa). O change ativo amplia esse objetivo para Ecoendoscopia e CPRE independentes. Operadores NIR enviam PDFs de relatorios medicos, o
+No baseline atual, o sistema faz **triagem automatizada para EDA e Colonoscopia** (Endoscopia Digestiva Alta e Baixa). O change ativo (`support-expanded-endoscopy-procedure-catalog`) amplia o catálogo para dez identidades atômicas — variações indivisíveis de EDA (GTT, cápsula endoscópica, dilatação) e a família Retossigmoidoscopia — sob contrato gravável 4.0, além de Ecoendoscopia e CPRE independentes já entregues. Operadores NIR enviam PDFs de relatorios medicos, o
 sistema processa via pipeline LLM, apresenta ao medico para decisao, encaminha
 ao agendador, e retorna o resultado ao NIR. Monolito Django SSR, sem API REST
 e sem SPA.
@@ -201,7 +212,8 @@ static/          # css/app.css (paleta hospitalar), js/upload.js, js/password-to
 
 ## State do Sistema
 
-- **Fase atual:** promoção estável `v0.9.0` a partir da candidata validada `v0.9.0-rc.2`; change CRÍTICO `align-followup-causes-with-suspension-form` implementado, aceito, arquivado e com specs canônicas promovidas; upgrade de produção pendente.
+- **Fase atual:** change CRÍTICO `support-expanded-endoscopy-procedure-catalog` **implementado na branch** `feature/support-expanded-endoscopy-procedure-catalog` (BASE_REF `38cbd0f`; gate final verde: 4445 testes, ruff/mypy clean, `openspec validate --strict` ok) — pendências: smoke funcional/acessível em ambiente real (sem browser neste host) e aprovação humana antes de arquivar/deployar; produção segue em 3.0/quatro tipos até o cutover 4.0/dez tipos pelo runbook.
+- **Fase anterior:** promoção estável `v0.9.0` a partir da candidata validada `v0.9.0-rc.2`; change CRÍTICO `align-followup-causes-with-suspension-form` implementado, aceito, arquivado e com specs canônicas promovidas; upgrade de produção pendente.
 - **Change concluído:** `openspec/archive/align-followup-causes-with-suspension-form/`; taxonomia oficial de follow-up e projeção histórica implementadas, ainda sem deploy.
 - **Release anterior:** `v0.9.0-rc.1`, com `prioritize-specialized-procedure-requests` arquivado e publicado como candidata.
 - **Change concluído:** `openspec/archive/prioritize-specialized-procedure-requests/`; comportamento-alvo implementado e ainda não deployado.
@@ -259,12 +271,12 @@ static/          # css/app.css (paleta hospitalar), js/upload.js, js/password-to
   - `openspec/archive/restore-isolated-deterministic-test-baseline/` (1 slice — baseline de testes isolado e determinístico restaurado e endurecido (gates baseline-vs-final)).
 - **Apps criados**: `apps/accounts/`, `apps/cases/`, `apps/llm/`, `apps/intake/`, `apps/pipeline/`,
   `apps/doctor/`, `apps/scheduler/`, `apps/dashboard/`, `apps/admin_ui/`
-- **Testes**: 3835 passando (gate final de `align-followup-causes-with-suspension-form`; inclui catálogo oficial, validação fail-closed, migration reversível, quatro projeções legadas, Histórico/cards/filtro/CSV append-only e manual), quality gate verde (ruff + mypy + pytest).
+- **Testes**: 4445 passando (gate final de `support-expanded-endoscopy-procedure-catalog` na branch; baseline anterior de `align-followup-causes-with-suspension-form` era 3835), quality gate verde (ruff + mypy + pytest).
 - **Templates**: base.html com tema hospitalar, login, switch-role, perfil, password reset/change,
   intake (home, my_cases, case_detail), doctor (queue, decision)
 - **Documentacao de dominio**: `docs/DOMAIN_ANALYSIS.md`
 - **Investigações**: `docs/investigations/2026-05-18-nir-to-doctor-flow-review.md`
-- **ADR ativas**: ADR-0001 (arquitetura Django SSR), ADR-0002 (emails transacionais de conta/autenticação), ADR-0003 (perfis de procedimento e tipo de exame explícito — **Accepted**, parcialmente superada pela ADR-0004), ADR-0004 (procedimentos múltiplos e contrato LLM neutro — **Accepted**, parcialmente superada pela ADR-0006), ADR-0006 (Ecoendoscopia e CPRE independentes + writer 3.0 — **Accepted**, 2026-09-12), ADR-0007 (follow-up restrito a procedimentos autorizados — **Accepted**, causas parcialmente superadas pela ADR-0009) e ADR-0009 (taxonomia oficial e compatibilidade histórica das causas — **Accepted**, 2026-09-18).
+- **ADR ativas**: ADR-0001 (arquitetura Django SSR), ADR-0002 (emails transacionais de conta/autenticação), ADR-0003 (perfis de procedimento e tipo de exame explícito — **Accepted**, parcialmente superada pela ADR-0004), ADR-0004 (procedimentos múltiplos e contrato LLM neutro — **Accepted**, parcialmente superada pela ADR-0006), ADR-0006 (Ecoendoscopia e CPRE independentes + writer 3.0 — **Accepted**, 2026-09-12), ADR-0007 (follow-up restrito a procedimentos autorizados — **Accepted**, causas parcialmente superadas pela ADR-0009), ADR-0009 (taxonomia oficial e compatibilidade histórica das causas — **Accepted**, 2026-09-18) e ADR-0010 (catálogo ampliado e pacotes atômicos de procedimentos endoscópicos — **Accepted**, 2026-09-25; supera parcialmente ADR-0004/ADR-0006 em catálogo e contrato gravável).
 - **Dívida técnica**: `django-fsm` deprecated → `viewflow.fsm` (não urgente); observabilidade de logs do gunicorn / falha SMTP (candidato a change de hardening)
 
 ## Quality Bar

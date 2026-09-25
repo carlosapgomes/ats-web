@@ -26,7 +26,7 @@ Fechar o change com runbook executável, prechecks de drenagem/compatibilidade, 
 
 ```yaml
 expected_files:
-  - docs/operations/expanded-endoscopy-procedure-catalog-cutover.md
+  - docs/deploy/expanded-endoscopy-procedure-catalog-cutover.md
   - apps/cases/management/commands/check_specialized_procedure_downgrade.py
   - apps/cases/tests/test_specialized_procedure_downgrade_check.py
   - PROJECT_CONTEXT.md

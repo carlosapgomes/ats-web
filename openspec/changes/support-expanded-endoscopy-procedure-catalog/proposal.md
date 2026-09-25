@@ -6,7 +6,7 @@
 
 **Risco:** CRÍTICO / HIGH-ARCH — altera identidades clínicas persistidas, matriz de combinações, contrato LLM strict, reconciliação, seleção operacional, decisão médica, filas e analytics.
 
-**ADR:** [`ADR-0010 — Catálogo ampliado e pacotes atômicos de procedimentos endoscópicos`](../../../docs/adr/ADR-0010-catalogo-ampliado-e-pacotes-atomicos-de-procedimentos-endoscopicos.md), proposta junto deste change e requerida como aceita antes do primeiro slice de código.
+**ADR:** [`ADR-0010 — Catálogo ampliado e pacotes atômicos de procedimentos endoscópicos`](../../../docs/adr/ADR-0010-catalogo-ampliado-e-pacotes-atomicos-de-procedimentos-endoscopicos.md), aceita em 2026-09-25 como pré-condição do primeiro slice de código.
 
 ## Why
 
