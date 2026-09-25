@@ -401,10 +401,16 @@ def _scheduler_queue_context(user: Any = None, tab: str = "pending") -> dict[str
     # (WAIT_APPT + notices iniciais + issues operacionais); Processados Hoje
     # soma apenas os cards processados do dia. Os dois contadores usam o MESMO
     # universo de buckets (catálogo + ``all``); cada card pertence a EXATAMENTE
-    # um bucket (eda | colonoscopy | eda_colonoscopy | echoendoscopy | cpre)
-    # pela dimensão autorizada, então combinado conta uma vez e um procedimento
-    # especializado nunca conta como casado. Nenhum contador inclui
-    # Histórico/ciências reconhecidas.
+    # um bucket (uma chave por conjunto válido do catálogo) pela dimensão
+    # autorizada, então combinado conta uma vez e um pacote nunca conta como
+    # EDA nem como casado. Nenhum contador inclui Histórico/ciências
+    # reconhecidas. As opções dos controles são projetadas do MESMO dicionário
+    # (R1/R3/D12) — predicado, contador e opção nunca divergem.
+    pending_exam_type_counts = _sum_approved_selection_counts(
+        [pending_cards, immediate_notice_cards, operational_issue_cards]
+    )
+    processed_exam_type_counts = _sum_approved_selection_counts([processed_today])
+
     context: dict[str, Any] = {
         "active_tab": tab,
         "pending_cases": pending_cards,
@@ -418,10 +424,10 @@ def _scheduler_queue_context(user: Any = None, tab: str = "pending") -> dict[str
         "processed_today_count": processed_today_count,
         "acknowledged_notice_count": len(acknowledged_notice_cards),
         "total_notice_count": pending_count + immediate_notice_count + operational_issue_count,
-        "exam_type_counts": _sum_approved_selection_counts(
-            [pending_cards, immediate_notice_cards, operational_issue_cards]
-        ),
-        "processed_exam_type_counts": _sum_approved_selection_counts([processed_today]),
+        "exam_type_options": _exam_type_filter_options(pending_exam_type_counts),
+        "processed_exam_type_options": _exam_type_filter_options(processed_exam_type_counts),
+        "exam_type_counts": pending_exam_type_counts,
+        "processed_exam_type_counts": processed_exam_type_counts,
     }
 
     return context
@@ -1264,9 +1270,9 @@ _APPROVED_TYPES_BY_SELECTION_KEY: dict[str, frozenset[str]] = {
     selection_key(procedure_types): frozenset(procedure_types) for procedure_types in _ORDERED_ALLOWED_PROCEDURE_SETS
 }
 
-# Opções do filtro do Histórico (R1/D13): ``all`` + uma chave por conjunto
-# válido do catálogo, incluindo Ecoendoscopia e CPRE. Valor inválido cai em
-# ``all`` na view.
+# Opções do filtro do Histórico (R1/D12): ``all`` + uma chave por conjunto
+# válido do catálogo. Dimensão fora deste universo é REJEITADA (nunca
+# reclassificada para ``all``) na view.
 _HISTORICAL_DIMENSION_CHOICES: tuple[str, ...] = (
     "all",
     *(selection_key(procedure_types) for procedure_types in _ORDERED_ALLOWED_PROCEDURE_SETS),
@@ -1283,6 +1289,29 @@ def _empty_approved_selection_buckets() -> dict[str, int]:
     for procedure_types in _ORDERED_ALLOWED_PROCEDURE_SETS:
         buckets[selection_key(procedure_types)] = 0
     return buckets
+
+
+def _exam_type_filter_options(counts: dict[str, int] | None = None) -> list[dict[str, Any]]:
+    """Opções dos controles de tipo do CHD, derivadas do catálogo (R1/R3/D12).
+
+    MESMO universo dos buckets (``_empty_approved_selection_buckets``):
+    ``all`` + uma opção por conjunto válido do catálogo, com a label canônica
+    (``Combinado`` deixa de existir como vocabulário local). Templates iteram
+    esta lista; ``counts`` carrega o valor do grupo quando o controle exibe
+    contadores (filas) e fica zerado no seletor do Histórico.
+    """
+    buckets = _empty_approved_selection_buckets() if counts is None else counts
+    options: list[dict[str, Any]] = [{"key": "all", "label": "Todos", "count": buckets["all"]}]
+    for procedure_types in _ORDERED_ALLOWED_PROCEDURE_SETS:
+        key = selection_key(procedure_types)
+        options.append(
+            {
+                "key": key,
+                "label": format_procedure_selection(procedure_types),
+                "count": buckets[key],
+            }
+        )
+    return options
 
 
 def _filter_by_approved_dimension(qs: QuerySet[Case], dimension: str) -> QuerySet[Case]:
@@ -1312,17 +1341,20 @@ def scheduler_historical_search(request: HttpRequest) -> HttpResponse:
     """Busca histórica Scheduler: casos aceitos/agendados/processados.
 
     Combina termo (ocorrência ou nome do paciente) com a dimensão autorizada
-    (exam_type=all|eda|colonoscopy|eda_colonoscopy). Valor inválido cai para
-    all. Dimensão específica sem termo lista os últimos 50 casos daquela
-    dimensão; com termo, ambos são compostos com AND. Sem critério nenhum,
-    mantém o estado vazio.
+    (uma das chaves de seleção do catálogo ou ``all``). Dimensão específica sem
+    termo lista os últimos 50 casos daquela dimensão; com termo, ambos são
+    compostos com AND. Sem critério nenhum, mantém o estado vazio.
+
+    Dimensão DESCONHECIDA é rejeitada (zero linhas no estado vazio já existente)
+    em vez de reclassificada para ``all``: rejeição intencional do CHD, distinta
+    do fallback para ``all`` mantido nos filtros NIR (R3).
     """
     query = request.GET.get("q", "").strip()
-    raw_exam_type = request.GET.get("exam_type", "all")
-    exam_type = raw_exam_type if raw_exam_type in _HISTORICAL_DIMENSION_CHOICES else "all"
+    exam_type = request.GET.get("exam_type", "all").strip()
+    known_dimension = exam_type in _HISTORICAL_DIMENSION_CHOICES
 
     qs = _with_approved_projection(_scheduler_historical_queryset())
-    if exam_type != "all":
+    if known_dimension and exam_type != "all":
         qs = _filter_by_approved_dimension(qs, exam_type)
     if query:
         qs = qs.filter(
@@ -1330,7 +1362,7 @@ def scheduler_historical_search(request: HttpRequest) -> HttpResponse:
         )
 
     results: list[dict[str, Any]] = []
-    if query or exam_type != "all":
+    if known_dimension and (query or exam_type != "all"):
         for case in qs.prefetch_related("procedures").order_by("-created_at")[:50]:
             approved = _approved_snapshot(case)
             results.append(
@@ -1364,6 +1396,8 @@ def scheduler_historical_search(request: HttpRequest) -> HttpResponse:
             "exam_type": exam_type,
             "results": results,
             "active_tab": "historical",
+            # R1/D12: opções do seletor derivadas do catálogo (sem contadores).
+            "exam_type_options": _exam_type_filter_options(),
         },
     )
 

@@ -3853,9 +3853,12 @@ class TestSchedulerPrioritySignalBadges:
         self._login_as(client, "scheduler")
         content = client.get("/scheduler/").content.decode()
         assert "Paciente Ordem" in content
-        idx_fb = content.index("Suspeita de corpo estranho")
-        idx_ci = content.index("Ingestão cáustica/corrosiva")
-        idx_gs = content.index("Gastrostomia")
+        # Slice 008: a fila renderiza labels do catálogo (ex.: "EDA +
+        # Gastrostomia (GTT)") ANTES dos cards, então a ordem dos badges é
+        # provada pelo atributo do próprio badge.
+        idx_fb = content.index('data-priority-signal-code="foreign_body"')
+        idx_ci = content.index('data-priority-signal-code="caustic_ingestion"')
+        idx_gs = content.index('data-priority-signal-code="gastrostomy"')
         assert idx_fb < idx_ci < idx_gs
 
     def test_pending_card_hides_container_without_signals(self, client) -> None:

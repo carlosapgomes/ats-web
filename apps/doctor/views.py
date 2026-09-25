@@ -27,12 +27,14 @@ from apps.cases.priority_signals import build_priority_signal_badges
 from apps.cases.procedures import (
     PROCEDURE_LABELS,
     PROCEDURE_ORDER,
+    SELECTION_KEYS,
     SUPPORTED_PROCEDURE_TYPES,
     format_procedure_selection,
     get_approved_procedure_types,
     get_declared_procedure_types,
     get_detected_procedure_types,
     is_procedure_neutral_structured_data,
+    procedure_types_for_selection,
     record_doctor_procedure_decisions,
     selection_key,
 )
@@ -88,6 +90,28 @@ DOCTOR_DECISION_MAP: dict[str, str] = {
     "accept": "ACEITAR",
     "deny": "NEGAR",
 }
+
+
+def _procedure_filter_options(*, include_none: bool) -> list[dict[str, str]]:
+    """Opções do controle de tipo das filas médicas, derivadas do catálogo (R1/D12).
+
+    ``all`` + cada chave de seleção válida (label canônica) e, em Decididos
+    Hoje, ``none`` ("Nenhum autorizado") — o template itera esta lista em vez
+    de repetir radios. Os contadores por opção são recalculados no cliente a
+    partir dos cards projetados (``data-proc-selection``); a view fornece as
+    chaves/labels, nunca uma lista de tipos fechada.
+    """
+    options: list[dict[str, str]] = [{"key": "all", "label": "Todos"}]
+    options.extend(
+        {
+            "key": key,
+            "label": format_procedure_selection(procedure_types_for_selection(key)),
+        }
+        for key in SELECTION_KEYS
+    )
+    if include_none:
+        options.append({"key": "none", "label": "Nenhum autorizado"})
+    return options
 
 
 def _get_patient_name(case: Case) -> str:
@@ -365,6 +389,9 @@ def _doctor_queue_context(request: HttpRequest) -> dict[str, Any]:
         "decided_count": len(decided_cards),
         "avg_wait_minutes": avg_wait,
         "avg_wait_display": avg_wait_display,
+        # R1/D12: opções do filtro derivadas do catálogo; ``none`` só existe na
+        # dimensão autorizada (Decididos Hoje).
+        "procedure_filter_options": _procedure_filter_options(include_none=active_tab == "decided"),
     }
 
 
