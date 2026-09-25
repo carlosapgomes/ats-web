@@ -615,7 +615,7 @@ class TestProcedureDecisionFormAndSubmit:
     # ── RED 2/3/6 complemento: GET renderiza entradas por procedimento ───
 
     def test_decision_page_renders_per_procedure_entries(self, client) -> None:
-        case = self._make_v2_case(detected=["eda"])
+        case = self._make_v2_case(detected=["eda", "colonoscopy"])
         self._login(client, "doctor")
         response = client.get(f"/doctor/{case.case_id}/")
         assert response.status_code == 200

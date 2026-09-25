@@ -879,10 +879,10 @@ class TestConsultiveInvariance:
     def test_fsm_transition_and_destination_are_identical_across_variants(self, django_user_model, client) -> None:
         """Fluxo da FSM (WAIT_DOCTOR → destino) igual com e sem alerta.
 
-        O submit da identidade nova é deliberadamente postergado ao Slice 006;
-        aqui o POST real do médico (sem disposição por componente) é aplicado
-        de forma idêntica às três variantes para provar que o alerta não altera
-        a transição nem o destino.
+        Slice 006 (R1): o submit real da identidade nova (o pacote
+        ``eda_gastrostomy``) exige disposição própria e é aplicado de forma
+        idêntica às três variantes para provar que o alerta consultivo não
+        altera a transição nem o destino.
         """
         from django.urls import reverse
 
@@ -910,9 +910,17 @@ class TestConsultiveInvariance:
             )
             assert lock.acquired is True
 
+            pipeline_event_count = case.events.count()
+
             response = client.post(
                 reverse("doctor:submit", args=[case.case_id]),
-                {"lock_token": str(lock.token)},
+                {
+                    "lock_token": str(lock.token),
+                    "procedure_eda_gastrostomy": "approved",
+                    "procedure_eda_gastrostomy_reason": "Aprovação registrada.",
+                    "support_flag": "none",
+                    "admission_flow": "scheduled",
+                },
             )
             assert response.status_code == 302
 
@@ -924,12 +932,16 @@ class TestConsultiveInvariance:
                     row.procedure_type for row in reloaded.procedures.all() if row.doctor_disposition == "approved"
                 ),
             }
-            events[variant] = list(reloaded.events.values_list("event_type", flat=True))
+            # Somente os eventos da jornada médica: o slice 006 grava row
+            # aprovada e o ARN de teste é compartilhado, de modo que a 2ª
+            # variante enxerga o caso decidido da 1ª no lookup de histórico.
+            events[variant] = list(reloaded.events.values_list("event_type", flat=True))[pipeline_event_count:]
 
         assert destinations["empty"] == destinations["normal_only"] == destinations["concerning"]
         assert events["empty"] == events["normal_only"] == events["concerning"]
-        assert destinations["empty"]["status"] == CaseStatus.WAIT_R1_CLEANUP_THUMBS
-        assert destinations["empty"]["decision"] == "deny"
+        assert destinations["empty"]["status"] == CaseStatus.WAIT_APPT
+        assert destinations["empty"]["decision"] == "accept"
+        assert destinations["empty"]["approved"] == ["eda_gastrostomy"]
 
 
 # ── R7: sinal legado permanece legível, mas não é writer de identidade ────

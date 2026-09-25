@@ -374,6 +374,36 @@
           Defina a disposição de cada procedimento. Procedimentos não detectados podem ser incluídos com
           justificativa própria; negativas exigem razão específica por componente.
         </p>
+        <!-- Inclusão/substituição por destino canônico (Slice 006, R2/D9):
+             o combobox pesquisável é progressive enhancement sobre o select
+             canônico; sem JS o select continua submetível. O valor é sempre
+             o código canônico da identidade (nunca alias/texto livre). -->
+        <div class="mb-3 p-3 border rounded bg-light" id="destination-procedure-section">
+          <label class="form-label fw-semibold" for="destination-procedure" id="destination-procedure-label">
+            Incluir ou substituir por
+          </label>
+          <p class="decision-hint small text-muted mb-2">
+            Busque e selecione o procedimento de destino. Se o destino não foi detectado na análise,
+            a justificativa é obrigatória. Nenhuma análise/policy é reexecutada no destino.
+          </p>
+          <div class="procedure-combobox">
+            <select class="form-select procedure-combobox__select{% if destination_errors %} is-invalid{% endif %}"
+                    id="destination-procedure" name="destination_procedure"
+                    data-procedure-combobox aria-labelledby="destination-procedure-label"
+                    {% if destination_errors %}aria-invalid="true"{% endif %}>
+              <option value=""{% if not selected_destination %} selected{% endif %}>Não incluir/substituir…</option>
+              {% for option in destination_options %}
+              <option value="{{ option.code }}"{% if option.code == selected_destination %} selected{% endif %}>{{ option.label }}</option>
+              {% endfor %}
+            </select>
+          </div>
+          {% if destination_errors %}<div class="invalid-feedback d-block">{{ destination_errors.0 }}</div>{% endif %}
+          <div class="mt-2">
+            <label class="form-label" for="destination-reason">Justificativa da inclusão/substituição</label>
+            <textarea class="form-control{% if destination_reason_errors %} is-invalid{% endif %}" id="destination-reason" name="destination_reason" rows="2" placeholder="Obrigatória quando o destino não foi detectado na análise">{{ destination_reason_value }}</textarea>
+            {% if destination_reason_errors %}<div class="invalid-feedback d-block">{{ destination_reason_errors.0 }}</div>{% endif %}
+          </div>
+        </div>
         {% for entry in procedure_entries %}
         <div class="procedure-decision-row mb-3 p-3 border rounded">
           <div class="d-flex flex-wrap align-items-center gap-2 mb-2">
@@ -583,7 +613,9 @@
 {% endblock %}
 
 {% block extra_js %}
-{% if not per_procedure %}
+{% if per_procedure %}
+<script src="{% static 'js/procedure_combobox.js' %}"></script>
+{% else %}
 <script src="{% static 'js/decision.js' %}"></script>
 {% endif %}
 <script src="{% static 'js/work_lock.js' %}"></script>

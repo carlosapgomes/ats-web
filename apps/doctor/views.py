@@ -25,7 +25,9 @@ from apps.cases.models import Case, CaseAttachment, CaseStatus, DetectionStatus,
 from apps.cases.navigation import resolve_safe_next_url
 from apps.cases.priority_signals import build_priority_signal_badges
 from apps.cases.procedures import (
+    PROCEDURE_LABELS,
     PROCEDURE_ORDER,
+    SUPPORTED_PROCEDURE_TYPES,
     format_procedure_selection,
     get_approved_procedure_types,
     get_declared_procedure_types,
@@ -399,12 +401,14 @@ def doctor_queue_partial(request: HttpRequest) -> HttpResponse:
 
 
 def _build_procedure_entries(case: Case, form: DoctorDecisionForm) -> list[dict[str, Any]]:
-    """Entradas do formulário procedure-neutral, uma por tipo selecionável (R1).
+    """Entradas do formulário procedure-neutral, uma por identidade DETECTADA.
 
-    Cada entrada expõe origem (declarada/detectada), recomendação da análise
-    quando existente e os ``BoundField`` PRÓPRIOS do procedimento. O template
-    não tem ramo por tipo: o antigo ``{% else %}`` ligava qualquer tipo
-    não-EDA a Colonoscopia, o que impedia a troca para Ecoendoscopia.
+    R1/D9: um pacote atômico ocupa uma única row e somente EDA + Colonoscopia
+    tem duas. A inclusão/substituição de destinos não detectados é feita pelo
+    combobox canônico — o template não renderiza rows de destino redundantes.
+    Cada entrada expõe a recomendação da análise quando existente e os
+    ``BoundField`` PRÓPRIOS do procedimento (o antigo ``{% else %}`` ligava
+    qualquer tipo não-EDA a Colonoscopia).
     """
     rows = {row.procedure_type: row for row in case.procedures.all()}
     recommendations: dict[str, str] = {}
@@ -417,27 +421,19 @@ def _build_procedure_entries(case: Case, form: DoctorDecisionForm) -> list[dict[
                 recommendations[str(rec["procedure_type"])] = SUGGESTION_FLOW_MAP.get(str(raw), "—")
 
     entries: list[dict[str, Any]] = []
-    for procedure_type in sorted(SELECTABLE_PROCEDURE_TYPES, key=lambda t: PROCEDURE_ORDER[t]):
+    for procedure_type in get_detected_procedure_types(case):
         field_name = f"procedure_{procedure_type}"
         reason_field_name = f"{field_name}_reason"
         if field_name not in form.fields or reason_field_name not in form.fields:
             continue
         row = rows.get(procedure_type)
-        detected = row is not None and row.detection_status == DetectionStatus.DETECTED
-        declared = bool(row and row.declared_by_nir)
-        if detected:
-            origin_label = "Detectado na análise"
-        elif declared:
-            origin_label = "Declarado pelo NIR · não detectado"
-        else:
-            origin_label = "Não detectado"
         entries.append(
             {
                 "procedure_type": procedure_type,
                 "procedure_label": ProcedureType(procedure_type).label,
-                "detected": detected,
-                "declared": declared,
-                "origin_label": origin_label,
+                "detected": True,
+                "declared": bool(row and row.declared_by_nir),
+                "origin_label": "Detectado na análise",
                 "recommendation": recommendations.get(procedure_type, ""),
                 "field": form[field_name],
                 "reason_field": form[reason_field_name],
@@ -449,24 +445,32 @@ def _build_procedure_entries(case: Case, form: DoctorDecisionForm) -> list[dict[
 def _build_procedure_decisions(cleaned: dict[str, Any], case: Case) -> list[dict[str, Any]]:
     """Converte o formulário validado em decisões por componente (R1/R2).
 
-    ``added_by_doctor`` é True quando a row não estava detectada (inclusão) —
-    a razão de inclusão é obrigatória e o LLM não é reexecutado (R8).
+    ``added_by_doctor`` é True quando a row não estava detectada (inclusão) — a
+    razão de inclusão é obrigatória e o LLM não é reexecutado (R8). O destino
+    escolhido no combobox entra como aprovação da identidade canônica (D9/R2),
+    sem duplicar uma row já decidida pelos campos por procedimento.
     """
     detected = {row.procedure_type for row in case.procedures.all() if row.detection_status == DetectionStatus.DETECTED}
-    decisions: list[dict[str, Any]] = []
+    decisions: dict[str, dict[str, Any]] = {}
     for procedure_type in SELECTABLE_PROCEDURE_TYPES:
         disposition = str(cleaned.get(f"procedure_{procedure_type}") or "")
         if disposition not in (DoctorDisposition.APPROVED, DoctorDisposition.DENIED):
             continue
-        decisions.append(
-            {
-                "procedure_type": procedure_type,
-                "disposition": disposition,
-                "reason": str(cleaned.get(f"procedure_{procedure_type}_reason") or "").strip(),
-                "added_by_doctor": disposition == DoctorDisposition.APPROVED and procedure_type not in detected,
-            }
-        )
-    return decisions
+        decisions[procedure_type] = {
+            "procedure_type": procedure_type,
+            "disposition": disposition,
+            "reason": str(cleaned.get(f"procedure_{procedure_type}_reason") or "").strip(),
+            "added_by_doctor": disposition == DoctorDisposition.APPROVED and procedure_type not in detected,
+        }
+    destination = str(cleaned.get("destination_procedure") or "")
+    if destination and destination not in decisions:
+        decisions[destination] = {
+            "procedure_type": destination,
+            "disposition": DoctorDisposition.APPROVED,
+            "reason": str(cleaned.get("destination_reason") or "").strip(),
+            "added_by_doctor": destination not in detected,
+        }
+    return sorted(decisions.values(), key=lambda entry: PROCEDURE_ORDER[entry["procedure_type"]])
 
 
 def _derive_global_deny_reason(decisions: list[dict[str, Any]]) -> str:
@@ -618,6 +622,14 @@ def _build_decision_context(case: Case, form: DoctorDecisionForm, request: HttpR
     per_procedure = _is_v2_case(case)
     procedure_entries = _build_procedure_entries(case, form) if per_procedure else []
 
+    # ── Slice 006 (R2/D9): combobox de destino canônico ──────────────────
+    # Um único controle pesquisável oferece todas as identidades atômicas do
+    # catálogo (o médico não é limitado pelas flags de intake). A seleção válida
+    # anterior é preservada no re-render; valor inválido nunca pré-seleciona.
+    selected_destination = form["destination_procedure"].value() or ""
+    if selected_destination not in SUPPORTED_PROCEDURE_TYPES:
+        selected_destination = ""
+
     # ── Suppress duplicate prior-case card when same as correction (R7) ──
     # If the case has an explicit correction and the prior case lookup
     # found the same case, hide the generic prior-case card to avoid
@@ -654,6 +666,12 @@ def _build_decision_context(case: Case, form: DoctorDecisionForm, request: HttpR
         # ── Slice 003: decisão e histórico por procedimento (v2) ──────
         "per_procedure": per_procedure,
         "procedure_entries": procedure_entries,
+        # ── Slice 006: combobox de destino canônico (R2) ──────────────
+        "destination_options": [{"code": code, "label": PROCEDURE_LABELS[code]} for code in SUPPORTED_PROCEDURE_TYPES],
+        "selected_destination": selected_destination,
+        "destination_errors": form["destination_procedure"].errors,
+        "destination_reason_errors": form["destination_reason"].errors,
+        "destination_reason_value": form["destination_reason"].value() or "",
         # ── Comunicação operacional ───────────────────────────────
         "communication_messages": case.communication_messages.select_related("author").all(),
         "can_post_communication": case.status != CaseStatus.CLEANED,

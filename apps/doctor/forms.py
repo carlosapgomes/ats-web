@@ -8,20 +8,28 @@ from apps.cases.admission import ADMISSION_FLOW_CHOICES, SUPPORT_FLAG_CHOICES
 from apps.cases.models import Case, DetectionStatus, DoctorDisposition, ProcedureType
 from apps.cases.procedures import (
     ALLOWED_PROCEDURE_SETS,
+    PROCEDURE_LABELS,
     PROCEDURE_ORDER,
+    SUPPORTED_PROCEDURE_TYPES,
     is_procedure_neutral_structured_data,
 )
 
-# Tipos que o médico pode manter, negar ou aprovar como destino da troca
-# (design D10/D14). O catálogo selecionável é exatamente os quatro tipos
-# suportados: CPRE entrou no Slice 004 reutilizando esta mesma estrutura, sem
-# novo ramo de template ou validação.
-SELECTABLE_PROCEDURE_TYPES: tuple[str, ...] = (
-    ProcedureType.EDA,
-    ProcedureType.COLONOSCOPY,
-    ProcedureType.ECHOENDOSCOPY,
-    ProcedureType.CPRE,
-)
+# Identidades que o médico pode manter, negar ou aprovar como destino da troca
+# (design D1/D10/D14). Derivado do catálogo central: cada identidade atômica
+# (incluindo os pacotes EDA/Retossigmoidoscopia) tem exatamente uma row de
+# decisão e o médico NÃO é limitado pelas flags de intake. Nunca manter uma
+# lista local de tipos.
+SELECTABLE_PROCEDURE_TYPES: tuple[str, ...] = SUPPORTED_PROCEDURE_TYPES
+
+
+# Inclusão/substituição por combobox pesquisável (design D9/R2). O valor
+# submetido é o código canônico de destino; ``eda_colonoscopy`` e aliases
+# NUNCA são aceitos como destino (não são ``ProcedureType``). O médico vê todas
+# as identidades do catálogo, pois flags de intake não limitam a substituição.
+DESTINATION_CHOICES: list[tuple[str, str]] = [
+    ("", "---"),
+    *((code, PROCEDURE_LABELS[code]) for code in SUPPORTED_PROCEDURE_TYPES),
+]
 
 
 class DoctorDecisionForm(forms.Form):
@@ -68,6 +76,18 @@ class DoctorDecisionForm(forms.Form):
         ),
         label="Orientações para agendamento/execução",
         help_text="Opcional · Máx. 500 caracteres. Para pedir documentos, use Comunicação operacional.",
+    )
+
+    # Inclusão/substituição por combobox pesquisável (design D9/R2).
+    destination_procedure = forms.ChoiceField(
+        required=False,
+        choices=DESTINATION_CHOICES,
+        label="Incluir ou substituir por",
+    )
+    destination_reason = forms.CharField(
+        required=False,
+        widget=forms.Textarea,
+        label="Justificativa da inclusão/substituição",
     )
 
     # ── Campos por procedimento (modo procedure-neutral) ─────────────
@@ -162,6 +182,7 @@ class DoctorDecisionForm(forms.Form):
         """
         detected = self._detected_procedure_types()
         approved: list[str] = []
+        denied: list[str] = []
         saw_disposition = False
         self._reject_unknown_procedure_fields()
 
@@ -173,6 +194,7 @@ class DoctorDecisionForm(forms.Form):
                 saw_disposition = True
 
             if disposition == DoctorDisposition.DENIED:
+                denied.append(procedure_type)
                 if procedure_type not in detected:
                     self.add_error(
                         f"procedure_{procedure_type}",
@@ -195,6 +217,37 @@ class DoctorDecisionForm(forms.Form):
                     f"procedure_{procedure_type}",
                     "Defina a decisão para este procedimento detectado.",
                 )
+
+        # Destino de inclusão/substituição (combobox): aprova a identidade
+        # canônica escolhida. Justificativa obrigatória quando o destino não foi
+        # detectado; destino já decidido na própria row (negado OU aprovado) é
+        # submissão dupla ambígua e invalida o formulário inteiro (fail-closed,
+        # P1 review round 1): sem isso a razão do destino seria validada e
+        # descartada em silêncio — a row venceria sem aviso.
+        destination = str(cleaned.get("destination_procedure") or "")
+        destination_reason = str(cleaned.get("destination_reason") or "").strip()
+        if destination:
+            saw_disposition = True
+            if destination in denied:
+                self.add_error(
+                    None,
+                    "O destino selecionado também foi negado na decisão por procedimento; "
+                    "ajuste as disposições antes de enviar.",
+                )
+            elif destination in approved:
+                self.add_error(
+                    "destination_procedure",
+                    "O destino selecionado também foi decidido na row do próprio procedimento; "
+                    "remova a decisão da row ou o destino para não enviar o mesmo procedimento "
+                    "por dois caminhos.",
+                )
+            else:
+                approved.append(destination)
+                if destination not in detected and not destination_reason:
+                    self.add_error(
+                        "destination_reason",
+                        "Justifique a inclusão deste procedimento (não detectado na análise).",
+                    )
 
         if approved and frozenset(approved) not in ALLOWED_PROCEDURE_SETS:
             labels = " + ".join(ProcedureType(t).label for t in sorted(approved, key=lambda t: PROCEDURE_ORDER[t]))

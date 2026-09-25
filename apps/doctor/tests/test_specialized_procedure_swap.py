@@ -361,21 +361,26 @@ class TestSpecializedProcedureSwap:
         evaluate_policy.assert_not_called()
 
     def test_decision_page_shows_no_destination_suggestion(self, client) -> None:
-        """A página de decisão não exibe sugestão/checklist da Ecoendoscopia destino."""
+        """O destino de troca é oferecido pelo combobox canônico (Slice 006).
+
+        Uma identidade não detectada não vira row de destino; a ação de
+        incluir/substituir passa por um único combobox e nunca exibe
+        sugestão/checklist do sistema para o destino (D9/R3).
+        """
         case = self._make_case(detected=[ProcedureType.EDA])
         self._login(client, "doctor")
 
         response = client.get(f"/doctor/{case.case_id}/")
         assert response.status_code == 200
         html = response.content.decode()
-        echo_row = re.search(
-            r'<div class="procedure-decision-row[^"]*"[^>]*>(?:(?!procedure-decision-row).)*'
-            r'name="procedure_echoendoscopy"',
-            html,
-            re.S,
-        )
-        assert echo_row is not None, "linha de Ecoendoscopia ausente na página de decisão"
-        assert "Sugestão do sistema" not in echo_row.group(0)
+
+        select = re.search(r'<select[^>]*name="destination_procedure"[^>]*>.*?</select>', html, re.S)
+        assert select is not None, "combobox de destino ausente na página de decisão"
+        assert 'value="echoendoscopy"' in select.group(0)
+
+        section_start = html.index('id="destination-procedure-section"')
+        section_end = html.index("procedure-decision-row", section_start)
+        assert "Sugestão do sistema" not in html[section_start:section_end]
 
     # ── R4: substituição integral vs. conjunto parcial incompatível ──────
 
