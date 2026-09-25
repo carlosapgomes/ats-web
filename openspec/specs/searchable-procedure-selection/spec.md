@@ -1,8 +1,9 @@
-## Purpose
+# searchable-procedure-selection Specification
 
+## Purpose
 Define uma seleção de procedimentos escalável, acessível e progressivamente aprimorada para as jornadas SSR de intake, correção e decisão médica.
 
-## ADDED Requirements
+## Requirements
 
 ### Requirement: Seletores de procedimento SHALL oferecer busca sem acentos
 

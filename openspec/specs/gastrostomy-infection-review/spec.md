@@ -1,8 +1,9 @@
-## Purpose
+# gastrostomy-infection-review Specification
 
+## Purpose
 Define uma revisão clínica consultiva e rastreável de possível infecção sistêmica para EDA + GTT, sem transformar evidência incompleta em hard rule ou bloqueio operacional.
 
-## ADDED Requirements
+## Requirements
 
 ### Requirement: Revisão infecciosa SHALL aplicar-se somente a EDA + GTT
 
