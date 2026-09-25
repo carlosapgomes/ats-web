@@ -1178,13 +1178,15 @@ _ECHOENDOSCOPY_TERM_PATTERN = re.compile(
 # prática clínica.
 _CPRE_TERM_PATTERN = re.compile("|".join(rf"\b{re.escape(alias)}\b" for alias in CPRE_PROFILE.scope_aliases))
 
-# ── Pacotes EDA (Slice 003, D2/D3) ───────────────────────────────────────────
+# ── Pacotes EDA (Slice 003/004, D2/D3) ───────────────────────────────────────
 #
-# ``cápsula`` é marcador autoevidente da família EDA (a ocorrência atual, mesmo
-# isolada em trecho próprio, basta). ``dilatação`` é termo ambíguo: exige
-# vínculo local com EDA solicitada na MESMA expressão e nunca aceita anatomia
-# dilatada como achado (colédoco/via biliar). Nenhuma abreviação operacional
-# nova é inventada (R2).
+# ``GTT``/``gastrostomia`` e ``cápsula`` são marcadores autoevidentes da família
+# EDA (a ocorrência atual, mesmo isolada em trecho próprio, basta).
+# ``dilatação`` é termo ambíguo: exige vínculo local com EDA solicitada na MESMA
+# expressão e nunca aceita anatomia dilatada como achado (colédoco/via biliar).
+# Nenhuma abreviação operacional nova é inventada (R2).
+_EDA_GASTROSTOMY_TERM_PATTERN = re.compile(r"\bgtt\b|\bgastrostomia\b|\bgastrostomy\b")
+
 _EDA_CAPSULE_TERM_PATTERN = re.compile(r"\bcapsula\b")
 
 _EDA_DILATION_TERM_PATTERN = re.compile(r"\bdilatacao\b")
@@ -1192,7 +1194,7 @@ _EDA_DILATION_TERM_PATTERN = re.compile(r"\bdilatacao\b")
 # Anatomia dilatada como achado de imagem/relatório, nunca o pacote endoscópico.
 _DILATION_BLOCKED_SITE_TERMS: tuple[str, ...] = ("coledoco", "via biliar", "vias biliares")
 
-_V4_VARIATION_TYPES: tuple[str, ...] = ("eda_capsule", "eda_dilation")
+_V4_VARIATION_TYPES: tuple[str, ...] = ("eda_gastrostomy", "eda_capsule", "eda_dilation")
 
 # Termos que exigem vínculo local ``com/e`` com a base na mesma expressão.
 _VARIATIONS_REQUIRING_LOCAL_LINK: frozenset[str] = frozenset({"eda_dilation"})
@@ -1228,6 +1230,7 @@ _PROCEDURE_OCCURRENCE_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
     ("colonoscopy", _COLONOSCOPY_TERM_PATTERN),
     ("echoendoscopy", _ECHOENDOSCOPY_TERM_PATTERN),
     ("cpre", _CPRE_TERM_PATTERN),
+    ("eda_gastrostomy", _EDA_GASTROSTOMY_TERM_PATTERN),
     ("eda_capsule", _EDA_CAPSULE_TERM_PATTERN),
     ("eda_dilation", _EDA_DILATION_TERM_PATTERN),
 )
@@ -1427,14 +1430,15 @@ def replace_occurrence_link(
     )
 
 
-# ── Detecção v4 (Slice 003, D3) ──────────────────────────────────────────────
+# ── Detecção v4 (Slice 003/004, D3) ──────────────────────────────────────────
 #
 # O contrato 4.0 preserva a detecção dos quatro tipos anteriores e acrescenta
-# os pacotes EDA. O item estruturado do LLM1 é proveniência suficiente para o
-# pacote entrar como candidato detectado, EXCETO quando o texto traz alguma
-# ocorrência do termo que não seja solicitação atual (histórica/negada/menção)
-# — aí o texto contradiz o item e o pacote não é detectado. A supressão da base
-# EDA depende de ocorrência textual ATUAL (decidida na reconciliação).
+# os pacotes EDA (GTT, Cápsula e Dilatação). O item estruturado do LLM1 é
+# proveniência suficiente para o pacote entrar como candidato detectado, EXCETO
+# quando o texto traz alguma ocorrência do termo que não seja solicitação atual
+# (histórica/negada/menção) — aí o texto contradiz o item e o pacote não é
+# detectado. A supressão da base EDA depende de ocorrência textual ATUAL
+# (decidida na reconciliação).
 
 
 def _extract_v4_variation_procedures(

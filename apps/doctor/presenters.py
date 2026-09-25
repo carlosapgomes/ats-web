@@ -18,6 +18,7 @@ from apps.cases.priority_signals import (
     build_priority_signal_context_fragments,
 )
 from apps.cases.procedures import PROCEDURE_LABELS, SUPPORTED_PROCEDURE_TYPES, is_procedure_neutral_structured_data
+from apps.pipeline.infection_review import INFECTION_EVIDENCE_ARTIFACT_KEY
 
 # Labels anatômicos do local informativo de EDA + Dilatação (D6/R6): a
 # apresentação é do presenter, o valor técnico vem do pipeline.
@@ -30,6 +31,46 @@ _DILATION_SITE_LABELS: dict[str, str] = {
     "other": "Outro local informado no laudo",
 }
 _DILATION_SITE_UNKNOWN_LABEL = "não informado no laudo"
+
+# Revisão infecciosa consultiva de EDA + GTT (Slice 004, D7/D8/R4/R5): copy
+# explícita de apoio à revisão humana — nunca diagnóstico nem critério
+# automático. O destaque já vem derivado em código pelo verificador.
+INFECTION_ALERT_COPY = (
+    "Possível infecção sistêmica — revisar evidências; informação consultiva, não altera a sugestão automática."
+)
+INFECTION_NEUTRAL_COPY = (
+    "Nenhum sinal de preocupação explicitamente documentado; informação consultiva, não altera a sugestão automática."
+)
+
+INFECTION_CATEGORY_LABELS: dict[str, str] = {
+    "leukocytes": "Leucócitos",
+    "crp": "PCR (proteína C reativa)",
+    "procalcitonin": "Procalcitonina",
+    "lactate": "Lactato",
+    "culture": "Culturas",
+    "temperature_or_fever": "Temperatura/febre",
+    "infectious_disease": "Infectologia",
+    "antibiotic": "Antibióticos",
+}
+
+INFECTION_ASSESSMENT_LABELS: dict[str, str] = {
+    "normal_explicit": "normal (documentado)",
+    "abnormal_explicit": "alterado (documentado)",
+    "positive_explicit": "positivo (documentado)",
+    "negative_explicit": "negativo (documentado)",
+    "febrile_explicit": "febre documentada",
+    "current_care_explicit": "avaliação de infectologia atual",
+    "antibiotic_in_use": "antibiótico em uso",
+    "antibiotic_started": "antibiótico iniciado",
+    "antibiotic_escalated": "antibiótico escalonado",
+    "unclassified": "sem interpretação documentada",
+}
+
+INFECTION_TEMPORAL_LABELS: dict[str, str] = {
+    "current": "atual",
+    "historical": "histórico",
+    "unknown": "temporalidade não informada",
+}
 
 
 def _format_exam_datetime(value: Any) -> str:
@@ -257,6 +298,7 @@ class DoctorReportPresenter:
             "priority_signal_badges": build_priority_signal_badges(self.priority_signals),
             "prior_sections": self._build_prior_sections(),
             "procedure_sections": self._build_procedure_sections(),
+            "infection_review": self._build_infection_review(),
             "notices": self._build_notices(),
         }
 
@@ -1111,6 +1153,65 @@ class DoctorReportPresenter:
         if not isinstance(site, str):
             return _DILATION_SITE_UNKNOWN_LABEL
         return _DILATION_SITE_LABELS.get(site, _DILATION_SITE_UNKNOWN_LABEL)
+
+    def _build_infection_review(self) -> dict[str, Any] | None:
+        """Painel consultivo ancorado de EDA + GTT (Slice 004, R4/R5/D8).
+
+        O painel existe SOMENTE quando a identidade detectada é exatamente
+        ``eda_gastrostomy`` (nunca por herança de família/sinal legado). Artefato
+        ausente/vazio ou sem filtro confirmado produz a MESMA seção neutra da
+        identidade exata (título + copy "informação consultiva"), com grupos
+        vazios: ausência/falha de extração nunca vira pendência nem bloqueio —
+        o médico segue com a análise normal do procedimento.
+        Todo o destaque vem derivado em código pelo verificador determinístico;
+        nenhum limiar clínico é calculado aqui.
+        """
+        if ProcedureType.EDA_GASTROSTOMY not in self._detected_procedure_types():
+            return None
+        artifact = self.suggested_action.get(INFECTION_EVIDENCE_ARTIFACT_KEY)
+        raw_groups = artifact.get("groups") if isinstance(artifact, dict) else None
+
+        groups: list[dict[str, Any]] = []
+        if isinstance(raw_groups, list):
+            for raw_group in raw_groups:
+                if not isinstance(raw_group, dict):
+                    continue
+                category = str(raw_group.get("category") or "")
+                raw_items = raw_group.get("items")
+                if category not in INFECTION_CATEGORY_LABELS or not isinstance(raw_items, list):
+                    continue
+                items: list[dict[str, Any]] = []
+                for raw_item in raw_items:
+                    if not isinstance(raw_item, dict):
+                        continue
+                    assessment = str(raw_item.get("assessment") or "")
+                    if assessment not in INFECTION_ASSESSMENT_LABELS:
+                        continue
+                    items.append(
+                        {
+                            "assessment_label": INFECTION_ASSESSMENT_LABELS[assessment],
+                            "temporal_label": INFECTION_TEMPORAL_LABELS.get(
+                                str(raw_item.get("temporal_status") or ""), ""
+                            ),
+                            "value_text": raw_item.get("value_text") or "",
+                            "evidence_excerpt": raw_item.get("evidence_excerpt") or "",
+                            "concerning": bool(raw_item.get("concerning")),
+                        }
+                    )
+                if not items:
+                    continue
+                groups.append({"category_label": INFECTION_CATEGORY_LABELS[category], "items": items})
+
+        if not groups:
+            # D7/D8: seção neutra (sem grupos, sem alerta), nunca pendência.
+            return {"concerning": False, "alert_message": INFECTION_NEUTRAL_COPY, "groups": []}
+
+        concerning = bool(artifact.get("concerning")) if isinstance(artifact, dict) else False
+        return {
+            "concerning": concerning,
+            "alert_message": INFECTION_ALERT_COPY if concerning else INFECTION_NEUTRAL_COPY,
+            "groups": groups,
+        }
 
     def _recommendation_detail(self, procedure_type: str, key: str) -> Any:
         """Campo consultivo da recomendação daquele procedimento, se existir."""

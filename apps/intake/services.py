@@ -100,6 +100,7 @@ _SELECTION_CHOICES_LABEL: str = ", ".join(_selection_label(key) for key in SELEC
 # combinado, depois os especializados.
 INTAKE_EXPOSED_SELECTION_KEYS: tuple[str, ...] = (
     ProcedureType.EDA,
+    ProcedureType.EDA_GASTROSTOMY,
     ProcedureType.EDA_CAPSULE,
     ProcedureType.EDA_DILATION,
     ProcedureType.COLONOSCOPY,

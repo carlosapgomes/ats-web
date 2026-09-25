@@ -72,6 +72,9 @@ Valores fixos e enums obrigatorios:
   bleeding, other ou unknown; subtype apenas standard ou unknown.
 - EDA + Gastrostomia (GTT): incluir infection_evidence[] (pode ser vazio) com
   {category, assessment, temporal_status, value_text, evidence_excerpt};
+  registrar TODOS os resultados presentes no relatorio principal, inclusive
+  normais/negativos e valores sem interpretacao explicita, preservando texto e
+  unidade documentados (nunca converter numeros nem inventar unidade);
   category leukocytes|crp|procalcitonin|lactate|culture|temperature_or_fever|
   infectious_disease|antibiotic; assessment normal_explicit|abnormal_explicit|
   positive_explicit|negative_explicit|febrile_explicit|current_care_explicit|

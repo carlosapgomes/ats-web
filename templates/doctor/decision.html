@@ -141,6 +141,27 @@
     </div>
     {% endif %}
 
+    {% if report.infection_review %}
+    <div class="report-block rounded p-2 mb-3 border{% if report.infection_review.concerning %} border-danger bg-danger bg-opacity-10{% endif %}">
+      <div class="report-block-title">🦠 Revisão infecciosa consultiva (EDA + GTT)</div>
+      <div class="report-block-body">
+        <div class="small{% if report.infection_review.concerning %} fw-semibold text-danger{% endif %}">{{ report.infection_review.alert_message }}</div>
+        {% for group in report.infection_review.groups %}
+        <div class="small mt-2">
+          <strong>{{ group.category_label }}</strong>
+          {% for item in group.items %}
+          <div class="ms-2">
+            • {{ item.assessment_label }}{% if item.value_text %}: {{ item.value_text }}{% endif %}{% if item.temporal_label %} ({{ item.temporal_label }}){% endif %}
+            {% if item.concerning %}<span class="badge bg-danger">possível infecção</span>{% endif %}
+            {% if item.evidence_excerpt %}<div class="text-muted">Trecho do laudo: “{{ item.evidence_excerpt }}”</div>{% endif %}
+          </div>
+          {% endfor %}
+        </div>
+        {% endfor %}
+      </div>
+    </div>
+    {% endif %}
+
     <div class="doctor-report-grid">
       <div class="report-block"><div class="report-block-title">📋 Resumo Clínico</div><div class="report-block-body">{% for line in report.blocks.resumo_clinico %}<p class="mb-1">{{ line }}</p>{% endfor %}</div></div>
       <div class="report-block"><div class="report-block-title">🔍 Achados Críticos</div><div class="report-block-body">{% for line in report.blocks.achados_criticos %}<div>{{ line }}</div>{% endfor %}</div></div>

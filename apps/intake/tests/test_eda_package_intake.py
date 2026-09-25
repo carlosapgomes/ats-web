@@ -6,8 +6,7 @@ Cobre:
   flag nova e sem gate de Colonoscopia;
 - cada pacote cria exatamente um ``Case`` com uma ``CaseProcedure`` declarada;
 - o ``<select name="exam_type">`` SSR publica as duas opções habilitadas;
-- EDA + GTT (Slice 004) e a família Retossigmoidoscopia (Slice 005) continuam
-  fora do intake.
+- a família Retossigmoidoscopia (Slice 005) continua fora do intake.
 """
 
 from __future__ import annotations
@@ -32,6 +31,14 @@ HOME_URL = "intake:home"
 # Identidades entregues neste slice (design D10): acrescentadas à lista
 # explícita de exposição, na ordem do catálogo (após EDA).
 NEW_SELECTION_KEYS = (ProcedureType.EDA_CAPSULE, ProcedureType.EDA_DILATION)
+
+# Ordem canônica da família EDA no catálogo (Slice 004 acrescenta GTT).
+EDA_FAMILY_CODES = (
+    ProcedureType.EDA,
+    ProcedureType.EDA_GASTROSTOMY,
+    ProcedureType.EDA_CAPSULE,
+    ProcedureType.EDA_DILATION,
+)
 
 
 # ── Helpers ──────────────────────────────────────────────────────────────
@@ -97,9 +104,16 @@ class TestPackageExposure:
             assert options[key].label == ProcedureType(key).label
 
     def test_packages_are_exposed_in_catalog_order_next_to_eda(self) -> None:
+        """Ordem do catálogo na família EDA: EDA, GTT, Cápsula, Dilatação.
+
+        O Slice 004 insere EDA + GTT entre EDA e Cápsula; a ordem relativa dos
+        pacotes deste slice é preservada (nunca listas divergentes por slice).
+        """
         keys = [option.key for option in intake_selection_options()]
-        assert keys.index(ProcedureType.EDA_CAPSULE) == keys.index(ProcedureType.EDA) + 1
-        assert keys.index(ProcedureType.EDA_DILATION) == keys.index(ProcedureType.EDA_CAPSULE) + 1
+        eda_family = [key for key in keys if key in set(EDA_FAMILY_CODES)]
+
+        assert eda_family == list(EDA_FAMILY_CODES)
+        assert keys.index(ProcedureType.EDA_CAPSULE) < keys.index(ProcedureType.EDA_DILATION)
 
     @override_settings(
         COLONOSCOPY_INTAKE_ENABLED=False,
@@ -120,7 +134,7 @@ class TestPackageExposure:
 
     def test_later_slices_stay_out_of_the_intake(self) -> None:
         keys = [option.key for option in intake_selection_options()]
-        for key in ("eda_gastrostomy", "rectosigmoidoscopy", "rectosigmoidoscopy_dilation", "rectosigmoidoscopy_argon"):
+        for key in ("rectosigmoidoscopy", "rectosigmoidoscopy_dilation", "rectosigmoidoscopy_argon"):
             assert key not in keys, key
 
     @pytest.mark.django_db

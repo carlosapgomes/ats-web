@@ -40,10 +40,11 @@ APP_CSS = PROJECT_ROOT / "static" / "css" / "app.css"
 
 # Ordem explícita de exposição no intake (design D10): as seleções publicadas.
 # Slice 002 entregou cinco; o Slice 003 acrescentou os pacotes EDA + Cápsula e
-# EDA + Dilatação na ordem do catálogo (após EDA). EDA + GTT e a família
-# Retossigmoidoscopia continuam fora (Slices 004/005).
+# EDA + Dilatação e o Slice 004 acrescentou EDA + GTT, todos na ordem do
+# catálogo (após EDA). A família Retossigmoidoscopia continua fora (Slice 005).
 EXPOSED_SELECTION_KEYS = (
     "eda",
+    "eda_gastrostomy",
     "eda_capsule",
     "eda_dilation",
     "colonoscopy",
@@ -52,8 +53,8 @@ EXPOSED_SELECTION_KEYS = (
     "cpre",
 )
 
-# Pacotes publicados sem gate de flag (Slice 003).
-PACKAGE_SELECTION_KEYS = ("eda_capsule", "eda_dilation")
+# Pacotes publicados sem gate de flag (Slices 003/004).
+PACKAGE_SELECTION_KEYS = ("eda_gastrostomy", "eda_capsule", "eda_dilation")
 
 # Vocabulário CSS exigido pelo componente (AGENTS.md §8: a fatia de UI inclui
 # o vocabulário em app.css e o pina em teste de guarda).
@@ -142,7 +143,6 @@ class TestIntakeSelectionOptions:
         keys = tuple(option.key for option in intake_selection_options())
         assert keys == EXPOSED_SELECTION_KEYS
         # Slices futuros ainda não aparecem no intake.
-        assert "eda_gastrostomy" not in keys
         assert "rectosigmoidoscopy" not in keys
 
     def test_labels_come_from_the_catalog(self) -> None:

@@ -17,10 +17,10 @@ EDA e/ou Colonoscopia, mesmo em trechos independentes (ADR-0008). Item
 estruturado isolado, histórico, negação ou menção nunca suprimem; dois
 especializados, tipo desconhecido ou duplicata continuam fail-closed.
 
-Slice 003 (D3): a MESMA proveniência sustenta a supressão da base EDA por
-exatamente uma variação atômica atual (``eda_capsule``/``eda_dilation``); o
-item estruturado sem ocorrência atual não suprime e o conjunto permanece misto
-(fail-closed na matriz, sem descartar valores).
+Slice 003/004 (D3): a MESMA proveniência sustenta a supressão da base EDA por
+exatamente uma variação atômica atual (``eda_gastrostomy``/``eda_capsule``/
+``eda_dilation``); o item estruturado sem ocorrência atual não suprime e o
+conjunto permanece misto (fail-closed na matriz, sem descartar valores).
 """
 
 from __future__ import annotations
@@ -84,16 +84,17 @@ _QUALIFICATION_CURRENT_REQUEST = "current_request"
 # Identificador da regra registrado em evento/sugestão (D3).
 PROCEDURE_PRECEDENCE_RULE = "specialized_over_conventional"
 
-# Variações atômicas de EDA e a base que elas clinicamente contêm (D3, Slice
-# 003): exatamente UMA variação com ocorrência textual atual suprime a base
+# Variações atômicas de EDA e a base que elas clinicamente contêm (D3, Slices
+# 003/004): exatamente UMA variação com ocorrência textual atual suprime a base
 # detectada em qualquer trecho (mesma expressão ou trecho independente), no
 # mesmo regime de proveniência da precedência especializada (ADR-0008).
 _VARIATION_BASE_TYPES: dict[str, str] = {
+    ProcedureType.EDA_GASTROSTOMY: ProcedureType.EDA,
     ProcedureType.EDA_CAPSULE: ProcedureType.EDA,
     ProcedureType.EDA_DILATION: ProcedureType.EDA,
 }
-# Termos ambíguos exigem vínculo local com a base na MESMA expressão; cápsula é
-# marcador autoevidente da família e não exige vínculo (D3).
+# Termos ambíguos exigem vínculo local com a base na MESMA expressão; GTT e
+# cápsula são marcadores autoevidentes da família e não exigem vínculo (D3).
 _VARIATIONS_REQUIRING_LOCAL_LINK: frozenset[str] = frozenset({ProcedureType.EDA_DILATION})
 # Identificador da regra de pacote registrado em evento/sugestão (D3).
 VARIATION_PRECEDENCE_RULE = "variation_over_base"
@@ -129,7 +130,7 @@ def _current_request_variation_types(occurrences: Any) -> set[str]:
 
 
 def _apply_variation_precedence(*, any_set: set[str], occurrences: Any) -> tuple[set[str], str, tuple[str, ...]]:
-    """Supressão da base por exatamente uma variação atual (D3/Slice 003).
+    """Supressão da base por exatamente uma variação atual (D3/Slices 003-004).
 
     Retorna o conjunto reconciliado, a variação selecionada e a base suprimida
     — vazios quando não houve redução. Duas variações atuais, variação sem
@@ -187,8 +188,8 @@ class ProcedureReconciliationResult:
     ``suppressed_conventional_types`` carregam a precedência especializada
     efetivamente aplicada (D3); ``variation_precedence_applied``/
     ``selected_variation_type``/``suppressed_base_types`` carregam a supressão
-    da base EDA por um pacote atômico (Slice 003). Todos são vazios quando não
-    houve redução.
+    da base EDA por um pacote atômico (Slices 003/004). Todos são vazios quando
+    não houve redução.
     """
 
     action: str  # "proceed" | "auto_upgrade" | "nir_review"
@@ -324,7 +325,7 @@ def reconcile_detected_procedures(
         any_set=any_set,
         occurrences=occurrences,
     )
-    # D3/Slice 003 — supressão da base por exatamente uma variação atual
+    # D3/Slices 003/004 — supressão da base por exatamente uma variação atual
     # (pacote atômico). Roda DEPOIS da precedência especializada: um
     # especializado atual já reduziu o conjunto e não há variação a suprimir.
     any_set, selected_variation_type, suppressed_base_types = _apply_variation_precedence(

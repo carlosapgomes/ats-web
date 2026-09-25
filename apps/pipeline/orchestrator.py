@@ -30,6 +30,12 @@ from apps.cases.procedures import (
 )
 from apps.llm.models import PromptTemplate
 from apps.pipeline.imaging_evidence import normalize_evidence_text, verify_abdominal_imaging_evidence
+from apps.pipeline.infection_review import (
+    INFECTION_EVIDENCE_ARTIFACT_KEY,
+    INFECTION_EVIDENCE_FIELD,
+    serialize_infection_review,
+    verify_infection_evidence,
+)
 from apps.pipeline.llm import LlmClient
 from apps.pipeline.llm1_service_v4 import (
     LLM1_V4_DEFAULT_SYSTEM_PROMPT,
@@ -63,10 +69,12 @@ from apps.pipeline.scope_detection import detect_procedure_occurrences, detect_r
 logger = logging.getLogger(__name__)
 
 
-# D5/Slice 003: o writer 4.0 detecta as dez identidades; os pacotes EDA entram
-# neste slice (Cápsula e Dilatação) e os demais chegam nos Slices 004/005.
+# D5/Slices 003/004: o writer 4.0 detecta as dez identidades; os pacotes EDA
+# entram nos Slices 003 (Cápsula e Dilatação) e 004 (GTT) e os demais no Slice
+# 005.
 _DETECTABLE_PROCEDURE_TYPES: tuple[str, ...] = (
     ProcedureType.EDA,
+    ProcedureType.EDA_GASTROSTOMY,
     ProcedureType.EDA_CAPSULE,
     ProcedureType.EDA_DILATION,
     ProcedureType.COLONOSCOPY,
@@ -155,6 +163,36 @@ def _project_detected_dilation_site(
         main_report_text=main_report_text,
     )
     return {"anatomical_site": projection.anatomical_site, "reason_code": projection.reason_code}
+
+
+# ── Revisão infecciosa consultiva de EDA + GTT (Slice 004, D7/D8) ───────────
+
+
+def project_infection_review(
+    *,
+    structured_data: dict[str, object],
+    detected_procedure_types: tuple[str, ...],
+    main_report_text: str,
+) -> dict[str, object] | None:
+    """Verifica e projeta a revisão infecciosa do artefato 4.0 (D7/D8/R1).
+
+    Existe SOMENTE para a identidade exata ``eda_gastrostomy`` — nenhuma outra
+    variação de EDA herda o painel por família/sinal legado. A coleção é
+    verificada contra o relatório principal (nunca anexos); ausência/falha de
+    extração devolve ``None`` (seção vazia/neutra, nunca pendência). O DTO
+    resultante NUNCA entra em ``failed_requirements``, ``priority_signals``,
+    policy ou no reconciliador LLM2: é apresentação consultiva.
+    """
+    if detected_procedure_types != (ProcedureType.EDA_GASTROSTOMY,):
+        return None
+    item = requested_procedure_for_type(structured_data, ProcedureType.EDA_GASTROSTOMY)
+    view = verify_infection_evidence(
+        entries=item.get(INFECTION_EVIDENCE_FIELD),
+        main_report_text=main_report_text,
+    )
+    if view.empty:
+        return None
+    return serialize_infection_review(view)
 
 
 def run_pipeline(
@@ -340,6 +378,9 @@ def _build_llm2_structured_data_view(
     reconciliado, na ordem canônica recebida e reaproveitando somente itens
     originais. Não muta o artefato persistido e nunca sintetiza item clínico
     ausente; campos comuns, summary e evidências são preservados.
+
+    D7/D8: ``INFECTION_EVIDENCE_FIELD`` é removido da cópia — a coleção
+    infecciosa é apresentação consultiva, nunca regra do reconciliador LLM2.
     """
     view = copy.deepcopy(llm1_structured_data)
     original_items = view.get("requested_procedures")
@@ -348,6 +389,7 @@ def _build_llm2_structured_data_view(
     items_by_type: dict[str, dict[str, object]] = {}
     for item in original_items:
         if isinstance(item, dict) and isinstance(item.get("procedure_type"), str):
+            item.pop(INFECTION_EVIDENCE_FIELD, None)
             items_by_type.setdefault(item["procedure_type"], item)
     view["requested_procedures"] = [
         items_by_type[procedure_type] for procedure_type in detected_procedure_types if procedure_type in items_by_type
@@ -658,11 +700,20 @@ def _run_v4_pipeline(
         recommendations.append(recommendation)
 
     global_support = strictest_global_support(tuple(str(r["support_recommendation"]) for r in recommendations))
+    # D7/R1: a revisão infecciosa é consultiva e exclusiva de EDA + GTT; ela
+    # acompanha o artefato 4.0 de apresentação, nunca a policy/priority signals.
+    infection_review = project_infection_review(
+        structured_data=result1.structured_data,
+        detected_procedure_types=reconciliation.detected_procedure_types,
+        main_report_text=case.extracted_text,
+    )
     case.suggested_action = {
         "schema_version": _SCHEMA_VERSION,
         "procedure_recommendations": recommendations,
         "global_support_recommendation": global_support,
     }
+    if infection_review is not None:
+        case.suggested_action[INFECTION_EVIDENCE_ARTIFACT_KEY] = infection_review
     if precedence_metadata is not None:
         case.suggested_action["procedure_precedence"] = precedence_metadata
     case.save()
