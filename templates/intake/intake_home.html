@@ -42,66 +42,29 @@
 
     <!-- Tipo de exame — obrigatório, lote homogêneo (Slice 002) -->
     <fieldset class="mb-3" id="exam-type-section">
-      <legend class="fw-semibold" id="exam-type-label">🩺 Tipo de exame <span class="text-danger">*</span></legend>
+      <legend class="fw-semibold">🩺 Tipo de exame <span class="text-danger">*</span></legend>
       <p class="text-muted small mb-2" id="exam-type-guidance">
         Selecione o tipo de exame. Cada lote deve conter PDFs do <strong>mesmo tipo</strong>;
         para tipos diferentes, envie <strong>lotes separados</strong>.
         <strong>EDA + Colonoscopia</strong> é uma opção válida: ambos os procedimentos de todos os PDFs do lote.
       </p>
-      <div class="d-flex flex-wrap gap-3" role="radiogroup" aria-labelledby="exam-type-label">
-        <div class="form-check">
-          <input class="form-check-input" type="radio" name="exam_type" value="eda" id="exam-type-eda">
-          <label class="form-check-label" for="exam-type-eda">EDA</label>
-        </div>
-        <div class="form-check">
-          {% if colonoscopy_intake_enabled %}
-          <input class="form-check-input" type="radio" name="exam_type" value="colonoscopy" id="exam-type-colonoscopy">
-          <label class="form-check-label" for="exam-type-colonoscopy">Colonoscopia</label>
-          {% else %}
-          <input class="form-check-input" type="radio" name="exam_type" value="colonoscopy" id="exam-type-colonoscopy" disabled>
-          <label class="form-check-label text-muted" for="exam-type-colonoscopy">
-            Colonoscopia
-            <span class="badge bg-secondary-subtle text-secondary-emphasis">indisponível para novos envios</span>
-          </label>
-          {% endif %}
-        </div>
-        <div class="form-check">
-          {% if colonoscopy_intake_enabled %}
-          <input class="form-check-input" type="radio" name="exam_type" value="eda_colonoscopy" id="exam-type-eda-colonoscopy">
-          <label class="form-check-label" for="exam-type-eda-colonoscopy">EDA + Colonoscopia</label>
-          {% else %}
-          <input class="form-check-input" type="radio" name="exam_type" value="eda_colonoscopy" id="exam-type-eda-colonoscopy" disabled>
-          <label class="form-check-label text-muted" for="exam-type-eda-colonoscopy">
-            EDA + Colonoscopia
-            <span class="badge bg-secondary-subtle text-secondary-emphasis">indisponível para novos envios</span>
-          </label>
-          {% endif %}
-        </div>
-        <div class="form-check">
-          {% if echoendoscopy_intake_enabled %}
-          <input class="form-check-input" type="radio" name="exam_type" value="echoendoscopy" id="exam-type-echoendoscopy">
-          <label class="form-check-label" for="exam-type-echoendoscopy">Ecoendoscopia</label>
-          {% else %}
-          <input class="form-check-input" type="radio" name="exam_type" value="echoendoscopy" id="exam-type-echoendoscopy" disabled>
-          <label class="form-check-label text-muted" for="exam-type-echoendoscopy">
-            Ecoendoscopia
-            <span class="badge bg-secondary-subtle text-secondary-emphasis">indisponível para novos envios</span>
-          </label>
-          {% endif %}
-        </div>
-        <div class="form-check">
-          {% if cpre_intake_enabled %}
-          <input class="form-check-input" type="radio" name="exam_type" value="cpre" id="exam-type-cpre">
-          <label class="form-check-label" for="exam-type-cpre">CPRE</label>
-          {% else %}
-          <input class="form-check-input" type="radio" name="exam_type" value="cpre" id="exam-type-cpre" disabled>
-          <label class="form-check-label text-muted" for="exam-type-cpre">
-            CPRE
-            <span class="badge bg-secondary-subtle text-secondary-emphasis">indisponível para novos envios</span>
-          </label>
-          {% endif %}
-        </div>
+      <!-- Controle canônico do tipo: o select é o valor submetido em qualquer
+           cenário; o combobox pesquisável é progressive enhancement (D9). -->
+      <div class="procedure-combobox">
+        <label class="visually-hidden" for="exam-type-select" id="exam-type-select-label">Tipo de exame</label>
+        <select class="form-select procedure-combobox__select" id="exam-type-select" name="exam_type"
+                data-procedure-combobox aria-labelledby="exam-type-select-label"
+                aria-describedby="exam-type-guidance{% if exam_type_error %} exam-type-error{% endif %}"
+                {% if exam_type_error %}aria-invalid="true"{% endif %}>
+          <option value=""{% if not selected_exam_type %} selected{% endif %}>Selecione o tipo de exame…</option>
+          {% for option in exam_type_options %}
+          <option value="{{ option.key }}"{% if option.aliases %} data-search-aliases="{{ option.aliases|join:', ' }}"{% endif %}{% if not option.enabled %} disabled{% endif %}{% if option.key == selected_exam_type %} selected{% endif %}>{{ option.label }}{% if not option.enabled %} — indisponível para novos envios{% endif %}</option>
+          {% endfor %}
+        </select>
       </div>
+      {% if exam_type_error %}
+      <p class="procedure-combobox__error" id="exam-type-error" role="alert">{{ exam_type_error }}</p>
+      {% endif %}
     </fieldset>
 
     <!-- Attachment upload section -->
@@ -213,5 +176,6 @@
 {% endblock %}
 
 {% block extra_js %}
+<script src="{% static 'js/procedure_combobox.js' %}"></script>
 <script src="{% static 'js/upload.js' %}"></script>
 {% endblock %}

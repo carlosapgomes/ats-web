@@ -206,27 +206,35 @@ class TestIntakeFlag:
 
 
 @pytest.mark.django_db
-class TestHtmlRadios:
+class TestHtmlExamTypeControl:
+    """Slice 002: o controle canônico é um ``<select>`` (radios removidos)."""
+
     def _home_content(self, client) -> str:
         client, _ = _nir_client(client)
         response = client.get(reverse("intake:home"))
         assert response.status_code == 200
         return str(response.content.decode())
 
-    def test_radio_fieldset_with_accessible_label(self, client) -> None:
+    def test_fieldset_with_accessible_label(self, client) -> None:
         content = self._home_content(client)
         assert 'name="exam_type"' in content
         assert "Tipo de exame" in content
-        assert "<fieldset" in content.lower() or 'role="radiogroup"' in content.lower()
+        assert "<fieldset" in content.lower()
+        assert "procedure-combobox" in content
 
-    def test_no_option_checked_by_default(self, client) -> None:
-        content = self._home_content(client)
+    def test_no_real_option_preselected(self, client) -> None:
+        """Placeholder selecionado; nenhuma opção real pré-marcada."""
         import re
 
-        radios = re.findall(r"<input[^>]*name=[\"']exam_type[\"'][^>]*>", content)
-        assert len(radios) >= 2, "Devem existir opções EDA e Colonoscopia"
-        for tag in radios:
-            assert "checked" not in tag, f"Radio pré-marcado: {tag}"
+        content = self._home_content(client)
+        options = re.findall(r"<option[^>]*>", content)
+        placeholders = [tag for tag in options if 'value=""' in tag]
+        assert placeholders, "Falta o placeholder de seleção"
+        assert "selected" in placeholders[0], "Placeholder deveria ser a seleção inicial"
+        real_options = [tag for tag in options if 'value=""' not in tag]
+        assert len(real_options) >= 2, "Devem existir opções EDA e Colonoscopia"
+        for tag in real_options:
+            assert "selected" not in tag, f"Opção real pré-marcada: {tag}"
 
     def test_copy_requires_separate_batches_per_type(self, client) -> None:
         content = self._home_content(client)

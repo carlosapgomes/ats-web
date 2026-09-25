@@ -10,6 +10,8 @@ import hashlib
 import logging
 import os
 import uuid
+from collections.abc import Callable
+from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from django.conf import settings
@@ -87,6 +89,79 @@ def _selection_label(key: str) -> str:
 
 
 _SELECTION_CHOICES_LABEL: str = ", ".join(_selection_label(key) for key in SELECTION_KEYS)
+
+
+# ── Opções de seleção por jornada (design D9/D10) ────────────────────────
+
+# Lista ordenada explícita dos códigos publicados no intake (upload, reenvio
+# corrigido e correção). Cada slice de identidade acrescenta SOMENTE o seu
+# código aqui; nenhuma flag nova é criada. A ordem espelha os radios
+# históricos: EDA, Colonoscopia, EDA + Colonoscopia, Ecoendoscopia, CPRE.
+INTAKE_EXPOSED_SELECTION_KEYS: tuple[str, ...] = (
+    ProcedureType.EDA,
+    ProcedureType.COLONOSCOPY,
+    EDA_COLONOSCOPY,
+    ProcedureType.ECHOENDOSCOPY,
+    ProcedureType.CPRE,
+)
+
+# Gate de flag por código exposto (D10): a referência é EXPLÍCITA — regra de
+# rollout, não lista derivada do catálogo. Código sem gate é sempre
+# habilitado (EDA).
+_INTAKE_SELECTION_FLAG_GATES: dict[str, Callable[[], bool]] = {
+    ProcedureType.COLONOSCOPY: is_colonoscopy_intake_enabled,
+    EDA_COLONOSCOPY: is_colonoscopy_intake_enabled,
+    ProcedureType.ECHOENDOSCOPY: is_echoendoscopy_intake_enabled,
+    ProcedureType.CPRE: is_cpre_intake_enabled,
+}
+
+
+@dataclass(frozen=True)
+class IntakeSelectionOption:
+    """Opção de procedimento exposta na jornada de intake (design D9/D10)."""
+
+    key: str
+    label: str
+    enabled: bool
+    aliases: tuple[str, ...] = ()
+
+
+def is_intake_selection_enabled(key: str) -> bool:
+    """Flag de rollout de um código exposto (sempre habilitado sem gate)."""
+    gate = _INTAKE_SELECTION_FLAG_GATES.get(key)
+    return True if gate is None else gate()
+
+
+def _selection_search_aliases(key: str) -> tuple[str, ...]:
+    """Aliases pesquisáveis de uma chave, derivados do catálogo.
+
+    Seleção composta (``eda_colonoscopy``) é encontrada também pelas labels dos
+    componentes — nenhum alias é inventado localmente; identidade atômica usa
+    somente a própria label.
+    """
+    components = procedure_types_for_selection(key)
+    if len(components) == 1:
+        return ()
+    return tuple(PROCEDURE_LABELS[code] for code in components)
+
+
+def intake_selection_options() -> tuple[IntakeSelectionOption, ...]:
+    """Opções ordenadas de procedimento para as jornadas de intake (R1/D10).
+
+    Compõe o catálogo (label/aliases) com as flags de rollout sobre a lista
+    explícita de códigos publicados. O template SSR usa exatamente esta lista;
+    ampliar a exposição é acrescentar o código em
+    ``INTAKE_EXPOSED_SELECTION_KEYS``.
+    """
+    return tuple(
+        IntakeSelectionOption(
+            key=key,
+            label=_selection_label(key),
+            enabled=is_intake_selection_enabled(key),
+            aliases=_selection_search_aliases(key),
+        )
+        for key in INTAKE_EXPOSED_SELECTION_KEYS
+    )
 
 
 def validate_exam_type(exam_type: str | None) -> str:

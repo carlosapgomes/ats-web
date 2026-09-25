@@ -57,6 +57,13 @@ def _nir_client(client):
     return client, user
 
 
+def _exam_type_option(html: str, value: str) -> str:
+    """Tag ``<option>`` da seleção canônica do controle de tipo (Slice 002)."""
+    match = re.search(rf'<option[^>]*value="{value}"[^>]*>', html)
+    assert match is not None, f"opção {value!r} ausente no formulário de intake"
+    return match.group(0)
+
+
 # ── R1: validação de choice + flag ──────────────────────────────────────────
 
 
@@ -115,9 +122,8 @@ class TestEchoendoscopyIntake:
             response = nir.get(reverse("intake:home"))
             html = response.content.decode()
             assert "CPRE" in html
-            cpre_input = re.search(r'<input[^>]*id="exam-type-cpre"[^>]*>', html)
-            assert cpre_input is not None, "opção CPRE ausente no formulário de intake"
-            assert "disabled" in cpre_input.group(0)
+            cpre_option = _exam_type_option(html, "cpre")
+            assert "disabled" in cpre_option
 
             nir.post(
                 reverse("intake:home"),
@@ -131,9 +137,8 @@ class TestEchoendoscopyIntake:
         nir, _ = _nir_client(client)
         response = nir.get(reverse("intake:home"))
         html = response.content.decode()
-        cpre_input = re.search(r'<input[^>]*id="exam-type-cpre"[^>]*>', html)
-        assert cpre_input is not None, "opção CPRE ausente no formulário de intake"
-        assert "disabled" not in cpre_input.group(0)
+        cpre_option = _exam_type_option(html, "cpre")
+        assert "disabled" not in cpre_option
 
         nir.post(
             reverse("intake:home"),

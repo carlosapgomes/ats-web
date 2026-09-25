@@ -44,17 +44,12 @@
   var validFiles = [];        // main PDF files
   var validAttachments = [];  // attachment files
 
-  // Exam type radios (Slice 002) — submit só habilita com arquivos + tipo
-  var examTypeRadios = document.querySelectorAll('input[name="exam_type"]');
-  var selectedExamType = '';
+  // Tipo de exame (Slice 002) — submit só habilita com arquivos + tipo. O
+  // <select> é a autoridade: o combobox pesquisável apenas o atualiza.
+  var examTypeSelect = document.querySelector('select[name="exam_type"]');
 
   function getSelectedExamType() {
-    for (var i = 0; i < examTypeRadios.length; i++) {
-      if (examTypeRadios[i].checked) {
-        return examTypeRadios[i].value;
-      }
-    }
-    return '';
+    return examTypeSelect ? examTypeSelect.value : '';
   }
 
   function updateSubmitState() {
@@ -62,11 +57,8 @@
     uploadBtn.disabled = !(validFiles.length > 0 && getSelectedExamType());
   }
 
-  for (var r = 0; r < examTypeRadios.length; r++) {
-    examTypeRadios[r].addEventListener('change', function () {
-      selectedExamType = getSelectedExamType();
-      updateSubmitState();
-    });
+  if (examTypeSelect) {
+    examTypeSelect.addEventListener('change', updateSubmitState);
   }
 
   // ── Initial UI setup ─────────────────────────────────────────────
@@ -604,7 +596,7 @@
       // Exam type is mandatory — backend is the source of truth (Slice 002)
       if (!getSelectedExamType()) {
         e.preventDefault();
-        showAlert('warning', 'Selecione o tipo de exame (EDA, Colonoscopia ou EDA + Colonoscopia) antes de enviar.');
+        showAlert('warning', 'Selecione o tipo de exame antes de enviar.');
         return;
       }
 

@@ -69,6 +69,7 @@ from .services import (
     confirm_case_receipt,
     correct_case_exam_type,
     ensure_exam_type_allowed,
+    intake_selection_options,
     is_colonoscopy_intake_enabled,
     is_cpre_intake_enabled,
     is_echoendoscopy_intake_enabled,
@@ -486,11 +487,29 @@ def intake_home(request: HttpRequest) -> HttpResponse:
     user = request.user
     assert user.is_authenticated
 
+    exam_type_options = intake_selection_options()
+    selected_exam_type = ""
+    exam_type_error = ""
+
     if request.method == "POST":
         form = CaseUploadForm(request.POST, request.FILES)
         files = request.FILES.getlist("pdf_files")
         attachments = request.FILES.getlist("attachment_files")
         exam_type = request.POST.get("exam_type", "")
+
+        # Re-render preserva a seleção válida anterior (R4/D9); o controle
+        # canônico só recebe `selected` para valores publicados.
+        if any(option.key == exam_type for option in exam_type_options):
+            selected_exam_type = exam_type
+
+        # Erro de seleção associado ao controle (role="alert" +
+        # aria-describedby/aria-invalid no <select>), sem anúncio duplicado
+        # no bloco genérico de mensagens.
+        try:
+            ensure_exam_type_allowed(exam_type)
+        except ValueError as exc:
+            exam_type_error = str(exc)
+
         cases, errors = process_uploaded_files(
             files,
             user,
@@ -499,6 +518,8 @@ def intake_home(request: HttpRequest) -> HttpResponse:
         )
 
         for error in errors:
+            if exam_type_error and error == exam_type_error:
+                continue
             messages.warning(request, error)
 
         if cases:
@@ -535,11 +556,11 @@ def intake_home(request: HttpRequest) -> HttpResponse:
         {
             "form": form,
             "recent_cases": recent_cases_data,
-            # R3: UI explica indisponibilidade de colonoscopia quando a flag
-            # de intake está desligada (a opção ativa só aparece com flag on).
-            "colonoscopy_intake_enabled": is_colonoscopy_intake_enabled(),
-            "echoendoscopy_intake_enabled": is_echoendoscopy_intake_enabled(),
-            "cpre_intake_enabled": is_cpre_intake_enabled(),
+            # R1/D10: opções vêm do helper de jornada (catálogo + flags); o
+            # template não repete a lista nem consulta flags diretamente.
+            "exam_type_options": exam_type_options,
+            "selected_exam_type": selected_exam_type,
+            "exam_type_error": exam_type_error,
         },
     )
 

@@ -226,16 +226,25 @@ class TestSpecializedIntakeFlags:
         assert getattr(settings, "CPRE_INTAKE_ENABLED", False) is False
 
     def test_cpre_visual_option_is_flag_gated(self) -> None:
-        """Opção visual existe, mas nasce ``disabled`` com a flag desligada."""
+        """Opção visual existe, mas nasce ``disabled`` com a flag desligada.
+
+        Slice 002: no upload as opções vêm do helper de jornada
+        (``apps/intake/services.py``), que aplica o gate explícito por código;
+        o reenvio corrigido mantém os radios com o gate no template.
+        """
         from pathlib import Path
 
         from django.conf import settings as django_settings
 
         base = Path(django_settings.BASE_DIR)
-        for relative in ("templates/intake/intake_home.html", "templates/intake/corrected_resubmission.html"):
-            source = (base / relative).read_text(encoding="utf-8")
-            assert 'value="cpre"' in source
-            assert "cpre_intake_enabled" in source
+        # Gate explícito do helper que publica as opções do upload.
+        assert "ProcedureType.CPRE: is_cpre_intake_enabled" in (base / "apps" / "intake" / "services.py").read_text(
+            encoding="utf-8"
+        )
+        assert "exam_type_options" in (base / "templates" / "intake" / "intake_home.html").read_text(encoding="utf-8")
+        source = (base / "templates" / "intake" / "corrected_resubmission.html").read_text(encoding="utf-8")
+        assert 'value="cpre"' in source
+        assert "cpre_intake_enabled" in source
 
     def test_echoendoscopy_option_is_flag_gated(self) -> None:
         """Opção visual existe, mas nasce ``disabled`` com a flag desligada."""
@@ -244,7 +253,10 @@ class TestSpecializedIntakeFlags:
         from django.conf import settings as django_settings
 
         base = Path(django_settings.BASE_DIR)
-        for relative in ("templates/intake/intake_home.html", "templates/intake/corrected_resubmission.html"):
-            source = (base / relative).read_text(encoding="utf-8")
-            assert 'value="echoendoscopy"' in source
-            assert "echoendoscopy_intake_enabled" in source
+        assert "ProcedureType.ECHOENDOSCOPY: is_echoendoscopy_intake_enabled" in (
+            base / "apps" / "intake" / "services.py"
+        ).read_text(encoding="utf-8")
+        assert "exam_type_options" in (base / "templates" / "intake" / "intake_home.html").read_text(encoding="utf-8")
+        source = (base / "templates" / "intake" / "corrected_resubmission.html").read_text(encoding="utf-8")
+        assert 'value="echoendoscopy"' in source
+        assert "echoendoscopy_intake_enabled" in source
