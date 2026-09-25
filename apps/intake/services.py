@@ -97,7 +97,7 @@ _SELECTION_CHOICES_LABEL: str = ", ".join(_selection_label(key) for key in SELEC
 # corrigido e correção). Cada slice de identidade acrescenta SOMENTE o seu
 # código aqui; nenhuma flag nova é criada. A ordem espelha o catálogo canônico
 # (``PROCEDURE_CATALOG``): EDA e seus pacotes, depois Colonoscopia e o
-# combinado, depois os especializados.
+# combinado, depois a família Retossigmoidoscopia, depois os especializados.
 INTAKE_EXPOSED_SELECTION_KEYS: tuple[str, ...] = (
     ProcedureType.EDA,
     ProcedureType.EDA_GASTROSTOMY,
@@ -105,6 +105,9 @@ INTAKE_EXPOSED_SELECTION_KEYS: tuple[str, ...] = (
     ProcedureType.EDA_DILATION,
     ProcedureType.COLONOSCOPY,
     EDA_COLONOSCOPY,
+    ProcedureType.RECTOSIGMOIDOSCOPY,
+    ProcedureType.RECTOSIGMOIDOSCOPY_DILATION,
+    ProcedureType.RECTOSIGMOIDOSCOPY_ARGON,
     ProcedureType.ECHOENDOSCOPY,
     ProcedureType.CPRE,
 )

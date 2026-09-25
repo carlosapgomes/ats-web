@@ -18,7 +18,7 @@
 
 ## 3. Retossigmoidoscopia
 
-- [ ] 3.1 Implementar o Slice 005 (`slices/slice-005-rectosigmoidoscopy-family-to-doctor.md`) e provar as três identidades de Retossigmoidoscopia do intake ao médico com profile de Colonoscopia, pacote indivisível e combinações proibidas fail-closed.
+- [x] 3.1 Implementar o Slice 005 (`slices/slice-005-rectosigmoidoscopy-family-to-doctor.md`) e provar as três identidades de Retossigmoidoscopia do intake ao médico com profile de Colonoscopia, pacote indivisível e combinações proibidas fail-closed.
 
 ## 4. Jornadas por ator
 

@@ -319,8 +319,8 @@ class TestCpreOccurrenceDetection:
         )
         cpre = next(o for o in occurrences if o.procedure_type == "cpre")
         eda = next(o for o in occurrences if o.procedure_type == "eda")
-        assert cpre.linked_eda is True
-        assert eda.linked_eda is True
+        assert cpre.linked_base is True
+        assert eda.linked_base is True
         assert cpre.qualification == "current_request"
         assert cpre.evidence_id != eda.evidence_id
 
@@ -331,7 +331,7 @@ class TestCpreOccurrenceDetection:
         )
         cpre = next(o for o in occurrences if o.procedure_type == "cpre")
         assert cpre.qualification == "current_request"
-        assert cpre.linked_eda is False
+        assert cpre.linked_base is False
 
 
 # ── R2: precedência por vínculo textual ─────────────────────────────────────

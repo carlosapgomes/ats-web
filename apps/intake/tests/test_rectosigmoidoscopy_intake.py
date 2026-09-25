@@ -1,12 +1,14 @@
-"""Slice 003 — exposição de EDA + Cápsula e EDA + Dilatação no intake (R1).
+"""Slice 005 — família Retossigmoidoscopia no intake (R1).
 
 Cobre:
 
-- as duas identidades entram na lista explícita de exposição do intake sem
+- as três identidades entram na lista explícita de exposição do intake sem
   flag nova e sem gate de Colonoscopia;
-- cada pacote cria exatamente um ``Case`` com uma ``CaseProcedure`` declarada;
-- o ``<select name="exam_type">`` SSR publica as duas opções habilitadas;
-- a família Retossigmoidoscopia (Slice 005) entra depois deste slice, na sequência do catálogo.
+- cada upload cria exatamente um ``Case`` com uma ``CaseProcedure`` declarada
+  com o código selecionado;
+- o ``<select name="exam_type">`` SSR publica as três opções habilitadas com o
+  código canônico como valor (label/alias nunca é valor válido);
+- nenhuma sigla operacional nova é aceita.
 """
 
 from __future__ import annotations
@@ -28,23 +30,23 @@ User = get_user_model()
 
 HOME_URL = "intake:home"
 
-# Identidades entregues neste slice (design D10): acrescentadas à lista
-# explícita de exposição, na ordem do catálogo (após EDA).
-NEW_SELECTION_KEYS = (ProcedureType.EDA_CAPSULE, ProcedureType.EDA_DILATION)
-
-# Ordem canônica da família EDA no catálogo (Slice 004 acrescenta GTT).
-EDA_FAMILY_CODES = (
-    ProcedureType.EDA,
-    ProcedureType.EDA_GASTROSTOMY,
-    ProcedureType.EDA_CAPSULE,
-    ProcedureType.EDA_DILATION,
+# Identidades entregues neste slice (design D10), na ordem do catálogo: depois
+# de Colonoscopia e do combinado derivado.
+NEW_SELECTION_KEYS = (
+    ProcedureType.RECTOSIGMOIDOSCOPY,
+    ProcedureType.RECTOSIGMOIDOSCOPY_DILATION,
+    ProcedureType.RECTOSIGMOIDOSCOPY_ARGON,
 )
+
+# Ordem canônica da família Colonoscopia no catálogo (Slice 005 acrescenta as
+# três Retossigmoidoscopias).
+COLONOSCOPY_FAMILY_CODES = (ProcedureType.COLONOSCOPY, *NEW_SELECTION_KEYS)
 
 
 # ── Helpers ──────────────────────────────────────────────────────────────
 
 
-def _create_test_pdf_bytes(text: str = "Paciente: João da Silva\nRegistro: 2026-0505-001") -> bytes:
+def _create_test_pdf_bytes(text: str = "Paciente: Ana Souza\nRegistro: 2026-0905-001") -> bytes:
     doc = fitz.open()
     page = doc.new_page()
     page.insert_text((72, 72), text, fontsize=12)
@@ -61,7 +63,7 @@ def _simple_pdf() -> SimpleUploadedFile:
 def _nir_client(client):
     from apps.accounts.models import Role
 
-    user = User.objects.create_user(username="nir-package@test.com", password="testpass123")
+    user = User.objects.create_user(username="nir-recto@test.com", password="testpass123")
     role, _ = Role.objects.get_or_create(name="nir")
     user.roles.add(role)
     client.force_login(user)
@@ -74,7 +76,7 @@ def _nir_client(client):
 def _option_tags(html: str) -> list[str]:
     match = re.search(r'<select[^>]*name="exam_type"[^>]*>.*?</select>', html, re.DOTALL)
     assert match is not None, "select canônico de exam_type ausente"
-    return re.findall(r"<option[^>]*>", match.group(0))
+    return re.findall(r"<option[^>]*>[^<]*</option>", match.group(0))
 
 
 def _option_tag(html: str, value: str) -> str:
@@ -93,67 +95,62 @@ def _post_upload(client, exam_type: str) -> None:
     )
 
 
-# ── R1: exposição das duas identidades ────────────────────────────────────
+# ── R1: exposição das três identidades ────────────────────────────────────
 
 
-class TestPackageExposure:
-    def test_both_packages_are_exposed_with_catalog_labels(self) -> None:
+class TestRectosigmoidoscopyExposure:
+    def test_identities_are_exposed_with_catalog_labels(self) -> None:
         options = {option.key: option for option in intake_selection_options()}
         for key in NEW_SELECTION_KEYS:
             assert key in options, key
             assert options[key].label == ProcedureType(key).label
 
-    def test_packages_are_exposed_in_catalog_order_next_to_eda(self) -> None:
-        """Ordem do catálogo na família EDA: EDA, GTT, Cápsula, Dilatação.
-
-        O Slice 004 insere EDA + GTT entre EDA e Cápsula; a ordem relativa dos
-        pacotes deste slice é preservada (nunca listas divergentes por slice).
-        """
+    def test_identities_are_exposed_in_catalog_order_within_the_family(self) -> None:
         keys = [option.key for option in intake_selection_options()]
-        eda_family = [key for key in keys if key in set(EDA_FAMILY_CODES)]
+        colon_family = [key for key in keys if key in set(COLONOSCOPY_FAMILY_CODES)]
 
-        assert eda_family == list(EDA_FAMILY_CODES)
-        assert keys.index(ProcedureType.EDA_CAPSULE) < keys.index(ProcedureType.EDA_DILATION)
+        assert colon_family == list(COLONOSCOPY_FAMILY_CODES)
 
     @override_settings(
         COLONOSCOPY_INTAKE_ENABLED=False,
         ECHOENDOSCOPY_INTAKE_ENABLED=False,
         CPRE_INTAKE_ENABLED=False,
     )
-    def test_packages_need_no_new_flag(self) -> None:
-        """R1: nenhuma flag nova medeia as variações no cutover (D14)."""
+    def test_identities_need_no_new_flag_and_no_colonoscopy_gate(self) -> None:
+        """R1: nenhuma flag nova medeia as Retossigmoidoscopias (D10/D14)."""
         enabled = {option.key for option in intake_selection_options() if option.enabled}
         for key in NEW_SELECTION_KEYS:
             assert key in enabled, key
             assert ensure_exam_type_allowed(key) == key
 
-    def test_packages_are_never_aliases_of_the_colonoscopy_gate(self) -> None:
-        with override_settings(COLONOSCOPY_INTAKE_ENABLED=True):
-            enabled = {option.key for option in intake_selection_options() if option.enabled}
-        assert set(NEW_SELECTION_KEYS).issubset(enabled)
+    def test_options_never_carry_invented_abbreviations_or_aliases(self) -> None:
+        """A identidade atômica usa somente a própria label canônica (D1)."""
+        options = {option.key: option for option in intake_selection_options()}
+        for key in NEW_SELECTION_KEYS:
+            assert options[key].aliases == ()
 
-    def test_later_family_is_exposed_after_the_slice_005_delivery(self) -> None:
-        """O Slice 005 publica a família Retossigmoidoscopia depois deste slice."""
-        keys = [option.key for option in intake_selection_options()]
-        for key in ("rectosigmoidoscopy", "rectosigmoidoscopy_dilation", "rectosigmoidoscopy_argon"):
-            assert key in keys, key
-        assert keys.index(ProcedureType.EDA_DILATION) < keys.index(ProcedureType.RECTOSIGMOIDOSCOPY)
+    def test_free_text_abbreviation_is_rejected(self) -> None:
+        for value in ("rsc", "retossigmoido", "Retossigmoidoscopia + Dilatacao"):
+            with pytest.raises(ValueError):
+                ensure_exam_type_allowed(value)
 
     @pytest.mark.django_db
-    def test_home_renders_both_options_enabled(self, client) -> None:
+    def test_home_renders_the_three_options_enabled(self, client) -> None:
         client, _ = _nir_client(client)
         html = client.get(reverse(HOME_URL)).content.decode()
         for key in NEW_SELECTION_KEYS:
-            assert "disabled" not in _option_tag(html, key), key
+            tag = _option_tag(html, key)
+            assert "disabled" not in tag, key
+            assert ProcedureType(key).label in tag, key
 
 
 # ── R1: uma row por caso ──────────────────────────────────────────────────
 
 
 @pytest.mark.django_db
-class TestPackageIntakeCreatesOneRow:
+class TestRectosigmoidoscopyIntakeCreatesOneRow:
     @pytest.mark.parametrize("exam_type", NEW_SELECTION_KEYS)
-    def test_package_upload_creates_one_case_with_one_declared_row(self, client, exam_type: str) -> None:
+    def test_upload_creates_one_case_with_one_declared_row(self, client, exam_type: str) -> None:
         _post_upload(client, exam_type)
         assert Case.objects.count() == 1
         case = Case.objects.get()
@@ -168,7 +165,14 @@ class TestPackageIntakeCreatesOneRow:
             "procedures": [exam_type]
         }
 
-    def test_label_alias_is_still_rejected_for_the_new_packages(self, client) -> None:
-        _post_upload(client, ProcedureType.EDA_CAPSULE.label)
+    @pytest.mark.parametrize("exam_type", NEW_SELECTION_KEYS)
+    def test_upload_never_creates_the_base_row_alongside_the_identity(self, client, exam_type: str) -> None:
+        _post_upload(client, exam_type)
+        case = Case.objects.get()
+        assert CaseProcedure.objects.filter(case=case).count() == 1
+
+    @pytest.mark.parametrize("exam_type", NEW_SELECTION_KEYS)
+    def test_label_alias_is_rejected(self, client, exam_type: str) -> None:
+        _post_upload(client, ProcedureType(exam_type).label)
         assert Case.objects.count() == 0
         assert CaseProcedure.objects.count() == 0

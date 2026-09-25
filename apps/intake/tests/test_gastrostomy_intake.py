@@ -7,7 +7,7 @@ Cobre:
 - o upload do pacote cria exatamente um ``Case`` com uma ``CaseProcedure``
   declarada e o evento enxuto da declaração;
 - alias/label/texto livre continuam rejeitados pelo backend;
-- a família Retossigmoidoscopia (Slice 005) continua fora do intake.
+- a família Retossigmoidoscopia (Slice 005) entra depois deste slice, na sequência do catálogo.
 """
 
 from __future__ import annotations
@@ -125,7 +125,8 @@ class TestGastrostomyExposure:
 
         assert PACKAGE_KEY in enabled
 
-    def test_later_slices_stay_out_of_the_intake(self) -> None:
+    def test_later_family_is_exposed_after_the_slice_005_delivery(self) -> None:
+        """O Slice 005 publica a família Retossigmoidoscopia depois deste slice."""
         keys = [option.key for option in intake_selection_options()]
 
         for key in (
@@ -133,7 +134,8 @@ class TestGastrostomyExposure:
             "rectosigmoidoscopy_dilation",
             "rectosigmoidoscopy_argon",
         ):
-            assert key not in keys, key
+            assert key in keys, key
+        assert keys.index("eda_gastrostomy") < keys.index("rectosigmoidoscopy")
 
     @pytest.mark.django_db
     def test_home_renders_the_option_enabled(self, client) -> None:

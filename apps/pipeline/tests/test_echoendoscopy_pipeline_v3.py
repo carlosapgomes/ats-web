@@ -235,8 +235,8 @@ class TestProcedureOccurrences:
         assert ("echoendoscopy", "current_request") in by_type
         echo = next(o for o in occurrences if o.procedure_type == "echoendoscopy")
         eda = next(o for o in occurrences if o.procedure_type == "eda")
-        assert echo.linked_eda is True
-        assert eda.linked_eda is True
+        assert echo.linked_base is True
+        assert eda.linked_base is True
         assert echo.excerpt.strip() != ""
         assert echo.evidence_id != eda.evidence_id
 
@@ -247,7 +247,7 @@ class TestProcedureOccurrences:
         )
         echo = next(o for o in occurrences if o.procedure_type == "echoendoscopy")
         assert echo.qualification == "current_request"
-        assert echo.linked_eda is False
+        assert echo.linked_base is False
 
     def test_historical_occurrence_is_qualified_as_historical(self) -> None:
         occurrences = detect_procedure_occurrences(

@@ -25,6 +25,7 @@ from apps.cases.models import Case, ProcedureType
 from apps.cases.priority_signals import resolve_priority_signals
 from apps.cases.procedures import (
     ALLOWED_PROCEDURE_SETS,
+    PROCEDURE_CATALOG,
     PROCEDURE_ORDER,
     set_detected_procedures,
 )
@@ -69,15 +70,18 @@ from apps.pipeline.scope_detection import detect_procedure_occurrences, detect_r
 logger = logging.getLogger(__name__)
 
 
-# D5/Slices 003/004: o writer 4.0 detecta as dez identidades; os pacotes EDA
-# entram nos Slices 003 (Cápsula e Dilatação) e 004 (GTT) e os demais no Slice
-# 005.
+# D5/Slices 003/004/005: o writer 4.0 detecta as dez identidades; os pacotes EDA
+# entram nos Slices 003 (Cápsula e Dilatação) e 004 (GTT), a família
+# Retossigmoidoscopia no Slice 005 e os especializados no Slice 001.
 _DETECTABLE_PROCEDURE_TYPES: tuple[str, ...] = (
     ProcedureType.EDA,
     ProcedureType.EDA_GASTROSTOMY,
     ProcedureType.EDA_CAPSULE,
     ProcedureType.EDA_DILATION,
     ProcedureType.COLONOSCOPY,
+    ProcedureType.RECTOSIGMOIDOSCOPY,
+    ProcedureType.RECTOSIGMOIDOSCOPY_DILATION,
+    ProcedureType.RECTOSIGMOIDOSCOPY_ARGON,
     ProcedureType.ECHOENDOSCOPY,
     ProcedureType.CPRE,
 )
@@ -294,14 +298,18 @@ def _require_declared_procedures(case: Case) -> tuple[str, ...]:
 
 
 def _resolve_pipeline_signals_type(detected_procedure_types: tuple[str, ...]) -> str:
-    """Perfil que restringe os sinais persistidos para o conjunto detectado.
+    """Profile que restringe os sinais persistidos para o conjunto detectado.
 
-    EDA tem precedência histórica quando presente; caso contrário o próprio
-    tipo detectado (Colonoscopia/Ecoendoscopia/CPRE) restringe os códigos
-    permitidos pelo perfil (D7).
+    D4: a família vem do ``profile_key`` do catálogo, então as três identidades
+    de Retossigmoidoscopia reutilizam exatamente os sinais permitidos de
+    Colonoscopia (e os pacotes EDA, os de EDA). EDA tem precedência histórica
+    quando presente; sem conjunto detectado, o fallback é EDA.
     """
+    profile_keys = {
+        definition.profile_key for definition in PROCEDURE_CATALOG if definition.code in detected_procedure_types
+    }
     for procedure_type in ("eda", "colonoscopy", "echoendoscopy", "cpre"):
-        if procedure_type in detected_procedure_types:
+        if procedure_type in profile_keys:
             return procedure_type
     return "eda"
 
