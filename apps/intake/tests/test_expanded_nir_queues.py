@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import re
 from pathlib import Path
+from typing import cast
 
 import pytest
 from django.contrib.auth import get_user_model
@@ -303,8 +304,9 @@ class TestCatalogProjection:
         assert package_comparison["declared_label"] == ProcedureType.EDA_CAPSULE.label
         assert package_comparison["detected_label"] == ProcedureType.EDA_CAPSULE.label
         assert package_comparison["authorized_label"] == ProcedureType.EDA_CAPSULE.label
-        assert len(package_comparison["per_procedure"]) == 1
-        package_row = package_comparison["per_procedure"][0]
+        package_rows = cast("list[dict[str, object]]", package_comparison["per_procedure"])
+        assert len(package_rows) == 1
+        package_row = package_rows[0]
         assert package_row["label"] == ProcedureType.EDA_CAPSULE.label
         assert package_row["status"] == "Aprovado"
         assert package_row["reason"] == "Indicada por sangramento obscuro."
@@ -320,9 +322,10 @@ class TestCatalogProjection:
         )
         combined_comparison = _procedure_comparison(Case.objects.get(pk=combined.pk))
 
-        assert [row["label"] for row in combined_comparison["per_procedure"]] == ["EDA", "Colonoscopia"]
-        assert combined_comparison["per_procedure"][1]["status"] == "Negado"
-        assert combined_comparison["per_procedure"][1]["reason"] == "Sem indicação no momento."
+        combined_rows = cast("list[dict[str, object]]", combined_comparison["per_procedure"])
+        assert [row["label"] for row in combined_rows] == ["EDA", "Colonoscopia"]
+        assert combined_rows[1]["status"] == "Negado"
+        assert combined_rows[1]["reason"] == "Sem indicação no momento."
 
     def test_final_response_in_closed_detail_shows_three_dimensions_for_package(self, client) -> None:
         client, user = _nir_client(client, "nir-closed-package@test.com")
