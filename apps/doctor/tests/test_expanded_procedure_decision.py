@@ -47,6 +47,11 @@ User = get_user_model()
 # Identidades atômicas (pacote/singleton): cada uma é UMA row de decisão.
 ATOMIC_IDENTITIES = tuple(SUPPORTED_PROCEDURE_TYPES)
 
+# Affordances de busca do destino médico (Slice 002, R3/D2/D3).
+SEARCH_HINT = "Busca ignora acentos e aceita sinônimos aprovados. Navegue com ↑ ↓ e confirme com Enter."
+DESTINATION_SEARCH_PLACEHOLDER = "Buscar procedimento de destino…"
+DESTINATION_SEARCH_HINT_ID = "destination-procedure-search-hint"
+
 
 def _v4_structured(detected: list[str]) -> dict[str, Any]:
     """structured_data 4.0 mínimo com o conjunto detectado de teste."""
@@ -59,6 +64,17 @@ def _v4_structured(detected: list[str]) -> dict[str, Any]:
         },
         "requested_procedures": [{"procedure_type": t, "evidence_spans": [{"excerpt": "x"}]} for t in detected],
     }
+
+
+def _hint_paragraph(html: str, hint_id: str) -> str:
+    """Parágrafo do hint persistente de busca da superfície."""
+    match = re.search(
+        r'<p class="form-text procedure-combobox__hint" id="' + re.escape(hint_id) + r'">(.*?)</p>',
+        html,
+        re.DOTALL,
+    )
+    assert match is not None, f"hint persistente de busca ausente: {hint_id}"
+    return match.group(0)
 
 
 @pytest.mark.django_db
@@ -265,6 +281,18 @@ class TestExpandedProcedureDecision:
         self._login(client, "doctor")
         html = client.get(f"/doctor/{case.case_id}/").content.decode()
         assert "js/procedure_combobox.js" in html
+
+    def test_destination_search_affordances_are_wired(self, client) -> None:
+        """R3/D2/D3: placeholder do destino e hint persistente associado ao select."""
+        case = self._make_case(detected=[ProcedureType.EDA])
+        self._login(client, "doctor")
+
+        html = client.get(f"/doctor/{case.case_id}/").content.decode()
+        select = re.search(r'<select[^>]*name="destination_procedure"[^>]*>', html)
+        assert select is not None, "combobox de destino ausente na decisão médica"
+        assert f'data-combobox-placeholder="{DESTINATION_SEARCH_PLACEHOLDER}"' in select.group(0)
+        assert f'aria-describedby="{DESTINATION_SEARCH_HINT_ID}"' in select.group(0)
+        assert SEARCH_HINT in _hint_paragraph(html, DESTINATION_SEARCH_HINT_ID)
 
     @pytest.mark.parametrize(
         "value",
@@ -588,6 +616,9 @@ class TestExpandedProcedureDecision:
         html = response.content.decode()
         assert "decision-error-banner" in html
         assert "Não foi possível salvar a decisão." in html
+        # R4: hint e associação sobrevivem ao re-render com erro.
+        assert f'aria-describedby="{DESTINATION_SEARCH_HINT_ID}"' in html
+        assert SEARCH_HINT in _hint_paragraph(html, DESTINATION_SEARCH_HINT_ID)
 
     def test_destination_swap_operational_notice_flow(self, client) -> None:
         case = self._make_case(detected=[ProcedureType.CPRE])

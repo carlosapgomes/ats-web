@@ -389,7 +389,10 @@
           <div class="procedure-combobox">
             <select class="form-select procedure-combobox__select{% if destination_errors %} is-invalid{% endif %}"
                     id="destination-procedure" name="destination_procedure"
-                    data-procedure-combobox aria-labelledby="destination-procedure-label"
+                    data-procedure-combobox
+                    data-combobox-placeholder="Buscar procedimento de destino…"
+                    aria-labelledby="destination-procedure-label"
+                    aria-describedby="destination-procedure-search-hint"
                     {% if destination_errors %}aria-invalid="true"{% endif %}>
               <option value=""{% if not selected_destination %} selected{% endif %}>Não incluir/substituir…</option>
               {% for option in destination_options %}
@@ -397,6 +400,7 @@
               {% endfor %}
             </select>
           </div>
+          <p class="form-text procedure-combobox__hint" id="destination-procedure-search-hint">Busca ignora acentos e aceita sinônimos aprovados. Navegue com ↑ ↓ e confirme com Enter.</p>
           {% if destination_errors %}<div class="invalid-feedback d-block">{{ destination_errors.0 }}</div>{% endif %}
           <div class="mt-2">
             <label class="form-label" for="destination-reason">Justificativa da inclusão/substituição</label>

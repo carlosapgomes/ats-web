@@ -6,6 +6,7 @@ GREEN: implementação mínima faz todos passarem.
 
 from __future__ import annotations
 
+import re
 from io import BytesIO
 from unittest.mock import patch
 
@@ -21,6 +22,14 @@ from apps.cases.models import Case, CaseAttachment, CaseEvent, CaseProcedure, Ca
 from apps.intake.services import create_corrected_resubmission
 
 User = get_user_model()
+
+# Affordances de busca do reenvio corrigido (Slice 002, R2/D2/D3).
+SEARCH_HINT = "Busca ignora acentos e aceita sinônimos aprovados. Navegue com ↑ ↓ e confirme com Enter."
+RESUBMISSION_SEARCH_PLACEHOLDER = "Buscar tipo de exame do novo envio…"
+RESUBMISSION_SEARCH_HINT_ID = "exam-type-search-hint"
+# O guidance pré-existente ("não é herdado automaticamente") soma-se ao hint,
+# como no upload — ambos descrevem o select canônico.
+RESUBMISSION_SEARCH_DESCRIBEDBY = f"exam-type-guidance {RESUBMISSION_SEARCH_HINT_ID}"
 
 
 # ── Helpers ──────────────────────────────────────────────────────────────
@@ -163,6 +172,24 @@ def _doctor_client(client):
     session["active_role"] = "doctor"
     session.save()
     return client, user
+
+
+def _exam_type_select_tag(html: str) -> str:
+    """Tag de abertura do select canônico de exam_type da jornada."""
+    match = re.search(r'<select[^>]*name="exam_type"[^>]*>', html)
+    assert match is not None, "select canônico de exam_type ausente"
+    return match.group(0)
+
+
+def _search_hint(html: str) -> str:
+    """Parágrafo do hint persistente de busca da jornada."""
+    match = re.search(
+        r'<p class="form-text procedure-combobox__hint" id="[^"]+">(.*?)</p>',
+        html,
+        re.DOTALL,
+    )
+    assert match is not None, "hint persistente de busca ausente"
+    return match.group(0)
 
 
 # ── Tests ────────────────────────────────────────────────────────────────
@@ -594,6 +621,9 @@ class TestCorrectedResubmissionExamTypeFlag:
         assert response.status_code == 200
         content = response.content.decode()
         assert "Selecione o tipo de exame" in content
+        # R4: hint e associação sobrevivem ao re-render com erro.
+        assert f'aria-describedby="{RESUBMISSION_SEARCH_DESCRIBEDBY}"' in _exam_type_select_tag(content)
+        assert SEARCH_HINT in _search_hint(content)
         assert Case.objects.count() == 1
         mock_enqueue.assert_not_called()
 
@@ -619,8 +649,6 @@ class TestCorrectedResubmissionExamTypeFlag:
 
     def test_form_has_no_prechecked_type(self, client) -> None:
         """Formulário sem opção pré-selecionada no controle canônico (select)."""
-        import re
-
         nir_client, nir_user = _nir_client(client)
         original = Case.objects.create(created_by=nir_user)
         url = reverse("intake:corrected_resubmission", args=[original.case_id])
@@ -636,6 +664,22 @@ class TestCorrectedResubmissionExamTypeFlag:
         selected = [tag for tag in re.findall(r"<option[^>]*>", select.group(0)) if "selected" in tag]
         assert len(selected) == 1, f"Opção pré-marcada indevida: {selected}"
         assert 'value=""' in selected[0]
+
+    def test_search_affordances_are_wired(self, client) -> None:
+        """R2/D2/D3: placeholder do reenvio e hint persistente associado ao select."""
+        nir_client, nir_user = _nir_client(client)
+        original = Case.objects.create(created_by=nir_user)
+        url = reverse("intake:corrected_resubmission", args=[original.case_id])
+        response = nir_client.get(url)
+        assert response.status_code == 200
+        content = response.content.decode()
+
+        select = _exam_type_select_tag(content)
+        assert f'data-combobox-placeholder="{RESUBMISSION_SEARCH_PLACEHOLDER}"' in select
+        assert f'aria-describedby="{RESUBMISSION_SEARCH_DESCRIBEDBY}"' in select
+        hint = _search_hint(content)
+        assert f'id="{RESUBMISSION_SEARCH_HINT_ID}"' in hint, "hint sem id estável"
+        assert SEARCH_HINT in hint
 
     # ── Flag de intake vale para o novo caso (R3/F1) ──────────────────
 
