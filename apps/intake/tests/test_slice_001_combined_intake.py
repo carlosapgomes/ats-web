@@ -26,6 +26,7 @@ from django.test import override_settings
 from django.urls import reverse
 
 from apps.cases.models import Case, CaseEvent, CaseProcedure
+from apps.intake.services import INTAKE_EXPOSED_SELECTION_KEYS
 
 pytestmark = pytest.mark.django_db
 
@@ -212,10 +213,12 @@ class TestCombinedFlagEnforcement:
         content = response.content.decode()
         assert "EDA + Colonoscopia" in content
         # Slice 002 (R1): o controle canônico é o <select name="exam_type">;
-        # EDA, Colonoscopia, EDA + Colonoscopia, Ecoendoscopia e CPRE (os dois
-        # especializados gated pelas próprias flags, default false).
+        # o conjunto de opções reais é a lista de exposição da jornada
+        # (EDA e pacotes, Colonoscopia/combinado e os especializados — estes
+        # últimos gated pelas próprias flags, default false).
         options = re.findall(r'<option[^>]*value="[^"]+"[^>]*>', content)
-        assert len(options) == 5
+        values = [re.search(r'value="([^"]*)"', tag).group(1) for tag in options]  # type: ignore[union-attr]
+        assert values == list(INTAKE_EXPOSED_SELECTION_KEYS)
         for tag in options:
             assert "selected" not in tag, f"Opção real pré-marcada: {tag}"
         echo_tag = next(tag for tag in options if 'value="echoendoscopy"' in tag)

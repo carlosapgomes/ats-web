@@ -13,7 +13,7 @@
 ## 2. Seleção pesquisável e variações de EDA
 
 - [x] 2.1 Implementar o Slice 002 (`slices/slice-002-searchable-intake-control.md`) e provar combobox acessível no upload atual, busca sem acentos, fallback SSR e validação por código exato.
-- [ ] 2.2 Implementar o Slice 003 (`slices/slice-003-eda-capsule-dilation-to-doctor.md`) e provar EDA + Cápsula/EDA + Dilatação do intake ao médico, incluindo precedência conservadora, profile EDA e local anatômico informativo.
+- [x] 2.2 Implementar o Slice 003 (`slices/slice-003-eda-capsule-dilation-to-doctor.md`) e provar EDA + Cápsula/EDA + Dilatação do intake ao médico, incluindo precedência conservadora, profile EDA e local anatômico informativo.
 - [ ] 2.3 Implementar o Slice 004 (`slices/slice-004-gastrostomy-infection-review.md`) e provar EDA + GTT do intake ao médico com resultados normais visíveis, alerta explicitamente sustentado e invariância de policy/recomendação/FSM.
 
 ## 3. Retossigmoidoscopia

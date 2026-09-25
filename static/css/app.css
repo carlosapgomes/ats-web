@@ -1298,13 +1298,24 @@ html {
   vertical-align: middle;
 }
 
-.exam-type-eda {
+/* Família EDA (design D12): os quatro códigos (EDA, EDA + GTT, EDA + Cápsula
+   e EDA + Dilatação) compartilham o MESMO bloco visual — nenhuma variação
+   ganha cor própria. */
+.exam-type-eda,
+.exam-type-eda_gastrostomy,
+.exam-type-eda_capsule,
+.exam-type-eda_dilation {
   background-color: var(--bs-primary-bg-subtle, #cfe2ff);
   color: var(--bs-primary-text-emphasis, #084298);
   border: 1px solid var(--bs-primary-border-subtle, #9ec5fe);
 }
 
-.exam-type-colonoscopy {
+/* Família Colonoscopia (design D12): Colonoscopia e as três Retossigmoidoscopias
+   compartilham o MESMO bloco visual. */
+.exam-type-colonoscopy,
+.exam-type-rectosigmoidoscopy,
+.exam-type-rectosigmoidoscopy_dilation,
+.exam-type-rectosigmoidoscopy_argon {
   background-color: var(--bs-success-bg-subtle, #d1e7dd);
   color: var(--bs-success-text-emphasis, #0a3622);
   border: 1px solid var(--bs-success-border-subtle, #a3cfbb);

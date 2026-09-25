@@ -18,6 +18,7 @@ import copy
 import logging
 import uuid
 from collections.abc import Container
+from dataclasses import dataclass
 
 from apps.cases.exam_profiles import require_exam_profile
 from apps.cases.models import Case, ProcedureType
@@ -28,7 +29,7 @@ from apps.cases.procedures import (
     set_detected_procedures,
 )
 from apps.llm.models import PromptTemplate
-from apps.pipeline.imaging_evidence import verify_abdominal_imaging_evidence
+from apps.pipeline.imaging_evidence import normalize_evidence_text, verify_abdominal_imaging_evidence
 from apps.pipeline.llm import LlmClient
 from apps.pipeline.llm1_service_v4 import (
     LLM1_V4_DEFAULT_SYSTEM_PROMPT,
@@ -56,23 +57,104 @@ from apps.pipeline.procedure_reconciliation import (
     reconcile_detected_procedures,
     serialize_procedure_precedence,
 )
-from apps.pipeline.schemas.adapters import project_v4_to_llm1_shape
-from apps.pipeline.scope_detection import detect_procedure_occurrences, detect_requested_procedures_v3
+from apps.pipeline.schemas.adapters import project_v4_to_llm1_shape, requested_procedure_for_type
+from apps.pipeline.scope_detection import detect_procedure_occurrences, detect_requested_procedures_v4
 
 logger = logging.getLogger(__name__)
 
 
-# D5: o catálogo completo (dez identidades) é a fonte do writer 4.0. A detecção
-# textual/precedência de pacotes ainda cobre somente os quatro tipos do contrato
-# anterior neste slice — Slices 003/004/005 habilitam os pacotes e a família
-# Retossigmoidoscopia.
+# D5/Slice 003: o writer 4.0 detecta as dez identidades; os pacotes EDA entram
+# neste slice (Cápsula e Dilatação) e os demais chegam nos Slices 004/005.
 _DETECTABLE_PROCEDURE_TYPES: tuple[str, ...] = (
     ProcedureType.EDA,
+    ProcedureType.EDA_CAPSULE,
+    ProcedureType.EDA_DILATION,
     ProcedureType.COLONOSCOPY,
     ProcedureType.ECHOENDOSCOPY,
     ProcedureType.CPRE,
 )
 _SCHEMA_VERSION = "4.0"
+
+# ── Local informativo da dilatação (D6/R5) ──────────────────────────────────
+
+_DILATION_ANATOMICAL_SITES: frozenset[str] = frozenset(
+    {
+        "esophagus",
+        "pylorus",
+        "duodenum",
+        "anastomosis",
+        "jejunum",
+        "other",
+    }
+)
+DILATION_SITE_NOT_DECLARED = "dilation_site_not_declared"
+DILATION_SITE_EXCERPT_NOT_ANCHORED = "dilation_excerpt_not_anchored"
+DILATION_SITE_EXCERPT_AMBIGUOUS = "dilation_excerpt_ambiguous"
+
+
+@dataclass(frozen=True)
+class DilationSiteProjection:
+    """Projeção APRESENTÁVEL do local de dilatação (design D6).
+
+    Informativa por definição: nunca cria pendência nem altera policy, sugestão
+    ou disposição médica; ``reason_code`` é o motivo técnico enxuto da queda
+    para ``unknown``.
+    """
+
+    anatomical_site: str
+    reason_code: str = ""
+
+
+def project_dilation_site(*, detail: object, main_report_text: str) -> DilationSiteProjection:
+    """Ancora o local declarado no relatório principal (design D6/R5).
+
+    O local só é projetado quando o ``evidence_excerpt`` ocorre de forma ÚNICA
+    no relatório principal normalizado. Local ausente, não ancorado (trecho
+    inventado) ou ambíguo (mais de uma ocorrência) cai para ``unknown`` com
+    motivo técnico — nunca falha o pipeline nem muda policy/FSM.
+    """
+    if not isinstance(detail, dict):
+        return DilationSiteProjection(
+            anatomical_site="unknown",
+            reason_code=DILATION_SITE_NOT_DECLARED,
+        )
+    anatomical_site = str(detail.get("anatomical_site") or "unknown")
+    excerpt = detail.get("evidence_excerpt")
+    if anatomical_site not in _DILATION_ANATOMICAL_SITES or not isinstance(excerpt, str) or not excerpt.strip():
+        return DilationSiteProjection(
+            anatomical_site="unknown",
+            reason_code=DILATION_SITE_NOT_DECLARED,
+        )
+    normalized_excerpt = normalize_evidence_text(excerpt)
+    normalized_report = normalize_evidence_text(main_report_text or "")
+    if not normalized_excerpt or normalized_excerpt not in normalized_report:
+        return DilationSiteProjection(
+            anatomical_site="unknown",
+            reason_code=DILATION_SITE_EXCERPT_NOT_ANCHORED,
+        )
+    if normalized_report.count(normalized_excerpt) > 1:
+        return DilationSiteProjection(
+            anatomical_site="unknown",
+            reason_code=DILATION_SITE_EXCERPT_AMBIGUOUS,
+        )
+    return DilationSiteProjection(anatomical_site=anatomical_site)
+
+
+def _project_detected_dilation_site(
+    *,
+    structured_data: dict[str, object],
+    detected_procedure_types: tuple[str, ...],
+    main_report_text: str,
+) -> dict[str, object] | None:
+    """Projeção consultiva do local, somente quando ``eda_dilation`` é detectada."""
+    if ProcedureType.EDA_DILATION not in detected_procedure_types:
+        return None
+    item = requested_procedure_for_type(structured_data, ProcedureType.EDA_DILATION)
+    projection = project_dilation_site(
+        detail=item.get("dilation_detail"),
+        main_report_text=main_report_text,
+    )
+    return {"anatomical_site": projection.anatomical_site, "reason_code": projection.reason_code}
 
 
 def run_pipeline(
@@ -321,7 +403,7 @@ def _run_v4_pipeline(
     case.summary_text = result1.summary_text
 
     # ── 2. Detecção + reconciliação (D7) ───────────────────────────────
-    detection = detect_requested_procedures_v3(
+    detection = detect_requested_procedures_v4(
         llm1_structured_data=result1.structured_data,
         cleaned_text=case.extracted_text,
     )
@@ -514,6 +596,14 @@ def _run_v4_pipeline(
     )
 
     # ── 10. Reconciliação por item + suporte global (D8) ──────────────
+    # D6/R5: o local da dilatação é ancorado no relatório principal ANTES da
+    # montagem do payload médico; local ausente/inventado/ambíguo projeta
+    # ``unknown`` com motivo técnico e nunca muda policy ou disposição.
+    dilation_site_projection = _project_detected_dilation_site(
+        structured_data=result1.structured_data,
+        detected_procedure_types=reconciliation.detected_procedure_types,
+        main_report_text=case.extracted_text,
+    )
     recommendations: list[dict[str, object]] = []
     for item in result2.procedure_recommendations:
         procedure_type = str(item["procedure_type"])
@@ -543,28 +633,29 @@ def _run_v4_pipeline(
             }
             for c in reconciled.contradictions
         ]
-        recommendations.append(
-            {
-                **item,
-                "suggestion": suggestion,
-                "policy_alignment": {
-                    "excluded_request": reconciled.policy_alignment.excluded_request,
-                    "labs_ok": reconciled.policy_alignment.labs_ok,
-                    "ecg_ok": reconciled.policy_alignment.ecg_ok,
-                    "pediatric_flag": reconciled.policy_alignment.pediatric_flag,
-                    "notes": reconciled.policy_alignment.notes,
-                },
-                "contradictions": contradictions,
-                # Suporte por componente é recomendação (soft) do LLM2 4.0;
-                # a síntese determinística de ASA segue apenas para exibição.
-                "support_recommendation": item["support_recommendation"],
-                "asa": {
-                    "bucket": support_ctx.asa_bucket,
-                    "display_text": support_ctx.asa_display,
-                },
-                "preop_decision": policy_results[procedure_type],
-            }
-        )
+        recommendation: dict[str, object] = {
+            **item,
+            "suggestion": suggestion,
+            "policy_alignment": {
+                "excluded_request": reconciled.policy_alignment.excluded_request,
+                "labs_ok": reconciled.policy_alignment.labs_ok,
+                "ecg_ok": reconciled.policy_alignment.ecg_ok,
+                "pediatric_flag": reconciled.policy_alignment.pediatric_flag,
+                "notes": reconciled.policy_alignment.notes,
+            },
+            "contradictions": contradictions,
+            # Suporte por componente é recomendação (soft) do LLM2 4.0;
+            # a síntese determinística de ASA segue apenas para exibição.
+            "support_recommendation": item["support_recommendation"],
+            "asa": {
+                "bucket": support_ctx.asa_bucket,
+                "display_text": support_ctx.asa_display,
+            },
+            "preop_decision": policy_results[procedure_type],
+        }
+        if dilation_site_projection is not None and procedure_type == ProcedureType.EDA_DILATION:
+            recommendation["dilation_detail"] = dilation_site_projection
+        recommendations.append(recommendation)
 
     global_support = strictest_global_support(tuple(str(r["support_recommendation"]) for r in recommendations))
     case.suggested_action = {

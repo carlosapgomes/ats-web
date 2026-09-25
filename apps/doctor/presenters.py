@@ -11,20 +11,25 @@ from datetime import UTC, datetime
 from typing import Any
 
 from apps.cases.exam_profiles import get_exam_profile
+from apps.cases.models import ProcedureType
 from apps.cases.priority_signals import (
     PRIORITY_SIGNAL_VERSION,
     build_priority_signal_badges,
     build_priority_signal_context_fragments,
 )
-from apps.cases.procedures import SUPPORTED_PROCEDURE_TYPES, is_procedure_neutral_structured_data
+from apps.cases.procedures import PROCEDURE_LABELS, SUPPORTED_PROCEDURE_TYPES, is_procedure_neutral_structured_data
 
-# Ordem canônica dos procedimentos detectados no relatório médico (D12).
-_DETECTED_PROCEDURE_ORDER: tuple[str, ...] = (
-    "eda",
-    "colonoscopy",
-    "echoendoscopy",
-    "cpre",
-)
+# Labels anatômicos do local informativo de EDA + Dilatação (D6/R6): a
+# apresentação é do presenter, o valor técnico vem do pipeline.
+_DILATION_SITE_LABELS: dict[str, str] = {
+    "esophagus": "Esôfago",
+    "pylorus": "Piloro",
+    "duodenum": "Duodeno",
+    "anastomosis": "Anastomose",
+    "jejunum": "Jejuno",
+    "other": "Outro local informado no laudo",
+}
+_DILATION_SITE_UNKNOWN_LABEL = "não informado no laudo"
 
 
 def _format_exam_datetime(value: Any) -> str:
@@ -251,6 +256,7 @@ class DoctorReportPresenter:
             "recent_denial": self._build_recent_denial(),
             "priority_signal_badges": build_priority_signal_badges(self.priority_signals),
             "prior_sections": self._build_prior_sections(),
+            "procedure_sections": self._build_procedure_sections(),
             "notices": self._build_notices(),
         }
 
@@ -284,17 +290,20 @@ class DoctorReportPresenter:
         return notices
 
     def _build_precedence_notice(self) -> str | None:
-        """Aviso da precedência especializada aplicada (D5/ADR-0008).
+        """Aviso da redução de conjunto aplicada (D5/ADR-0008, D3/Slice 003).
 
         Informativo e não bloqueante: não altera policy, formulário, validação
         nem FSM. Existe somente quando ``suggested_action.procedure_precedence``
-        registra a supressão de convencionais — singleton especializado normal,
-        conflito fail-closed e artefatos legados não geram aviso. Os labels vêm
-        do catálogo/perfis, nunca de valores técnicos crus.
+        registra uma supressão (especializado sobre convencionais ou variação
+        atômica sobre a base) — singleton normal, conflito fail-closed e
+        artefatos legados não geram aviso. Os labels vêm do catálogo/perfis,
+        nunca de valores técnicos crus, e a copy acompanha a regra aplicada.
         """
         metadata = self.suggested_action.get("procedure_precedence")
         if not isinstance(metadata, dict):
             return None
+        from apps.pipeline.procedure_reconciliation import VARIATION_PRECEDENCE_RULE
+
         selected = metadata.get("selected")
         suppressed = metadata.get("suppressed")
         if not isinstance(selected, str) or selected not in SUPPORTED_PROCEDURE_TYPES:
@@ -308,6 +317,13 @@ class DoctorReportPresenter:
         ]
         if not suppressed_labels:
             return None
+        if metadata.get("rule") == VARIATION_PRECEDENCE_RULE:
+            return (
+                f"O relatório apresentou também solicitação de {'/'.join(suppressed_labels)}. "
+                f"O sistema priorizou {self._canonical_label_for_type(selected)} porque a solicitação "
+                "atual descreve o pacote atômico correspondente. Revise o texto original e ajuste a "
+                "decisão se necessário."
+            )
         return (
             f"O relatório apresentou também solicitação de {'/'.join(suppressed_labels)}. "
             f"O sistema priorizou {self._canonical_label_for_type(selected)} pela regra de "
@@ -334,14 +350,22 @@ class DoctorReportPresenter:
             from apps.pipeline.schemas.adapters import requested_procedure_types_v3
 
             types = list(requested_procedure_types_v3(self.structured_data))
-        return tuple(procedure_type for procedure_type in _DETECTED_PROCEDURE_ORDER if procedure_type in types)
+        return tuple(procedure_type for procedure_type in SUPPORTED_PROCEDURE_TYPES if procedure_type in types)
+
+    def _identity_label(self, procedure_type: str) -> str:
+        """Label canônica da IDENTIDADE (D4) — nunca a label do profile/família.
+
+        Um pacote é apresentado como sua identidade atômica (ex.: ``EDA +
+        Cápsula``), e não como a label do profile clínico reutilizado.
+        """
+        return PROCEDURE_LABELS.get(procedure_type) or get_exam_profile(procedure_type).label
 
     def _canonical_label_for_type(self, procedure_type: str) -> str:
         """Label canônico do procedimento para a decisão por componente."""
         from apps.pipeline.schemas.adapters import requested_procedure_for_type
 
-        if procedure_type != "eda":
-            return get_exam_profile(procedure_type).label
+        if procedure_type != ProcedureType.EDA:
+            return self._identity_label(procedure_type)
         procedure = requested_procedure_for_type(self.structured_data, "eda")
         subtype = procedure.get("subtype") or "standard"
         if subtype == "foreign_body":
@@ -864,9 +888,7 @@ class DoctorReportPresenter:
                 return "procedimento não identificado no laudo"
             if len(types) == 1:
                 return self._canonical_label_for_type(types[0])
-            if len(types) == 2:
-                return " + ".join(get_exam_profile(procedure_type).label for procedure_type in types)
-            return " + ".join(get_exam_profile(procedure_type).label for procedure_type in types)
+            return " + ".join(self._identity_label(procedure_type) for procedure_type in types)
         if self.exam_type == "colonoscopy":
             return "Colonoscopia"
         if not self.exam_type:
@@ -1053,6 +1075,52 @@ class DoctorReportPresenter:
                 }
             )
         return sections
+
+    # ── Procedure sections (R6/D11) ──────────────────────────────────────
+
+    def _build_procedure_sections(self) -> list[dict[str, Any]]:
+        """Uma seção por procedimento DETECTADO (R6/D11).
+
+        Um pacote atômico ocupa uma única seção; EDA + Colonoscopia mantém duas
+        rows e, portanto, duas seções. O local traduzido da dilatação é
+        exclusivo de ``eda_dilation`` (nunca herdado por outro procedimento da
+        família) e vem da projeção ancorada pelo pipeline.
+        """
+        sections: list[dict[str, Any]] = []
+        for procedure_type in self._detected_procedure_types():
+            section: dict[str, Any] = {
+                "procedure_type": procedure_type,
+                "label": self._canonical_label_for_type(procedure_type),
+            }
+            if procedure_type == ProcedureType.EDA_DILATION:
+                section["dilation_site_label"] = self._dilation_site_label(procedure_type)
+            sections.append(section)
+        return sections
+
+    def _dilation_site_label(self, procedure_type: str) -> str:
+        """Local informativo da dilatação projetado pelo pipeline (D6/R6).
+
+        Sem projeção ancorada (artefato legado, destino incluído pelo médico ou
+        pacote de outra família) o texto é neutro: nunca inventa local nem cria
+        pendência.
+        """
+        detail = self._recommendation_detail(procedure_type, "dilation_detail")
+        if not isinstance(detail, dict):
+            return _DILATION_SITE_UNKNOWN_LABEL
+        site = detail.get("anatomical_site")
+        if not isinstance(site, str):
+            return _DILATION_SITE_UNKNOWN_LABEL
+        return _DILATION_SITE_LABELS.get(site, _DILATION_SITE_UNKNOWN_LABEL)
+
+    def _recommendation_detail(self, procedure_type: str, key: str) -> Any:
+        """Campo consultivo da recomendação daquele procedimento, se existir."""
+        recommendations = self.suggested_action.get("procedure_recommendations")
+        if not isinstance(recommendations, list):
+            return None
+        for recommendation in recommendations:
+            if isinstance(recommendation, dict) and recommendation.get("procedure_type") == procedure_type:
+                return recommendation.get(key)
+        return None
 
     # ── Recent denial ────────────────────────────────────────────────────
 

@@ -95,10 +95,13 @@ _SELECTION_CHOICES_LABEL: str = ", ".join(_selection_label(key) for key in SELEC
 
 # Lista ordenada explícita dos códigos publicados no intake (upload, reenvio
 # corrigido e correção). Cada slice de identidade acrescenta SOMENTE o seu
-# código aqui; nenhuma flag nova é criada. A ordem espelha os radios
-# históricos: EDA, Colonoscopia, EDA + Colonoscopia, Ecoendoscopia, CPRE.
+# código aqui; nenhuma flag nova é criada. A ordem espelha o catálogo canônico
+# (``PROCEDURE_CATALOG``): EDA e seus pacotes, depois Colonoscopia e o
+# combinado, depois os especializados.
 INTAKE_EXPOSED_SELECTION_KEYS: tuple[str, ...] = (
     ProcedureType.EDA,
+    ProcedureType.EDA_CAPSULE,
+    ProcedureType.EDA_DILATION,
     ProcedureType.COLONOSCOPY,
     EDA_COLONOSCOPY,
     ProcedureType.ECHOENDOSCOPY,

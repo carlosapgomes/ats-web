@@ -14,7 +14,6 @@ EDA/Colonoscopia permanece inalterado (R5).
 
 from __future__ import annotations
 
-from apps.cases.exam_profiles import get_exam_profile
 from apps.pipeline.policy.eda_preop_policy import (
     REQUIREMENT_CATEGORIES,
     VerifiedImaging,
@@ -32,7 +31,10 @@ def evaluate_procedure_policy(
 
     Args:
         structured_data: projeção 1.1 do procedimento (adapta 1.1/2.0/3.0).
-        procedure_type: um dos quatro tipos do catálogo.
+        procedure_type: uma das dez identidades atômicas do catálogo. O código
+            ORIGINAL é repassado à policy — o profile é resolvido por
+            ``profile_key`` (pacotes reutilizam as regras da família) e a label
+            persistida nos textos determinísticos é a da IDENTIDADE (D4).
         verified_imaging: outcomes do verificador determinístico de imagem
             (design D6). A policy consome SOMENTE evidência aprovada; perfis
             EDA/Colonoscopia ignoram o parâmetro e não mudam de comportamento.
@@ -42,10 +44,9 @@ def evaluate_procedure_policy(
         ``reason_text``, ``evidence_spans``, ``pediatric_flag`` e
         ``failed_requirements[]`` em ordem estável.
     """
-    profile = get_exam_profile(procedure_type)
     return evaluate_preop_policy(
         structured_data=structured_data,
-        exam_type=profile.exam_type,
+        exam_type=procedure_type,
         verified_imaging=verified_imaging,
     )
 

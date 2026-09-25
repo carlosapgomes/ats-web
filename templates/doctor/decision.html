@@ -127,6 +127,20 @@
       {% if report.context.pediatric %}<div>{{ report.context.pediatric }}</div>{% endif %}
     </div>
 
+    {% if report.procedure_sections %}
+    <div class="report-block border rounded p-2 mb-3">
+      <div class="report-block-title">🧾 Procedimentos analisados</div>
+      <div class="report-block-body">
+        {% for section in report.procedure_sections %}
+        <div class="small mb-1">
+          <span class="badge exam-type-badge exam-type-{{ section.procedure_type }}">{{ section.label }}</span>
+          {% if section.dilation_site_label %}<span class="ms-2">Local da dilatação: {{ section.dilation_site_label }}</span>{% endif %}
+        </div>
+        {% endfor %}
+      </div>
+    </div>
+    {% endif %}
+
     <div class="doctor-report-grid">
       <div class="report-block"><div class="report-block-title">📋 Resumo Clínico</div><div class="report-block-body">{% for line in report.blocks.resumo_clinico %}<p class="mb-1">{{ line }}</p>{% endfor %}</div></div>
       <div class="report-block"><div class="report-block-title">🔍 Achados Críticos</div><div class="report-block-body">{% for line in report.blocks.achados_criticos %}<div>{{ line }}</div>{% endfor %}</div></div>

@@ -38,9 +38,22 @@ HOME_URL = "intake:home"
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
 APP_CSS = PROJECT_ROOT / "static" / "css" / "app.css"
 
-# Ordem explícita de exposição no intake (design D10): as cinco seleções
-# publicadas hoje. Nenhuma identidade nova entra neste slice (R6).
-EXPOSED_SELECTION_KEYS = ("eda", "colonoscopy", "eda_colonoscopy", "echoendoscopy", "cpre")
+# Ordem explícita de exposição no intake (design D10): as seleções publicadas.
+# Slice 002 entregou cinco; o Slice 003 acrescentou os pacotes EDA + Cápsula e
+# EDA + Dilatação na ordem do catálogo (após EDA). EDA + GTT e a família
+# Retossigmoidoscopia continuam fora (Slices 004/005).
+EXPOSED_SELECTION_KEYS = (
+    "eda",
+    "eda_capsule",
+    "eda_dilation",
+    "colonoscopy",
+    "eda_colonoscopy",
+    "echoendoscopy",
+    "cpre",
+)
+
+# Pacotes publicados sem gate de flag (Slice 003).
+PACKAGE_SELECTION_KEYS = ("eda_capsule", "eda_dilation")
 
 # Vocabulário CSS exigido pelo componente (AGENTS.md §8: a fatia de UI inclui
 # o vocabulário em app.css e o pina em teste de guarda).
@@ -128,10 +141,8 @@ class TestIntakeSelectionOptions:
     def test_exposes_only_published_selections_in_explicit_order(self) -> None:
         keys = tuple(option.key for option in intake_selection_options())
         assert keys == EXPOSED_SELECTION_KEYS
-        # R6: nenhuma identidade futura aparece no intake deste slice.
+        # Slices futuros ainda não aparecem no intake.
         assert "eda_gastrostomy" not in keys
-        assert "eda_capsule" not in keys
-        assert "eda_dilation" not in keys
         assert "rectosigmoidoscopy" not in keys
 
     def test_labels_come_from_the_catalog(self) -> None:
@@ -150,19 +161,19 @@ class TestIntakeSelectionOptions:
         ECHOENDOSCOPY_INTAKE_ENABLED=False,
         CPRE_INTAKE_ENABLED=False,
     )
-    def test_all_flags_off_expose_only_eda_as_enabled(self) -> None:
+    def test_all_flags_off_expose_only_eda_and_its_packages_as_enabled(self) -> None:
         enabled = {option.key for option in intake_selection_options() if option.enabled}
-        assert enabled == {"eda"}
+        assert enabled == {"eda", *PACKAGE_SELECTION_KEYS}
 
     @override_settings(COLONOSCOPY_INTAKE_ENABLED=True)
     def test_colonoscopy_flag_enables_the_pair_and_the_combined_selection(self) -> None:
         enabled = {option.key for option in intake_selection_options() if option.enabled}
-        assert enabled == {"eda", "colonoscopy", "eda_colonoscopy"}
+        assert enabled == {"eda", *PACKAGE_SELECTION_KEYS, "colonoscopy", "eda_colonoscopy"}
 
     @override_settings(ECHOENDOSCOPY_INTAKE_ENABLED=True, CPRE_INTAKE_ENABLED=True)
     def test_specialized_flags_are_independent_from_colonoscopy(self) -> None:
         enabled = {option.key for option in intake_selection_options() if option.enabled}
-        assert enabled == {"eda", "echoendoscopy", "cpre"}
+        assert enabled == {"eda", *PACKAGE_SELECTION_KEYS, "echoendoscopy", "cpre"}
 
     @override_settings(
         COLONOSCOPY_INTAKE_ENABLED=True,

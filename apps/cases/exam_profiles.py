@@ -21,7 +21,7 @@ fechado.
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 
 from apps.cases.procedures import PROCEDURE_CATALOG
 
@@ -147,9 +147,17 @@ _PROFILES_BY_KEY: dict[str, ExamProfile] = {
 }
 
 # Catálogo completo resolvido por ``profile_key`` (design D4): as dez
-# identidades atômicas apontam para o profile clínico da família.
+# identidades atômicas apontam para o profile clínico da família. A label é a
+# da IDENTIDADE (design D4 — textos determinísticos persistidos pela policy e
+# apresentação usam a label canônica, ex.: ``EDA + Cápsula``), enquanto
+# ``exam_type`` permanece a chave da família e mantém a dispatch clínica
+# exatamente como está (pacotes aplicam as regras do profile de EDA).
 _PROFILES_BY_EXAM_TYPE: dict[str, ExamProfile] = {
-    definition.code: _PROFILES_BY_KEY[definition.profile_key] for definition in PROCEDURE_CATALOG
+    definition.code: replace(
+        _PROFILES_BY_KEY[definition.profile_key],
+        label=definition.label,
+    )
+    for definition in PROCEDURE_CATALOG
 }
 
 

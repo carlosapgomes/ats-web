@@ -1178,6 +1178,25 @@ _ECHOENDOSCOPY_TERM_PATTERN = re.compile(
 # prática clínica.
 _CPRE_TERM_PATTERN = re.compile("|".join(rf"\b{re.escape(alias)}\b" for alias in CPRE_PROFILE.scope_aliases))
 
+# ── Pacotes EDA (Slice 003, D2/D3) ───────────────────────────────────────────
+#
+# ``cápsula`` é marcador autoevidente da família EDA (a ocorrência atual, mesmo
+# isolada em trecho próprio, basta). ``dilatação`` é termo ambíguo: exige
+# vínculo local com EDA solicitada na MESMA expressão e nunca aceita anatomia
+# dilatada como achado (colédoco/via biliar). Nenhuma abreviação operacional
+# nova é inventada (R2).
+_EDA_CAPSULE_TERM_PATTERN = re.compile(r"\bcapsula\b")
+
+_EDA_DILATION_TERM_PATTERN = re.compile(r"\bdilatacao\b")
+
+# Anatomia dilatada como achado de imagem/relatório, nunca o pacote endoscópico.
+_DILATION_BLOCKED_SITE_TERMS: tuple[str, ...] = ("coledoco", "via biliar", "vias biliares")
+
+_V4_VARIATION_TYPES: tuple[str, ...] = ("eda_capsule", "eda_dilation")
+
+# Termos que exigem vínculo local ``com/e`` com a base na mesma expressão.
+_VARIATIONS_REQUIRING_LOCAL_LINK: frozenset[str] = frozenset({"eda_dilation"})
+
 # Termos que expressam a MESMA ocorrência composta "EDA com/e <especializado>".
 _LINK_SEPARATOR_PATTERN = re.compile(r"\b(?:com|e)\b")
 
@@ -1209,6 +1228,8 @@ _PROCEDURE_OCCURRENCE_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
     ("colonoscopy", _COLONOSCOPY_TERM_PATTERN),
     ("echoendoscopy", _ECHOENDOSCOPY_TERM_PATTERN),
     ("cpre", _CPRE_TERM_PATTERN),
+    ("eda_capsule", _EDA_CAPSULE_TERM_PATTERN),
+    ("eda_dilation", _EDA_DILATION_TERM_PATTERN),
 )
 
 
@@ -1331,7 +1352,40 @@ def detect_procedure_occurrences(
             linked.append(replace_occurrence_link(occurrence=occurrence, linked=True))
         else:
             linked.append(occurrence)
-    return tuple(linked)
+    return tuple(_qualify_variation_occurrences(occurrences=linked, normalized_text=normalized_text))
+
+
+def _qualify_variation_occurrences(
+    *,
+    occurrences: list[ProcedureOccurrence],
+    normalized_text: str,
+) -> list[ProcedureOccurrence]:
+    """Aplica o regime dos termos ambíguos às ocorrências dos pacotes EDA (D3).
+
+    ``dilatação`` sem vínculo local com EDA na mesma expressão — ou descrevendo
+    anatomia dilatada como achado (``dilatação de colédoco``/via biliar) —
+    permanece mera MENÇÃO: nem a detecção nem a reconciliação podem tratá-la
+    como solicitação atual. ``cápsula`` é marcador autoevidente e passa intacta.
+    """
+    qualified: list[ProcedureOccurrence] = []
+    for occurrence in occurrences:
+        if occurrence.procedure_type in _VARIATIONS_REQUIRING_LOCAL_LINK:
+            prefix, suffix = _clause_context(normalized_text, occurrence.start, occurrence.end)
+            local_context = f"{prefix} {suffix}"
+            blocked_site = any(
+                _contains_scope_term(normalized_text=local_context, term=term) for term in _DILATION_BLOCKED_SITE_TERMS
+            )
+            if blocked_site or not occurrence.linked_eda:
+                qualified.append(
+                    replace_occurrence_link(
+                        occurrence=occurrence,
+                        linked=False,
+                        qualification=_QUALIFICATION_MENTION,
+                    )
+                )
+                continue
+        qualified.append(occurrence)
+    return qualified
 
 
 def _clause_text_at(*, normalized_text: str, start: int) -> str:
@@ -1371,3 +1425,76 @@ def replace_occurrence_link(
         end=occurrence.end,
         linked_eda=linked,
     )
+
+
+# ── Detecção v4 (Slice 003, D3) ──────────────────────────────────────────────
+#
+# O contrato 4.0 preserva a detecção dos quatro tipos anteriores e acrescenta
+# os pacotes EDA. O item estruturado do LLM1 é proveniência suficiente para o
+# pacote entrar como candidato detectado, EXCETO quando o texto traz alguma
+# ocorrência do termo que não seja solicitação atual (histórica/negada/menção)
+# — aí o texto contradiz o item e o pacote não é detectado. A supressão da base
+# EDA depende de ocorrência textual ATUAL (decidida na reconciliação).
+
+
+def _extract_v4_variation_procedures(
+    *,
+    llm1_structured_data: dict[str, object],
+) -> set[str]:
+    """Pacotes EDA com item estruturado 4.0 e evidence spans válidos (D3)."""
+    raw = llm1_structured_data.get("requested_procedures")
+    if not isinstance(raw, list):
+        return set()
+    result: set[str] = set()
+    for item in raw:
+        if not isinstance(item, dict):
+            continue
+        procedure_type = item.get("procedure_type")
+        spans = item.get("evidence_spans")
+        if procedure_type not in _V4_VARIATION_TYPES:
+            continue
+        if not isinstance(spans, list) or not spans:
+            continue
+        result.add(str(procedure_type))
+    return result
+
+
+def detect_requested_procedures_v4(
+    *,
+    llm1_structured_data: dict[str, object],
+    cleaned_text: str,
+) -> dict[str, dict[str, bool]]:
+    """Detecta solicitações atuais do contrato 4.0 (D3).
+
+    Preserva integralmente a detecção dos quatro tipos anteriores e acrescenta
+    ``eda_capsule`` (marcador autoevidente) e ``eda_dilation`` (termo ambíguo,
+    já exigido com vínculo local nas ocorrências). Histórico, negação, achado
+    anatômico e menção solta nunca criam pacote.
+
+    O item estruturado do LLM1 só autoriza o pacote quando NENHUMA ocorrência
+    do termo existe no texto: uma ocorrência não-atual (histórica, negada ou
+    mera menção) contradiz o item e o pacote não é detectado — o caso falha
+    fechado ao NIR em vez de prosseguir pela coincidência com a declaração
+    (P1 review round 1). Sem qualquer ocorrência, o item estruturado permanece
+    candidato (conjunto misto → fail-closed na matriz), comportamento
+    preservado.
+    """
+    detection = detect_requested_procedures_v3(
+        llm1_structured_data=llm1_structured_data,
+        cleaned_text=cleaned_text,
+    )
+    structured = _extract_v4_variation_procedures(llm1_structured_data=llm1_structured_data)
+    occurrences = detect_procedure_occurrences(
+        llm1_structured_data=llm1_structured_data,
+        cleaned_text=cleaned_text,
+    )
+    current_occurrences = {
+        occurrence.procedure_type for occurrence in occurrences if occurrence.qualification == _QUALIFICATION_CURRENT
+    }
+    occurrence_types = {occurrence.procedure_type for occurrence in occurrences}
+    for procedure_type in _V4_VARIATION_TYPES:
+        present = procedure_type in current_occurrences or (
+            procedure_type in structured and procedure_type not in occurrence_types
+        )
+        detection[procedure_type] = {"strong": present, "any": present}
+    return detection
