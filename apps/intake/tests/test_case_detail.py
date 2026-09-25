@@ -1846,10 +1846,13 @@ class TestNirPrioritySignalBadges:
         assert response.status_code == 200
         content = response.content.decode()
         assert "Paciente Ordem" in content
-        idx_fb = content.index("Suspeita de corpo estranho")
-        idx_ci = content.index("Ingestão cáustica/corrosiva")
-        idx_gs = content.index("Gastrostomia")
-        assert idx_fb < idx_ci < idx_gs
+        # Slice 007: o filtro de procedimento também cita "Gastrostomia"; a
+        # ordem canônica é provada pelos códigos dos badges, não por índices
+        # globais de texto (independe de outros textos da página).
+        import re
+
+        codes = re.findall(r'data-priority-signal-code="([^"]+)"', content)
+        assert codes == ["foreign_body", "caustic_ingestion", "gastrostomy"]
 
     def test_my_cases_hides_container_without_signals(self, client) -> None:
         """Caso sem sinais persistidos não renderiza container de badges."""

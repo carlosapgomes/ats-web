@@ -4,12 +4,15 @@
  * pending counter (WAIT_APPT + operational notices + operational issues).
  * Processados Hoje tab: simple dimension filter over processed cards.
  *
- * Slice 004: the scheduler queue filters by the AUTHORIZED procedure set
- * (R5/D13). Every filterable card exposes the projected selection via
- * data-approved-selection (eda | colonoscopy | eda_colonoscopy |
- * echoendoscopy | cpre); the legacy bridge data-exam-type remains as fallback
- * until cutover. HTMX polling re-applies the filter on htmx:afterSwap because
- * the controls live outside #scheduler-queue-content.
+ * The queue filters by the AUTHORIZED procedure set (R5/D13). Every filterable
+ * card exposes the projected selection via data-approved-selection; the legacy
+ * bridge data-exam-type remains as fallback until cutover. Keys, labels and
+ * counters are NOT listed here: the template renders one radio per
+ * catalog-derived option (data-exam-type-label) and one counter per option
+ * (data-exam-type-count) and this script reads both from the DOM (R7).
+ *
+ * HTMX polling re-applies the filter on htmx:afterSwap because the controls
+ * live outside #scheduler-queue-content.
  *
  * No dependencies, no persistence (no URL, storage, cookie or session).
  * No action depends on this filter — ACK forms and schedule links stay intact.
@@ -39,8 +42,8 @@
     );
   }
 
-  /** Return the selected exam type: "all" | "eda" | "colonoscopy" |
-   *  "eda_colonoscopy" | "echoendoscopy" | "cpre". */
+  /** Return the selected exam type (catalog selection key or "all") — never a
+   *  hardcoded list. */
   function getSelectedType() {
     for (var i = 0; i < typeButtons.length; i++) {
       if (typeButtons[i].checked) {
@@ -50,13 +53,13 @@
     return "all";
   }
 
-  /** Human label for the active scope. */
-  function scopeLabel(type) {
-    if (type === "eda") return "EDA";
-    if (type === "colonoscopy") return "Colonoscopia";
-    if (type === "eda_colonoscopy") return "EDA + Colonoscopia";
-    if (type === "echoendoscopy") return "Ecoendoscopia";
-    if (type === "cpre") return "CPRE";
+  /** Human label of the active scope, read from the rendered control (R7). */
+  function scopeLabel() {
+    for (var i = 0; i < typeButtons.length; i++) {
+      if (typeButtons[i].checked) {
+        return typeButtons[i].getAttribute("data-exam-type-label") || typeButtons[i].value;
+      }
+    }
     return "Todos";
   }
 
@@ -78,10 +81,24 @@
 
   // ── Counters ──────────────────────────────────────────────────────
 
+  /** Counter keys are read from the rendered elements (R7): the template emits
+   *  one [data-exam-type-count] per catalog-derived option. */
+  function emptyCounts() {
+    var counts = {};
+    Array.prototype.forEach.call(
+      document.querySelectorAll("[data-exam-type-count]"),
+      function (el) {
+        counts[el.getAttribute("data-exam-type-count") || "all"] = 0;
+      }
+    );
+    return counts;
+  }
+
   /** Recompute per-type counters from the projected card attribute. */
   function updateCounts() {
     var cards = getCards();
-    var counts = { all: cards.length, eda: 0, colonoscopy: 0, eda_colonoscopy: 0, echoendoscopy: 0, cpre: 0 };
+    var counts = emptyCounts();
+    counts.all = cards.length;
     Array.prototype.forEach.call(cards, function (card) {
       var selection = cardSelection(card);
       if (counts[selection] !== undefined) counts[selection]++;
@@ -118,7 +135,7 @@
       statusEl.textContent = "";
       return;
     }
-    var scope = type !== "all" ? " de " + scopeLabel(type) + "." : ".";
+    var scope = type !== "all" ? " de " + scopeLabel() + "." : ".";
     if (visibleCount === total) {
       statusEl.textContent =
         "Mostrando todos os " + total + " " + pluralCasos(total) + scope;

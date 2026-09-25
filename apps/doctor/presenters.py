@@ -11,20 +11,66 @@ from datetime import UTC, datetime
 from typing import Any
 
 from apps.cases.exam_profiles import get_exam_profile
+from apps.cases.models import ProcedureType
 from apps.cases.priority_signals import (
     PRIORITY_SIGNAL_VERSION,
     build_priority_signal_badges,
     build_priority_signal_context_fragments,
 )
-from apps.cases.procedures import SUPPORTED_PROCEDURE_TYPES, is_procedure_neutral_structured_data
+from apps.cases.procedures import PROCEDURE_LABELS, SUPPORTED_PROCEDURE_TYPES, is_procedure_neutral_structured_data
+from apps.pipeline.infection_review import INFECTION_EVIDENCE_ARTIFACT_KEY
 
-# Ordem canônica dos procedimentos detectados no relatório médico (D12).
-_DETECTED_PROCEDURE_ORDER: tuple[str, ...] = (
-    "eda",
-    "colonoscopy",
-    "echoendoscopy",
-    "cpre",
+# Labels anatômicos do local informativo de EDA + Dilatação (D6/R6): a
+# apresentação é do presenter, o valor técnico vem do pipeline.
+_DILATION_SITE_LABELS: dict[str, str] = {
+    "esophagus": "Esôfago",
+    "pylorus": "Piloro",
+    "duodenum": "Duodeno",
+    "anastomosis": "Anastomose",
+    "jejunum": "Jejuno",
+    "other": "Outro local informado no laudo",
+}
+_DILATION_SITE_UNKNOWN_LABEL = "não informado no laudo"
+
+# Revisão infecciosa consultiva de EDA + GTT (Slice 004, D7/D8/R4/R5): copy
+# explícita de apoio à revisão humana — nunca diagnóstico nem critério
+# automático. O destaque já vem derivado em código pelo verificador.
+INFECTION_ALERT_COPY = (
+    "Possível infecção sistêmica — revisar evidências; informação consultiva, não altera a sugestão automática."
 )
+INFECTION_NEUTRAL_COPY = (
+    "Nenhum sinal de preocupação explicitamente documentado; informação consultiva, não altera a sugestão automática."
+)
+
+INFECTION_CATEGORY_LABELS: dict[str, str] = {
+    "leukocytes": "Leucócitos",
+    "crp": "PCR (proteína C reativa)",
+    "procalcitonin": "Procalcitonina",
+    "lactate": "Lactato",
+    "culture": "Culturas",
+    "temperature_or_fever": "Temperatura/febre",
+    "infectious_disease": "Infectologia",
+    "antibiotic": "Antibióticos",
+}
+
+INFECTION_ASSESSMENT_LABELS: dict[str, str] = {
+    "normal_explicit": "normal (documentado)",
+    "abnormal_explicit": "alterado (documentado)",
+    "positive_explicit": "positivo (documentado)",
+    "negative_explicit": "negativo (documentado)",
+    "febrile_explicit": "febre documentada",
+    "current_care_explicit": "avaliação de infectologia atual",
+    "antibiotic_in_use": "antibiótico em uso",
+    "antibiotic_started": "antibiótico iniciado",
+    "antibiotic_escalated": "antibiótico escalonado",
+    "unclassified": "sem interpretação documentada",
+}
+
+INFECTION_TEMPORAL_LABELS: dict[str, str] = {
+    "current": "atual",
+    "historical": "histórico",
+    "unknown": "temporalidade não informada",
+}
 
 
 def _format_exam_datetime(value: Any) -> str:
@@ -251,19 +297,26 @@ class DoctorReportPresenter:
             "recent_denial": self._build_recent_denial(),
             "priority_signal_badges": build_priority_signal_badges(self.priority_signals),
             "prior_sections": self._build_prior_sections(),
+            "procedure_sections": self._build_procedure_sections(),
+            "infection_review": self._build_infection_review(),
             "notices": self._build_notices(),
         }
 
     def _is_v3(self) -> bool:
-        """True quando o artefato é do contrato gravável 3.0."""
-        return isinstance(self.structured_data, dict) and self.structured_data.get("schema_version") == "3.0"
+        """True quando o artefato usa o contrato procedure-neutral gravável.
+
+        R4 (cutover 4.0): reconhece 2.0/3.0 históricos e 4.0 (writer atual);
+        1.1 permanece no caminho legado.
+        """
+        return is_procedure_neutral_structured_data(self.structured_data)
 
     def _build_notices(self) -> list[str]:
         """Avisos operacionais do relatório (design D9/D5).
 
-        No contrato 3.0 a sugestão automática usa SOMENTE o relatório principal:
-        o aviso descreve o limite técnico (anexos disponíveis na tela não
-        participaram), sem afirmar invalidade clínica e sem bloquear decisão.
+        No contrato procedure-neutral (2.0/3.0/4.0) a sugestão automática usa
+        SOMENTE o relatório principal: o aviso descreve o limite técnico (anexos
+        disponíveis na tela não participaram), sem afirmar invalidade clínica e
+        sem bloquear decisão.
         Quando a precedência especializada suprimiu EDA/Colonoscopia, um aviso
         informativo adicional identifica o procedimento priorizado.
         """
@@ -279,17 +332,20 @@ class DoctorReportPresenter:
         return notices
 
     def _build_precedence_notice(self) -> str | None:
-        """Aviso da precedência especializada aplicada (D5/ADR-0008).
+        """Aviso da redução de conjunto aplicada (D5/ADR-0008, D3/Slice 003).
 
         Informativo e não bloqueante: não altera policy, formulário, validação
         nem FSM. Existe somente quando ``suggested_action.procedure_precedence``
-        registra a supressão de convencionais — singleton especializado normal,
-        conflito fail-closed e artefatos legados não geram aviso. Os labels vêm
-        do catálogo/perfis, nunca de valores técnicos crus.
+        registra uma supressão (especializado sobre convencionais ou variação
+        atômica sobre a base) — singleton normal, conflito fail-closed e
+        artefatos legados não geram aviso. Os labels vêm do catálogo/perfis,
+        nunca de valores técnicos crus, e a copy acompanha a regra aplicada.
         """
         metadata = self.suggested_action.get("procedure_precedence")
         if not isinstance(metadata, dict):
             return None
+        from apps.pipeline.procedure_reconciliation import VARIATION_PRECEDENCE_RULE
+
         selected = metadata.get("selected")
         suppressed = metadata.get("suppressed")
         if not isinstance(selected, str) or selected not in SUPPORTED_PROCEDURE_TYPES:
@@ -303,6 +359,13 @@ class DoctorReportPresenter:
         ]
         if not suppressed_labels:
             return None
+        if metadata.get("rule") == VARIATION_PRECEDENCE_RULE:
+            return (
+                f"O relatório apresentou também solicitação de {'/'.join(suppressed_labels)}. "
+                f"O sistema priorizou {self._canonical_label_for_type(selected)} porque a solicitação "
+                "atual descreve o pacote atômico correspondente. Revise o texto original e ajuste a "
+                "decisão se necessário."
+            )
         return (
             f"O relatório apresentou também solicitação de {'/'.join(suppressed_labels)}. "
             f"O sistema priorizou {self._canonical_label_for_type(selected)} pela regra de "
@@ -329,14 +392,22 @@ class DoctorReportPresenter:
             from apps.pipeline.schemas.adapters import requested_procedure_types_v3
 
             types = list(requested_procedure_types_v3(self.structured_data))
-        return tuple(procedure_type for procedure_type in _DETECTED_PROCEDURE_ORDER if procedure_type in types)
+        return tuple(procedure_type for procedure_type in SUPPORTED_PROCEDURE_TYPES if procedure_type in types)
+
+    def _identity_label(self, procedure_type: str) -> str:
+        """Label canônica da IDENTIDADE (D4) — nunca a label do profile/família.
+
+        Um pacote é apresentado como sua identidade atômica (ex.: ``EDA +
+        Cápsula``), e não como a label do profile clínico reutilizado.
+        """
+        return PROCEDURE_LABELS.get(procedure_type) or get_exam_profile(procedure_type).label
 
     def _canonical_label_for_type(self, procedure_type: str) -> str:
         """Label canônico do procedimento para a decisão por componente."""
         from apps.pipeline.schemas.adapters import requested_procedure_for_type
 
-        if procedure_type != "eda":
-            return get_exam_profile(procedure_type).label
+        if procedure_type != ProcedureType.EDA:
+            return self._identity_label(procedure_type)
         procedure = requested_procedure_for_type(self.structured_data, "eda")
         subtype = procedure.get("subtype") or "standard"
         if subtype == "foreign_body":
@@ -859,9 +930,7 @@ class DoctorReportPresenter:
                 return "procedimento não identificado no laudo"
             if len(types) == 1:
                 return self._canonical_label_for_type(types[0])
-            if len(types) == 2:
-                return " + ".join(get_exam_profile(procedure_type).label for procedure_type in types)
-            return " + ".join(get_exam_profile(procedure_type).label for procedure_type in types)
+            return " + ".join(self._identity_label(procedure_type) for procedure_type in types)
         if self.exam_type == "colonoscopy":
             return "Colonoscopia"
         if not self.exam_type:
@@ -1048,6 +1117,111 @@ class DoctorReportPresenter:
                 }
             )
         return sections
+
+    # ── Procedure sections (R6/D11) ──────────────────────────────────────
+
+    def _build_procedure_sections(self) -> list[dict[str, Any]]:
+        """Uma seção por procedimento DETECTADO (R6/D11).
+
+        Um pacote atômico ocupa uma única seção; EDA + Colonoscopia mantém duas
+        rows e, portanto, duas seções. O local traduzido da dilatação é
+        exclusivo de ``eda_dilation`` (nunca herdado por outro procedimento da
+        família) e vem da projeção ancorada pelo pipeline.
+        """
+        sections: list[dict[str, Any]] = []
+        for procedure_type in self._detected_procedure_types():
+            section: dict[str, Any] = {
+                "procedure_type": procedure_type,
+                "label": self._canonical_label_for_type(procedure_type),
+            }
+            if procedure_type == ProcedureType.EDA_DILATION:
+                section["dilation_site_label"] = self._dilation_site_label(procedure_type)
+            sections.append(section)
+        return sections
+
+    def _dilation_site_label(self, procedure_type: str) -> str:
+        """Local informativo da dilatação projetado pelo pipeline (D6/R6).
+
+        Sem projeção ancorada (artefato legado, destino incluído pelo médico ou
+        pacote de outra família) o texto é neutro: nunca inventa local nem cria
+        pendência.
+        """
+        detail = self._recommendation_detail(procedure_type, "dilation_detail")
+        if not isinstance(detail, dict):
+            return _DILATION_SITE_UNKNOWN_LABEL
+        site = detail.get("anatomical_site")
+        if not isinstance(site, str):
+            return _DILATION_SITE_UNKNOWN_LABEL
+        return _DILATION_SITE_LABELS.get(site, _DILATION_SITE_UNKNOWN_LABEL)
+
+    def _build_infection_review(self) -> dict[str, Any] | None:
+        """Painel consultivo ancorado de EDA + GTT (Slice 004, R4/R5/D8).
+
+        O painel existe SOMENTE quando a identidade detectada é exatamente
+        ``eda_gastrostomy`` (nunca por herança de família/sinal legado). Artefato
+        ausente/vazio ou sem filtro confirmado produz a MESMA seção neutra da
+        identidade exata (título + copy "informação consultiva"), com grupos
+        vazios: ausência/falha de extração nunca vira pendência nem bloqueio —
+        o médico segue com a análise normal do procedimento.
+        Todo o destaque vem derivado em código pelo verificador determinístico;
+        nenhum limiar clínico é calculado aqui.
+        """
+        if ProcedureType.EDA_GASTROSTOMY not in self._detected_procedure_types():
+            return None
+        artifact = self.suggested_action.get(INFECTION_EVIDENCE_ARTIFACT_KEY)
+        raw_groups = artifact.get("groups") if isinstance(artifact, dict) else None
+
+        groups: list[dict[str, Any]] = []
+        if isinstance(raw_groups, list):
+            for raw_group in raw_groups:
+                if not isinstance(raw_group, dict):
+                    continue
+                category = str(raw_group.get("category") or "")
+                raw_items = raw_group.get("items")
+                if category not in INFECTION_CATEGORY_LABELS or not isinstance(raw_items, list):
+                    continue
+                items: list[dict[str, Any]] = []
+                for raw_item in raw_items:
+                    if not isinstance(raw_item, dict):
+                        continue
+                    assessment = str(raw_item.get("assessment") or "")
+                    if assessment not in INFECTION_ASSESSMENT_LABELS:
+                        continue
+                    items.append(
+                        {
+                            "assessment_label": INFECTION_ASSESSMENT_LABELS[assessment],
+                            "temporal_label": INFECTION_TEMPORAL_LABELS.get(
+                                str(raw_item.get("temporal_status") or ""), ""
+                            ),
+                            "value_text": raw_item.get("value_text") or "",
+                            "evidence_excerpt": raw_item.get("evidence_excerpt") or "",
+                            "concerning": bool(raw_item.get("concerning")),
+                        }
+                    )
+                if not items:
+                    continue
+                groups.append({"category_label": INFECTION_CATEGORY_LABELS[category], "items": items})
+
+        if not groups:
+            # D7/D8: seção neutra (sem grupos, sem alerta), nunca pendência.
+            return {"concerning": False, "alert_message": INFECTION_NEUTRAL_COPY, "groups": []}
+
+        concerning = bool(artifact.get("concerning")) if isinstance(artifact, dict) else False
+        return {
+            "concerning": concerning,
+            "alert_message": INFECTION_ALERT_COPY if concerning else INFECTION_NEUTRAL_COPY,
+            "groups": groups,
+        }
+
+    def _recommendation_detail(self, procedure_type: str, key: str) -> Any:
+        """Campo consultivo da recomendação daquele procedimento, se existir."""
+        recommendations = self.suggested_action.get("procedure_recommendations")
+        if not isinstance(recommendations, list):
+            return None
+        for recommendation in recommendations:
+            if isinstance(recommendation, dict) and recommendation.get("procedure_type") == procedure_type:
+                return recommendation.get(key)
+        return None
 
     # ── Recent denial ────────────────────────────────────────────────────
 

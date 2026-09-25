@@ -1178,7 +1178,69 @@ _ECHOENDOSCOPY_TERM_PATTERN = re.compile(
 # prática clínica.
 _CPRE_TERM_PATTERN = re.compile("|".join(rf"\b{re.escape(alias)}\b" for alias in CPRE_PROFILE.scope_aliases))
 
-# Termos que expressam a MESMA ocorrência composta "EDA com/e <especializado>".
+# ── Pacotes EDA (Slice 003/004, D2/D3) ───────────────────────────────────────
+#
+# ``GTT``/``gastrostomia`` e ``cápsula`` são marcadores autoevidentes da família
+# EDA (a ocorrência atual, mesmo isolada em trecho próprio, basta).
+# ``dilatação`` é termo ambíguo: exige vínculo local com EDA solicitada na MESMA
+# expressão e nunca aceita anatomia dilatada como achado (colédoco/via biliar).
+# Nenhuma abreviação operacional nova é inventada (R2).
+_EDA_GASTROSTOMY_TERM_PATTERN = re.compile(r"\bgtt\b|\bgastrostomia\b|\bgastrostomy\b")
+
+_EDA_CAPSULE_TERM_PATTERN = re.compile(r"\bcapsula\b")
+
+_EDA_DILATION_TERM_PATTERN = re.compile(r"\bdilatacao\b")
+
+# ── Família Retossigmoidoscopia (Slice 005, D3) ───────────────────────────
+#
+# O nome canônico é a única ocorrência aceita (nenhuma sigla/alias inventado).
+# ``dilatação`` e ``argônio`` são termos ambíguos e exigem vínculo local com
+# Retossigmoidoscopia solicitada na MESMA expressão; ``dilatação de colédoco``
+# segue bloqueada como achado anatômico.
+_RETOSSIGMOIDOSCOPY_TERM_PATTERN = re.compile(r"\bretossigmoidoscopia\b")
+
+_RECTOSIGMOIDOSCOPY_DILATION_TERM_PATTERN = re.compile(r"\bdilatacao\b")
+
+_RECTOSIGMOIDOSCOPY_ARGON_TERM_PATTERN = re.compile(r"\bargonio\b")
+
+# Anatomia dilatada como achado de imagem/relatório, nunca o pacote endoscópico.
+_DILATION_BLOCKED_SITE_TERMS: tuple[str, ...] = ("coledoco", "via biliar", "vias biliares")
+
+_V4_VARIATION_TYPES: tuple[str, ...] = (
+    "eda_gastrostomy",
+    "eda_capsule",
+    "eda_dilation",
+    "rectosigmoidoscopy_dilation",
+    "rectosigmoidoscopy_argon",
+)
+
+# Identidades 4.0 cujo item estruturado é proveniência suficiente quando o texto
+# não traz NENHUMA ocorrência do termo (D3).
+_V4_STRUCTURED_CANDIDATE_TYPES: tuple[str, ...] = (*_V4_VARIATION_TYPES, "rectosigmoidoscopy")
+
+# Termos que exigem vínculo local ``com/e`` com a base na mesma expressão.
+_VARIATIONS_REQUIRING_LOCAL_LINK: frozenset[str] = frozenset(
+    {"eda_dilation", "rectosigmoidoscopy_dilation", "rectosigmoidoscopy_argon"}
+)
+
+# Variações de dilatação (de qualquer família): únicas sujeitas ao bloqueio de
+# anatomia dilatada como achado.
+_DILATION_VARIATION_TYPES: frozenset[str] = frozenset({"eda_dilation", "rectosigmoidoscopy_dilation"})
+
+# Base que a expressão composta de cada termo precisa conter (D3): as variações
+# de Retossigmoidoscopia vinculam-se à própria Retossigmoidoscopia; todos os
+# demais termos compostos (especializados e pacotes EDA) vinculam-se à EDA.
+_VARIATION_BASE_PATTERNS: dict[str, re.Pattern[str]] = {
+    "rectosigmoidoscopy_dilation": _RETOSSIGMOIDOSCOPY_TERM_PATTERN,
+    "rectosigmoidoscopy_argon": _RETOSSIGMOIDOSCOPY_TERM_PATTERN,
+}
+
+# Identidades que funcionam como BASE de expressão composta (D3): nunca são
+# resolvidas como termo vinculado, apenas marcadas como base quando o termo
+# correspondente aparece ligado na mesma expressão.
+_BASE_IDENTITY_TYPES: frozenset[str] = frozenset({"eda", "rectosigmoidoscopy"})
+
+# Termos que expressam a MESMA ocorrência composta "<base> com/e <termo>".
 _LINK_SEPARATOR_PATTERN = re.compile(r"\b(?:com|e)\b")
 
 
@@ -1188,8 +1250,9 @@ class ProcedureOccurrence:
 
     ``start``/``end`` são offsets no texto normalizado e formam, com o tipo, o
     ``evidence_id`` determinístico da ocorrência (proveniência auditável).
-    ``linked_eda`` marca a expressão composta ``EDA com/e <especializado>`` no
-    mesmo contexto, que a reconciliação colapsa (D3).
+    ``linked_base`` marca a expressão composta ``<base> com/e <termo>`` no mesmo
+    contexto — ``EDA com <especializado>`` ou ``Retossigmoidoscopia com
+    dilatação/argônio`` —, que a reconciliação colapsa (D3).
     """
 
     procedure_type: str
@@ -1197,7 +1260,7 @@ class ProcedureOccurrence:
     excerpt: str
     start: int
     end: int
-    linked_eda: bool = False
+    linked_base: bool = False
 
     @property
     def evidence_id(self) -> str:
@@ -1209,6 +1272,12 @@ _PROCEDURE_OCCURRENCE_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
     ("colonoscopy", _COLONOSCOPY_TERM_PATTERN),
     ("echoendoscopy", _ECHOENDOSCOPY_TERM_PATTERN),
     ("cpre", _CPRE_TERM_PATTERN),
+    ("eda_gastrostomy", _EDA_GASTROSTOMY_TERM_PATTERN),
+    ("eda_capsule", _EDA_CAPSULE_TERM_PATTERN),
+    ("eda_dilation", _EDA_DILATION_TERM_PATTERN),
+    ("rectosigmoidoscopy", _RETOSSIGMOIDOSCOPY_TERM_PATTERN),
+    ("rectosigmoidoscopy_dilation", _RECTOSIGMOIDOSCOPY_DILATION_TERM_PATTERN),
+    ("rectosigmoidoscopy_argon", _RECTOSIGMOIDOSCOPY_ARGON_TERM_PATTERN),
 )
 
 
@@ -1227,21 +1296,30 @@ def _classify_occurrence(*, prefix: str, suffix: str) -> str:
     return _QUALIFICATION_MENTION
 
 
-def _linked_eda_in_clause(*, clause: str, specialized: ProcedureOccurrence) -> bool:
-    """True quando há ocorrência EDA ligada ao especializado por ``com``/``e``.
+def _family_base_type(procedure_type: str) -> str:
+    """Base exigida pela expressão composta de um termo (D3).
 
-    O vínculo é textual e local: exige uma ocorrência EDA no MESMO contexto e um
-    separador ``com``/``e`` entre as duas ocorrências. Conjunto por si só nunca
-    colapsa (D3).
+    As variações de Retossigmoidoscopia vinculam-se à própria
+    Retossigmoidoscopia; qualquer outro termo composto (especializados e pacotes
+    EDA) vincula-se à EDA.
     """
-    if specialized.procedure_type == "eda":
-        return False
-    for match in _EDA_PROCEDURE_OCCURRENCE_PATTERN.finditer(clause):
-        eda_start, eda_end = match.start(), match.end()
-        if eda_end <= specialized.start:
-            between = clause[eda_end : specialized.start]
-        elif specialized.end <= eda_start:
-            between = clause[specialized.end : eda_start]
+    return "rectosigmoidoscopy" if procedure_type in _VARIATION_BASE_PATTERNS else "eda"
+
+
+def _linked_base_in_clause(*, clause: str, specialized: ProcedureOccurrence) -> bool:
+    """True quando há ocorrência da BASE ligada ao termo por ``com``/``e``.
+
+    O vínculo é textual e local: exige uma ocorrência da base da família no
+    MESMO contexto e um separador ``com``/``e`` entre as duas ocorrências.
+    Conjunto por si só nunca colapsa (D3).
+    """
+    base_pattern = _VARIATION_BASE_PATTERNS.get(specialized.procedure_type, _EDA_PROCEDURE_OCCURRENCE_PATTERN)
+    for match in base_pattern.finditer(clause):
+        base_start, base_end = match.start(), match.end()
+        if base_end <= specialized.start:
+            between = clause[base_end : specialized.start]
+        elif specialized.end <= base_start:
+            between = clause[specialized.end : base_start]
         else:
             return True
         if _LINK_SEPARATOR_PATTERN.search(between) is not None:
@@ -1293,45 +1371,84 @@ def detect_procedure_occurrences(
 
     # Vínculo ``com/e`` é avaliado por cláusula, após todas as ocorrências da
     # cláusula existirem (o separador pode preceder ou suceder o especializado).
-    # Uma expressão composta cuja ocorrência EDA é solicitação ATUAL é, por
-    # definição, uma solicitação atual do especializado (``EDA com Eco`` = Eco).
+    # Uma expressão composta cuja ocorrência da BASE é solicitação ATUAL é, por
+    # definição, uma solicitação atual do termo composto (``EDA com Eco`` = Eco;
+    # ``Retossigmoidoscopia com dilatação`` = Retossigmoidoscopia + Dilatação).
     clause_for = {
         occurrence.start: _clause_text_at(normalized_text=normalized_text, start=occurrence.start)
         for occurrence in occurrences
     }
-    current_eda_by_clause: dict[str, bool] = {}
+    current_types_by_clause: dict[str, set[str]] = {}
     for occurrence in occurrences:
+        if occurrence.qualification != _QUALIFICATION_CURRENT:
+            continue
         clause = clause_for[occurrence.start]
-        if occurrence.procedure_type == "eda" and occurrence.qualification == _QUALIFICATION_CURRENT:
-            current_eda_by_clause[clause] = True
+        current_types_by_clause.setdefault(clause, set()).add(occurrence.procedure_type)
 
     linked: list[ProcedureOccurrence] = []
-    linked_specialized_clauses: set[str] = set()
+    linked_base_by_clause: dict[str, set[str]] = {}
     resolved: list[ProcedureOccurrence] = []
     for occurrence in occurrences:
         clause = clause_for[occurrence.start]
-        if occurrence.procedure_type == "eda":
+        if occurrence.procedure_type in _BASE_IDENTITY_TYPES:
+            # A própria base é resolvida no final (vínculo simétrico).
             resolved.append(occurrence)
             continue
+        base_type = _family_base_type(occurrence.procedure_type)
         clause_start = normalized_text.find(clause)
         local = replace_occurrence_offsets(occurrence=occurrence, clause_start=clause_start)
-        if _linked_eda_in_clause(clause=clause, specialized=local):
-            linked_specialized_clauses.add(clause)
+        if _linked_base_in_clause(clause=clause, specialized=local):
+            linked_base_by_clause.setdefault(clause, set()).add(base_type)
             qualification = occurrence.qualification
-            if current_eda_by_clause.get(clause) and qualification == _QUALIFICATION_MENTION:
+            if base_type in current_types_by_clause.get(clause, set()) and qualification == _QUALIFICATION_MENTION:
                 qualification = _QUALIFICATION_CURRENT
             resolved.append(replace_occurrence_link(occurrence=occurrence, linked=True, qualification=qualification))
         else:
             resolved.append(occurrence)
 
-    # O vínculo é simétrico: a ocorrência EDA da expressão composta também é
+    # O vínculo é simétrico: a ocorrência da BASE da expressão composta também é
     # marcada, para que a reconciliação veja a proveniência de ambos os lados.
     for occurrence in resolved:
-        if occurrence.procedure_type == "eda" and clause_for[occurrence.start] in linked_specialized_clauses:
+        if occurrence.procedure_type in linked_base_by_clause.get(clause_for[occurrence.start], set()):
             linked.append(replace_occurrence_link(occurrence=occurrence, linked=True))
         else:
             linked.append(occurrence)
-    return tuple(linked)
+    return tuple(_qualify_variation_occurrences(occurrences=linked, normalized_text=normalized_text))
+
+
+def _qualify_variation_occurrences(
+    *,
+    occurrences: list[ProcedureOccurrence],
+    normalized_text: str,
+) -> list[ProcedureOccurrence]:
+    """Aplica o regime dos termos ambíguos às ocorrências dos pacotes (D3).
+
+    ``dilatação``/``argônio`` sem vínculo local com a base da família na mesma
+    expressão — ou descrevendo anatomia dilatada como achado (``dilatação de
+    colédoco``/via biliar) — permanece mera MENÇÃO: nem a detecção nem a
+    reconciliação podem tratá-la como solicitação atual. ``cápsula``,
+    ``GTT``/``gastrostomia`` e o nome canônico de Retossigmoidoscopia são
+    marcadores autoevidentes e passam intactos.
+    """
+    qualified: list[ProcedureOccurrence] = []
+    for occurrence in occurrences:
+        if occurrence.procedure_type in _VARIATIONS_REQUIRING_LOCAL_LINK:
+            prefix, suffix = _clause_context(normalized_text, occurrence.start, occurrence.end)
+            local_context = f"{prefix} {suffix}"
+            blocked_site = occurrence.procedure_type in _DILATION_VARIATION_TYPES and any(
+                _contains_scope_term(normalized_text=local_context, term=term) for term in _DILATION_BLOCKED_SITE_TERMS
+            )
+            if blocked_site or not occurrence.linked_base:
+                qualified.append(
+                    replace_occurrence_link(
+                        occurrence=occurrence,
+                        linked=False,
+                        qualification=_QUALIFICATION_MENTION,
+                    )
+                )
+                continue
+        qualified.append(occurrence)
+    return qualified
 
 
 def _clause_text_at(*, normalized_text: str, start: int) -> str:
@@ -1352,7 +1469,7 @@ def replace_occurrence_offsets(*, occurrence: ProcedureOccurrence, clause_start:
         excerpt=occurrence.excerpt,
         start=occurrence.start - clause_start,
         end=occurrence.end - clause_start,
-        linked_eda=occurrence.linked_eda,
+        linked_base=occurrence.linked_base,
     )
 
 
@@ -1362,12 +1479,89 @@ def replace_occurrence_link(
     linked: bool,
     qualification: str | None = None,
 ) -> ProcedureOccurrence:
-    """Devolve a ocorrência com o vínculo ``com/e EDA`` e qualificação resolvidos."""
+    """Devolve a ocorrência com o vínculo ``com/e <base>`` e a qualificação resolvidos."""
     return ProcedureOccurrence(
         procedure_type=occurrence.procedure_type,
         qualification=qualification or occurrence.qualification,
         excerpt=occurrence.excerpt,
         start=occurrence.start,
         end=occurrence.end,
-        linked_eda=linked,
+        linked_base=linked,
     )
+
+
+# ── Detecção v4 (Slice 003/004/005, D3) ──────────────────────────────────────
+#
+# O contrato 4.0 preserva a detecção dos quatro tipos anteriores e acrescenta
+# os pacotes atômicos (GTT, Cápsula e Dilatação) e a família
+# Retossigmoidoscopia (nome canônico, Dilatação e Argônio). O item estruturado
+# do LLM1 é proveniência suficiente para a identidade entrar como candidata
+# detectada, EXCETO quando o texto traz alguma ocorrência do termo que não seja
+# solicitação atual (histórica/negada/menção) — aí o texto contradiz o item e a
+# identidade não é detectada. A supressão da base (EDA/Retossigmoidoscopia)
+# depende de ocorrência textual ATUAL (decidida na reconciliação).
+
+
+def _extract_v4_structured_candidates(
+    *,
+    llm1_structured_data: dict[str, object],
+) -> set[str]:
+    """Identidades 4.0 com item estruturado e evidence spans válidos (D3)."""
+    raw = llm1_structured_data.get("requested_procedures")
+    if not isinstance(raw, list):
+        return set()
+    result: set[str] = set()
+    for item in raw:
+        if not isinstance(item, dict):
+            continue
+        procedure_type = item.get("procedure_type")
+        spans = item.get("evidence_spans")
+        if procedure_type not in _V4_STRUCTURED_CANDIDATE_TYPES:
+            continue
+        if not isinstance(spans, list) or not spans:
+            continue
+        result.add(str(procedure_type))
+    return result
+
+
+def detect_requested_procedures_v4(
+    *,
+    llm1_structured_data: dict[str, object],
+    cleaned_text: str,
+) -> dict[str, dict[str, bool]]:
+    """Detecta solicitações atuais do contrato 4.0 (D3).
+
+    Preserva integralmente a detecção dos quatro tipos anteriores e acrescenta
+    ``eda_gastrostomy``/``eda_capsule`` (marcadores autoevidentes),
+    ``eda_dilation`` e a família Retossigmoidoscopia (``rectosigmoidoscopy``,
+    ``rectosigmoidoscopy_dilation`` e ``rectosigmoidoscopy_argon``). Dilatação e
+    argônio são termos ambíguos e já exigem vínculo local nas ocorrências;
+    histórico, negação, achado anatômico e menção solta nunca criam identidade.
+
+    O item estruturado do LLM1 só autoriza a identidade quando NENHUMA
+    ocorrência do termo existe no texto: uma ocorrência não-atual (histórica,
+    negada ou mera menção) contradiz o item e a identidade não é detectada — o
+    caso falha fechado ao NIR em vez de prosseguir pela coincidência com a
+    declaração (P1 review round 1). Sem qualquer ocorrência, o item estruturado
+    permanece candidato (conjunto misto → fail-closed na matriz), comportamento
+    preservado.
+    """
+    detection = detect_requested_procedures_v3(
+        llm1_structured_data=llm1_structured_data,
+        cleaned_text=cleaned_text,
+    )
+    structured = _extract_v4_structured_candidates(llm1_structured_data=llm1_structured_data)
+    occurrences = detect_procedure_occurrences(
+        llm1_structured_data=llm1_structured_data,
+        cleaned_text=cleaned_text,
+    )
+    current_occurrences = {
+        occurrence.procedure_type for occurrence in occurrences if occurrence.qualification == _QUALIFICATION_CURRENT
+    }
+    occurrence_types = {occurrence.procedure_type for occurrence in occurrences}
+    for procedure_type in _V4_STRUCTURED_CANDIDATE_TYPES:
+        present = procedure_type in current_occurrences or (
+            procedure_type in structured and procedure_type not in occurrence_types
+        )
+        detection[procedure_type] = {"strong": present, "any": present}
+    return detection

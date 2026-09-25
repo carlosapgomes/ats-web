@@ -30,6 +30,16 @@ Slice 005 — Jornada médica nas filas especializadas (R1–R5):
   detectado → autorizado quando os conjuntos divergem.
 - R5: a seleção vem do atributo projetado no card — sem inferência por texto
   de badge e sem lógica binária de "outro tipo".
+
+Slice 008 — fila médica pelo catálogo ampliado (R1–R2, R7):
+
+- R1: o universo publicado em Pendentes/Decididos Hoje volta a ser DERIVADO do
+  catálogo (``SELECTION_KEYS`` + ``none``), como o Slice 001 havia pinado para
+  o subset então publicado.
+- R2/R7: as opções são iteradas pelo template e o script inicializa
+  chaves/contagens/rótulos pelos ``data-*`` renderizados, sem objeto literal
+  fechado de tipos (a prova comportamental das novas identidades está em
+  ``test_expanded_catalog_queues.py``).
 """
 
 from __future__ import annotations
@@ -43,7 +53,7 @@ from django.contrib.auth import get_user_model
 from django.utils import timezone
 
 from apps.cases.models import Case, CaseProcedure, CaseStatus
-from apps.cases.procedures import SUPPORTED_PROCEDURE_TYPES, selection_key
+from apps.cases.procedures import SELECTION_KEYS, SUPPORTED_PROCEDURE_TYPES, selection_key
 
 User = get_user_model()
 
@@ -53,12 +63,18 @@ QUEUE_CONTENT_HTML = REPO_ROOT / "templates" / "doctor" / "_queue_content.html"
 QUEUE_FILTER_JS = REPO_ROOT / "static" / "js" / "doctor_queue_filter.js"
 DECISION_HTML = REPO_ROOT / "templates" / "doctor" / "decision.html"
 
-# Universo de filtros do catálogo (design D13): `all` + cada singleton +
-# o combinado exato EDA + Colonoscopia. Derivado dos helpers centrais para
-# não duplicar catálogo no teste.
+# Universo de filtros do catálogo (design D12): `all` + cada singleton +
+# o combinado exato EDA + Colonoscopia.
 CATALOG_FILTER_VALUES = {"all", selection_key(("eda", "colonoscopy"))} | {
     selection_key((procedure_type,)) for procedure_type in SUPPORTED_PROCEDURE_TYPES
 }
+
+# Slice 008 (design D12): as filas médicas publicam TODAS as chaves de seleção
+# do catálogo, na ordem canônica (o combinado é a chave derivada, por último);
+# Decididos Hoje acrescenta `none`. O universo derivado substitui o subset
+# pinado pelo Slice 001.
+CATALOG_FILTER_ORDER = ["all", *SELECTION_KEYS]
+DECIDED_FILTER_ORDER = [*CATALOG_FILTER_ORDER, "none"]
 
 
 def _radio_values(html: str, name: str) -> list[str]:
@@ -282,23 +298,26 @@ class TestDoctorQueueExamTypeFilters:
     # ── Slice 005 · R1: universo detectado inclui os tipos especializados ──
 
     def test_pending_filter_universe_is_the_catalog(self, client) -> None:
-        """R1: Pendentes oferece Todos, EDA, Colonoscopia, combinado, Eco e CPRE.
+        """R1: Pendentes oferece Todos + cada chave de seleção do catálogo (D12).
 
-        O combina exatamente com o catálogo central + combinado (D13): nenhum
-        tipo é omitido e `none` não pertence a este universo.
+        Slice 008 restaurou a igualdade derivada do catálogo (dez identidades +
+        combinado); ``none`` não pertence a esta dimensão.
         """
         self._login_as(client, "doctor")
         response = client.get("/doctor/")
         assert response.status_code == 200
         content = response.content.decode()
         values = _radio_values(content, "doctor-queue-exam-type")
-        assert values == ["all", "eda", "colonoscopy", "eda_colonoscopy", "echoendoscopy", "cpre"]
+        assert values == CATALOG_FILTER_ORDER
         assert set(values) == CATALOG_FILTER_VALUES
+        assert "none" not in values
         assert 'id="doctor-queue-type-filter"' in content
-        assert 'data-exam-type-count="echoendoscopy"' in content
-        assert 'data-exam-type-count="cpre"' in content
+        for key in SELECTION_KEYS:
+            assert f'data-exam-type-count="{key}"' in content
         assert "Ecoendoscopia" in content
         assert "CPRE" in content
+        assert "EDA + Gastrostomia (GTT)" in content
+        assert "Retossigmoidoscopia + Argônio" in content
 
     def test_decided_filter_universe_is_authorized_catalog_with_none(self, client) -> None:
         """R2: Decididos Hoje filtra por autorizado e preserva Nenhum autorizado."""
@@ -307,7 +326,7 @@ class TestDoctorQueueExamTypeFilters:
         assert response.status_code == 200
         content = response.content.decode()
         values = _radio_values(content, "doctor-decided-exam-type")
-        assert values == ["all", "eda", "colonoscopy", "eda_colonoscopy", "echoendoscopy", "cpre", "none"]
+        assert values == DECIDED_FILTER_ORDER
         assert set(values) == CATALOG_FILTER_VALUES | {"none"}
         assert 'value="all" checked' in content
         assert "Nenhum autorizado" in content
@@ -512,16 +531,20 @@ class TestDoctorQueueFilterStatic:
             assert hardcoded not in content_html
 
     def test_js_counts_and_scope_cover_specialized_catalog(self) -> None:
-        """R1/R2: contadores e rótulo de escopo acompanham o catálogo (D13)."""
+        """R1/R2 (Slice 008): contadores e rótulo vêm dos elementos renderizados.
+
+        Nenhum objeto literal fechado de tipos pode voltar ao script (R7).
+        """
         js = self._read(QUEUE_FILTER_JS)
-        counts = re.search(r"var counts = \{([^}]*)\}", js)
-        assert counts is not None, "objeto de contadores ausente no JS"
-        counts_keys = counts.group(1)
-        for key in ("all", "eda", "colonoscopy", "eda_colonoscopy", "echoendoscopy", "cpre", "none"):
-            assert f"{key}:" in counts_keys, f"contador ausente: {key}"
-        assert 'if (type === "echoendoscopy") return "Ecoendoscopia";' in js
-        assert 'if (type === "cpre") return "CPRE";' in js
-        assert 'if (type === "none") return "Nenhum autorizado";' in js
+        literal = re.search(r"var counts = \{([^}]*)\}", js)
+        assert literal is not None
+        assert literal.group(1).strip() == "", "objeto literal fechado de tipos no script"
+        assert "[data-exam-type-count]" in js
+        assert 'getAttribute("data-exam-type-count")' in js
+        assert 'getAttribute("data-exam-type-label")' in js
+        for key in SELECTION_KEYS:
+            assert f'if (type === "{key}")' not in js
+        assert 'if (type === "none") return "Nenhum autorizado";' not in js
 
     def test_js_has_no_text_inference_nor_binary_other_type(self) -> None:
         """R5: seleção vem exclusivamente do atributo projetado (nunca do texto)."""

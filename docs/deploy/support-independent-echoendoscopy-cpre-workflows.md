@@ -1,5 +1,14 @@
 # Runbook de Deploy — `support-independent-echoendoscopy-cpre-workflows`
 
+> **NOTA DE SUPERSEÇÃO (2026-09-25):** o precheck `check_specialized_procedure_downgrade`
+> descrito aqui (fronteira `first_3_0_write`) foi evoluído pelo change
+> `support-expanded-endoscopy-procedure-catalog` para a fronteira `first_4_0_write`:
+> artefatos 3.0 e rows de Ecoendoscopia/CPRE passaram a ser baseline **informacional**
+> (não bloqueiam retorno à imagem anterior); bloqueiam writes 4.0, rows das seis novas
+> identidades e jobs em voo. Este runbook permanece como registro histórico do cutover
+> 3.0; para operação atual, use
+> `docs/deploy/expanded-endoscopy-procedure-catalog-cutover.md`.
+
 **Change:** `support-independent-echoendoscopy-cpre-workflows` (Slices 001–009)
 **Branch:** `feature/support-independent-echoendoscopy-cpre-workflows` → `main`
 **Classificação de risco:** 🔴 CRÍTICO / HIGH-ARCH — cutover do writer LLM strict

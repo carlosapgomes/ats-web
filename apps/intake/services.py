@@ -10,6 +10,8 @@ import hashlib
 import logging
 import os
 import uuid
+from collections.abc import Callable
+from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from django.conf import settings
@@ -27,7 +29,10 @@ from apps.cases.models import (
     ProcedureType,
 )
 from apps.cases.procedures import (
+    PROCEDURE_LABELS,
+    SELECTION_KEYS,
     get_declared_procedure_types,
+    procedure_types_for_selection,
     reset_detection_and_doctor_statuses,
     set_declared_procedures,
     sync_declared_projection,
@@ -69,34 +74,138 @@ def is_cpre_intake_enabled() -> bool:
     return bool(getattr(settings, "CPRE_INTAKE_ENABLED", False))
 
 
-# Seleção declarada aceita no intake: EDA, Colonoscopia, a combinação
-# eda_colonoscopy e (sob flag própria) echoendoscopy e cpre. O valor combinado
-# NÃO é membro de ProcedureType.values — é chave de seleção derivada da
-# projeção, não field choice.
-_DECLARED_SELECTION_VALUES: frozenset[str] = frozenset(
-    {
-        ProcedureType.EDA,
-        ProcedureType.COLONOSCOPY,
-        EDA_COLONOSCOPY,
-        ProcedureType.ECHOENDOSCOPY,
-        ProcedureType.CPRE,
-    }
+# Seleção declarada aceita no intake: derivada de ``SELECTION_KEYS`` do
+# catálogo (design D10) — cada código atômico mais a chave derivada
+# ``eda_colonoscopy``. O valor combinado NÃO é membro de
+# ``ProcedureType.values``. Expor as chaves aqui NÃO expõe opções na UI: as
+# flags de rollout continuam explicitamente em ``ensure_*_allowed`` e o helper
+# de opções por jornada lista somente os códigos publicados.
+_DECLARED_SELECTION_VALUES: frozenset[str] = frozenset(SELECTION_KEYS)
+
+
+def _selection_label(key: str) -> str:
+    """Label legível de uma chave de seleção, derivada das labels do catálogo."""
+    return " + ".join(PROCEDURE_LABELS[code] for code in procedure_types_for_selection(key))
+
+
+_SELECTION_CHOICES_LABEL: str = ", ".join(_selection_label(key) for key in SELECTION_KEYS)
+
+
+# ── Opções de seleção por jornada (design D9/D10) ────────────────────────
+
+# Lista ordenada explícita dos códigos publicados no intake (upload, reenvio
+# corrigido e correção). Cada slice de identidade acrescenta SOMENTE o seu
+# código aqui; nenhuma flag nova é criada. A ordem espelha o catálogo canônico
+# (``PROCEDURE_CATALOG``): EDA e seus pacotes, depois Colonoscopia e o
+# combinado, depois a família Retossigmoidoscopia, depois os especializados.
+INTAKE_EXPOSED_SELECTION_KEYS: tuple[str, ...] = (
+    ProcedureType.EDA,
+    ProcedureType.EDA_GASTROSTOMY,
+    ProcedureType.EDA_CAPSULE,
+    ProcedureType.EDA_DILATION,
+    ProcedureType.COLONOSCOPY,
+    EDA_COLONOSCOPY,
+    ProcedureType.RECTOSIGMOIDOSCOPY,
+    ProcedureType.RECTOSIGMOIDOSCOPY_DILATION,
+    ProcedureType.RECTOSIGMOIDOSCOPY_ARGON,
+    ProcedureType.ECHOENDOSCOPY,
+    ProcedureType.CPRE,
 )
+
+# Gate de flag por código exposto (D10): a referência é EXPLÍCITA — regra de
+# rollout, não lista derivada do catálogo. Código sem gate é sempre
+# habilitado (EDA).
+_INTAKE_SELECTION_FLAG_GATES: dict[str, Callable[[], bool]] = {
+    ProcedureType.COLONOSCOPY: is_colonoscopy_intake_enabled,
+    EDA_COLONOSCOPY: is_colonoscopy_intake_enabled,
+    ProcedureType.ECHOENDOSCOPY: is_echoendoscopy_intake_enabled,
+    ProcedureType.CPRE: is_cpre_intake_enabled,
+}
+
+
+@dataclass(frozen=True)
+class IntakeSelectionOption:
+    """Opção de procedimento exposta na jornada de intake (design D9/D10)."""
+
+    key: str
+    label: str
+    enabled: bool
+    aliases: tuple[str, ...] = ()
+
+
+def is_intake_selection_enabled(key: str) -> bool:
+    """Flag de rollout de um código exposto (sempre habilitado sem gate)."""
+    gate = _INTAKE_SELECTION_FLAG_GATES.get(key)
+    return True if gate is None else gate()
+
+
+def _selection_search_aliases(key: str) -> tuple[str, ...]:
+    """Aliases pesquisáveis de uma chave, derivados do catálogo.
+
+    Seleção composta (``eda_colonoscopy``) é encontrada também pelas labels dos
+    componentes — nenhum alias é inventado localmente; identidade atômica usa
+    somente a própria label.
+    """
+    components = procedure_types_for_selection(key)
+    if len(components) == 1:
+        return ()
+    return tuple(PROCEDURE_LABELS[code] for code in components)
+
+
+def intake_selection_options() -> tuple[IntakeSelectionOption, ...]:
+    """Opções ordenadas de procedimento para as jornadas de intake (R1/D10).
+
+    Compõe o catálogo (label/aliases) com as flags de rollout sobre a lista
+    explícita de códigos publicados. O template SSR usa exatamente esta lista;
+    ampliar a exposição é acrescentar o código em
+    ``INTAKE_EXPOSED_SELECTION_KEYS``.
+    """
+    return tuple(
+        IntakeSelectionOption(
+            key=key,
+            label=_selection_label(key),
+            enabled=is_intake_selection_enabled(key),
+            aliases=_selection_search_aliases(key),
+        )
+        for key in INTAKE_EXPOSED_SELECTION_KEYS
+    )
+
+
+@dataclass(frozen=True)
+class NirProcedureFilterOption:
+    """Opção de filtro por procedimento declarado das filas NIR (design D12)."""
+
+    key: str
+    label: str
+
+
+def nir_procedure_filter_options() -> tuple[NirProcedureFilterOption, ...]:
+    """Opções ordenadas de filtro declarado das filas NIR (R5/D12).
+
+    Compõe "Todos os tipos" com as chaves de seleção publicadas no intake, na
+    ordem canônica do catálogo. As flags de intake NÃO gateiam filtros: elas
+    limitam somente novos intakes (R6); casos existentes de qualquer identidade
+    continuam consultáveis, então nenhuma opção é omitida por flag.
+    """
+    return (
+        NirProcedureFilterOption(key="all", label="Todos os tipos"),
+        *(NirProcedureFilterOption(key=key, label=_selection_label(key)) for key in INTAKE_EXPOSED_SELECTION_KEYS),
+    )
 
 
 def validate_exam_type(exam_type: str | None) -> str:
     """Valida e normaliza a seleção declarada (intake e correção NIR).
 
-    Levanta ``ValueError`` se ausente/inválida. Aceita EDA, Colonoscopia,
-    Ecoendoscopia, CPRE ou a combinação ``eda_colonoscopy`` (chave de seleção
-    derivada) — nunca inferência por texto (R1). Desde o Slice 005 a correção
-    NIR aceita as seleções, então esta validação é compartilhada por novos
-    intakes/reenvios e pela correção; o gate de flag de intake fica em
-    ``ensure_exam_type_allowed`` (não aqui).
+    Levanta ``ValueError`` se ausente/inválida. Aceita as chaves canônicas do
+    catálogo (``SELECTION_KEYS``) — nunca inferência por texto (R1). Desde o
+    Slice 005 a correção NIR aceita as seleções, então esta validação é
+    compartilhada por novos intakes/reenvios e pela correção; os gates de flag
+    de intake ficam em ``ensure_exam_type_allowed`` (novo caso/reenvio) e
+    ``ensure_intake_selection_permitted`` (correção, D10), não aqui.
     """
     value = (exam_type or "").strip()
     if value not in _DECLARED_SELECTION_VALUES:
-        raise ValueError("Selecione o tipo de exame (EDA, Colonoscopia, EDA + Colonoscopia, Ecoendoscopia ou CPRE).")
+        raise ValueError(f"Selecione o tipo de exame ({_SELECTION_CHOICES_LABEL}).")
     return value
 
 
@@ -104,10 +213,11 @@ def ensure_specialized_exam_type_allowed(exam_type: str | None) -> str:
     """Gate de choice + flag dos tipos ESPECIALIZADOS (Slice 007, R3).
 
     Exige a flag de intake do próprio tipo ligada para Ecoendoscopia/CPRE —
-    fronteira compartilhada pelo intake (upload/reenvio) e pela correção NIR.
-    EDA, Colonoscopia e EDA + Colonoscopia passam inalterados: na correção
-    eles mantêm o contrato do Slice 005 (a flag de colonoscopia gateia a
-    criação de NOVO caso, não a correção do caso em revisão).
+    fronteira compartilhada pelo intake (upload/reenvio), via
+    ``ensure_exam_type_allowed``. EDA, Colonoscopia e EDA + Colonoscopia passam
+    inalterados aqui; a flag de colonoscopia é aplicada por
+    ``ensure_exam_type_allowed`` (novo caso) e por
+    ``ensure_intake_selection_permitted`` (correção, D10).
     """
     value = validate_exam_type(exam_type)
     if value == ProcedureType.ECHOENDOSCOPY and not is_echoendoscopy_intake_enabled():
@@ -143,15 +253,23 @@ def ensure_exam_type_allowed(exam_type: str | None) -> str:
     return value
 
 
-def _procedure_types_for_selection(exam_type: str) -> tuple[str, ...]:
-    """Mapeia a seleção declarada para o conjunto de procedimentos.
+def ensure_intake_selection_permitted(exam_type: str | None) -> str:
+    """Gate de seleção pela jornada de intake (design D10, fix round 1).
 
-    ``eda_colonoscopy`` (chave derivada) → (eda, colonoscopy); tipos únicos →
-    o próprio.
+    Fonte única da derivação por jornada: a MESMA lista habilitada que compõe o
+    combobox (``intake_selection_options``, que aplica as flags de rollout sobre
+    as chaves publicadas). Seleção publicada cuja flag de intake está desligada
+    (Colonoscopia, ``eda_colonoscopy``, Ecoendoscopia, CPRE) é rejeitada; EDA e
+    identidades sem gate sempre passam.
+
+    Usado pela correção NIR: um POST manipulado não pode alcançar uma opção que
+    a jornada de correção exclui.
     """
-    if exam_type == EDA_COLONOSCOPY:
-        return (ProcedureType.EDA, ProcedureType.COLONOSCOPY)
-    return (exam_type,)
+    value = validate_exam_type(exam_type)
+    permitted = {option.key for option in intake_selection_options() if option.enabled}
+    if value not in permitted:
+        raise ValueError(f"{_selection_label(value)} ainda não está disponível para novos envios.")
+    return value
 
 
 # ── Correção de tipo e confirmação NIR serializadas (Slice 006) ───────────
@@ -304,14 +422,17 @@ def correct_case_exam_type(
     LLM_STRUCT (R2) com eventos append-only (R5). Após commit, enfileira o
     pipeline LLM exatamente uma vez — nunca reextrai PDF (R4); em falha de
     enqueue, agenda retry automático e levanta ``EnqueueAfterCommitError`` (C5).
+    A seleção passa por ``ensure_intake_selection_permitted`` (D10): identidade
+    fora das opções habilitadas da jornada é rejeitada antes de qualquer efeito.
 
     Raises:
-        ValueError: caso inelegível, tipo inválido/igual ou reason_code inválido.
+        ValueError: caso inelegível, tipo inválido/indisponível na jornada,
+            tipo igual ao declarado ou reason_code inválido.
         PermissionError: ator sem papel NIR, papel ativo incorreto ou reserva
             incompatível/ausente/expirada.
         EnqueueAfterCommitError: enqueue pós-commit falhou (correção commitada).
     """
-    validated_exam_type = ensure_specialized_exam_type_allowed(new_exam_type)
+    validated_exam_type = ensure_intake_selection_permitted(new_exam_type)
     if reason_code not in EXAM_TYPE_CORRECTION_REASONS:
         raise ValueError("Motivo da correção inválido.")
     if lock_token is None:
@@ -323,7 +444,7 @@ def correct_case_exam_type(
             raise ValueError("Caso não está em revisão manual elegível para correção de tipo.")
         # Slice 008 (R2): igualdade/old/new usam CONJUNTOS de CaseProcedure —
         # o conjunto declarado vem das rows (coluna ponte removida no 011-C).
-        new_procedures = list(_procedure_types_for_selection(validated_exam_type))
+        new_procedures = list(procedure_types_for_selection(validated_exam_type))
         old_procedures = list(get_declared_procedure_types(case))
         if set(new_procedures) == set(old_procedures):
             raise ValueError("O novo conjunto de procedimentos deve ser diferente do declarado.")
@@ -799,7 +920,7 @@ def _create_case_from_file(
         # vira UM Case com DUAS rows; falha aqui reverte o caso.
         set_declared_procedures(
             case=case,
-            procedure_types=_procedure_types_for_selection(exam_type),
+            procedure_types=procedure_types_for_selection(exam_type),
             actor=user,
         )
 
@@ -887,7 +1008,7 @@ def create_corrected_resubmission(
 
         set_declared_procedures(
             case=new_case,
-            procedure_types=_procedure_types_for_selection(validated_exam_type),
+            procedure_types=procedure_types_for_selection(validated_exam_type),
             actor=user,
         )
 

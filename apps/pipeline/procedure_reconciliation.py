@@ -16,6 +16,13 @@ ocorrência textual do MESMO tipo qualificada como ``current_request`` suprime
 EDA e/ou Colonoscopia, mesmo em trechos independentes (ADR-0008). Item
 estruturado isolado, histórico, negação ou menção nunca suprimem; dois
 especializados, tipo desconhecido ou duplicata continuam fail-closed.
+
+Slice 003/004/005 (D3): a MESMA proveniência sustenta a supressão da base por
+exatamente uma variação atômica atual (``eda_gastrostomy``/``eda_capsule``/
+``eda_dilation`` sobre ``eda``; ``rectosigmoidoscopy_dilation``/
+``rectosigmoidoscopy_argon`` sobre ``rectosigmoidoscopy``); o item estruturado
+sem ocorrência atual não suprime e o conjunto permanece misto (fail-closed na
+matriz, sem descartar valores).
 """
 
 from __future__ import annotations
@@ -79,6 +86,29 @@ _QUALIFICATION_CURRENT_REQUEST = "current_request"
 # Identificador da regra registrado em evento/sugestão (D3).
 PROCEDURE_PRECEDENCE_RULE = "specialized_over_conventional"
 
+# Variações atômicas e a base que elas clinicamente contêm (D3, Slices
+# 003/004/005): exatamente UMA variação com ocorrência textual atual suprime a
+# base detectada em qualquer trecho (mesma expressão ou trecho independente), no
+# mesmo regime de proveniência da precedência especializada (ADR-0008).
+_VARIATION_BASE_TYPES: dict[str, str] = {
+    ProcedureType.EDA_GASTROSTOMY: ProcedureType.EDA,
+    ProcedureType.EDA_CAPSULE: ProcedureType.EDA,
+    ProcedureType.EDA_DILATION: ProcedureType.EDA,
+    ProcedureType.RECTOSIGMOIDOSCOPY_DILATION: ProcedureType.RECTOSIGMOIDOSCOPY,
+    ProcedureType.RECTOSIGMOIDOSCOPY_ARGON: ProcedureType.RECTOSIGMOIDOSCOPY,
+}
+# Termos ambíguos exigem vínculo local com a base na MESMA expressão; GTT e
+# cápsula são marcadores autoevidentes da família e não exigem vínculo (D3).
+_VARIATIONS_REQUIRING_LOCAL_LINK: frozenset[str] = frozenset(
+    {
+        ProcedureType.EDA_DILATION,
+        ProcedureType.RECTOSIGMOIDOSCOPY_DILATION,
+        ProcedureType.RECTOSIGMOIDOSCOPY_ARGON,
+    }
+)
+# Identificador da regra de pacote registrado em evento/sugestão (D3).
+VARIATION_PRECEDENCE_RULE = "variation_over_base"
+
 
 def _current_request_occurrence_types(occurrences: Any) -> set[str]:
     """Tipos com ocorrência textual qualificada como solicitação atual (D1)."""
@@ -87,6 +117,49 @@ def _current_request_occurrence_types(occurrences: Any) -> set[str]:
         for occurrence in occurrences or ()
         if str(getattr(occurrence, "qualification", "")) == _QUALIFICATION_CURRENT_REQUEST
     }
+
+
+def _current_request_variation_types(occurrences: Any) -> set[str]:
+    """Variações com ocorrência atual que autoriza supressão da base (D3).
+
+    Termo ambíguo só autoriza quando a própria ocorrência carrega o vínculo
+    local com a base; marcadores autoevidentes dispensam vínculo. O item
+    estruturado sem ocorrência atual não entra aqui e, portanto, não suprime.
+    """
+    result: set[str] = set()
+    for occurrence in occurrences or ():
+        procedure_type = str(getattr(occurrence, "procedure_type", ""))
+        if procedure_type not in _VARIATION_BASE_TYPES:
+            continue
+        if str(getattr(occurrence, "qualification", "")) != _QUALIFICATION_CURRENT_REQUEST:
+            continue
+        if procedure_type in _VARIATIONS_REQUIRING_LOCAL_LINK and not bool(getattr(occurrence, "linked_base", False)):
+            continue
+        result.add(procedure_type)
+    return result
+
+
+def _apply_variation_precedence(*, any_set: set[str], occurrences: Any) -> tuple[set[str], str, tuple[str, ...]]:
+    """Supressão da base por exatamente uma variação atual (D3/Slices 003-005).
+
+    Retorna o conjunto reconciliado, a variação selecionada e a base suprimida
+    — vazios quando não houve redução. Duas variações atuais (de qualquer
+    família), variação sem ocorrência atual e conjunto sem a base permanecem
+    inalterados (fail-closed na matriz, sem descartar valores).
+    """
+    variations = any_set & set(_VARIATION_BASE_TYPES)
+    if len(variations) != 1:
+        return any_set, "", ()
+    selected = str(next(iter(variations)))
+    if selected not in _current_request_variation_types(occurrences):
+        return any_set, "", ()
+    base = _VARIATION_BASE_TYPES[selected]
+    if base not in any_set:
+        return any_set, "", ()
+    # Somente a base é absorvida pela variação: qualquer outro componente do
+    # conjunto bruto permanece e segue à matriz (fail-closed sem descartar
+    # valores — ex.: pacote + Colonoscopia).
+    return any_set - {base}, selected, (base,)
 
 
 def _apply_specialized_precedence(*, any_set: set[str], occurrences: Any) -> tuple[set[str], str, tuple[str, ...]]:
@@ -123,7 +196,10 @@ class ProcedureReconciliationResult:
 
     ``precedence_applied``/``selected_specialized_type``/
     ``suppressed_conventional_types`` carregam a precedência especializada
-    efetivamente aplicada (D3); são vazios quando não houve supressão.
+    efetivamente aplicada (D3); ``variation_precedence_applied``/
+    ``selected_variation_type``/``suppressed_base_types`` carregam a supressão
+    da base EDA por um pacote atômico (Slices 003/004). Todos são vazios quando
+    não houve redução.
     """
 
     action: str  # "proceed" | "auto_upgrade" | "nir_review"
@@ -134,6 +210,9 @@ class ProcedureReconciliationResult:
     precedence_applied: bool = False
     selected_specialized_type: str = ""
     suppressed_conventional_types: tuple[str, ...] = ()
+    variation_precedence_applied: bool = False
+    selected_variation_type: str = ""
+    suppressed_base_types: tuple[str, ...] = ()
 
 
 def _proceed(
@@ -141,6 +220,8 @@ def _proceed(
     *,
     selected_specialized_type: str = "",
     suppressed_conventional_types: tuple[str, ...] = (),
+    selected_variation_type: str = "",
+    suppressed_base_types: tuple[str, ...] = (),
 ) -> ProcedureReconciliationResult:
     return ProcedureReconciliationResult(
         action="proceed",
@@ -150,6 +231,9 @@ def _proceed(
         precedence_applied=bool(selected_specialized_type and suppressed_conventional_types),
         selected_specialized_type=selected_specialized_type,
         suppressed_conventional_types=suppressed_conventional_types,
+        variation_precedence_applied=bool(selected_variation_type and suppressed_base_types),
+        selected_variation_type=selected_variation_type,
+        suppressed_base_types=suppressed_base_types,
     )
 
 
@@ -170,6 +254,8 @@ def _nir_review(
     detected: tuple[str, ...],
     selected_specialized_type: str = "",
     suppressed_conventional_types: tuple[str, ...] = (),
+    selected_variation_type: str = "",
+    suppressed_base_types: tuple[str, ...] = (),
 ) -> ProcedureReconciliationResult:
     return ProcedureReconciliationResult(
         action="nir_review",
@@ -179,6 +265,9 @@ def _nir_review(
         precedence_applied=bool(selected_specialized_type and suppressed_conventional_types),
         selected_specialized_type=selected_specialized_type,
         suppressed_conventional_types=suppressed_conventional_types,
+        variation_precedence_applied=bool(selected_variation_type and suppressed_base_types),
+        selected_variation_type=selected_variation_type,
+        suppressed_base_types=suppressed_base_types,
     )
 
 
@@ -246,9 +335,18 @@ def reconcile_detected_procedures(
         any_set=any_set,
         occurrences=occurrences,
     )
+    # D3/Slices 003/004 — supressão da base por exatamente uma variação atual
+    # (pacote atômico). Roda DEPOIS da precedência especializada: um
+    # especializado atual já reduziu o conjunto e não há variação a suprimir.
+    any_set, selected_variation_type, suppressed_base_types = _apply_variation_precedence(
+        any_set=any_set,
+        occurrences=occurrences,
+    )
     precedence_kwargs: dict[str, Any] = {
         "selected_specialized_type": selected_specialized_type,
         "suppressed_conventional_types": suppressed_conventional_types,
+        "selected_variation_type": selected_variation_type,
+        "suppressed_base_types": suppressed_base_types,
     }
 
     if any_set and frozenset(any_set) not in ALLOWED_PROCEDURE_SETS:
@@ -324,18 +422,25 @@ def reconcile_detected_procedures(
 def serialize_procedure_precedence(reconciliation: ProcedureReconciliationResult) -> dict[str, object] | None:
     """Metadados enxutos de precedência para evento e sugestão (D3).
 
-    Retorna ``None`` quando a regra não foi aplicada (singleton especializado
-    normal, conflito fail-closed, legado), evitando confundir correção
-    determinística com operação normal. Nunca carrega excerpt ou texto
-    clínico: apenas regra, tipo selecionado e tipos suprimidos.
+    Retorna ``None`` quando nenhuma regra foi aplicada (singleton normal,
+    conflito fail-closed, legado), evitando confundir correção determinística
+    com operação normal. As duas reduções (especializado sobre convencionais e
+    variação atômica sobre a base) usam o MESMO formato de proveniência —
+    regra, selecionado e suprimidos — nunca excerpt ou texto clínico.
     """
-    if not reconciliation.precedence_applied:
-        return None
-    return {
-        "rule": PROCEDURE_PRECEDENCE_RULE,
-        "selected": reconciliation.selected_specialized_type,
-        "suppressed": list(reconciliation.suppressed_conventional_types),
-    }
+    if reconciliation.precedence_applied:
+        return {
+            "rule": PROCEDURE_PRECEDENCE_RULE,
+            "selected": reconciliation.selected_specialized_type,
+            "suppressed": list(reconciliation.suppressed_conventional_types),
+        }
+    if reconciliation.variation_precedence_applied:
+        return {
+            "rule": VARIATION_PRECEDENCE_RULE,
+            "selected": reconciliation.selected_variation_type,
+            "suppressed": list(reconciliation.suppressed_base_types),
+        }
+    return None
 
 
 def _project_review_evidence_spans(evidence_spans: list[dict[str, str]]) -> list[dict[str, str]]:

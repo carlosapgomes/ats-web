@@ -465,14 +465,17 @@ class TestDoctorQueueProcedureFilters:
         assert "Nenhum autorizado" in content
 
     def test_queue_html_offers_combined_and_none_options(self) -> None:
+        """Slice 008: o template ITERA as opções projectadas (nunca repete radios).
+
+        O universo (dez identidades + combinado + `none` em Decididos Hoje) é
+        derivado do catálogo no contexto; a prova renderizada está em
+        ``test_expanded_catalog_queues.py``.
+        """
         html = QUEUE_HTML.read_text(encoding="utf-8")
-        assert 'value="eda_colonoscopy"' in html
-        assert 'data-exam-type-count="eda_colonoscopy"' in html
-        assert 'value="none"' in html  # Nenhum autorizado (Decididos Hoje)
-        # Opções legadas preservadas.
-        assert 'value="all" checked' in html
-        assert 'value="eda"' in html
-        assert 'value="colonoscopy"' in html
+        assert html.count("{% for option in procedure_filter_options %}") == 2
+        assert 'data-exam-type-count="{{ option.key }}"' in html
+        assert 'data-exam-type-label="{{ option.label }}"' in html
+        assert 'value="{{ option.key }}"' in html
         assert "data-doctor-queue-search" in html
 
     def test_queue_partial_exposes_procedure_selection_attribute(self) -> None:
@@ -486,8 +489,9 @@ class TestDoctorQueueProcedureFilters:
         # Filtra pela dimensão projetada com fallback para a ponte legada.
         assert "data-proc-selection" in js
         assert "data-exam-type" in js
-        assert "eda_colonoscopy" in js
-        assert "none" in js
+        # Slice 008: chaves/contagens/rótulos vêm das opções renderizadas.
+        assert "data-exam-type-count" in js
+        assert "data-exam-type-label" in js
         # Comportamento legado preservado (busca/limpar/afterSwap).
         assert "htmx:afterSwap" in js
         assert "clearFilter" in js

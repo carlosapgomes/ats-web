@@ -26,6 +26,7 @@ from django.test import override_settings
 from django.urls import reverse
 
 from apps.cases.models import Case, CaseEvent, CaseProcedure
+from apps.intake.services import INTAKE_EXPOSED_SELECTION_KEYS
 
 pytestmark = pytest.mark.django_db
 
@@ -211,16 +212,18 @@ class TestCombinedFlagEnforcement:
             response = client.get(reverse("intake:home"))
         content = response.content.decode()
         assert "EDA + Colonoscopia" in content
-        radios = re.findall(r'<input[^>]*name=["\']exam_type["\'][^>]*>', content)
-        # Slice 002 (R1) e Slice 004 (R1): EDA, Colonoscopia, EDA + Colonoscopia,
-        # Ecoendoscopia e CPRE (os dois especializados gated pelas próprias
-        # flags, default false).
-        assert len(radios) == 5
-        for tag in radios:
-            assert "checked" not in tag, f"Radio pré-marcado: {tag}"
-        echo_tag = next(tag for tag in radios if 'value="echoendoscopy"' in tag)
+        # Slice 002 (R1): o controle canônico é o <select name="exam_type">;
+        # o conjunto de opções reais é a lista de exposição da jornada
+        # (EDA e pacotes, Colonoscopia/combinado e os especializados — estes
+        # últimos gated pelas próprias flags, default false).
+        options = re.findall(r'<option[^>]*value="[^"]+"[^>]*>', content)
+        values = [re.search(r'value="([^"]*)"', tag).group(1) for tag in options]  # type: ignore[union-attr]
+        assert values == list(INTAKE_EXPOSED_SELECTION_KEYS)
+        for tag in options:
+            assert "selected" not in tag, f"Opção real pré-marcada: {tag}"
+        echo_tag = next(tag for tag in options if 'value="echoendoscopy"' in tag)
         assert "disabled" in echo_tag
-        cpre_tag = next(tag for tag in radios if 'value="cpre"' in tag)
+        cpre_tag = next(tag for tag in options if 'value="cpre"' in tag)
         assert "disabled" in cpre_tag
 
     def test_flag_off_disables_colon_and_combined(self, client) -> None:

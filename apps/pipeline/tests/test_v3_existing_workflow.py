@@ -1,12 +1,13 @@
-"""Slice 001 (R6/R7/R8) — cutover 3.0 preserva o fluxo EDA/Colonoscopia.
+"""Slice 001 do cutover 3.0 (migrado no cutover 4.0) — fluxo EDA/Colonoscopia.
 
-Cobre:
-- R6: jobs EDA, Colonoscopia e EDA + Colonoscopia usam UMA chamada 3.0 por
-  estágio, chegam a ``WAIT_DOCTOR`` e a superfície médica lê o artefato 3.0 sem
+Cobre, agora sob o writer 4.0:
+- R6: jobs EDA, Colonoscopia e EDA + Colonoscopia usam UMA chamada 4.0 por
+  estágio, chegam a ``WAIT_DOCTOR`` e a superfície médica lê o artefato 4.0 sem
   regressão (relatório por componente, não modo legado).
-- R7: o seed cria os quatro prompts 3.0 de forma idempotente, sem apagar
+- R7: o seed cria os quatro prompts 4.0 de forma idempotente, sem apagar
   histórico anterior.
-- R8: nenhuma opção/fluxo especializado é exposto no intake.
+- R8 (histórico): as chaves de seleção declaradas derivam do catálogo; a UI do
+  intake continua oferecendo somente as opções publicadas.
 """
 
 from __future__ import annotations
@@ -19,7 +20,7 @@ from django.core.management import call_command
 from apps.cases.models import Case, CaseEvent, CaseStatus
 from apps.cases.procedures import set_declared_procedures
 from apps.pipeline.llm import RecordingLlmClient
-from apps.pipeline.llm1_service_v3 import LLM1_V3_DEFAULT_SYSTEM_PROMPT
+from apps.pipeline.llm1_service_v4 import LLM1_V4_DEFAULT_SYSTEM_PROMPT
 from apps.pipeline.orchestrator import run_pipeline
 from apps.pipeline.tests.test_slice_002_pipeline import (
     _colon_procedure,
@@ -38,7 +39,7 @@ NEUTRAL_NAMES = ["exam_llm1_system", "exam_llm1_user", "exam_llm2_system", "exam
 
 
 def _make_declared_case(user, *, procedure_types: tuple[str, ...], extracted_text: str) -> Case:
-    """Caso pronto para o pipeline 3.0 com a projeção declarada informada."""
+    """Caso pronto para o pipeline 4.0 com a projeção declarada informada."""
     case = Case.objects.create(created_by=user, agency_record_number="12345", extracted_text=extracted_text)
     set_declared_procedures(case=case, procedure_types=list(procedure_types), actor=user)
     case.start_processing(user=user)
@@ -50,11 +51,11 @@ def _make_declared_case(user, *, procedure_types: tuple[str, ...], extracted_tex
     return case
 
 
-# ── R6: writer 3.0 ponta a ponta ────────────────────────────────────────────
+# ── R6: writer 4.0 ponta a ponta ────────────────────────────────────────────
 
 
 class TestV3WriterReachesDoctor:
-    def test_eda_reaches_wait_doctor_with_v3_artifacts(self, django_user_model) -> None:
+    def test_eda_reaches_wait_doctor_with_v4_artifacts(self, django_user_model) -> None:
         user = django_user_model.objects.create_user(username="nir")
         case = _make_declared_case(user, procedure_types=("eda",), extracted_text="Solicito EDA.")
         client = RecordingLlmClient(
@@ -68,9 +69,9 @@ class TestV3WriterReachesDoctor:
         reloaded = _reload(case)
         assert reloaded.status == CaseStatus.WAIT_DOCTOR
         assert reloaded.structured_data is not None
-        assert reloaded.structured_data["schema_version"] == "3.0"
+        assert reloaded.structured_data["schema_version"] == "4.0"
         assert reloaded.suggested_action is not None
-        assert reloaded.suggested_action["schema_version"] == "3.0"
+        assert reloaded.suggested_action["schema_version"] == "4.0"
         assert len(client.calls) == 2  # uma chamada por estágio
 
     def test_colonoscopy_reaches_wait_doctor(self, django_user_model) -> None:
@@ -119,12 +120,12 @@ class TestV3WriterReachesDoctor:
         run_pipeline(case.case_id, llm_client=client)
 
         detection_event = CaseEvent.objects.get(case=case, event_type="CASE_PROCEDURES_DETECTED")
-        assert detection_event.payload["schema_version"] == "3.0"
+        assert detection_event.payload["schema_version"] == "4.0"
         llm1_event = CaseEvent.objects.get(case=case, event_type="LLM1_OK")
-        assert llm1_event.payload["schema_version"] == "3.0"
+        assert llm1_event.payload["schema_version"] == "4.0"
 
-    def test_doctor_surface_reads_v3_without_regression(self, django_user_model) -> None:
-        """R6: o artefato 3.0 entra no modo por componente da UI médica."""
+    def test_doctor_surface_reads_v4_without_regression(self, django_user_model) -> None:
+        """R6: o artefato 4.0 entra no modo por componente da UI médica."""
         from apps.doctor.presenters import DoctorReportPresenter
         from apps.doctor.views import _is_v2_case
 
@@ -154,11 +155,11 @@ class TestV3WriterReachesDoctor:
         assert "EDA + Colonoscopia" in report["context"]["procedure"]
 
 
-# ── R7: seed 3.0 idempotente preservando histórico ──────────────────────────
+# ── R7: seed 4.0 idempotente preservando histórico ──────────────────────────
 
 
-class TestSeedPromptsV3:
-    def test_seeds_four_active_v3_prompts(self) -> None:
+class TestSeedPromptsV4:
+    def test_seeds_four_active_v4_prompts(self) -> None:
         from apps.llm.models import PromptTemplate
 
         call_command("seed_prompts")
@@ -189,7 +190,7 @@ class TestSeedPromptsV3:
         active = PromptTemplate.get_active("exam_llm1_system")
         assert active is not None
         assert active.version == 2
-        assert active.content == LLM1_V3_DEFAULT_SYSTEM_PROMPT
+        assert active.content == LLM1_V4_DEFAULT_SYSTEM_PROMPT
         # Histórico preservado e inativado — nunca apagado nem reativado.
         legacy = PromptTemplate.objects.get(name="exam_llm1_system", version=1)
         assert legacy.content == "conteudo 2.0 legado"
@@ -210,16 +211,13 @@ class TestSpecializedIntakeFlags:
     """
 
     def test_intake_rejects_unknown_procedure_selections(self) -> None:
+        """D10: as chaves declaradas derivam do catálogo; alias/texto livre falha."""
+        from apps.cases.procedures import SELECTION_KEYS
         from apps.intake.services import _DECLARED_SELECTION_VALUES, validate_exam_type
 
-        assert _DECLARED_SELECTION_VALUES == {
-            "eda",
-            "colonoscopy",
-            "eda_colonoscopy",
-            "echoendoscopy",
-            "cpre",
-        }
-        for value in ("eda_cpre", "eda_echoendoscopy"):
+        assert _DECLARED_SELECTION_VALUES == frozenset(SELECTION_KEYS)
+        assert {"eda", "eda_gastrostomy", "rectosigmoidoscopy_argon", "cpre"} <= _DECLARED_SELECTION_VALUES
+        for value in ("eda_cpre", "eda_echoendoscopy", "EDA", "Colonoscopia"):
             with pytest.raises(ValueError):
                 validate_exam_type(value)
 
@@ -228,16 +226,26 @@ class TestSpecializedIntakeFlags:
         assert getattr(settings, "CPRE_INTAKE_ENABLED", False) is False
 
     def test_cpre_visual_option_is_flag_gated(self) -> None:
-        """Opção visual existe, mas nasce ``disabled`` com a flag desligada."""
+        """Opção visual existe, mas nasce ``disabled`` com a flag desligada.
+
+        Slice 002: no upload as opções vêm do helper de jornada
+        (``apps/intake/services.py``), que aplica o gate explícito por código;
+        o Slice 007 migrou o reenvio corrigido para o MESMO combobox
+        (``exam_type_options``), com o gate em ``option.enabled``.
+        """
         from pathlib import Path
 
         from django.conf import settings as django_settings
 
         base = Path(django_settings.BASE_DIR)
-        for relative in ("templates/intake/intake_home.html", "templates/intake/corrected_resubmission.html"):
-            source = (base / relative).read_text(encoding="utf-8")
-            assert 'value="cpre"' in source
-            assert "cpre_intake_enabled" in source
+        # Gate explícito do helper que publica as opções do upload.
+        assert "ProcedureType.CPRE: is_cpre_intake_enabled" in (base / "apps" / "intake" / "services.py").read_text(
+            encoding="utf-8"
+        )
+        assert "exam_type_options" in (base / "templates" / "intake" / "intake_home.html").read_text(encoding="utf-8")
+        source = (base / "templates" / "intake" / "corrected_resubmission.html").read_text(encoding="utf-8")
+        assert "exam_type_options" in source
+        assert "not option.enabled" in source
 
     def test_echoendoscopy_option_is_flag_gated(self) -> None:
         """Opção visual existe, mas nasce ``disabled`` com a flag desligada."""
@@ -246,7 +254,10 @@ class TestSpecializedIntakeFlags:
         from django.conf import settings as django_settings
 
         base = Path(django_settings.BASE_DIR)
-        for relative in ("templates/intake/intake_home.html", "templates/intake/corrected_resubmission.html"):
-            source = (base / relative).read_text(encoding="utf-8")
-            assert 'value="echoendoscopy"' in source
-            assert "echoendoscopy_intake_enabled" in source
+        assert "ProcedureType.ECHOENDOSCOPY: is_echoendoscopy_intake_enabled" in (
+            base / "apps" / "intake" / "services.py"
+        ).read_text(encoding="utf-8")
+        assert "exam_type_options" in (base / "templates" / "intake" / "intake_home.html").read_text(encoding="utf-8")
+        source = (base / "templates" / "intake" / "corrected_resubmission.html").read_text(encoding="utf-8")
+        assert "exam_type_options" in source
+        assert "not option.enabled" in source

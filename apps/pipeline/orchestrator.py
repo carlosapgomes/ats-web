@@ -1,14 +1,15 @@
-"""Pipeline orchestrator — runs the procedure-neutral v3 LLM pipeline for a case.
+"""Pipeline orchestrator — runs the procedure-neutral v4 LLM pipeline for a case.
 
-Ties together: LLM1 v3 extraction → detection/reconciliation →
+Ties together: LLM1 v4 extraction → detection/reconciliation →
 per-component preop policy → prior context per procedure →
-LLM2 v3 suggestion → support synthesis → FSM transitions.
+LLM2 v4 suggestion → support synthesis → FSM transitions.
 
-Cutover 3.0 (design D5/D15): o caminho executável é EXCLUSIVAMENTE o contrato
-3.0. Schemas/serviços 1.1/2.0 permanecem como leitores históricos e para
-rollback anterior ao primeiro write 3.0, mas nunca são chamados por um job novo.
-Casos sem procedimentos declarados válidos em ``CaseProcedure`` falham de modo
-explícito/auditável (R1), nunca caem em perfil singular/EDA.
+Cutover 4.0 (design D5/D14 / ADR-0010): o caminho executável é EXCLUSIVAMENTE o
+contrato 4.0 (dez identidades atômicas). Serviços/schemas 3.0 permanecem como
+leitores históricos e para rollback anterior ao primeiro write 4.0, mas nunca
+são chamados por um job novo. Casos sem procedimentos declarados válidos em
+``CaseProcedure`` falham de modo explícito/auditável (R1), nunca caem em perfil
+singular/EDA.
 """
 
 from __future__ import annotations
@@ -16,29 +17,37 @@ from __future__ import annotations
 import copy
 import logging
 import uuid
+from collections.abc import Container
+from dataclasses import dataclass
 
-from apps.cases.exam_profiles import get_exam_profile
-from apps.cases.models import Case
+from apps.cases.exam_profiles import require_exam_profile
+from apps.cases.models import Case, ProcedureType
 from apps.cases.priority_signals import resolve_priority_signals
 from apps.cases.procedures import (
     ALLOWED_PROCEDURE_SETS,
+    PROCEDURE_CATALOG,
     PROCEDURE_ORDER,
-    SUPPORTED_PROCEDURE_TYPES,
     set_detected_procedures,
 )
 from apps.llm.models import PromptTemplate
-from apps.pipeline.imaging_evidence import verify_abdominal_imaging_evidence
-from apps.pipeline.llm import LlmClient
-from apps.pipeline.llm1_service_v3 import (
-    LLM1_V3_DEFAULT_SYSTEM_PROMPT,
-    LLM1_V3_DEFAULT_USER_PROMPT,
-    Llm1ServiceV3,
-    Llm1V3Result,
+from apps.pipeline.imaging_evidence import normalize_evidence_text, verify_abdominal_imaging_evidence
+from apps.pipeline.infection_review import (
+    INFECTION_EVIDENCE_ARTIFACT_KEY,
+    INFECTION_EVIDENCE_FIELD,
+    serialize_infection_review,
+    verify_infection_evidence,
 )
-from apps.pipeline.llm2_service_v3 import (
-    LLM2_V3_DEFAULT_SYSTEM_PROMPT,
-    LLM2_V3_DEFAULT_USER_PROMPT,
-    Llm2ServiceV3,
+from apps.pipeline.llm import LlmClient
+from apps.pipeline.llm1_service_v4 import (
+    LLM1_V4_DEFAULT_SYSTEM_PROMPT,
+    LLM1_V4_DEFAULT_USER_PROMPT,
+    Llm1ServiceV4,
+    Llm1V4Result,
+)
+from apps.pipeline.llm2_service_v4 import (
+    LLM2_V4_DEFAULT_SYSTEM_PROMPT,
+    LLM2_V4_DEFAULT_USER_PROMPT,
+    Llm2ServiceV4,
     strictest_global_support,
 )
 from apps.pipeline.policy import (
@@ -55,15 +64,139 @@ from apps.pipeline.procedure_reconciliation import (
     reconcile_detected_procedures,
     serialize_procedure_precedence,
 )
-from apps.pipeline.schemas.adapters import project_v3_to_llm1_shape
-from apps.pipeline.scope_detection import detect_procedure_occurrences, detect_requested_procedures_v3
+from apps.pipeline.schemas.adapters import project_v4_to_llm1_shape, requested_procedure_for_type
+from apps.pipeline.scope_detection import detect_procedure_occurrences, detect_requested_procedures_v4
 
 logger = logging.getLogger(__name__)
 
 
-# Contrato 3.0: os quatro procedimentos suportados (design D1).
-_PROCEDURE_TYPES: tuple[str, ...] = SUPPORTED_PROCEDURE_TYPES
-_SCHEMA_VERSION = "3.0"
+# D5/Slices 003/004/005: o writer 4.0 detecta as dez identidades; os pacotes EDA
+# entram nos Slices 003 (Cápsula e Dilatação) e 004 (GTT), a família
+# Retossigmoidoscopia no Slice 005 e os especializados no Slice 001.
+_DETECTABLE_PROCEDURE_TYPES: tuple[str, ...] = (
+    ProcedureType.EDA,
+    ProcedureType.EDA_GASTROSTOMY,
+    ProcedureType.EDA_CAPSULE,
+    ProcedureType.EDA_DILATION,
+    ProcedureType.COLONOSCOPY,
+    ProcedureType.RECTOSIGMOIDOSCOPY,
+    ProcedureType.RECTOSIGMOIDOSCOPY_DILATION,
+    ProcedureType.RECTOSIGMOIDOSCOPY_ARGON,
+    ProcedureType.ECHOENDOSCOPY,
+    ProcedureType.CPRE,
+)
+_SCHEMA_VERSION = "4.0"
+
+# ── Local informativo da dilatação (D6/R5) ──────────────────────────────────
+
+_DILATION_ANATOMICAL_SITES: frozenset[str] = frozenset(
+    {
+        "esophagus",
+        "pylorus",
+        "duodenum",
+        "anastomosis",
+        "jejunum",
+        "other",
+    }
+)
+DILATION_SITE_NOT_DECLARED = "dilation_site_not_declared"
+DILATION_SITE_EXCERPT_NOT_ANCHORED = "dilation_excerpt_not_anchored"
+DILATION_SITE_EXCERPT_AMBIGUOUS = "dilation_excerpt_ambiguous"
+
+
+@dataclass(frozen=True)
+class DilationSiteProjection:
+    """Projeção APRESENTÁVEL do local de dilatação (design D6).
+
+    Informativa por definição: nunca cria pendência nem altera policy, sugestão
+    ou disposição médica; ``reason_code`` é o motivo técnico enxuto da queda
+    para ``unknown``.
+    """
+
+    anatomical_site: str
+    reason_code: str = ""
+
+
+def project_dilation_site(*, detail: object, main_report_text: str) -> DilationSiteProjection:
+    """Ancora o local declarado no relatório principal (design D6/R5).
+
+    O local só é projetado quando o ``evidence_excerpt`` ocorre de forma ÚNICA
+    no relatório principal normalizado. Local ausente, não ancorado (trecho
+    inventado) ou ambíguo (mais de uma ocorrência) cai para ``unknown`` com
+    motivo técnico — nunca falha o pipeline nem muda policy/FSM.
+    """
+    if not isinstance(detail, dict):
+        return DilationSiteProjection(
+            anatomical_site="unknown",
+            reason_code=DILATION_SITE_NOT_DECLARED,
+        )
+    anatomical_site = str(detail.get("anatomical_site") or "unknown")
+    excerpt = detail.get("evidence_excerpt")
+    if anatomical_site not in _DILATION_ANATOMICAL_SITES or not isinstance(excerpt, str) or not excerpt.strip():
+        return DilationSiteProjection(
+            anatomical_site="unknown",
+            reason_code=DILATION_SITE_NOT_DECLARED,
+        )
+    normalized_excerpt = normalize_evidence_text(excerpt)
+    normalized_report = normalize_evidence_text(main_report_text or "")
+    if not normalized_excerpt or normalized_excerpt not in normalized_report:
+        return DilationSiteProjection(
+            anatomical_site="unknown",
+            reason_code=DILATION_SITE_EXCERPT_NOT_ANCHORED,
+        )
+    if normalized_report.count(normalized_excerpt) > 1:
+        return DilationSiteProjection(
+            anatomical_site="unknown",
+            reason_code=DILATION_SITE_EXCERPT_AMBIGUOUS,
+        )
+    return DilationSiteProjection(anatomical_site=anatomical_site)
+
+
+def _project_detected_dilation_site(
+    *,
+    structured_data: dict[str, object],
+    detected_procedure_types: tuple[str, ...],
+    main_report_text: str,
+) -> dict[str, object] | None:
+    """Projeção consultiva do local, somente quando ``eda_dilation`` é detectada."""
+    if ProcedureType.EDA_DILATION not in detected_procedure_types:
+        return None
+    item = requested_procedure_for_type(structured_data, ProcedureType.EDA_DILATION)
+    projection = project_dilation_site(
+        detail=item.get("dilation_detail"),
+        main_report_text=main_report_text,
+    )
+    return {"anatomical_site": projection.anatomical_site, "reason_code": projection.reason_code}
+
+
+# ── Revisão infecciosa consultiva de EDA + GTT (Slice 004, D7/D8) ───────────
+
+
+def project_infection_review(
+    *,
+    structured_data: dict[str, object],
+    detected_procedure_types: tuple[str, ...],
+    main_report_text: str,
+) -> dict[str, object] | None:
+    """Verifica e projeta a revisão infecciosa do artefato 4.0 (D7/D8/R1).
+
+    Existe SOMENTE para a identidade exata ``eda_gastrostomy`` — nenhuma outra
+    variação de EDA herda o painel por família/sinal legado. A coleção é
+    verificada contra o relatório principal (nunca anexos); ausência/falha de
+    extração devolve ``None`` (seção vazia/neutra, nunca pendência). O DTO
+    resultante NUNCA entra em ``failed_requirements``, ``priority_signals``,
+    policy ou no reconciliador LLM2: é apresentação consultiva.
+    """
+    if detected_procedure_types != (ProcedureType.EDA_GASTROSTOMY,):
+        return None
+    item = requested_procedure_for_type(structured_data, ProcedureType.EDA_GASTROSTOMY)
+    view = verify_infection_evidence(
+        entries=item.get(INFECTION_EVIDENCE_FIELD),
+        main_report_text=main_report_text,
+    )
+    if view.empty:
+        return None
+    return serialize_infection_review(view)
 
 
 def run_pipeline(
@@ -75,7 +208,7 @@ def run_pipeline(
     llm2_system_prompt: str | None = None,
     llm2_user_template: str | None = None,
 ) -> None:
-    """Orchestrate the procedure-neutral v2 LLM pipeline for a case.
+    """Orchestrate the procedure-neutral v4 LLM pipeline for a case.
 
     FSM flow (happy path):
         LLM_STRUCT → LLM_SUGGEST → R2_POST_WIDGET → WAIT_DOCTOR
@@ -84,7 +217,7 @@ def run_pipeline(
     All injectable parameters default to production values (settings/DB).
     Override them in tests to avoid needing DB templates or real LLM calls.
 
-    R1: o pipeline é exclusivamente 3.0. Caso sem procedimentos declarados
+    R1: o pipeline é exclusivamente 4.0. Caso sem procedimentos declarados
     válidos em ``CaseProcedure`` falha de modo explícito/auditável (PIPELINE_FAILED),
     sem cair em perfil singular/EDA nem em prompt 1.1.
     """
@@ -93,16 +226,17 @@ def run_pipeline(
     # Use separate stage-specific clients in production mode.
     # When a single client is injected (tests), use it for both.
     if llm_client is None:
-        from apps.pipeline.llm import create_openai_llm1_client, create_openai_llm2_client
+        from apps.pipeline.llm1_service_v4 import create_openai_llm1_v4_client
+        from apps.pipeline.llm2_service_v4 import create_openai_llm2_v4_client
 
-        client_llm1: LlmClient = create_openai_llm1_client()
-        client_llm2: LlmClient = create_openai_llm2_client()
+        client_llm1: LlmClient = create_openai_llm1_v4_client()
+        client_llm2: LlmClient = create_openai_llm2_v4_client()
     else:
         client_llm1 = llm_client
         client_llm2 = llm_client
 
     try:
-        _run_v3_pipeline(
+        _run_v4_pipeline(
             case=case,
             client_llm1=client_llm1,
             client_llm2=client_llm2,
@@ -124,7 +258,7 @@ def run_pipeline(
             logger.exception("Failed to record pipeline failure for case %s", case_id)
 
 
-# ── V3 pipeline (procedure-neutral — contract 3.0) ──────────────────────────
+# ── V4 pipeline (procedure-neutral — contract 4.0) ──────────────────────────
 
 
 class DeclaredProceduresMissingError(Exception):
@@ -158,27 +292,51 @@ def _require_declared_procedures(case: Case) -> tuple[str, ...]:
     declared = sorted(set(declared_values), key=lambda t: PROCEDURE_ORDER[t])
     if not declared:
         raise DeclaredProceduresMissingError(
-            f"Pipeline v3 exige procedimentos declarados em CaseProcedure (case_id={case.case_id}); nenhum encontrado."
+            f"Pipeline v4 exige procedimentos declarados em CaseProcedure (case_id={case.case_id}); nenhum encontrado."
         )
     return tuple(declared)
 
 
 def _resolve_pipeline_signals_type(detected_procedure_types: tuple[str, ...]) -> str:
-    """Perfil que restringe os sinais persistidos para o conjunto detectado.
+    """Profile que restringe os sinais persistidos para o conjunto detectado.
 
-    EDA tem precedência histórica quando presente; caso contrário o próprio
-    tipo detectado (Colonoscopia/Ecoendoscopia/CPRE) restringe os códigos
-    permitidos pelo perfil (D7).
+    D4: a família vem do ``profile_key`` do catálogo, então as três identidades
+    de Retossigmoidoscopia reutilizam exatamente os sinais permitidos de
+    Colonoscopia (e os pacotes EDA, os de EDA). EDA tem precedência histórica
+    quando presente; sem conjunto detectado, o fallback é EDA.
     """
+    profile_keys = {
+        definition.profile_key for definition in PROCEDURE_CATALOG if definition.code in detected_procedure_types
+    }
     for procedure_type in ("eda", "colonoscopy", "echoendoscopy", "cpre"):
-        if procedure_type in detected_procedure_types:
+        if procedure_type in profile_keys:
             return procedure_type
     return "eda"
 
 
-# D14/R6: em artefatos 3.0 a Ecoendoscopia é persistida apenas como
-# ``CaseProcedure``; o resolvedor não adiciona o MESMO código de sinal.
-_V3_EXCLUDED_SIGNAL_CODES: frozenset[str] = frozenset({"echoendoscopy"})
+# D13/D14: em writes 4.0 a Ecoendoscopia é persistida apenas como
+# ``CaseProcedure`` e os pacotes atômicos cobrem os sinais equivalentes; o
+# resolvedor não adiciona o MESMO código de sinal derivado.
+_V4_EXCLUDED_SIGNAL_CODES: frozenset[str] = frozenset({"echoendoscopy"})
+
+# Pacote atômico → código de sinal legado já coberto pela própria identidade.
+_ATOMIC_PACKAGE_SIGNAL_CODES: dict[str, str] = {
+    ProcedureType.EDA_GASTROSTOMY: "gastrostomy",
+    ProcedureType.EDA_DILATION: "esophageal_dilation",
+}
+
+
+def _excluded_signal_codes(*, atomic_identity_types: Container[str]) -> frozenset[str]:
+    """Códigos de sinal legado que um write 4.0 não persiste (design D13).
+
+    Um sinal derivado nunca é gravado quando a identidade atômica correspondente
+    já é o procedimento do caso; os artefatos históricos continuam legíveis.
+    """
+    return _V4_EXCLUDED_SIGNAL_CODES | {
+        signal_code
+        for identity_code, signal_code in _ATOMIC_PACKAGE_SIGNAL_CODES.items()
+        if identity_code in atomic_identity_types
+    }
 
 
 def _resolve_prompt(name: str) -> tuple[str, int]:
@@ -189,7 +347,7 @@ def _resolve_prompt(name: str) -> tuple[str, int]:
     return _get_prompt_content(name), 0
 
 
-def _collect_v3_evidence_spans(structured_data: dict[str, object]) -> list[dict[str, str]]:
+def _collect_v4_evidence_spans(structured_data: dict[str, object]) -> list[dict[str, str]]:
     """Spans comuns + por procedimento para payload enxuto de revisão (R8)."""
     spans: list[dict[str, str]] = []
     common = structured_data.get("common_preop")
@@ -228,6 +386,9 @@ def _build_llm2_structured_data_view(
     reconciliado, na ordem canônica recebida e reaproveitando somente itens
     originais. Não muta o artefato persistido e nunca sintetiza item clínico
     ausente; campos comuns, summary e evidências são preservados.
+
+    D7/D8: ``INFECTION_EVIDENCE_FIELD`` é removido da cópia — a coleção
+    infecciosa é apresentação consultiva, nunca regra do reconciliador LLM2.
     """
     view = copy.deepcopy(llm1_structured_data)
     original_items = view.get("requested_procedures")
@@ -236,6 +397,7 @@ def _build_llm2_structured_data_view(
     items_by_type: dict[str, dict[str, object]] = {}
     for item in original_items:
         if isinstance(item, dict) and isinstance(item.get("procedure_type"), str):
+            item.pop(INFECTION_EVIDENCE_FIELD, None)
             items_by_type.setdefault(item["procedure_type"], item)
     view["requested_procedures"] = [
         items_by_type[procedure_type] for procedure_type in detected_procedure_types if procedure_type in items_by_type
@@ -243,7 +405,7 @@ def _build_llm2_structured_data_view(
     return view
 
 
-def _run_v3_pipeline(
+def _run_v4_pipeline(
     *,
     case: Case,
     client_llm1: LlmClient,
@@ -253,18 +415,19 @@ def _run_v3_pipeline(
     llm2_system_prompt: str | None,
     llm2_user_template: str | None,
 ) -> None:
-    """Pipeline procedure-neutral 3.0 (uma análise conjunta por estágio).
+    """Pipeline procedure-neutral 4.0 (uma análise conjunta por estágio).
 
-    O LLM2 pode usar retries corretivos limitados sem dividir a análise por
-    procedimento. Fluxo entregue (R1–R8): LLM1 3.0 (história comum + requested_procedures) →
-    detecção/reconciliação D7 → projeção atômica → policy por componente →
-    prior context por componente (D10) → LLM2 3.0 (conjunto exato) → suporte
-    global mais restritivo → WAIT_DOCTOR com relatório neutro legível. Gates de
-    revisão NIR (combined→single, mismatch, unknown) nunca executam LLM2.
+        O LLM2 pode usar retries corretivos limitados sem dividir a análise por
+        procedimento. Fluxo entregue (R1–R8): LLM1 4.0 (história comum + requested_procedures das
+    dez identidades) → detecção/reconciliação D7 → projeção atômica → policy por
+        componente → prior context por componente (D10) → LLM2 4.0 (conjunto exato) →
+        suporte global mais restritivo → WAIT_DOCTOR com relatório neutro legível.
+        Gates de revisão NIR (combined→single, mismatch, unknown) nunca executam
+        LLM2.
     """
     declared = _require_declared_procedures(case)
 
-    # ── 1. LLM1 3.0 — uma chamada ────────────────────────────────────────
+    # ── 1. LLM1 4.0 — uma chamada ────────────────────────────────────────
     if llm1_system_prompt is not None:
         sp1, sp1_version = llm1_system_prompt, 0
     else:
@@ -274,7 +437,7 @@ def _run_v3_pipeline(
     else:
         ut1, ut1_version = _resolve_prompt("exam_llm1_user")
 
-    service1 = Llm1ServiceV3(client_llm1)
+    service1 = Llm1ServiceV4(client_llm1)
     result1 = service1.run(
         case_id=str(case.case_id),
         agency_record_number=case.agency_record_number,
@@ -290,7 +453,7 @@ def _run_v3_pipeline(
     case.summary_text = result1.summary_text
 
     # ── 2. Detecção + reconciliação (D7) ───────────────────────────────
-    detection = detect_requested_procedures_v3(
+    detection = detect_requested_procedures_v4(
         llm1_structured_data=result1.structured_data,
         cleaned_text=case.extracted_text,
     )
@@ -298,8 +461,8 @@ def _run_v3_pipeline(
         llm1_structured_data=result1.structured_data,
         cleaned_text=case.extracted_text,
     )
-    strong = tuple(t for t in _PROCEDURE_TYPES if detection[t]["strong"])
-    any_evidence = tuple(t for t in _PROCEDURE_TYPES if detection[t]["any"])
+    strong = tuple(t for t in _DETECTABLE_PROCEDURE_TYPES if detection[t]["strong"])
+    any_evidence = tuple(t for t in _DETECTABLE_PROCEDURE_TYPES if detection[t]["any"])
     reconciliation = reconcile_detected_procedures(
         declared=declared,
         strong=strong,
@@ -323,19 +486,22 @@ def _run_v3_pipeline(
             detected_types=detected_types,
         )
 
-    # Sinais prioritários por projeção compatível (R5/D7): EDA quando presente,
-    # senão o próprio tipo detectado restringe os códigos permitidos. Em 3.0 o
-    # sinal legado ``echoendoscopy`` é excluído (D14).
+    # Sinais prioritários por projeção compatível (R5/D7/D13): EDA quando
+    # presente, senão o próprio tipo detectado restringe os códigos permitidos.
+    # Em 4.0 a Ecoendoscopia e os códigos de sinal já cobertos por um pacote
+    # atômico (GTT/dilatação) não são persistidos (D13/D14).
     signals_type = _resolve_pipeline_signals_type(reconciliation.detected_procedure_types)
-    signals_projection = project_v3_to_llm1_shape(
-        v3_data=result1.structured_data,
+    signals_projection = project_v4_to_llm1_shape(
+        v4_data=result1.structured_data,
         procedure_type=signals_type,
     )
     case.priority_signals = resolve_priority_signals(
         structured_data=signals_projection,
         source_text=case.extracted_text,
         exam_type=signals_type,
-        excluded_signal_codes=_V3_EXCLUDED_SIGNAL_CODES,
+        excluded_signal_codes=_excluded_signal_codes(
+            atomic_identity_types=set(declared) | set(reconciliation.detected_procedure_types)
+        ),
     )
 
     # ── 4. Eventos de detecção (R8: versões de schema/prompt + conjuntos) ─
@@ -378,7 +544,7 @@ def _run_v3_pipeline(
             reason_text=reconciliation.reason_text,
             declared=declared,
             detected=reconciliation.detected_procedure_types,
-            evidence_spans=_collect_v3_evidence_spans(result1.structured_data),
+            evidence_spans=_collect_v4_evidence_spans(result1.structured_data),
         )
         if precedence_metadata is not None:
             review_payload = {**review_payload, "procedure_precedence": precedence_metadata}
@@ -397,7 +563,7 @@ def _run_v3_pipeline(
         return
 
     # ── 6. LLM1 concluído (LLM_STRUCT → LLM_SUGGEST) ──────────────────
-    case.llm1_complete(success=True, user=None, payload=_build_v3_llm1_ok_payload(case, result1))
+    case.llm1_complete(success=True, user=None, payload=_build_v4_llm1_ok_payload(case, result1))
     case.save()
 
     # ── 7. Policy determinística por componente (R5/D8) ────────────────
@@ -411,8 +577,8 @@ def _run_v3_pipeline(
     )
     policy_results: dict[str, dict[str, object]] = {}
     for procedure_type in reconciliation.detected_procedure_types:
-        projection = project_v3_to_llm1_shape(
-            v3_data=result1.structured_data,
+        projection = project_v4_to_llm1_shape(
+            v4_data=result1.structured_data,
             procedure_type=procedure_type,
         )
         decision = evaluate_procedure_policy(
@@ -453,7 +619,7 @@ def _run_v3_pipeline(
             )
             case.save()
 
-    # ── 9. LLM2 3.0 — análise conjunta com conjunto exato (R6) ──────────
+    # ── 9. LLM2 4.0 — análise conjunta com conjunto exato (R6) ──────────
     if llm2_system_prompt is not None:
         sp2, sp2_version = llm2_system_prompt, 0
     else:
@@ -463,7 +629,7 @@ def _run_v3_pipeline(
     else:
         ut2, ut2_version = _resolve_prompt("exam_llm2_user")
 
-    service2 = Llm2ServiceV3(client_llm2)
+    service2 = Llm2ServiceV4(client_llm2)
     llm2_structured_data_view = _build_llm2_structured_data_view(
         llm1_structured_data=result1.structured_data,
         detected_procedure_types=reconciliation.detected_procedure_types,
@@ -480,14 +646,22 @@ def _run_v3_pipeline(
     )
 
     # ── 10. Reconciliação por item + suporte global (D8) ──────────────
+    # D6/R5: o local da dilatação é ancorado no relatório principal ANTES da
+    # montagem do payload médico; local ausente/inventado/ambíguo projeta
+    # ``unknown`` com motivo técnico e nunca muda policy ou disposição.
+    dilation_site_projection = _project_detected_dilation_site(
+        structured_data=result1.structured_data,
+        detected_procedure_types=reconciliation.detected_procedure_types,
+        main_report_text=case.extracted_text,
+    )
     recommendations: list[dict[str, object]] = []
     for item in result2.procedure_recommendations:
         procedure_type = str(item["procedure_type"])
-        projection = project_v3_to_llm1_shape(
-            v3_data=result1.structured_data,
+        projection = project_v4_to_llm1_shape(
+            v4_data=result1.structured_data,
             procedure_type=procedure_type,
         )
-        profile = get_exam_profile(procedure_type)
+        profile = require_exam_profile(procedure_type)
         precheck = _build_policy_precheck(
             projection,
             allow_foreign_body_exception=profile.allows_foreign_body_exception,
@@ -509,35 +683,45 @@ def _run_v3_pipeline(
             }
             for c in reconciled.contradictions
         ]
-        recommendations.append(
-            {
-                **item,
-                "suggestion": suggestion,
-                "policy_alignment": {
-                    "excluded_request": reconciled.policy_alignment.excluded_request,
-                    "labs_ok": reconciled.policy_alignment.labs_ok,
-                    "ecg_ok": reconciled.policy_alignment.ecg_ok,
-                    "pediatric_flag": reconciled.policy_alignment.pediatric_flag,
-                    "notes": reconciled.policy_alignment.notes,
-                },
-                "contradictions": contradictions,
-                # Suporte por componente é recomendação (soft) do LLM2 3.0;
-                # a síntese determinística de ASA segue apenas para exibição.
-                "support_recommendation": item["support_recommendation"],
-                "asa": {
-                    "bucket": support_ctx.asa_bucket,
-                    "display_text": support_ctx.asa_display,
-                },
-                "preop_decision": policy_results[procedure_type],
-            }
-        )
+        recommendation: dict[str, object] = {
+            **item,
+            "suggestion": suggestion,
+            "policy_alignment": {
+                "excluded_request": reconciled.policy_alignment.excluded_request,
+                "labs_ok": reconciled.policy_alignment.labs_ok,
+                "ecg_ok": reconciled.policy_alignment.ecg_ok,
+                "pediatric_flag": reconciled.policy_alignment.pediatric_flag,
+                "notes": reconciled.policy_alignment.notes,
+            },
+            "contradictions": contradictions,
+            # Suporte por componente é recomendação (soft) do LLM2 4.0;
+            # a síntese determinística de ASA segue apenas para exibição.
+            "support_recommendation": item["support_recommendation"],
+            "asa": {
+                "bucket": support_ctx.asa_bucket,
+                "display_text": support_ctx.asa_display,
+            },
+            "preop_decision": policy_results[procedure_type],
+        }
+        if dilation_site_projection is not None and procedure_type == ProcedureType.EDA_DILATION:
+            recommendation["dilation_detail"] = dilation_site_projection
+        recommendations.append(recommendation)
 
     global_support = strictest_global_support(tuple(str(r["support_recommendation"]) for r in recommendations))
+    # D7/R1: a revisão infecciosa é consultiva e exclusiva de EDA + GTT; ela
+    # acompanha o artefato 4.0 de apresentação, nunca a policy/priority signals.
+    infection_review = project_infection_review(
+        structured_data=result1.structured_data,
+        detected_procedure_types=reconciliation.detected_procedure_types,
+        main_report_text=case.extracted_text,
+    )
     case.suggested_action = {
         "schema_version": _SCHEMA_VERSION,
         "procedure_recommendations": recommendations,
         "global_support_recommendation": global_support,
     }
+    if infection_review is not None:
+        case.suggested_action[INFECTION_EVIDENCE_ARTIFACT_KEY] = infection_review
     if precedence_metadata is not None:
         case.suggested_action["procedure_precedence"] = precedence_metadata
     case.save()
@@ -550,7 +734,7 @@ def _run_v3_pipeline(
     case.llm2_complete(success=True, user=None)
     case._record_event(
         "LLM2_OK",
-        payload=_build_v3_llm2_ok_payload(
+        payload=_build_v4_llm2_ok_payload(
             case=case,
             prompt_system_version=sp2_version,
             prompt_user_version=ut2_version,
@@ -562,8 +746,8 @@ def _run_v3_pipeline(
     case.save()
 
 
-def _build_v3_llm1_ok_payload(case: Case, result1: Llm1V3Result) -> dict[str, object]:
-    """Payload enxuto de LLM1_OK para contrato 2.0 (sem texto clínico integral)."""
+def _build_v4_llm1_ok_payload(case: Case, result1: Llm1V4Result) -> dict[str, object]:
+    """Payload enxuto de LLM1_OK para contrato 4.0 (sem texto clínico integral)."""
     return {
         "schema_version": _SCHEMA_VERSION,
         "summary_text": case.summary_text,
@@ -575,14 +759,14 @@ def _build_v3_llm1_ok_payload(case: Case, result1: Llm1V3Result) -> dict[str, ob
     }
 
 
-def _build_v3_llm2_ok_payload(
+def _build_v4_llm2_ok_payload(
     *,
     case: Case,
     prompt_system_version: int,
     prompt_user_version: int,
     detected_procedure_types: tuple[str, ...],
 ) -> dict[str, object]:
-    """Payload enxuto de LLM2_OK para o fluxo v2 (R8, sem texto clínico)."""
+    """Payload enxuto de LLM2_OK para contrato 4.0 (R8, sem texto clínico)."""
     return {
         "schema_version": _SCHEMA_VERSION,
         "prompt_system_name": "exam_llm2_system",
@@ -677,10 +861,10 @@ def _get_prompt_content(name: str) -> str:
         return template.content
     logger.warning("PromptTemplate %r not found — using fallback", name)
     fallbacks = {
-        "exam_llm1_system": LLM1_V3_DEFAULT_SYSTEM_PROMPT,
-        "exam_llm1_user": LLM1_V3_DEFAULT_USER_PROMPT,
-        "exam_llm2_system": LLM2_V3_DEFAULT_SYSTEM_PROMPT,
-        "exam_llm2_user": LLM2_V3_DEFAULT_USER_PROMPT,
+        "exam_llm1_system": LLM1_V4_DEFAULT_SYSTEM_PROMPT,
+        "exam_llm1_user": LLM1_V4_DEFAULT_USER_PROMPT,
+        "exam_llm2_system": LLM2_V4_DEFAULT_SYSTEM_PROMPT,
+        "exam_llm2_user": LLM2_V4_DEFAULT_USER_PROMPT,
     }
     return fallbacks.get(name, "{case_id}")
 

@@ -10,9 +10,10 @@ Proves R1–R5:
   grupos/copy/ações.
 - R3: Processados Hoje tem badge e filtro simples por tipo, sem alterar
   ownership, período local ou ciências reconhecidas.
-- R4: Histórico é server-side: ``exam_type=all|eda|colonoscopy`` com fallback
-  para all, compõe com q, tipo sem q lista os últimos do tipo e os resultados
-  mostram badge; botão Limpar zera q/tipo.
+- R4: Histórico é server-side: ``all`` + cada chave de seleção do catálogo,
+  compõe com q, tipo sem q lista os últimos do tipo e os resultados mostram
+  badge; botão Limpar zera q/tipo. Dimensão DESCONHECIDA é rejeitada (estado
+  vazio) em vez de reclassificada para ``all`` — fallback exclusivo do NIR.
 - R5: confirmação/negação, ACK de notices/issues, locks e autorização seguem
   intactos; nenhuma ação depende do filtro.
 
@@ -21,13 +22,19 @@ estática dos marcadores e pela matriz documentada no relatório do slice.
 
 Slice 006 acrescenta os buckets especializados: Pendentes/Processados Hoje
 oferecem Ecoendoscopia e CPRE com contadores no MESMO universo do catálogo
-(R1/R3); o Histórico aceita ``all|eda|colonoscopy|eda_colonoscopy|
-echoendoscopy|cpre`` e filtra por igualdade exata do conjunto autorizado
-(R1/R6); especializado nunca recebe label nem contador casado (R2).
+(R1/R3); o Histórico filtra por igualdade exata do conjunto autorizado (R1/R6);
+especializado nunca recebe label nem contador casado (R2).
+
+Slice 008 — filas CHD pelo catálogo ampliado (R1/R3/R7): opções e contadores
+derivam do catálogo (dez identidades + combinado), o template itera essas
+opções e o script inicializa chaves/contagens/rótulos pelos ``data-*``
+renderizados. A prova comportamental das novas identidades está em
+``test_expanded_catalog_scheduler.py``.
 """
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 from typing import Any
 
@@ -475,8 +482,15 @@ class TestSchedulerHistoricalExamType:
         assert "Joao Colon" not in content
         assert "Maria EDA" not in content
 
-    def test_historical_invalid_type_falls_back_to_all(self, client) -> None:
-        """Tipo inválido cai para all e compõe com q sobre os dois tipos."""
+    def test_historical_invalid_type_is_rejected_not_reclassified(self, client) -> None:
+        """R3 (spec delta): dimensão desconhecida é REJEITADA, nunca vira ``all``.
+
+        A reclassificação para ``all`` é o fallback EXCLUSIVO dos filtros NIR
+        (``apps/intake``); no CHD a dimensão fora do catálogo devolve o estado
+        vazio existente. Proveniência: requisição "Histórico CHD combina tipo e
+        busca" — "O backend SHALL rejeitar filtros desconhecidos em vez de
+        reclassificá-los".
+        """
         self._login_as(client, "scheduler")
         nir = User.objects.create_user(username="nir-schhist-3@test.com")
         nir.roles.add(self._create_role("nir"))
@@ -485,8 +499,10 @@ class TestSchedulerHistoricalExamType:
         response = client.get("/scheduler/historical/?exam_type=bogus&q=Maria")
         assert response.status_code == 200
         content = response.content.decode()
-        assert "H-EDA-2" in content
-        assert "H-COL-3" in content
+        # Nenhuma linha do universo histórico: não há reclassificação para all.
+        assert "H-EDA-2" not in content
+        assert "H-COL-3" not in content
+        assert "Nenhum caso encontrado" in content
 
     def test_historical_results_show_exam_type_badge(self, client) -> None:
         """Resultados do histórico mostram badge real do tipo persistido."""
@@ -641,11 +657,16 @@ class TestSchedulerQueueFilterStatic:
         assert "exam_type_label" in html
 
     def test_js_counts_and_scope_cover_specialized_catalog(self) -> None:
-        """R1/R2/R3: o filtro client-side conhece Ecoendoscopia e CPRE."""
+        """R1/R2/R3 (Slice 008): contadores/rótulo vêm dos elementos renderizados."""
         js = self._read(QUEUE_FILTER_JS)
-        assert "echoendoscopy: 0, cpre: 0" in js
-        assert 'if (type === "echoendoscopy") return "Ecoendoscopia";' in js
-        assert 'if (type === "cpre") return "CPRE";' in js
+        literal = re.search(r"var counts = \{([^}]*)\}", js)
+        assert literal is not None
+        assert literal.group(1).strip() == "", "objeto literal fechado de tipos no script"
+        assert "[data-exam-type-count]" in js
+        assert 'getAttribute("data-exam-type-count")' in js
+        assert 'getAttribute("data-exam-type-label")' in js
+        for key in ("eda", "colonoscopy", "eda_colonoscopy", "echoendoscopy", "cpre"):
+            assert f'if (type === "{key}")' not in js
 
 
 class TestSchedulerApprovedDimensionSource:

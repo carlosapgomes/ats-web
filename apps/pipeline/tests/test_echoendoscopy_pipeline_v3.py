@@ -11,7 +11,7 @@ Cobre:
 - R4: declaração = detecção segue ao médico; mismatch volta ao NIR sem
   auto-upgrade especializado.
 - R6: o caso chega a ``WAIT_DOCTOR`` como singleton e o sinal legado
-  ``echoendoscopy`` não é duplicado em artefatos 3.0 (D14).
+  ``echoendoscopy`` não é duplicado em artefatos 4.0 (D14).
 - R7: payload legado 1.1/2.0 continua legível, sem nova row/backfill.
 
 Slice 001 do change ``prioritize-specialized-procedure-requests`` (ADR-0008):
@@ -111,7 +111,7 @@ def _llm1_json(
 ) -> str:
     return json.dumps(
         {
-            "schema_version": "3.0",
+            "schema_version": "4.0",
             "language": "pt-BR",
             "agency_record_number": "12345",
             "patient": {"name": "Paciente", "age": 35, "sex": "M", "document_id": None},
@@ -160,7 +160,7 @@ def _llm1_json(
 def _llm2_json(case_id: str, *, procedure_type: str, suggestion: str = "accept") -> str:
     return json.dumps(
         {
-            "schema_version": "3.0",
+            "schema_version": "4.0",
             "language": "pt-BR",
             "case_id": case_id,
             "agency_record_number": "12345",
@@ -235,8 +235,8 @@ class TestProcedureOccurrences:
         assert ("echoendoscopy", "current_request") in by_type
         echo = next(o for o in occurrences if o.procedure_type == "echoendoscopy")
         eda = next(o for o in occurrences if o.procedure_type == "eda")
-        assert echo.linked_eda is True
-        assert eda.linked_eda is True
+        assert echo.linked_base is True
+        assert eda.linked_base is True
         assert echo.excerpt.strip() != ""
         assert echo.evidence_id != eda.evidence_id
 
@@ -247,7 +247,7 @@ class TestProcedureOccurrences:
         )
         echo = next(o for o in occurrences if o.procedure_type == "echoendoscopy")
         assert echo.qualification == "current_request"
-        assert echo.linked_eda is False
+        assert echo.linked_base is False
 
     def test_historical_occurrence_is_qualified_as_historical(self) -> None:
         occurrences = detect_procedure_occurrences(
@@ -423,7 +423,7 @@ class TestEchoendoscopyEndToEnd:
         reloaded = _reload(case)
         assert reloaded.status == CaseStatus.WAIT_DOCTOR
         assert reloaded.structured_data is not None
-        assert reloaded.structured_data["schema_version"] == "3.0"
+        assert reloaded.structured_data["schema_version"] == "4.0"
         recommendations = _recommendations(reloaded)
         assert [item["procedure_type"] for item in recommendations] == ["echoendoscopy"]
         preop = recommendations[0]["preop_decision"]
@@ -452,8 +452,8 @@ class TestEchoendoscopyEndToEnd:
 
         assert recommendations[0]["suggestion"] == "deny"
 
-    def test_specialized_signal_is_not_duplicated_in_v3_artifacts(self, django_user_model) -> None:
-        """D14/R6: 3.0 não persiste o sinal legado ``echoendoscopy``."""
+    def test_specialized_signal_is_not_duplicated_in_v4_artifacts(self, django_user_model) -> None:
+        """D14/R6: 4.0 não persiste o sinal legado ``echoendoscopy``."""
         user = django_user_model.objects.create_user(username="nir-eda-signal")
         report = "Solicito EDA. Mencao a ecoendoscopia previa em 2018."
         case = _make_case(user, procedure_types=(ProcedureType.EDA,), extracted_text=report)

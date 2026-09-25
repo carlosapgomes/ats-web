@@ -30,6 +30,20 @@ User = get_user_model()
 
 _MIGRATION_MODULE = "apps.cases.migrations.0019_alter_caseprocedure_procedure_type"
 _PREVIOUS_MIGRATION = "0018_alter_procedurefollowup_non_performance_reason"
+
+# Catálogo canônico vigente (cutover 4.0, ADR-0010).
+EXPANDED_CATALOG_CODES: tuple[str, ...] = (
+    "eda",
+    "eda_gastrostomy",
+    "eda_capsule",
+    "eda_dilation",
+    "colonoscopy",
+    "rectosigmoidoscopy",
+    "rectosigmoidoscopy_dilation",
+    "rectosigmoidoscopy_argon",
+    "echoendoscopy",
+    "cpre",
+)
 _LEGACY_V2_STRUCTURED_DATA: dict[str, Any] = {
     "schema_version": "2.0",
     "language": "pt-BR",
@@ -68,7 +82,14 @@ class TestMigrationIsAlterFieldOnly:
 
 
 class TestForwardMigrationPreservesData:
-    """R1 — forward 0018 → 0019 não muta rows, JSON clínico nem eventos."""
+    """R1 — forward 0018 → 0019 (e até a leaf atual) não muta rows, JSON clínico nem eventos.
+
+    Executa fora do bloco atômico do pytest: o teardown do sandbox reaplica as
+    migrations de choice/``max_length`` e o PostgreSQL recusa ``ALTER COLUMN``
+    numa tabela com eventos de trigger pendentes do próprio teste.
+    """
+
+    pytestmark = pytest.mark.django_db(transaction=True)
 
     @pytest.fixture(autouse=True)
     def _migration_sandbox(self):
@@ -167,7 +188,7 @@ class TestForwardMigrationPreservesData:
         assert migrated_case >= 1
         assert CaseProcedure.objects.filter(procedure_type__in=["eda", "colonoscopy"]).exists()
 
-    def test_final_choices_include_specialized_types(self) -> None:
+    def test_final_choices_include_expanded_catalog(self) -> None:
         self._migrate_to_0018()
         self._migrate_to_0019()
-        assert set(ProcedureType.values) == {"eda", "colonoscopy", "echoendoscopy", "cpre"}
+        assert set(ProcedureType.values) == set(EXPANDED_CATALOG_CODES)

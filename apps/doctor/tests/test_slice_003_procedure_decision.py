@@ -399,7 +399,7 @@ class TestProcedureDecisionFormAndSubmit:
         token = self._claim_lock(case.case_id, doctor)
 
         with mock.patch(
-            "apps.pipeline.orchestrator._run_v3_pipeline",
+            "apps.pipeline.orchestrator._run_v4_pipeline",
             side_effect=AssertionError("LLM rerun não permitido no submit médico"),
         ) as v2_run:
             response = self._submit(
@@ -615,7 +615,7 @@ class TestProcedureDecisionFormAndSubmit:
     # ── RED 2/3/6 complemento: GET renderiza entradas por procedimento ───
 
     def test_decision_page_renders_per_procedure_entries(self, client) -> None:
-        case = self._make_v2_case(detected=["eda"])
+        case = self._make_v2_case(detected=["eda", "colonoscopy"])
         self._login(client, "doctor")
         response = client.get(f"/doctor/{case.case_id}/")
         assert response.status_code == 200

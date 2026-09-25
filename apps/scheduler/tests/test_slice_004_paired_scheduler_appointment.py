@@ -626,10 +626,14 @@ class TestSchedulerPairedStatic:
     def _read(self, path: Path) -> str:
         return path.read_text(encoding="utf-8")
 
-    def test_queue_html_offers_combined_option(self) -> None:
+    def test_queue_html_iterates_catalog_options(self) -> None:
+        """Slice 008: opções/contadores iterados do catálogo (nunca radios literais)."""
         html = self._read(QUEUE_HTML)
-        assert 'value="eda_colonoscopy"' in html
-        assert "Combinado" in html
+        assert html.count("{% for option in exam_type_options %}") == 1
+        assert html.count("{% for option in processed_exam_type_options %}") == 1
+        assert 'value="{{ option.key }}"' in html
+        assert 'data-exam-type-count="{{ option.key }}"' in html
+        assert 'data-exam-type-label="{{ option.label }}"' in html
 
     def test_queue_cards_expose_approved_selection(self) -> None:
         html = self._read(QUEUE_CONTENT_HTML)
@@ -638,9 +642,9 @@ class TestSchedulerPairedStatic:
         assert "paired_label" in html
         assert "transformation_approved" in html
 
-    def test_historical_html_offers_combined_and_keeps_legacy_label(self) -> None:
+    def test_historical_html_iterates_options_and_keeps_legacy_label(self) -> None:
         html = self._read(HISTORICAL_HTML)
-        assert 'value="eda_colonoscopy"' in html
+        assert "{% for option in exam_type_options %}" in html
         # Regressão: teste estático existente exige a string exam_type_label.
         assert "exam_type_label" in html
 
@@ -650,11 +654,13 @@ class TestSchedulerPairedStatic:
         assert "approved_label" in html
         assert "procedure_reasons" in html
 
-    def test_js_handles_combined_selection(self) -> None:
+    def test_js_reads_selection_and_labels_from_the_dom(self) -> None:
+        """Slice 008/R7: chaves, contagens e rótulos vêm dos elementos renderizados."""
         js = self._read(QUEUE_FILTER_JS)
-        assert "eda_colonoscopy" in js
         assert "data-approved-selection" in js
-        assert "EDA + Colonoscopia" in js
+        assert "data-exam-type-count" in js
+        assert "data-exam-type-label" in js
+        assert "var counts = {" not in js.replace("var counts = {};", "")
 
 
 @pytest.mark.django_db

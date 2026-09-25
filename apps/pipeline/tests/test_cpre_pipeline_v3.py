@@ -116,7 +116,7 @@ def _llm1_json(
 ) -> str:
     return json.dumps(
         {
-            "schema_version": "3.0",
+            "schema_version": "4.0",
             "language": "pt-BR",
             "agency_record_number": "12345",
             "patient": {"name": "Paciente", "age": 35, "sex": "M", "document_id": None},
@@ -165,7 +165,7 @@ def _llm1_json(
 def _llm2_json(case_id: str, *, procedure_type: str, suggestion: str = "accept") -> str:
     return json.dumps(
         {
-            "schema_version": "3.0",
+            "schema_version": "4.0",
             "language": "pt-BR",
             "case_id": case_id,
             "agency_record_number": "12345",
@@ -319,8 +319,8 @@ class TestCpreOccurrenceDetection:
         )
         cpre = next(o for o in occurrences if o.procedure_type == "cpre")
         eda = next(o for o in occurrences if o.procedure_type == "eda")
-        assert cpre.linked_eda is True
-        assert eda.linked_eda is True
+        assert cpre.linked_base is True
+        assert eda.linked_base is True
         assert cpre.qualification == "current_request"
         assert cpre.evidence_id != eda.evidence_id
 
@@ -331,7 +331,7 @@ class TestCpreOccurrenceDetection:
         )
         cpre = next(o for o in occurrences if o.procedure_type == "cpre")
         assert cpre.qualification == "current_request"
-        assert cpre.linked_eda is False
+        assert cpre.linked_base is False
 
 
 # ── R2: precedência por vínculo textual ─────────────────────────────────────
@@ -693,7 +693,7 @@ class TestCpreEndToEnd:
         assert reloaded.status == CaseStatus.WAIT_DOCTOR
         structured = reloaded.structured_data
         assert isinstance(structured, dict)
-        assert structured["schema_version"] == "3.0"
+        assert structured["schema_version"] == "4.0"
         recommendations = _recommendations(reloaded)
         assert [item["procedure_type"] for item in recommendations] == ["cpre"]
         preop = recommendations[0]["preop_decision"]

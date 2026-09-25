@@ -14,18 +14,11 @@
   <fieldset class="mb-3">
     <legend class="form-label fw-semibold mb-2">Filtrar por tipo de exame</legend>
     <div class="btn-group" role="group" aria-label="Filtrar por tipo de exame">
-      <input type="radio" class="btn-check" name="scheduler-queue-exam-type" id="scheduler-exam-type-all" value="all" checked data-scheduler-exam-filter>
-      <label class="btn btn-outline-secondary" for="scheduler-exam-type-all">Todos <span class="badge text-bg-secondary" data-exam-type-count="all">{{ exam_type_counts.all }}</span></label>
-      <input type="radio" class="btn-check" name="scheduler-queue-exam-type" id="scheduler-exam-type-eda" value="eda" data-scheduler-exam-filter>
-      <label class="btn btn-outline-secondary" for="scheduler-exam-type-eda">EDA <span class="badge text-bg-secondary" data-exam-type-count="eda">{{ exam_type_counts.eda }}</span></label>
-      <input type="radio" class="btn-check" name="scheduler-queue-exam-type" id="scheduler-exam-type-colonoscopy" value="colonoscopy" data-scheduler-exam-filter>
-      <label class="btn btn-outline-secondary" for="scheduler-exam-type-colonoscopy">Colonoscopia <span class="badge text-bg-secondary" data-exam-type-count="colonoscopy">{{ exam_type_counts.colonoscopy }}</span></label>
-      <input type="radio" class="btn-check" name="scheduler-queue-exam-type" id="scheduler-exam-type-combined" value="eda_colonoscopy" data-scheduler-exam-filter>
-      <label class="btn btn-outline-secondary" for="scheduler-exam-type-combined">Combinado <span class="badge text-bg-secondary" data-exam-type-count="eda_colonoscopy">{{ exam_type_counts.eda_colonoscopy }}</span></label>
-      <input type="radio" class="btn-check" name="scheduler-queue-exam-type" id="scheduler-exam-type-echoendoscopy" value="echoendoscopy" data-scheduler-exam-filter>
-      <label class="btn btn-outline-secondary" for="scheduler-exam-type-echoendoscopy">Ecoendoscopia <span class="badge text-bg-secondary" data-exam-type-count="echoendoscopy">{{ exam_type_counts.echoendoscopy }}</span></label>
-      <input type="radio" class="btn-check" name="scheduler-queue-exam-type" id="scheduler-exam-type-cpre" value="cpre" data-scheduler-exam-filter>
-      <label class="btn btn-outline-secondary" for="scheduler-exam-type-cpre">CPRE <span class="badge text-bg-secondary" data-exam-type-count="cpre">{{ exam_type_counts.cpre }}</span></label>
+      {# Opções e contadores derivados do catálogo (R1/R3/D12): mesmo universo do predicado. #}
+      {% for option in exam_type_options %}
+      <input type="radio" class="btn-check" name="scheduler-queue-exam-type" id="scheduler-exam-type-{{ option.key }}" value="{{ option.key }}" {% if option.key == 'all' %}checked{% endif %} data-scheduler-exam-filter data-exam-type-label="{{ option.label }}">
+      <label class="btn btn-outline-secondary" for="scheduler-exam-type-{{ option.key }}">{{ option.label }} <span class="badge text-bg-secondary" data-exam-type-count="{{ option.key }}">{{ option.count }}</span></label>
+      {% endfor %}
     </div>
   </fieldset>
   <div
@@ -49,18 +42,11 @@
   <fieldset class="mb-3">
     <legend class="form-label fw-semibold mb-2">Filtrar por tipo de exame</legend>
     <div class="btn-group" role="group" aria-label="Filtrar por tipo de exame">
-      <input type="radio" class="btn-check" name="scheduler-processed-exam-type" id="scheduler-processed-type-all" value="all" checked data-scheduler-exam-filter>
-      <label class="btn btn-outline-secondary" for="scheduler-processed-type-all">Todos <span class="badge text-bg-secondary" data-exam-type-count="all">{{ processed_exam_type_counts.all }}</span></label>
-      <input type="radio" class="btn-check" name="scheduler-processed-exam-type" id="scheduler-processed-type-eda" value="eda" data-scheduler-exam-filter>
-      <label class="btn btn-outline-secondary" for="scheduler-processed-type-eda">EDA <span class="badge text-bg-secondary" data-exam-type-count="eda">{{ processed_exam_type_counts.eda }}</span></label>
-      <input type="radio" class="btn-check" name="scheduler-processed-exam-type" id="scheduler-processed-type-colonoscopy" value="colonoscopy" data-scheduler-exam-filter>
-      <label class="btn btn-outline-secondary" for="scheduler-processed-type-colonoscopy">Colonoscopia <span class="badge text-bg-secondary" data-exam-type-count="colonoscopy">{{ processed_exam_type_counts.colonoscopy }}</span></label>
-      <input type="radio" class="btn-check" name="scheduler-processed-exam-type" id="scheduler-processed-type-combined" value="eda_colonoscopy" data-scheduler-exam-filter>
-      <label class="btn btn-outline-secondary" for="scheduler-processed-type-combined">Combinado <span class="badge text-bg-secondary" data-exam-type-count="eda_colonoscopy">{{ processed_exam_type_counts.eda_colonoscopy }}</span></label>
-      <input type="radio" class="btn-check" name="scheduler-processed-exam-type" id="scheduler-processed-type-echoendoscopy" value="echoendoscopy" data-scheduler-exam-filter>
-      <label class="btn btn-outline-secondary" for="scheduler-processed-type-echoendoscopy">Ecoendoscopia <span class="badge text-bg-secondary" data-exam-type-count="echoendoscopy">{{ processed_exam_type_counts.echoendoscopy }}</span></label>
-      <input type="radio" class="btn-check" name="scheduler-processed-exam-type" id="scheduler-processed-type-cpre" value="cpre" data-scheduler-exam-filter>
-      <label class="btn btn-outline-secondary" for="scheduler-processed-type-cpre">CPRE <span class="badge text-bg-secondary" data-exam-type-count="cpre">{{ processed_exam_type_counts.cpre }}</span></label>
+      {# Opções e contadores derivados do catálogo (R1/R3/D12): mesmo universo do predicado. #}
+      {% for option in processed_exam_type_options %}
+      <input type="radio" class="btn-check" name="scheduler-processed-exam-type" id="scheduler-processed-type-{{ option.key }}" value="{{ option.key }}" {% if option.key == 'all' %}checked{% endif %} data-scheduler-exam-filter data-exam-type-label="{{ option.label }}">
+      <label class="btn btn-outline-secondary" for="scheduler-processed-type-{{ option.key }}">{{ option.label }} <span class="badge text-bg-secondary" data-exam-type-count="{{ option.key }}">{{ option.count }}</span></label>
+      {% endfor %}
     </div>
   </fieldset>
   <div

@@ -14,18 +14,11 @@
   <fieldset class="mb-3" id="doctor-queue-type-filter">
     <legend class="form-label fw-semibold mb-2">Filtrar por tipo de exame</legend>
     <div class="btn-group" role="group" aria-label="Filtrar por tipo de exame">
-      <input type="radio" class="btn-check" name="doctor-queue-exam-type" id="doctor-exam-type-all" value="all" checked data-doctor-exam-filter>
-      <label class="btn btn-outline-secondary" for="doctor-exam-type-all">Todos <span class="badge text-bg-secondary" data-exam-type-count="all">0</span></label>
-      <input type="radio" class="btn-check" name="doctor-queue-exam-type" id="doctor-exam-type-eda" value="eda" data-doctor-exam-filter>
-      <label class="btn btn-outline-secondary" for="doctor-exam-type-eda">EDA <span class="badge text-bg-secondary" data-exam-type-count="eda">0</span></label>
-      <input type="radio" class="btn-check" name="doctor-queue-exam-type" id="doctor-exam-type-colonoscopy" value="colonoscopy" data-doctor-exam-filter>
-      <label class="btn btn-outline-secondary" for="doctor-exam-type-colonoscopy">Colonoscopia <span class="badge text-bg-secondary" data-exam-type-count="colonoscopy">0</span></label>
-      <input type="radio" class="btn-check" name="doctor-queue-exam-type" id="doctor-exam-type-combined" value="eda_colonoscopy" data-doctor-exam-filter>
-      <label class="btn btn-outline-secondary" for="doctor-exam-type-combined">EDA + Colonoscopia <span class="badge text-bg-secondary" data-exam-type-count="eda_colonoscopy">0</span></label>
-      <input type="radio" class="btn-check" name="doctor-queue-exam-type" id="doctor-exam-type-echoendoscopy" value="echoendoscopy" data-doctor-exam-filter>
-      <label class="btn btn-outline-secondary" for="doctor-exam-type-echoendoscopy">Ecoendoscopia <span class="badge text-bg-secondary" data-exam-type-count="echoendoscopy">0</span></label>
-      <input type="radio" class="btn-check" name="doctor-queue-exam-type" id="doctor-exam-type-cpre" value="cpre" data-doctor-exam-filter>
-      <label class="btn btn-outline-secondary" for="doctor-exam-type-cpre">CPRE <span class="badge text-bg-secondary" data-exam-type-count="cpre">0</span></label>
+      {# Opções derivadas do catálogo (R1/D12): label canônica + chave de seleção. #}
+      {% for option in procedure_filter_options %}
+      <input type="radio" class="btn-check" name="doctor-queue-exam-type" id="doctor-exam-type-{{ option.key }}" value="{{ option.key }}" {% if option.key == 'all' %}checked{% endif %} data-doctor-exam-filter data-exam-type-label="{{ option.label }}">
+      <label class="btn btn-outline-secondary" for="doctor-exam-type-{{ option.key }}">{{ option.label }} <span class="badge text-bg-secondary" data-exam-type-count="{{ option.key }}">0</span></label>
+      {% endfor %}
     </div>
   </fieldset>
   <label for="doctor-queue-search-input" class="form-label fw-semibold">
@@ -75,20 +68,11 @@
   <fieldset class="mb-3">
     <legend class="form-label fw-semibold mb-2">Filtrar por tipo de exame</legend>
     <div class="btn-group" role="group" aria-label="Filtrar por tipo de exame">
-      <input type="radio" class="btn-check" name="doctor-decided-exam-type" id="doctor-decided-type-all" value="all" checked data-doctor-exam-filter>
-      <label class="btn btn-outline-secondary" for="doctor-decided-type-all">Todos <span class="badge text-bg-secondary" data-exam-type-count="all">0</span></label>
-      <input type="radio" class="btn-check" name="doctor-decided-exam-type" id="doctor-decided-type-eda" value="eda" data-doctor-exam-filter>
-      <label class="btn btn-outline-secondary" for="doctor-decided-type-eda">EDA <span class="badge text-bg-secondary" data-exam-type-count="eda">0</span></label>
-      <input type="radio" class="btn-check" name="doctor-decided-exam-type" id="doctor-decided-type-colonoscopy" value="colonoscopy" data-doctor-exam-filter>
-      <label class="btn btn-outline-secondary" for="doctor-decided-type-colonoscopy">Colonoscopia <span class="badge text-bg-secondary" data-exam-type-count="colonoscopy">0</span></label>
-      <input type="radio" class="btn-check" name="doctor-decided-exam-type" id="doctor-decided-type-combined" value="eda_colonoscopy" data-doctor-exam-filter>
-      <label class="btn btn-outline-secondary" for="doctor-decided-type-combined">EDA + Colonoscopia <span class="badge text-bg-secondary" data-exam-type-count="eda_colonoscopy">0</span></label>
-      <input type="radio" class="btn-check" name="doctor-decided-exam-type" id="doctor-decided-type-echoendoscopy" value="echoendoscopy" data-doctor-exam-filter>
-      <label class="btn btn-outline-secondary" for="doctor-decided-type-echoendoscopy">Ecoendoscopia <span class="badge text-bg-secondary" data-exam-type-count="echoendoscopy">0</span></label>
-      <input type="radio" class="btn-check" name="doctor-decided-exam-type" id="doctor-decided-type-cpre" value="cpre" data-doctor-exam-filter>
-      <label class="btn btn-outline-secondary" for="doctor-decided-type-cpre">CPRE <span class="badge text-bg-secondary" data-exam-type-count="cpre">0</span></label>
-      <input type="radio" class="btn-check" name="doctor-decided-exam-type" id="doctor-decided-type-none" value="none" data-doctor-exam-filter>
-      <label class="btn btn-outline-secondary" for="doctor-decided-type-none">Nenhum autorizado <span class="badge text-bg-secondary" data-exam-type-count="none">0</span></label>
+      {# Opções derivadas do catálogo (R2/D12): Decididos Hoje filtra o AUTORIZADO e inclui `none`. #}
+      {% for option in procedure_filter_options %}
+      <input type="radio" class="btn-check" name="doctor-decided-exam-type" id="doctor-decided-type-{{ option.key }}" value="{{ option.key }}" {% if option.key == 'all' %}checked{% endif %} data-doctor-exam-filter data-exam-type-label="{{ option.label }}">
+      <label class="btn btn-outline-secondary" for="doctor-decided-type-{{ option.key }}">{{ option.label }} <span class="badge text-bg-secondary" data-exam-type-count="{{ option.key }}">0</span></label>
+      {% endfor %}
     </div>
   </fieldset>
   <div

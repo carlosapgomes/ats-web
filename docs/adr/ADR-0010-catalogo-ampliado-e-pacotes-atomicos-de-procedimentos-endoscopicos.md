@@ -1,10 +1,10 @@
 # ADR-0010: Catálogo ampliado e pacotes atômicos de procedimentos endoscópicos
 
 ## Status
-Proposed
 
-## Data
-2026-09-25
+Accepted
+
+**Aceita em:** 2026-09-25
 
 ## Contexto
 
@@ -109,3 +109,4 @@ Esta ADR parcialmente supera a ADR-0004 e a ADR-0006 apenas onde limitavam o cat
 ## Histórico de Mudanças
 
 - 2026-09-25: ADR criada como `Proposed` junto ao change OpenSpec.
+- 2026-09-25: aceite humano formal; status mudado de `Proposed` para `Accepted`. Os detalhamentos operacionais da decisão (precedência de pacote em trechos independentes, sentinela `invalid` de `selection_key`, labels de identidade nos reason texts, CSS de badges por família) estão registrados no `design.md`/specs do change; primeiro slice de código liberado.

@@ -71,6 +71,7 @@ from apps.dashboard.procedure_analytics import (
     apply_procedure_selection_filter,
     category_key,
     compute_procedure_analytics,
+    procedure_selection_options,
     resolve_dimension,
     resolve_selection,
 )
@@ -799,6 +800,7 @@ def _dashboard_case_list_context(request: HttpRequest) -> dict[str, Any]:
         "attention_count": attention_count,
         "procedure_dimension": procedure_dimension,
         "procedure_selection": procedure_selection,
+        "procedure_selection_options": procedure_selection_options(),
         "procedure_dimension_label": DIMENSION_LABELS[procedure_dimension],
         "metrics_period": metrics_period,
         "metrics_date": metrics_date,

@@ -207,49 +207,20 @@ SHALL permanecer inalterados.
 - **AND** `oneOf` e `discriminator` são removidos
 - **AND** o schema original não é mutado
 
-### Requirement: Dispatch LLM de produção SHALL vincular strict schema ao contrato 3.0
-
-O pipeline de produção, sem cliente LLM injetado, SHALL vincular novos processamentos exclusivamente aos strict schemas 3.0. Schemas 1.1/2.0 SHALL permanecer somente em adapters e leitores históricos após o cutover.
-
-#### Scenario: LLM1 de produção recebe strict schema 3.0
-
-- **GIVEN** o pipeline cria o cliente LLM1 sem injeção de teste após o cutover
-- **WHEN** a chamada à API é montada
-- **THEN** `response_format` usa `json_schema` strict
-- **AND** o schema vinculado define `schema_version` fixo em `"3.0"`
-- **AND** aceita quatro tipos e evidência abdominal tipada
-- **AND** não contém chaves exclusivas do contrato 1.1.
-
-#### Scenario: LLM2 de produção recebe strict schema 3.0
-
-- **GIVEN** o pipeline cria o cliente LLM2 sem injeção de teste após o cutover
-- **WHEN** a chamada à API é montada
-- **THEN** `response_format` usa `json_schema` strict
-- **AND** o schema vinculado define `schema_version` fixo em `"3.0"`
-- **AND** `procedure_recommendations` aceita os quatro tipos.
-
-#### Scenario: Schema 3.0 é compatível com normalização strict
-
-- **GIVEN** o JSON Schema de `Llm1ResponseV3` ou `Llm2ResponseV3`
-- **WHEN** a normalização strict é aplicada
-- **THEN** todo nó objeto declara `additionalProperties: false`
-- **AND** todo nó objeto lista todas as propriedades em `required`
-- **AND** nenhuma construção incompatível com strict mode permanece.
-
 ### Requirement: Evidência abdominal SHALL separar modalidade, anatomia e achado
 
-LLM1 3.0 SHALL extrair imagens do relatório principal em coleção tipada com modalidade, localização anatômica, presença de conclusão/achado, trecho-fonte e data opcional. `tracked_exams` textual e anexos MUST NOT satisfazer a hard rule.
+LLM1 4.0 SHALL preservar a extração 3.0 de imagens do relatório principal em coleção tipada com modalidade, localização anatômica, presença de conclusão/achado, trecho-fonte e data opcional. `tracked_exams` textual e anexos MUST NOT satisfazer a hard rule de Ecoendoscopia/CPRE.
 
 #### Scenario: TC sem anatomia
 
-- **GIVEN** relatório menciona resultado de TC sem indicar abdome/abdome superior
+- **GIVEN** o relatório menciona resultado de TC sem indicar abdome/abdome superior
 - **WHEN** evidência é normalizada
 - **THEN** localização permanece não especificada
 - **AND** a imagem não satisfaz Ecoendoscopia nem CPRE.
 
 #### Scenario: Mera solicitação de imagem
 
-- **GIVEN** relatório apenas solicita ou agenda uma imagem
+- **GIVEN** o relatório apenas solicita ou agenda uma imagem
 - **WHEN** LLM1 extrai o documento
 - **THEN** `report_finding_present` não é verdadeiro
 - **AND** a imagem não satisfaz a policy.
@@ -257,8 +228,8 @@ LLM1 3.0 SHALL extrair imagens do relatório principal em coleção tipada com m
 #### Scenario: Data antiga disponível
 
 - **GIVEN** imagem qualificante possui conclusão/achado e data antiga
-- **WHEN** policy executa
-- **THEN** data é preservada
+- **WHEN** a policy executa
+- **THEN** a data é preservada
 - **AND** antiguidade não invalida o requisito.
 
 ### Requirement: Evidência de imagem SHALL estar ancorada no relatório principal
@@ -383,3 +354,46 @@ A avaliação SHALL retornar coleção ordenada de todos os requisitos não aten
 - **WHEN** reconciliação executa
 - **THEN** sugestão é corrigida para negar
 - **AND** contradição fica auditada.
+
+### Requirement: Detalhe de EDA + Dilatação SHALL ser anatômico e informativo
+
+Para `eda_dilation`, LLM1 4.0 SHALL extrair exatamente um local entre `esophagus`, `pylorus`, `duodenum`, `anastomosis`, `jejunum`, `other` e `unknown`, acompanhado de trecho-fonte quando documentado. O local SHALL NOT criar identidade nova, modificar profile/policy, sugestão ou disposição e SHALL permanecer `unknown` quando o texto não sustentar uma opção.
+
+#### Scenario: Local explícito
+
+- **GIVEN** a solicitação atual de EDA + Dilatação informa dilatação de piloro
+- **WHEN** LLM1 4.0 é validado e apresentado
+- **THEN** o local é `pylorus`
+- **AND** o procedimento continua `eda_dilation`.
+
+#### Scenario: Local ausente
+
+- **GIVEN** a solicitação pede EDA + Dilatação sem informar local
+- **WHEN** LLM1 4.0 é validado
+- **THEN** o local é `unknown`
+- **AND** nenhuma pendência clínica é criada.
+
+#### Scenario: Local não ancorado
+
+- **GIVEN** a resposta declara um local cujo trecho não existe no relatório principal
+- **WHEN** a evidência é verificada
+- **THEN** o local apresentado cai para `unknown`
+- **AND** a policy permanece inalterada.
+
+### Requirement: Writers 3.0 SHALL encerrar antes do primeiro write 4.0
+
+O cutover SHALL drenar jobs de análise, ativar web, workers e prompts 4.0 de forma coordenada e MUST NOT permitir writers 3.0 e 4.0 concorrentes. Nenhuma nova flag de produto SHALL mediar o rollout das identidades deste change.
+
+#### Scenario: Job 3.0 em voo
+
+- **GIVEN** existe job 3.0 ainda executando
+- **WHEN** a operação tenta iniciar o writer 4.0
+- **THEN** o cutover é interrompido até a drenagem
+- **AND** nenhum write 4.0 é iniciado.
+
+#### Scenario: Primeiro write 4.0 concluído
+
+- **GIVEN** ao menos um artefato 4.0 foi persistido
+- **WHEN** ocorre incidente após o cutover
+- **THEN** rollback para writer 3.0 não é suportado
+- **AND** a recuperação preserva dados e corrige para frente.

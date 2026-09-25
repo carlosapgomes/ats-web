@@ -1,10 +1,13 @@
 /* doctor_queue_filter.js — Client-side filters for doctor queue cards.
  *
- * Pendentes tab: composed filter over exam type (Todos|EDA|Colonoscopia|
- * EDA + Colonoscopia|Ecoendoscopia|CPRE) AND patient name / agency record
- * number search.
- * Decididos Hoje tab: simple exam type filter over the same catalog options
- * plus Nenhum autorizado, without search.
+ * Pendentes tab: composed filter over the exam type AND patient name /
+ * agency record number search. Decididos Hoje tab: simple exam type filter
+ * over the same catalog options plus Nenhum autorizado, without search.
+ *
+ * Keys, labels and counters are NOT listed here: the template renders one
+ * radio per catalog-derived option (data-exam-type-label) and one counter
+ * per option (data-exam-type-count), and this script reads both from the DOM
+ * (R7). Adding a catalog identity never requires touching this file.
  *
  * The type selection lives in radio buttons ([data-doctor-exam-filter]) and
  * the term in the search input; switching type never clears the term and
@@ -54,8 +57,8 @@
     return document.querySelectorAll("[data-doctor-queue-card]");
   }
 
-  /** Return the selected exam type: all | eda | colonoscopy | eda_colonoscopy |
-   *  echoendoscopy | cpre | none. */
+  /** Return the selected exam type value (catalog selection key, "all" or
+   *  "none") — never a hardcoded list. */
   function getSelectedType() {
     for (var i = 0; i < typeButtons.length; i++) {
       if (typeButtons[i].checked) {
@@ -65,14 +68,13 @@
     return "all";
   }
 
-  /** Human label for the active scope. */
-  function scopeLabel(type) {
-    if (type === "eda") return "EDA";
-    if (type === "colonoscopy") return "Colonoscopia";
-    if (type === "eda_colonoscopy") return "EDA + Colonoscopia";
-    if (type === "echoendoscopy") return "Ecoendoscopia";
-    if (type === "cpre") return "CPRE";
-    if (type === "none") return "Nenhum autorizado";
+  /** Human label of the active scope, read from the rendered control (R7). */
+  function scopeLabel() {
+    for (var i = 0; i < typeButtons.length; i++) {
+      if (typeButtons[i].checked) {
+        return typeButtons[i].getAttribute("data-exam-type-label") || typeButtons[i].value;
+      }
+    }
     return "Todos";
   }
 
@@ -91,10 +93,24 @@
 
   // ── Counters ──────────────────────────────────────────────────────
 
+  /** Counter keys are read from the rendered elements (R7): the template
+   *  emits one [data-exam-type-count] per catalog-derived option. */
+  function emptyCounts() {
+    var counts = {};
+    Array.prototype.forEach.call(
+      document.querySelectorAll("[data-exam-type-count]"),
+      function (el) {
+        counts[el.getAttribute("data-exam-type-count") || "all"] = 0;
+      }
+    );
+    return counts;
+  }
+
   /** Recompute per-type counters from the persisted card attribute. */
   function updateCounts() {
     var cards = getCards();
-    var counts = { all: cards.length, eda: 0, colonoscopy: 0, eda_colonoscopy: 0, echoendoscopy: 0, cpre: 0, none: 0 };
+    var counts = emptyCounts();
+    counts.all = cards.length;
     Array.prototype.forEach.call(cards, function (card) {
       var type = cardSelectionKey(card);
       if (counts[type] !== undefined) counts[type]++;
@@ -159,7 +175,7 @@
       statusEl.textContent = "";
       return;
     }
-    var scope = type !== "all" ? " de " + scopeLabel(type) + "." : ".";
+    var scope = type !== "all" ? " de " + scopeLabel() + "." : ".";
     if (visibleCount === total) {
       statusEl.textContent =
         "Mostrando todos os " + total + " " + pluralCasos(total) + scope;
