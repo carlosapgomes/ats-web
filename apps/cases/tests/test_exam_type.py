@@ -5,7 +5,7 @@ composto ``cases_status_exam_type_idx``; a classe ``ExamType`` permanece apenas
 por compatibilidade e é removida no Slice 011-E — por isso este módulo NÃO a
 importa. Os testes de enum/campo/índice/backfill 0014 morreram com a coluna e
 foram substituídos por testes do contrato final (R5): payload de criação com
-somente ``status`` (decisão 1), schema sem field/índice e radios da correção
+somente ``status`` (decisão 1), schema sem field/índice e combobox da correção
 marcando "(atual)" pela projeção declarada (decisão 2) — nunca pela coluna.
 """
 
@@ -15,6 +15,7 @@ from typing import Any
 
 import pytest
 from django.contrib.auth import get_user_model
+from django.test import override_settings
 from django.urls import reverse
 
 from apps.cases.models import Case, CaseEvent, CaseProcedure, CaseStatus, ProcedureType
@@ -140,43 +141,56 @@ class TestCaseSchemaFinal:
 # ── Decisão 2 — radios da correção pela projeção, nunca pela coluna ───────
 
 
-class TestCorrectionScreenRadiosUseProjection:
-    """Decisão 2 — radios da correção marcam (atual)/disabled pela PROJEÇÃO.
+class TestCorrectionScreenOptionsUseProjection:
+    """Decisão 2 — opções da correção marcam (atual)/disabled pela PROJEÇÃO.
 
     Um caso com histórico legado divergente (payload antigo de ``CASE_CREATED``
     com ``exam_type`` de outro tipo) continua marcando o conjunto declarado
-    projetado das rows.
+    projetado das rows. Slice 007 migrou os radios para o combobox canônico
+    (``<select name="exam_type">``); a prova é a mesma.
     """
 
-    def _assert_radio_state(self, content: str, radio_id: str, label_for: str, current: bool) -> None:
-        """Verifica o estado de um radio pelo bloco input (disabled) e label ((atual))."""
-        input_block = content.split(f'id="{radio_id}"')[1].split("<label")[0]
-        label_block = content.split(f'for="{label_for}"')[1].split("</label>")[0]
-        if current:
-            assert "disabled" in input_block, f"radio {radio_id} deveria estar disabled"
-            assert "(atual)" in label_block, f"label {label_for} deveria marcar (atual)"
-        else:
-            assert "disabled" not in input_block, f"radio {radio_id} não deveria estar disabled"
-            assert "(atual)" not in label_block, f"label {label_for} não deveria marcar (atual)"
+    @staticmethod
+    def _correction_select(content: str) -> str:
+        import re
 
-    def test_eda_projection_marks_eda_radio_current(self, client) -> None:
-        """Projeção EDA → radio EDA disabled com (atual); demais habilitados."""
+        match = re.search(r'<select[^>]*name="exam_type"[^>]*>.*?</select>', content, re.DOTALL)
+        assert match is not None, "select canônico da correção ausente"
+        return match.group(0)
+
+    def _assert_option_state(self, content: str, value: str, current: bool) -> None:
+        """Verifica o estado de uma opção do combobox (disabled) e o texto ((atual))."""
+        import re
+
+        select = self._correction_select(content)
+        match = re.search(rf'<option value="{value}"([^>]*)>(.*?)</option>', select, re.DOTALL)
+        assert match is not None, f"opção {value} ausente: {select}"
+        attributes, label = match.group(1), match.group(2)
+        if current:
+            assert "disabled" in attributes, f"opção {value} deveria estar disabled"
+            assert "(atual)" in label, f"opção {value} deveria marcar (atual)"
+        else:
+            assert "disabled" not in attributes, f"opção {value} não deveria estar disabled"
+            assert "(atual)" not in label, f"opção {value} não deveria marcar (atual)"
+
+    def test_eda_projection_marks_eda_option_current(self, client) -> None:
+        """Projeção EDA → opção EDA disabled com (atual); demais habilitadas."""
         client, user = _nir_client(client, "nir-011c-eda@test.com")
         case = _eligible_case(user=user, declared="eda")
         # Histórico legado: payload antigo de criação apontava colonoscopia —
-        # deve ser IGNORADO pelos radios (append-only, sem coluna).
+        # deve ser IGNORADO pelo combobox (append-only, sem coluna).
         CaseEvent.objects.filter(case=case, event_type="CASE_CREATED").update(
             payload={"status": CaseStatus.NEW, "exam_type": "colonoscopy"}
         )
 
         content = client.get(reverse("intake:case_detail", args=[case.case_id])).content.decode()
         assert "Correção de Tipo de Exame" in content
-        self._assert_radio_state(content, "exam-type-eda", "exam-type-eda", current=True)
-        self._assert_radio_state(content, "exam-type-colonoscopy", "exam-type-colonoscopy", current=False)
-        self._assert_radio_state(content, "exam-type-combined", "exam-type-combined", current=False)
+        self._assert_option_state(content, "eda", current=True)
+        self._assert_option_state(content, "eda_gastrostomy", current=False)
+        self._assert_option_state(content, "eda_capsule", current=False)
 
-    def test_combined_projection_marks_combined_radio_current(self, client) -> None:
-        """Projeção combinada → radio EDA + Colonoscopia disabled com (atual)."""
+    def test_combined_projection_marks_combined_option_current(self, client) -> None:
+        """Projeção combinada → opção EDA + Colonoscopia disabled com (atual)."""
         client, user = _nir_client(client, "nir-011c-comb@test.com")
         case = _eligible_case(user=user, declared="eda")
         set_declared_procedures(
@@ -185,8 +199,9 @@ class TestCorrectionScreenRadiosUseProjection:
             actor=user,
         )
 
-        content = client.get(reverse("intake:case_detail", args=[case.case_id])).content.decode()
+        with override_settings(COLONOSCOPY_INTAKE_ENABLED=True):
+            content = client.get(reverse("intake:case_detail", args=[case.case_id])).content.decode()
         assert "Correção de Tipo de Exame" in content
-        self._assert_radio_state(content, "exam-type-eda", "exam-type-eda", current=False)
-        self._assert_radio_state(content, "exam-type-colonoscopy", "exam-type-colonoscopy", current=False)
-        self._assert_radio_state(content, "exam-type-combined", "exam-type-combined", current=True)
+        self._assert_option_state(content, "eda", current=False)
+        self._assert_option_state(content, "colonoscopy", current=False)
+        self._assert_option_state(content, "eda_colonoscopy", current=True)

@@ -2,6 +2,7 @@
 
 import logging
 import uuid
+from urllib.parse import quote
 
 from django.conf import settings
 from django.contrib import messages
@@ -65,15 +66,15 @@ from apps.cases.services import (
 from .forms import CaseUploadForm
 from .services import (
     EXAM_TYPE_CORRECTION_REASONS,
+    INTAKE_EXPOSED_SELECTION_KEYS,
     EnqueueAfterCommitError,
+    IntakeSelectionOption,
     confirm_case_receipt,
     correct_case_exam_type,
     ensure_exam_type_allowed,
     intake_selection_options,
-    is_colonoscopy_intake_enabled,
-    is_cpre_intake_enabled,
-    is_echoendoscopy_intake_enabled,
     is_exam_type_correction_eligible,
+    nir_procedure_filter_options,
     process_uploaded_files,
     validate_attachment_file,
 )
@@ -101,20 +102,11 @@ def _declared_badge(case: Case) -> dict[str, str]:
     return {"declared_label": "—", "declared_type_key": ""}
 
 
-# Dimensões aceitas nos filtros NIR (R5/D13): Todos + EDA/Colonoscopia/Combinado
-# + os especializados (Slice 007), SEMPRE pelo conjunto DECLARADO (nunca
-# detected/approved). ``eda_colonoscopy`` é a seleção combinada; o valor
-# inválido cai para all.
-_NIR_DECLARED_DIMENSIONS: frozenset[str] = frozenset(
-    {
-        "all",
-        ProcedureType.EDA,
-        ProcedureType.COLONOSCOPY,
-        EDA_COLONOSCOPY,
-        ProcedureType.ECHOENDOSCOPY,
-        ProcedureType.CPRE,
-    }
-)
+# Dimensões aceitas nos filtros NIR (R5/D12): Todos + TODAS as chaves de
+# seleção publicadas no intake (dez identidades atômicas + ``eda_colonoscopy``),
+# SEMPRE pelo conjunto DECLARADO (nunca detected/approved). ``all`` é o default;
+# valor fora do catálogo/filtro inválido cai para all.
+_NIR_DECLARED_DIMENSIONS: frozenset[str] = frozenset({"all", *INTAKE_EXPOSED_SELECTION_KEYS})
 
 
 def _declared_row_exists(procedure_type: str) -> models.Exists:
@@ -128,42 +120,72 @@ def _declared_row_exists(procedure_type: str) -> models.Exists:
     )
 
 
-def _filter_by_declared_dimension(qs: models.QuerySet[Case], dimension: str) -> models.QuerySet[Case]:
-    """Filtra um queryset pela dimensão DECLARADA (R5/D13, Slice 008/007).
-
-    Usa subqueries ``Exists`` explícitas para evitar a semântica ambígua de
-    ``exclude`` sobre relação múltipla (que divide condições em dois EXISTS
-    separados). Buckets EXCLUSIVOS: ``eda``/``colonoscopy``/``echoendoscopy``/
-    ``cpre`` exigem a row declarada do tipo e a AUSÊNCIA de qualquer outra row
-    declarada; combinado exige as duas rows EDA + Colonoscopia. NUNCA consulta
-    detected/approved (D13) e, desde o Slice 008, NUNCA consulta a ponte
-    ``Case.exam_type``: um caso sem rows declaradas (legado/inválido) é
-    fail-closed — não aparece em bucket específico e não recebe default EDA.
-    Apenas "Todos" (sem filtro) o lista. O sinal legado de Ecoendoscopia
-    também não alimenta o bucket especializado (R5: sem backfill/inferência).
-    """
-    qs = qs.annotate(
-        _decl_eda=_declared_row_exists(ProcedureType.EDA),
-        _decl_colonoscopy=_declared_row_exists(ProcedureType.COLONOSCOPY),
-        _decl_echoendoscopy=_declared_row_exists(ProcedureType.ECHOENDOSCOPY),
-        _decl_cpre=_declared_row_exists(ProcedureType.CPRE),
-    )
-    if dimension == EDA_COLONOSCOPY:
-        return qs.filter(_decl_eda=True, _decl_colonoscopy=True)
-    qs = qs.annotate(
-        _decl_others=models.Exists(
-            CaseProcedure.objects.filter(case_id=models.OuterRef("pk"), declared_by_nir=True).exclude(
-                procedure_type=dimension
-            )
+def _declared_other_row_exists(procedure_types: tuple[str, ...]) -> models.Exists:
+    """Existência de row DECLARADA fora do conjunto informado (exclusividade)."""
+    return models.Exists(
+        CaseProcedure.objects.filter(case_id=models.OuterRef("pk"), declared_by_nir=True).exclude(
+            procedure_type__in=list(procedure_types)
         )
     )
-    if dimension == ProcedureType.EDA:
-        return qs.filter(_decl_eda=True, _decl_others=False)
-    if dimension == ProcedureType.COLONOSCOPY:
-        return qs.filter(_decl_colonoscopy=True, _decl_others=False)
-    if dimension == ProcedureType.ECHOENDOSCOPY:
-        return qs.filter(_decl_echoendoscopy=True, _decl_others=False)
-    return qs.filter(_decl_cpre=True, _decl_others=False)
+
+
+def _filter_by_declared_dimension(qs: models.QuerySet[Case], dimension: str) -> models.QuerySet[Case]:
+    """Filtra um queryset pela dimensão DECLARADA (R5/D12).
+
+    Igualdade EXATA: um código atômico exige a própria row declarada e a
+    AUSÊNCIA de qualquer outra row declarada; ``eda_colonoscopy`` exige as duas
+    rows EDA + Colonoscopia e nenhuma outra. Nunca usa prefixo/família (uma
+    variação como ``eda_dilation`` não é bucket de ``eda``), nunca consulta
+    detected/approved e nunca consulta a ponte ``Case.exam_type``: caso sem
+    rows declaradas (legado/inválido) é fail-closed — só aparece em "Todos".
+    """
+    if dimension == EDA_COLONOSCOPY:
+        return qs.annotate(
+            _decl_eda=_declared_row_exists(ProcedureType.EDA),
+            _decl_colonoscopy=_declared_row_exists(ProcedureType.COLONOSCOPY),
+            _decl_others=_declared_other_row_exists(
+                (ProcedureType.EDA, ProcedureType.COLONOSCOPY),
+            ),
+        ).filter(_decl_eda=True, _decl_colonoscopy=True, _decl_others=False)
+    return qs.annotate(
+        _decl_own=_declared_row_exists(dimension),
+        _decl_others=_declared_other_row_exists((dimension,)),
+    ).filter(_decl_own=True, _decl_others=False)
+
+
+def _correction_selection_options() -> list[IntakeSelectionOption]:
+    """Opções habilitadas do combobox de correção (R1/D9/D10).
+
+    As MESMAS chaves/componente do upload, restritas ao que a correção aceita:
+    identidade com flag de intake desligada não é oferecida (o backend rejeita
+    igualmente via ``ensure_intake_selection_permitted`` — mesma derivação).
+    """
+    return [option for option in intake_selection_options() if option.enabled]
+
+
+def _correction_selected_key(declared_key: str, attempted_key: str) -> str:
+    """Chave pré-selecionada do combobox de correção (R1).
+
+    Um POST rejeitado por outro campo re-renderiza o detalhe preservando a
+    escolha válida tentada; sem tentativa (ou tentativa igual à declarada), a
+    seleção ATUAL declarada permanece marcada.
+    """
+    enabled_keys = {option.key for option in _correction_selection_options()}
+    if attempted_key in enabled_keys and attempted_key != declared_key:
+        return attempted_key
+    return declared_key
+
+
+def _correction_rerender_url(case_id: uuid.UUID, attempted_key: str) -> str:
+    """URL do detalhe que preserva a escolha válida tentada (R1).
+
+    Somente chave publicada e habilitada é carregada na query string; qualquer
+    outro valor (alias/texto livre) cai no detalhe sem parâmetro.
+    """
+    base = reverse("intake:case_detail", args=[case_id])
+    if attempted_key in {option.key for option in _correction_selection_options()}:
+        return f"{base}?correction_exam_type={quote(attempted_key)}"
+    return base
 
 
 def _correction_detected_label(suggested: dict[str, object]) -> str:
@@ -662,6 +684,9 @@ def _my_cases_context(request: HttpRequest) -> dict[str, object]:
         "status_labels": STATUS_LABELS,
         "status_css": STATUS_CSS_CLASS,
         "my_cases_partial_url": partial_url,
+        # R5/D12: opções derivadas do catálogo (dez identidades + combinado),
+        # independentes das flags de intake.
+        "procedure_filter_options": nir_procedure_filter_options(),
     }
 
 
@@ -877,19 +902,22 @@ def case_detail(request: HttpRequest, case_id: uuid.UUID) -> HttpResponse:
     if lock_held and is_exam_type_correction_eligible(case):
         can_correct_exam_type = True
         suggested = case.suggested_action or {}
+        # R1 (Slice 007): o reenvio re-renderiza o detalhe com a escolha válida
+        # tentada (outro campo rejeitado) — nunca descarta silenciosamente.
+        attempted_correction = request.GET.get("correction_exam_type", "")
         correction_form_context = {
             # Label declarado projetado da projeção (combinado → "EDA + Colonoscopia").
             "declared_label": declared_badge["declared_label"],
             # Slice 011-C (decisão 2): chave de seleção derivada da projeção
-            # para os radios marcarem "(atual)" — nunca a coluna removida.
+            # para marcar "(atual)" — nunca a coluna removida.
             "declared_type_key": declared_badge["declared_type_key"],
             "detected_exam_type_label": _correction_detected_label(suggested),
             "reason_text": suggested.get("reason_text", ""),
             "correction_reason_choices": list(EXAM_TYPE_CORRECTION_REASONS.items()),
-            # Slice 007 (R3): as opções especializadas só aparecem com a flag
-            # de intake do próprio tipo ligada — o backend rejeita igualmente.
-            "echoendoscopy_intake_enabled": is_echoendoscopy_intake_enabled(),
-            "cpre_intake_enabled": is_cpre_intake_enabled(),
+            # R1 (Slice 007): MESMO combobox/chaves do upload; só as identidades
+            # habilitadas pelas flags preexistentes são oferecidas.
+            "exam_type_options": _correction_selection_options(),
+            "selected_exam_type": _correction_selected_key(declared_badge["declared_type_key"], attempted_correction),
         }
 
     # ── Correction context (R1: corrects_case card) ──────────────
@@ -1193,6 +1221,24 @@ def _is_safe_redirect(url: str) -> bool:
     return url_has_allowed_host_and_scheme(url, allowed_hosts=None)
 
 
+def _corrected_resubmission_context(original_case: Case, *, selected_exam_type: str = "") -> dict[str, object]:
+    """Contexto do formulário de reenvio corrigido (R1/R3).
+
+    O combobox usa as MESMAS opções publicadas do upload (catálogo + flags) e
+    ``selected_exam_type`` preserva a escolha em erro de re-render. Nenhum tipo
+    é herdado do caso original — a escolha é sempre explícita do NIR.
+    """
+    published = {option.key for option in intake_selection_options()}
+    return {
+        "original_case": original_case,
+        "patient_name": original_case.patient_name,
+        "status_label": STATUS_LABELS.get(original_case.status, original_case.get_status_display()),
+        "status_css": STATUS_CSS_CLASS.get(original_case.status, "status-pending"),
+        "exam_type_options": intake_selection_options(),
+        "selected_exam_type": selected_exam_type if selected_exam_type in published else "",
+    }
+
+
 @login_required
 @role_required("nir")
 def corrected_resubmission(request: HttpRequest, case_id: uuid.UUID) -> HttpResponse:
@@ -1241,13 +1287,7 @@ def corrected_resubmission(request: HttpRequest, case_id: uuid.UUID) -> HttpResp
             return render(
                 request,
                 "intake/corrected_resubmission.html",
-                {
-                    "original_case": original_case,
-                    "patient_name": original_case.patient_name,
-                    "colonoscopy_intake_enabled": is_colonoscopy_intake_enabled(),
-                    "echoendoscopy_intake_enabled": is_echoendoscopy_intake_enabled(),
-                    "cpre_intake_enabled": is_cpre_intake_enabled(),
-                },
+                _corrected_resubmission_context(original_case, selected_exam_type=exam_type),
             )
 
         # pdf_file já validado acima como não-None
@@ -1279,28 +1319,14 @@ def corrected_resubmission(request: HttpRequest, case_id: uuid.UUID) -> HttpResp
         return render(
             request,
             "intake/corrected_resubmission.html",
-            {
-                "original_case": original_case,
-                "patient_name": original_case.patient_name,
-                "colonoscopy_intake_enabled": is_colonoscopy_intake_enabled(),
-                "echoendoscopy_intake_enabled": is_echoendoscopy_intake_enabled(),
-                "cpre_intake_enabled": is_cpre_intake_enabled(),
-            },
+            _corrected_resubmission_context(original_case, selected_exam_type=exam_type),
         )
 
     # GET
     return render(
         request,
         "intake/corrected_resubmission.html",
-        {
-            "original_case": original_case,
-            "patient_name": original_case.patient_name,
-            "status_label": STATUS_LABELS.get(original_case.status, original_case.get_status_display()),
-            "status_css": STATUS_CSS_CLASS.get(original_case.status, "status-pending"),
-            "colonoscopy_intake_enabled": is_colonoscopy_intake_enabled(),
-            "echoendoscopy_intake_enabled": is_echoendoscopy_intake_enabled(),
-            "cpre_intake_enabled": is_cpre_intake_enabled(),
-        },
+        _corrected_resubmission_context(original_case),
     )
 
 
@@ -1438,7 +1464,8 @@ def exam_type_correction(request: HttpRequest, case_id: uuid.UUID) -> HttpRespon
         return redirect("intake:case_detail", case_id=case.case_id)
     except ValueError as exc:
         messages.warning(request, str(exc))
-        return redirect("intake:case_detail", case_id=case.case_id)
+        # R1: re-renderiza o detalhe preservando a escolha válida tentada.
+        return redirect(_correction_rerender_url(case.case_id, new_exam_type))
     except EnqueueAfterCommitError as exc:
         # Falha PÓS-commit: a correção foi aplicada (LLM_STRUCT). Mensagem
         # verdadeira: retry automático programado ou erro operacional explícito
@@ -1608,6 +1635,9 @@ def closed_cases_search(request: HttpRequest) -> HttpResponse:
             "query": query,
             "exam_type": exam_type,
             "results": results,
+            # R5/D12: filtro completo derivado do catálogo (flags não gateiam
+            # consulta de casos existentes).
+            "procedure_filter_options": nir_procedure_filter_options(),
         },
     )
 

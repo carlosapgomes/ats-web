@@ -618,7 +618,7 @@ class TestCorrectedResubmissionExamTypeFlag:
         mock_enqueue.assert_not_called()
 
     def test_form_has_no_prechecked_type(self, client) -> None:
-        """Formulário sem opção pré-marcada (radios EDA/Colonoscopia)."""
+        """Formulário sem opção pré-selecionada no controle canônico (select)."""
         import re
 
         nir_client, nir_user = _nir_client(client)
@@ -629,10 +629,13 @@ class TestCorrectedResubmissionExamTypeFlag:
         content = response.content.decode()
         assert 'name="exam_type"' in content
         assert "Tipo de exame" in content
-        radios = re.findall(r"<input[^>]*name=[\"']exam_type[\"'][^>]*>", content)
-        assert len(radios) >= 2
-        for tag in radios:
-            assert "checked" not in tag, f"Radio pré-marcado: {tag}"
+        # Slice 007: o controle canônico é o <select> do combobox (radios removidos).
+        assert not re.findall(r"<input[^>]*name=[\"']exam_type[\"']", content)
+        select = re.search(r'<select[^>]*name="exam_type"[^>]*>.*?</select>', content, re.DOTALL)
+        assert select is not None, "select canônico de exam_type ausente"
+        selected = [tag for tag in re.findall(r"<option[^>]*>", select.group(0)) if "selected" in tag]
+        assert len(selected) == 1, f"Opção pré-marcada indevida: {selected}"
+        assert 'value=""' in selected[0]
 
     # ── Flag de intake vale para o novo caso (R3/F1) ──────────────────
 

@@ -171,14 +171,37 @@ def intake_selection_options() -> tuple[IntakeSelectionOption, ...]:
     )
 
 
+@dataclass(frozen=True)
+class NirProcedureFilterOption:
+    """Opção de filtro por procedimento declarado das filas NIR (design D12)."""
+
+    key: str
+    label: str
+
+
+def nir_procedure_filter_options() -> tuple[NirProcedureFilterOption, ...]:
+    """Opções ordenadas de filtro declarado das filas NIR (R5/D12).
+
+    Compõe "Todos os tipos" com as chaves de seleção publicadas no intake, na
+    ordem canônica do catálogo. As flags de intake NÃO gateiam filtros: elas
+    limitam somente novos intakes (R6); casos existentes de qualquer identidade
+    continuam consultáveis, então nenhuma opção é omitida por flag.
+    """
+    return (
+        NirProcedureFilterOption(key="all", label="Todos os tipos"),
+        *(NirProcedureFilterOption(key=key, label=_selection_label(key)) for key in INTAKE_EXPOSED_SELECTION_KEYS),
+    )
+
+
 def validate_exam_type(exam_type: str | None) -> str:
     """Valida e normaliza a seleção declarada (intake e correção NIR).
 
     Levanta ``ValueError`` se ausente/inválida. Aceita as chaves canônicas do
     catálogo (``SELECTION_KEYS``) — nunca inferência por texto (R1). Desde o
     Slice 005 a correção NIR aceita as seleções, então esta validação é
-    compartilhada por novos intakes/reenvios e pela correção; o gate de flag de
-    intake fica em ``ensure_exam_type_allowed`` (não aqui).
+    compartilhada por novos intakes/reenvios e pela correção; os gates de flag
+    de intake ficam em ``ensure_exam_type_allowed`` (novo caso/reenvio) e
+    ``ensure_intake_selection_permitted`` (correção, D10), não aqui.
     """
     value = (exam_type or "").strip()
     if value not in _DECLARED_SELECTION_VALUES:
@@ -190,10 +213,11 @@ def ensure_specialized_exam_type_allowed(exam_type: str | None) -> str:
     """Gate de choice + flag dos tipos ESPECIALIZADOS (Slice 007, R3).
 
     Exige a flag de intake do próprio tipo ligada para Ecoendoscopia/CPRE —
-    fronteira compartilhada pelo intake (upload/reenvio) e pela correção NIR.
-    EDA, Colonoscopia e EDA + Colonoscopia passam inalterados: na correção
-    eles mantêm o contrato do Slice 005 (a flag de colonoscopia gateia a
-    criação de NOVO caso, não a correção do caso em revisão).
+    fronteira compartilhada pelo intake (upload/reenvio), via
+    ``ensure_exam_type_allowed``. EDA, Colonoscopia e EDA + Colonoscopia passam
+    inalterados aqui; a flag de colonoscopia é aplicada por
+    ``ensure_exam_type_allowed`` (novo caso) e por
+    ``ensure_intake_selection_permitted`` (correção, D10).
     """
     value = validate_exam_type(exam_type)
     if value == ProcedureType.ECHOENDOSCOPY and not is_echoendoscopy_intake_enabled():
@@ -226,6 +250,25 @@ def ensure_exam_type_allowed(exam_type: str | None) -> str:
             "Colonoscopia e EDA + Colonoscopia ainda não estão habilitadas para novos envios. "
             "Envie lotes apenas de EDA."
         )
+    return value
+
+
+def ensure_intake_selection_permitted(exam_type: str | None) -> str:
+    """Gate de seleção pela jornada de intake (design D10, fix round 1).
+
+    Fonte única da derivação por jornada: a MESMA lista habilitada que compõe o
+    combobox (``intake_selection_options``, que aplica as flags de rollout sobre
+    as chaves publicadas). Seleção publicada cuja flag de intake está desligada
+    (Colonoscopia, ``eda_colonoscopy``, Ecoendoscopia, CPRE) é rejeitada; EDA e
+    identidades sem gate sempre passam.
+
+    Usado pela correção NIR: um POST manipulado não pode alcançar uma opção que
+    a jornada de correção exclui.
+    """
+    value = validate_exam_type(exam_type)
+    permitted = {option.key for option in intake_selection_options() if option.enabled}
+    if value not in permitted:
+        raise ValueError(f"{_selection_label(value)} ainda não está disponível para novos envios.")
     return value
 
 
@@ -379,14 +422,17 @@ def correct_case_exam_type(
     LLM_STRUCT (R2) com eventos append-only (R5). Após commit, enfileira o
     pipeline LLM exatamente uma vez — nunca reextrai PDF (R4); em falha de
     enqueue, agenda retry automático e levanta ``EnqueueAfterCommitError`` (C5).
+    A seleção passa por ``ensure_intake_selection_permitted`` (D10): identidade
+    fora das opções habilitadas da jornada é rejeitada antes de qualquer efeito.
 
     Raises:
-        ValueError: caso inelegível, tipo inválido/igual ou reason_code inválido.
+        ValueError: caso inelegível, tipo inválido/indisponível na jornada,
+            tipo igual ao declarado ou reason_code inválido.
         PermissionError: ator sem papel NIR, papel ativo incorreto ou reserva
             incompatível/ausente/expirada.
         EnqueueAfterCommitError: enqueue pós-commit falhou (correção commitada).
     """
-    validated_exam_type = ensure_specialized_exam_type_allowed(new_exam_type)
+    validated_exam_type = ensure_intake_selection_permitted(new_exam_type)
     if reason_code not in EXAM_TYPE_CORRECTION_REASONS:
         raise ValueError("Motivo da correção inválido.")
     if lock_token is None:

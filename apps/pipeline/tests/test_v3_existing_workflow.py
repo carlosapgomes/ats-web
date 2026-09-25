@@ -230,7 +230,8 @@ class TestSpecializedIntakeFlags:
 
         Slice 002: no upload as opções vêm do helper de jornada
         (``apps/intake/services.py``), que aplica o gate explícito por código;
-        o reenvio corrigido mantém os radios com o gate no template.
+        o Slice 007 migrou o reenvio corrigido para o MESMO combobox
+        (``exam_type_options``), com o gate em ``option.enabled``.
         """
         from pathlib import Path
 
@@ -243,8 +244,8 @@ class TestSpecializedIntakeFlags:
         )
         assert "exam_type_options" in (base / "templates" / "intake" / "intake_home.html").read_text(encoding="utf-8")
         source = (base / "templates" / "intake" / "corrected_resubmission.html").read_text(encoding="utf-8")
-        assert 'value="cpre"' in source
-        assert "cpre_intake_enabled" in source
+        assert "exam_type_options" in source
+        assert "not option.enabled" in source
 
     def test_echoendoscopy_option_is_flag_gated(self) -> None:
         """Opção visual existe, mas nasce ``disabled`` com a flag desligada."""
@@ -258,5 +259,5 @@ class TestSpecializedIntakeFlags:
         ).read_text(encoding="utf-8")
         assert "exam_type_options" in (base / "templates" / "intake" / "intake_home.html").read_text(encoding="utf-8")
         source = (base / "templates" / "intake" / "corrected_resubmission.html").read_text(encoding="utf-8")
-        assert 'value="echoendoscopy"' in source
-        assert "echoendoscopy_intake_enabled" in source
+        assert "exam_type_options" in source
+        assert "not option.enabled" in source

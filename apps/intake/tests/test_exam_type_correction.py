@@ -43,6 +43,12 @@ from apps.intake.services import (
 
 User = get_user_model()
 
+# D10 (fix round 1): a correção para Colonoscopia/EDA + Colonoscopia exige a flag
+# de intake ligada; esta suíte exercita a mecânica de correção com essas
+# identidades. A recusa com a flag DESLIGADA é fixada em
+# ``test_expanded_procedure_correction``.
+pytestmark = pytest.mark.usefixtures("colonoscopy_intake_enabled")
+
 
 # ── Helpers ──────────────────────────────────────────────────────────────
 
@@ -1655,9 +1661,11 @@ class TestTimelineLabels:
 class TestSpecializedCorrectionGate:
     """R3 (dívida do Slice 002): correção consulta a flag do tipo especializado.
 
-    ``echoendoscopy``/``cpre`` exigem a flag própria ligada; EDA/Colonoscopia/
-    Combinado mantêm o contrato do Slice 005 (a flag de colonoscopia gateia
-    criação de caso, não correção).
+    ``echoendoscopy``/``cpre`` exigem a flag própria ligada. Colonoscopia e
+    EDA + Colonoscopia também obedecem ``COLONOSCOPY_INTAKE_ENABLED`` (D10,
+    fix round 1) — por isso a suíte roda com a flag ligada via
+    ``colonoscopy_intake_enabled``; a recusa com a flag desligada é fixada em
+    ``test_expanded_procedure_correction``.
     """
 
     def _specialized_case(self, *, user, declared: str, detected: str) -> Case:

@@ -388,44 +388,19 @@
     {% csrf_token %}
     <input type="hidden" name="lock_token" value="{{ lock_token }}">
     <div class="mb-3">
-      <label class="form-label fw-semibold">Novo conjunto de procedimentos <span class="text-danger">*</span></label>
-      <div class="form-check">
-        <input class="form-check-input" type="radio" name="exam_type" id="exam-type-eda" value="eda"
-               {% if correction_form_context.declared_type_key == "eda" %}disabled{% endif %}>
-        <label class="form-check-label" for="exam-type-eda">EDA {% if correction_form_context.declared_type_key == "eda" %}(atual){% endif %}</label>
+      <label class="form-label fw-semibold" id="correction-exam-type-label">Novo conjunto de procedimentos <span class="text-danger">*</span></label>
+      <!-- Controle canônico (Slice 007/R1): mesmo combobox/chaves do upload —
+           o select é o valor submetido em qualquer cenário; progressive
+           enhancement em procedure_combobox.js. -->
+      <div class="procedure-combobox">
+        <select class="form-select procedure-combobox__select" id="correction-exam-type-select" name="exam_type"
+                data-procedure-combobox aria-labelledby="correction-exam-type-label" required>
+          <option value=""{% if not correction_form_context.selected_exam_type %} selected{% endif %}>Selecione o novo conjunto de procedimentos…</option>
+          {% for option in correction_form_context.exam_type_options %}
+          <option value="{{ option.key }}"{% if option.aliases %} data-search-aliases="{{ option.aliases|join:', ' }}"{% endif %}{% if option.key == correction_form_context.declared_type_key %} disabled{% endif %}{% if option.key == correction_form_context.selected_exam_type %} selected{% endif %}>{{ option.label }}{% if option.key == correction_form_context.declared_type_key %} (atual){% endif %}</option>
+          {% endfor %}
+        </select>
       </div>
-      <div class="form-check">
-        <input class="form-check-input" type="radio" name="exam_type" id="exam-type-colonoscopy" value="colonoscopy"
-               {% if correction_form_context.declared_type_key == "colonoscopy" %}disabled{% endif %}>
-        <label class="form-check-label" for="exam-type-colonoscopy">
-          Colonoscopia {% if correction_form_context.declared_type_key == "colonoscopy" %}(atual){% endif %}
-        </label>
-      </div>
-      <div class="form-check">
-        <input class="form-check-input" type="radio" name="exam_type" id="exam-type-combined" value="eda_colonoscopy"
-               {% if correction_form_context.declared_type_key == "eda_colonoscopy" %}disabled{% endif %}>
-        <label class="form-check-label" for="exam-type-combined">
-          EDA + Colonoscopia {% if correction_form_context.declared_type_key == "eda_colonoscopy" %}(atual){% endif %}
-        </label>
-      </div>
-      {% if correction_form_context.echoendoscopy_intake_enabled %}
-      <div class="form-check">
-        <input class="form-check-input" type="radio" name="exam_type" id="exam-type-echoendoscopy" value="echoendoscopy"
-               {% if correction_form_context.declared_type_key == "echoendoscopy" %}disabled{% endif %}>
-        <label class="form-check-label" for="exam-type-echoendoscopy">
-          Ecoendoscopia {% if correction_form_context.declared_type_key == "echoendoscopy" %}(atual){% endif %}
-        </label>
-      </div>
-      {% endif %}
-      {% if correction_form_context.cpre_intake_enabled %}
-      <div class="form-check">
-        <input class="form-check-input" type="radio" name="exam_type" id="exam-type-cpre" value="cpre"
-               {% if correction_form_context.declared_type_key == "cpre" %}disabled{% endif %}>
-        <label class="form-check-label" for="exam-type-cpre">
-          CPRE {% if correction_form_context.declared_type_key == "cpre" %}(atual){% endif %}
-        </label>
-      </div>
-      {% endif %}
     </div>
     <div class="mb-3">
       <label for="correction-reason-code" class="form-label fw-semibold">
@@ -913,6 +888,9 @@
 {% block extra_js %}
 {% if lock_token %}
 <script src="{% static 'js/work_lock.js' %}"></script>
+{% endif %}
+{% if can_correct_exam_type %}
+<script src="{% static 'js/procedure_combobox.js' %}"></script>
 {% endif %}
 <script>
   const confirmBtn = document.getElementById('btn-confirm');

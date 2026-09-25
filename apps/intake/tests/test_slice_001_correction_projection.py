@@ -27,7 +27,7 @@ from apps.cases.procedures import get_declared_procedure_types
 from apps.cases.services import claim_case_lock
 from apps.intake.services import correct_case_exam_type
 
-pytestmark = pytest.mark.django_db
+pytestmark = [pytest.mark.django_db, pytest.mark.usefixtures("colonoscopy_intake_enabled")]
 
 User = get_user_model()
 
