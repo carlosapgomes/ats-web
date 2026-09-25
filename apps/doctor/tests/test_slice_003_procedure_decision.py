@@ -399,7 +399,7 @@ class TestProcedureDecisionFormAndSubmit:
         token = self._claim_lock(case.case_id, doctor)
 
         with mock.patch(
-            "apps.pipeline.orchestrator._run_v3_pipeline",
+            "apps.pipeline.orchestrator._run_v4_pipeline",
             side_effect=AssertionError("LLM rerun não permitido no submit médico"),
         ) as v2_run:
             response = self._submit(

@@ -2,13 +2,13 @@
 
 ## 0. Precondições do change
 
-- [ ] 0.1 Obter aceite humano da `ADR-0010`, mudar seu status para `Accepted` e verificar o índice `docs/adr/README.md` antes de qualquer código.
-- [ ] 0.2 Criar `feature/support-expanded-endoscopy-procedure-catalog`, registrar `BASE_REF`, confirmar working tree adequada e executar baseline global uma única vez se não houver CI verde confiável; registrar comandos/resultados no relatório do Slice 001.
-- [ ] 0.3 Atualizar `PROJECT_CONTEXT.md` para registrar este change como alvo ainda não implantado, distinguindo baseline 3.0/quatro tipos do objetivo 4.0/dez tipos; verificar por revisão do diff.
+- [x] 0.1 Obter aceite humano da `ADR-0010`, mudar seu status para `Accepted` e verificar o índice `docs/adr/README.md` antes de qualquer código.
+- [x] 0.2 Criar `feature/support-expanded-endoscopy-procedure-catalog`, registrar `BASE_REF`, confirmar working tree adequada e executar baseline global uma única vez se não houver CI verde confiável; registrar comandos/resultados no relatório do Slice 001. *(BASE_REF `38cbd0f`; gate verde registrado em `.pi/reports/baseline-support-expanded-endoscopy-procedure-catalog-2026-09-25.md`, a citar no relatório do Slice 001; nota: neste host o pytest exige `POSTGRES_TEST_HOST_PORT=55433` pois a porta 5433 pertence a outro projeto.)*
+- [x] 0.3 Atualizar `PROJECT_CONTEXT.md` para registrar este change como alvo ainda não implantado, distinguindo baseline 3.0/quatro tipos do objetivo 4.0/dez tipos; verificar por revisão do diff.
 
 ## 1. Catálogo e contrato gravável
 
-- [ ] 1.1 Implementar o Slice 001 (`slices/slice-001-v4-cutover-preserves-existing-workflow.md`) e provar catálogo/matriz/migration, writer strict 4.0, adapters históricos e fluxo EDA/Colonoscopia até o médico sem regressão.
+- [x] 1.1 Implementar o Slice 001 (`slices/slice-001-v4-cutover-preserves-existing-workflow.md`) e provar catálogo/matriz/migration, writer strict 4.0, adapters históricos e fluxo EDA/Colonoscopia até o médico sem regressão.
 
 ## 2. Seleção pesquisável e variações de EDA
 

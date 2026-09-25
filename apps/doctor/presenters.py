@@ -255,15 +255,20 @@ class DoctorReportPresenter:
         }
 
     def _is_v3(self) -> bool:
-        """True quando o artefato é do contrato gravável 3.0."""
-        return isinstance(self.structured_data, dict) and self.structured_data.get("schema_version") == "3.0"
+        """True quando o artefato usa o contrato procedure-neutral gravável.
+
+        R4 (cutover 4.0): reconhece 2.0/3.0 históricos e 4.0 (writer atual);
+        1.1 permanece no caminho legado.
+        """
+        return is_procedure_neutral_structured_data(self.structured_data)
 
     def _build_notices(self) -> list[str]:
         """Avisos operacionais do relatório (design D9/D5).
 
-        No contrato 3.0 a sugestão automática usa SOMENTE o relatório principal:
-        o aviso descreve o limite técnico (anexos disponíveis na tela não
-        participaram), sem afirmar invalidade clínica e sem bloquear decisão.
+        No contrato procedure-neutral (2.0/3.0/4.0) a sugestão automática usa
+        SOMENTE o relatório principal: o aviso descreve o limite técnico (anexos
+        disponíveis na tela não participaram), sem afirmar invalidade clínica e
+        sem bloquear decisão.
         Quando a precedência especializada suprimiu EDA/Colonoscopia, um aviso
         informativo adicional identifica o procedimento priorizado.
         """

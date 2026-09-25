@@ -48,17 +48,25 @@ class CaseStatus(models.TextChoices):
 
 
 class ProcedureType(models.TextChoices):
-    """Procedimento suportado como componente de um caso (design D1).
+    """Identidade atômica de procedimento suportada como componente (design D1).
 
-    Um caso possui no máximo uma ocorrência de cada; a combinação é o conjunto
-    das rows — nunca uma row genérica `combined`. Ecoendoscopia e CPRE são
-    procedimentos independentes (nunca subtipo/sinal de EDA) e a matriz válida
-    é fechada em ``apps.cases.procedures`` (EDA, Colonoscopia, EDA+Colonoscopia,
-    Ecoendoscopia, CPRE).
+    Um caso possui no máximo uma ocorrência de cada; a combinação só existe
+    para o par ``{eda, colonoscopy}`` — nunca uma row genérica `combined`. Os
+    pacotes (EDA + GTT/Cápsula/Dilatação e Retossigmoidoscopia + Dilatação/
+    Argônio) são identidades atômicas indivisíveis: uma row, uma decisão.
+    Ecoendoscopia e CPRE são procedimentos independentes (nunca subtipo/sinal
+    de EDA). Ordem canônica, labels, família/profile e matriz válida ficam
+    centralizados em ``apps.cases.procedures`` (design D1/D2).
     """
 
     EDA = "eda", "EDA"
+    EDA_GASTROSTOMY = "eda_gastrostomy", "EDA + Gastrostomia (GTT)"
+    EDA_CAPSULE = "eda_capsule", "EDA + Cápsula"
+    EDA_DILATION = "eda_dilation", "EDA + Dilatação"
     COLONOSCOPY = "colonoscopy", "Colonoscopia"
+    RECTOSIGMOIDOSCOPY = "rectosigmoidoscopy", "Retossigmoidoscopia"
+    RECTOSIGMOIDOSCOPY_DILATION = "rectosigmoidoscopy_dilation", "Retossigmoidoscopia + Dilatação"
+    RECTOSIGMOIDOSCOPY_ARGON = "rectosigmoidoscopy_argon", "Retossigmoidoscopia + Argônio"
     ECHOENDOSCOPY = "echoendoscopy", "Ecoendoscopia"
     CPRE = "cpre", "CPRE"
 
@@ -93,7 +101,7 @@ class CaseProcedure(models.Model):
     """
 
     case = models.ForeignKey("Case", on_delete=models.CASCADE, related_name="procedures")
-    procedure_type = models.CharField(max_length=20, choices=ProcedureType.choices)
+    procedure_type = models.CharField(max_length=32, choices=ProcedureType.choices)
     declared_by_nir = models.BooleanField(default=False)
     detection_status = models.CharField(
         max_length=20,

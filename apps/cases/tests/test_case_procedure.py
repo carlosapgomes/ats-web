@@ -78,10 +78,23 @@ class TestProcedureEnums:
     """R1 — enums mínimos sem CPRE/procedure engine genérica."""
 
     def test_procedure_type_values(self) -> None:
-        # Cutover 3.0 (ADR-0006): o catálogo passa a ter os quatro procedimentos.
-        assert set(ProcedureType.values) == {"eda", "colonoscopy", "echoendoscopy", "cpre"}
+        # Cutover 4.0 (ADR-0010): o catálogo passa a ter as dez identidades atômicas.
+        assert set(ProcedureType.values) == {
+            "eda",
+            "eda_gastrostomy",
+            "eda_capsule",
+            "eda_dilation",
+            "colonoscopy",
+            "rectosigmoidoscopy",
+            "rectosigmoidoscopy_dilation",
+            "rectosigmoidoscopy_argon",
+            "echoendoscopy",
+            "cpre",
+        }
         assert ProcedureType.EDA.label == "EDA"
+        assert ProcedureType.EDA_GASTROSTOMY.label == "EDA + Gastrostomia (GTT)"
         assert ProcedureType.COLONOSCOPY.label == "Colonoscopia"
+        assert ProcedureType.RECTOSIGMOIDOSCOPY.label == "Retossigmoidoscopia"
         assert ProcedureType.ECHOENDOSCOPY.label == "Ecoendoscopia"
         assert ProcedureType.CPRE.label == "CPRE"
 
@@ -436,30 +449,42 @@ class TestProcedureGettersReturnOnlyRows:
 
 
 class TestProcedureCatalogAndMatrix:
-    """Slice 001 (R2/R3) — catálogo de quatro tipos e matriz fechada."""
+    """Cutover 4.0 (R1/R2) — catálogo de dez identidades e matriz fechada."""
 
-    def test_catalog_has_four_ordered_types(self) -> None:
-        assert SUPPORTED_PROCEDURE_TYPES == ("eda", "colonoscopy", "echoendoscopy", "cpre")
+    def test_catalog_has_ten_ordered_types(self) -> None:
+        assert SUPPORTED_PROCEDURE_TYPES == (
+            "eda",
+            "eda_gastrostomy",
+            "eda_capsule",
+            "eda_dilation",
+            "colonoscopy",
+            "rectosigmoidoscopy",
+            "rectosigmoidoscopy_dilation",
+            "rectosigmoidoscopy_argon",
+            "echoendoscopy",
+            "cpre",
+        )
 
-    def test_only_five_sets_are_allowed(self) -> None:
+    def test_only_singletons_and_pair_are_allowed(self) -> None:
         assert ALLOWED_PROCEDURE_SETS == frozenset(
-            {
-                frozenset({"eda"}),
-                frozenset({"colonoscopy"}),
-                frozenset({"eda", "colonoscopy"}),
-                frozenset({"echoendoscopy"}),
-                frozenset({"cpre"}),
-            }
+            {frozenset({procedure_type}) for procedure_type in SUPPORTED_PROCEDURE_TYPES}
+            | {frozenset({"eda", "colonoscopy"})}
         )
 
     @pytest.mark.parametrize(
         "selection",
         [
             ["eda"],
+            ["eda_gastrostomy"],
+            ["eda_capsule"],
+            ["eda_dilation"],
             ["colonoscopy"],
-            ["eda", "colonoscopy"],
+            ["rectosigmoidoscopy"],
+            ["rectosigmoidoscopy_dilation"],
+            ["rectosigmoidoscopy_argon"],
             ["echoendoscopy"],
             ["cpre"],
+            ["eda", "colonoscopy"],
         ],
     )
     def test_normalize_accepts_every_allowed_set(self, selection: list[str]) -> None:
@@ -474,6 +499,8 @@ class TestProcedureCatalogAndMatrix:
             ["colonoscopy", "cpre"],
             ["echoendoscopy", "cpre"],
             ["eda", "colonoscopy", "echoendoscopy"],
+            ["eda_gastrostomy", "colonoscopy"],
+            ["rectosigmoidoscopy_dilation", "eda"],
             ["unknown_type"],
         ],
     )
@@ -488,18 +515,29 @@ class TestProcedureCatalogAndMatrix:
         assert is_paired_appointment_set(["colonoscopy", "eda"]) is True
         assert is_paired_appointment_set(["eda"]) is False
         assert is_paired_appointment_set(["echoendoscopy", "cpre"]) is False
+        assert is_paired_appointment_set(["eda_gastrostomy", "colonoscopy"]) is False
         assert PAIRED_APPOINTMENT_SET == frozenset({"eda", "colonoscopy"})
 
     def test_selection_key_is_not_length_based(self) -> None:
-        # R2: dois elementos só viram ``eda_colonoscopy`` quando são exatamente
+        # R2/D2: dois elementos só viram ``eda_colonoscopy`` quando são exatamente
         # o par EDA + Colonoscopia; ``len == 2`` não é regra de domínio.
         assert selection_key(("eda", "colonoscopy")) == "eda_colonoscopy"
-        assert selection_key(("echoendoscopy", "cpre")) == "echoendoscopy"
+        assert selection_key(("eda_gastrostomy",)) == "eda_gastrostomy"
+        assert selection_key(("rectosigmoidoscopy_argon",)) == "rectosigmoidoscopy_argon"
         assert selection_key(("echoendoscopy",)) == "echoendoscopy"
         assert selection_key(("cpre",)) == "cpre"
         assert selection_key(()) == ""
 
+    def test_selection_key_returns_reserved_sentinel_for_off_matrix_sets(self) -> None:
+        # D2: função total — conjunto não-vazio fora da matriz devolve o
+        # sentinela reservado, nunca o primeiro elemento.
+        assert selection_key(("echoendoscopy", "cpre")) == "invalid"
+        assert selection_key(("eda_gastrostomy", "colonoscopy")) == "invalid"
+        assert selection_key(("unknown_type",)) == "invalid"
+
     def test_format_labels_for_specialized_singles(self) -> None:
         assert format_procedure_selection(["echoendoscopy"]) == "Ecoendoscopia"
         assert format_procedure_selection(["cpre"]) == "CPRE"
+        assert format_procedure_selection(["eda_gastrostomy"]) == "EDA + Gastrostomia (GTT)"
+        assert format_procedure_selection(["rectosigmoidoscopy"]) == "Retossigmoidoscopia"
         assert format_procedure_selection(["colonoscopy", "eda"]) == "EDA + Colonoscopia"

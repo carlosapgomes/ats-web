@@ -5025,14 +5025,24 @@ class TestProcedureSummaryCard:
         assert end != -1, "Card deve terminar antes da seção Sub-metrics"
         return content[start:end]
 
-    def test_procedure_summary_card_has_marker_title_and_six_items(self, client) -> None:
-        """R1 — marcador, título compacto e exatamente seis itens case-level."""
+    def test_procedure_summary_card_has_marker_title_and_one_item_per_category(self, client) -> None:
+        """R1 — marcador, título compacto e uma categoria exclusiva por item.
+
+        Cutover 4.0: o universo de categorias derivou de ``CATEGORY_ORDER`` (as
+        dez identidades do catálogo + combinado + ``none`` + ``invalid``). O
+        card precisa continuar renderizando exatamente uma categoria exclusiva
+        por caso (design D12).
+        """
+        from apps.dashboard.procedure_analytics import CATEGORY_LABELS, CATEGORY_ORDER
+
         _login_as(client, "manager")
         content = client.get(reverse("dashboard:index")).content.decode()
         card = self._summary_card_block(content)
         assert "PROCEDIMENTOS —" in card, "Título compacto sem 'POR DIMENSÃO'"
         assert "POR DIMENSÃO" not in card
-        assert card.count("procedure-summary-item") == 6, "Seis categorias exclusivas"
+        assert card.count("procedure-summary-item") == len(CATEGORY_ORDER), "Uma categoria exclusiva por item"
+        for category in CATEGORY_ORDER:
+            assert CATEGORY_LABELS[category] in card, f"Categoria {category!r} deve constar no resumo"
         for category in ("EDA", "Colonoscopia", "EDA + Colonoscopia", "Ecoendoscopia", "CPRE", "Nenhum"):
             assert category in card, f"Categoria {category!r} deve constar no resumo"
 

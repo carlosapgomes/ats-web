@@ -1,10 +1,13 @@
-"""Adapters estritos entre schemas 1.1/2.0/3.0 (design D5/D8 / ADR-0006).
+"""Adapters estritos entre schemas 1.1/2.0/3.0/4.0 (design D5/D8 / ADR-0006/0010).
 
 Nenhum JSON histórico é reescrito: a leitura detecta ``schema_version`` e
 projeta apenas em memória. ``project_v2_to_llm1_shape`` alimenta as políticas
 determinísticas e sinais prioritários existentes (sem copiar policy para
 combinado — R5); ``project_v3_to_llm1_shape`` faz o mesmo para o contrato 3.0,
 que acrescenta os quatro tipos e a coleção tipada de imagem abdominal.
+``project_v4_to_llm1_shape``/``requested_procedure_types_v4`` cobrem o writer
+atual 4.0 (dez identidades atômicas), reutilizando a mesma forma de item e de
+``common_preop`` dos contratos anteriores.
 """
 
 from __future__ import annotations
@@ -12,6 +15,7 @@ from __future__ import annotations
 from typing import Any
 
 from apps.cases.models import ProcedureType
+from apps.cases.procedures import PROCEDURE_ORDER, SUPPORTED_PROCEDURE_TYPES
 
 SUPPORTED_V2_PROCEDURE_TYPES: tuple[str, ...] = (ProcedureType.EDA, ProcedureType.COLONOSCOPY)
 SUPPORTED_V3_PROCEDURE_TYPES: tuple[str, ...] = (
@@ -21,13 +25,18 @@ SUPPORTED_V3_PROCEDURE_TYPES: tuple[str, ...] = (
     ProcedureType.CPRE,
 )
 
+# Writer atual 4.0: as dez identidades atômicas na ordem canônica do domínio.
+SUPPORTED_V4_PROCEDURE_TYPES: tuple[str, ...] = SUPPORTED_PROCEDURE_TYPES
+
 _V3_PROCEDURE_ORDER: dict[str, int] = {type_: position for position, type_ in enumerate(SUPPORTED_V3_PROCEDURE_TYPES)}
 
 
 def detect_schema_version(structured_data: Any) -> str:
-    """Retorna a versão de schema de um payload estruturado (``3.0``/``2.0``/``1.1``)."""
+    """Retorna a versão de schema de um payload estruturado (``4.0``/``3.0``/``2.0``/``1.1``)."""
     if isinstance(structured_data, dict):
         version = structured_data.get("schema_version")
+        if version == "4.0":
+            return "4.0"
         if version == "3.0":
             return "3.0"
         if version == "2.0":
@@ -88,6 +97,45 @@ def requested_procedure_types_v3(structured_data: Any) -> tuple[str, ...]:
             seen.append(procedure_type)
     seen.sort(key=lambda t: _V3_PROCEDURE_ORDER[t])
     return tuple(seen)
+
+
+def requested_procedure_types_v4(structured_data: Any) -> tuple[str, ...]:
+    """Conjunto ordenado de procedimentos declarados pela extração v4.
+
+    Cobre as dez identidades atômicas na ordem canônica do catálogo. Valores
+    fora do catálogo são descartados na leitura (a reconciliação falha fechada
+    ao receber conjuntos vazios ou incoerentes — R3); os adapters históricos
+    continuam em ``requested_procedure_types_v2``/``_v3``.
+    """
+    if not isinstance(structured_data, dict):
+        return ()
+    raw = structured_data.get("requested_procedures")
+    if not isinstance(raw, list):
+        return ()
+    seen: list[str] = []
+    for item in raw:
+        if not isinstance(item, dict):
+            continue
+        procedure_type = item.get("procedure_type")
+        if procedure_type in PROCEDURE_ORDER and procedure_type not in seen:
+            seen.append(procedure_type)
+    seen.sort(key=lambda t: PROCEDURE_ORDER[t])
+    return tuple(seen)
+
+
+def project_v4_to_llm1_shape(
+    *,
+    v4_data: dict[str, object],
+    procedure_type: str,
+) -> dict[str, object]:
+    """Projeta dados v4 para a forma 1.1 consumida por policy/sinais.
+
+    O contrato 4.0 mantém a mesma forma de item por procedimento e de
+    ``common_preop`` dos contratos procedure-neutral anteriores (novos campos
+    tipados de detalhe ficam no artefato versionado, não nesta projeção), então
+    a leitura reutiliza ``project_v3_to_llm1_shape`` sem reescrever JSON.
+    """
+    return project_v3_to_llm1_shape(v3_data=v4_data, procedure_type=procedure_type)
 
 
 def project_v3_to_llm1_shape(

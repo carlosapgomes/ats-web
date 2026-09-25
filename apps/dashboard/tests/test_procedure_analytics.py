@@ -29,6 +29,28 @@ User = get_user_model()
 # ── Helpers ──────────────────────────────────────────────────────────────
 
 
+def _expected_breakdown(**counts: int) -> dict[str, int]:
+    """Categoria exclusiva por dimensão: catálogo derivado + combinado + none/invalid.
+
+    Derivado de ``CATEGORY_ORDER`` (inclui o bucket ``invalid`` do sentinela de
+    ``selection_key`` — design D12) e comparado por igualdade exata, então o
+    teste continua fechando o universo de categorias.
+    """
+    from apps.dashboard.procedure_analytics import CATEGORY_ORDER
+
+    return {category: counts.get(category, 0) for category in CATEGORY_ORDER}
+
+
+def _expected_volume(*, combined: int = 0, **counts: int) -> dict[str, int]:
+    """Volume por componente: todas as identidades do catálogo + ``combined``."""
+    from apps.cases.procedures import SUPPORTED_PROCEDURE_TYPES
+
+    expected = {procedure_type: 0 for procedure_type in SUPPORTED_PROCEDURE_TYPES}
+    expected.update(counts)
+    expected["combined"] = combined
+    return expected
+
+
 def _login_as(client, role_name: str = "manager"):
     """Cria usuário com papel, faz login e seta active_role na sessão."""
     from apps.accounts.models import Role
@@ -213,32 +235,11 @@ class TestDimensionBreakdownAndVolume:
             assert total == 4, f"Breakdown {dim} deve fechar com 4 casos, obteve {total}"
 
         # Declarado: A,D = EDA; B = combinado; C = Colonoscopia; sem especializados
-        assert breakdown["declared"] == {
-            "eda": 2,
-            "colonoscopy": 1,
-            "eda_colonoscopy": 1,
-            "echoendoscopy": 0,
-            "cpre": 0,
-            "none": 0,
-        }
+        assert breakdown["declared"] == _expected_breakdown(eda=2, colonoscopy=1, eda_colonoscopy=1)
         # Detectado: A = EDA; B,D = combinado; C = Colonoscopia; sem especializados
-        assert breakdown["detected"] == {
-            "eda": 1,
-            "colonoscopy": 1,
-            "eda_colonoscopy": 2,
-            "echoendoscopy": 0,
-            "cpre": 0,
-            "none": 0,
-        }
+        assert breakdown["detected"] == _expected_breakdown(eda=1, colonoscopy=1, eda_colonoscopy=2)
         # Autorizado: A = EDA; B = combinado; C = Nenhum (negado integral); D = Colonoscopia
-        assert breakdown["approved"] == {
-            "eda": 1,
-            "colonoscopy": 1,
-            "eda_colonoscopy": 1,
-            "echoendoscopy": 0,
-            "cpre": 0,
-            "none": 1,
-        }
+        assert breakdown["approved"] == _expected_breakdown(eda=1, colonoscopy=1, eda_colonoscopy=1, none=1)
 
     def test_component_volume_counts_combined_as_two(self, client) -> None:
         from apps.dashboard.procedure_analytics import compute_procedure_analytics
@@ -250,29 +251,11 @@ class TestDimensionBreakdownAndVolume:
         volume = analytics["volume"]
 
         # Declarado: EDA em A,B,D (3); Colon em B,C (2); combinado B (1)
-        assert volume["declared"] == {
-            "eda": 3,
-            "colonoscopy": 2,
-            "echoendoscopy": 0,
-            "cpre": 0,
-            "combined": 1,
-        }
+        assert volume["declared"] == _expected_volume(eda=3, colonoscopy=2, combined=1)
         # Detectado: EDA em A,B,D (3); Colon em B,C,D (3); combinado B,D (2)
-        assert volume["detected"] == {
-            "eda": 3,
-            "colonoscopy": 3,
-            "echoendoscopy": 0,
-            "cpre": 0,
-            "combined": 2,
-        }
+        assert volume["detected"] == _expected_volume(eda=3, colonoscopy=3, combined=2)
         # Autorizado: EDA em A,B (2); Colon em B,D (2); combinado B (1)
-        assert volume["approved"] == {
-            "eda": 2,
-            "colonoscopy": 2,
-            "echoendoscopy": 0,
-            "cpre": 0,
-            "combined": 1,
-        }
+        assert volume["approved"] == _expected_volume(eda=2, colonoscopy=2, combined=1)
 
         # Casos (4) ≠ componentes (5 no declarado): 4 + 1 combinado = 5
         assert volume["declared"]["eda"] + volume["declared"]["colonoscopy"] == 5
@@ -327,23 +310,9 @@ class TestSpecializedDimensionAnalytics:
             assert sum(breakdown[dim].values()) == 5, f"Breakdown {dim} deve fechar com 5 casos"
 
         # Declarado: EDA (SP-EDA), combinado (SP-COMB), Eco (SP-ECO, SP-DENY), CPRE (SP-CPRE)
-        assert breakdown["declared"] == {
-            "eda": 1,
-            "colonoscopy": 0,
-            "eda_colonoscopy": 1,
-            "echoendoscopy": 2,
-            "cpre": 1,
-            "none": 0,
-        }
+        assert breakdown["declared"] == _expected_breakdown(eda=1, eda_colonoscopy=1, echoendoscopy=2, cpre=1)
         # Autorizado: SP-DENY cai em Nenhum (negativa integral) sem virar EDA
-        assert breakdown["approved"] == {
-            "eda": 1,
-            "colonoscopy": 0,
-            "eda_colonoscopy": 1,
-            "echoendoscopy": 1,
-            "cpre": 1,
-            "none": 1,
-        }
+        assert breakdown["approved"] == _expected_breakdown(eda=1, eda_colonoscopy=1, echoendoscopy=1, cpre=1, none=1)
 
     def test_component_volume_includes_specialized_without_inflating_eda(self, client) -> None:
         from apps.dashboard.procedure_analytics import compute_procedure_analytics
@@ -353,13 +322,7 @@ class TestSpecializedDimensionAnalytics:
 
         volume = compute_procedure_analytics(Case.objects.all())["volume"]
 
-        assert volume["declared"] == {
-            "eda": 2,
-            "colonoscopy": 1,
-            "echoendoscopy": 2,
-            "cpre": 1,
-            "combined": 1,
-        }
+        assert volume["declared"] == _expected_volume(eda=2, colonoscopy=1, echoendoscopy=2, cpre=1, combined=1)
         # Eco/CPRE nunca incrementam EDA: apenas SP-EDA e SP-COMB contam como EDA.
         assert volume["declared"]["eda"] == 2
 
@@ -988,11 +951,5 @@ class TestProcedureDimensionAuthority:
 
         analytics = compute_procedure_analytics(Case.objects.all())
         assert analytics["breakdown"]["declared"]["eda_colonoscopy"] == 1
-        assert analytics["volume"]["declared"] == {
-            "eda": 1,
-            "colonoscopy": 1,
-            "echoendoscopy": 0,
-            "cpre": 0,
-            "combined": 1,
-        }
+        assert analytics["volume"]["declared"] == _expected_volume(eda=1, colonoscopy=1, combined=1)
         assert analytics["paired_confirmed"] == 1

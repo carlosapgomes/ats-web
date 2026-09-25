@@ -18,6 +18,7 @@ from django.db.models import Exists, OuterRef, Q
 
 from apps.cases.models import CaseEvent, CaseProcedure, ProcedureType
 from apps.cases.procedures import (
+    PROCEDURE_CATALOG,
     SUPPORTED_PROCEDURE_TYPES,
     get_approved_procedure_types,
     get_declared_procedure_types,
@@ -38,27 +39,40 @@ DIMENSION_LABELS: dict[str, str] = {
 
 # Seleções válidas do parâmetro ``procedure_selection`` da tabela gerencial.
 # ``none`` permanece porque a dimensão consultada admite negativa integral.
+# O bucket ``invalid`` (sentinel de ``selection_key``) é renderizado pelo
+# ``CATEGORY_ORDER``/``CATEGORY_LABELS``; ele NÃO entra nesta tupla enquanto o
+# predicado de filtro continuar fechado nos quatro tipos clássicos, senão o
+# parâmetro cairia no ramo ``none`` e devolveria rows erradas (Slice 009
+# generaliza o filtro para o catálogo ampliado).
 SELECTIONS: tuple[str, ...] = ("all", "eda", "colonoscopy", "eda_colonoscopy", "echoendoscopy", "cpre", "none")
 
 # Categorias exclusivas de um caso numa dimensão (D13). ``none`` pertence ao
 # universo quando a projeção da dimensão é vazia (ex.: negativa integral na
-# dimensão autorizado, ou detecção ainda não sustentada).
+# dimensão autorizado, ou detecção ainda não sustentada). ``invalid`` é o
+# bucket próprio do sentinela de ``selection_key``: conjunto persistido fora
+# da matriz nunca é somado a uma categoria válida nem omitido em silêncio
+# (design D12).
 CATEGORY_ORDER: tuple[str, ...] = (
     "eda",
+    "eda_gastrostomy",
+    "eda_capsule",
+    "eda_dilation",
     "colonoscopy",
-    "eda_colonoscopy",
+    "rectosigmoidoscopy",
+    "rectosigmoidoscopy_dilation",
+    "rectosigmoidoscopy_argon",
     "echoendoscopy",
     "cpre",
+    "eda_colonoscopy",
     "none",
+    "invalid",
 )
 
 CATEGORY_LABELS: dict[str, str] = {
-    "eda": "EDA",
-    "colonoscopy": "Colonoscopia",
+    **{definition.code: definition.label for definition in PROCEDURE_CATALOG},
     "eda_colonoscopy": "EDA + Colonoscopia",
-    "echoendoscopy": "Ecoendoscopia",
-    "cpre": "CPRE",
     "none": "Nenhum",
+    "invalid": "Conjunto inválido",
 }
 
 # Predicado de cada dimensão sobre rows CaseProcedure (fonte única, D14).
@@ -89,8 +103,12 @@ def resolve_selection(raw: str) -> str:
 
 
 def category_key(procedure_types: tuple[str, ...]) -> str:
-    """Categoria exclusiva de um conjunto ordenado: eda|colonoscopy|eda_colonoscopy|
-    echoendoscopy|cpre|none."""
+    """Categoria exclusiva de um conjunto ordenado (design D12/D13).
+
+    Chave do catálogo, ``eda_colonoscopy`` para o par exato, ``none`` para o
+    conjunto vazio e o sentinela ``invalid`` para conjunto persistido fora da
+    matriz — nunca reduzido a singleton e nunca omitido em silêncio.
+    """
     return selection_key(procedure_types) or "none"
 
 

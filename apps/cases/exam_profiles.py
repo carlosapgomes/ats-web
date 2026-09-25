@@ -11,11 +11,19 @@ de imagem de Ecoendoscopia/CPRE. A *ativação* da hard rule especializada e do
 verificador determinístico de evidência ocorre nos slices verticais próprios
 (Slice 002/004); no Slice 001 o comportamento de EDA/Colonoscopia permanece
 exatamente inalterado (R5).
+
+Design D4 (catálogo ampliado): as dez identidades atômicas resolvem o profile
+clínico da família pelo ``profile_key`` do catálogo. O fallback silencioso para
+EDA permanece apenas em ``get_exam_profile`` (adapters/presenters de artefatos
+legados 1.1/2.0/3.0); writers novos usam ``require_exam_profile``, que falha
+fechado.
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+
+from apps.cases.procedures import PROCEDURE_CATALOG
 
 
 @dataclass(frozen=True)
@@ -131,16 +139,39 @@ CPRE_PROFILE = ExamProfile(
     ),
 )
 
+_PROFILES_BY_KEY: dict[str, ExamProfile] = {
+    "eda": EDA_PROFILE,
+    "colonoscopy": COLONOSCOPY_PROFILE,
+    "echoendoscopy": ECHOENDOSCOPY_PROFILE,
+    "cpre": CPRE_PROFILE,
+}
+
+# Catálogo completo resolvido por ``profile_key`` (design D4): as dez
+# identidades atômicas apontam para o profile clínico da família.
 _PROFILES_BY_EXAM_TYPE: dict[str, ExamProfile] = {
-    profile.exam_type: profile for profile in (EDA_PROFILE, COLONOSCOPY_PROFILE, ECHOENDOSCOPY_PROFILE, CPRE_PROFILE)
+    definition.code: _PROFILES_BY_KEY[definition.profile_key] for definition in PROCEDURE_CATALOG
 }
 
 
 def get_exam_profile(exam_type: str | None) -> ExamProfile:
-    """Resolve o perfil de procedimento para um tipo de exame.
+    """Resolve o perfil de procedimento para um tipo de exame (leitura).
 
-    Tipo desconhecido/ausente cai em EDA por compatibilidade (casos históricos
-    são EDA e o default do modelo é ``eda``).
+    Tipo desconhecido/ausente cai em EDA por compatibilidade — o fallback existe
+    SOMENTE para adapters/presenters de artefatos legados (1.1/2.0/3.0).
+    Writers novos usam :func:`require_exam_profile`, que falha fechado.
     """
     normalized = (exam_type or "").strip().lower()
     return _PROFILES_BY_EXAM_TYPE.get(normalized, EDA_PROFILE)
+
+
+def require_exam_profile(exam_type: str) -> ExamProfile:
+    """Resolve o perfil de um writer novo, falhando fechado (design D4).
+
+    Código fora do catálogo levanta ``ValueError`` — um writer 4.0 nunca cai
+    silenciosamente no profile de EDA.
+    """
+    normalized = (exam_type or "").strip().lower()
+    profile = _PROFILES_BY_EXAM_TYPE.get(normalized)
+    if profile is None:
+        raise ValueError(f"Procedimento sem profile clínico: {exam_type!r}.")
+    return profile

@@ -116,7 +116,7 @@ def _llm1_json(
 ) -> str:
     return json.dumps(
         {
-            "schema_version": "3.0",
+            "schema_version": "4.0",
             "language": "pt-BR",
             "agency_record_number": "12345",
             "patient": {"name": "Paciente", "age": 35, "sex": "M", "document_id": None},
@@ -165,7 +165,7 @@ def _llm1_json(
 def _llm2_json(case_id: str, *, procedure_type: str, suggestion: str = "accept") -> str:
     return json.dumps(
         {
-            "schema_version": "3.0",
+            "schema_version": "4.0",
             "language": "pt-BR",
             "case_id": case_id,
             "agency_record_number": "12345",
@@ -693,7 +693,7 @@ class TestCpreEndToEnd:
         assert reloaded.status == CaseStatus.WAIT_DOCTOR
         structured = reloaded.structured_data
         assert isinstance(structured, dict)
-        assert structured["schema_version"] == "3.0"
+        assert structured["schema_version"] == "4.0"
         recommendations = _recommendations(reloaded)
         assert [item["procedure_type"] for item in recommendations] == ["cpre"]
         preop = recommendations[0]["preop_decision"]

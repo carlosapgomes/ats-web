@@ -1,10 +1,10 @@
 """Tests for the seed_prompts management command.
 
-Slice 007 (D6/ADR-0004): o seed tornou-se canônico para os QUATRO prompts
-neutros ``exam_llm{1,2}_{system,user}``. Ele garante exatamente uma versão
-ativa por nome neutro (cria v1 ativa quando ausente) e desativa toda versão
-ATIVA dos oito nomes legados, preservando linhas/versões históricas. Reexecutar
-não cria versões extras nem reativa nome antigo.
+Cutover 4.0 (D5/D14): o seed tornou-se canônico para os QUATRO prompts neutros
+``exam_llm{1,2}_{system,user}`` com o conteúdo do contrato 4.0. Ele garante
+exatamente uma versão ativa por nome neutro (cria v1 ativa quando ausente) e
+desativa toda versão ATIVA dos oito nomes legados, preservando linhas/versões
+históricas. Reexecutar não cria versões extras nem reativa nome antigo.
 """
 
 from __future__ import annotations
@@ -90,6 +90,60 @@ class TestSeedPromptsNeutralCanonical:
                 f"Prompt {pt.name} contains 'relatório de endoscopia'"
             )
             assert "achados endoscópicos" not in pt.content.lower(), f"Prompt {pt.name} contains 'achados endoscópicos'"
+
+
+@pytest.mark.django_db
+class TestSeedPromptsV4CanonicalContent:
+    """Cutover 4.0: o conteúdo ativo é o contrato 4.0 (dez identidades)."""
+
+    def test_seeded_content_matches_the_v4_defaults(self) -> None:
+        from apps.pipeline.llm1_service_v4 import (
+            LLM1_V4_DEFAULT_SYSTEM_PROMPT,
+            LLM1_V4_DEFAULT_USER_PROMPT,
+        )
+        from apps.pipeline.llm2_service_v4 import (
+            LLM2_V4_DEFAULT_SYSTEM_PROMPT,
+            LLM2_V4_DEFAULT_USER_PROMPT,
+        )
+
+        expected = {
+            "exam_llm1_system": LLM1_V4_DEFAULT_SYSTEM_PROMPT,
+            "exam_llm1_user": LLM1_V4_DEFAULT_USER_PROMPT,
+            "exam_llm2_system": LLM2_V4_DEFAULT_SYSTEM_PROMPT,
+            "exam_llm2_user": LLM2_V4_DEFAULT_USER_PROMPT,
+        }
+        call_command("seed_prompts")
+        for name, content in expected.items():
+            active = PromptTemplate.get_active(name)
+            assert active is not None, f"Missing active template: {name}"
+            assert active.content == content
+            assert content.strip()
+
+    def test_seeded_system_prompts_fix_schema_version_4_0(self) -> None:
+        call_command("seed_prompts")
+        for name in ("exam_llm1_system", "exam_llm2_system"):
+            active = PromptTemplate.get_active(name)
+            assert active is not None
+            assert "schema_version 4.0" in active.content
+
+    def test_active_3_0_prompt_is_upgraded_to_a_new_v4_version(self) -> None:
+        from apps.pipeline.llm2_service_v4 import LLM2_V4_DEFAULT_USER_PROMPT
+
+        PromptTemplate.objects.create(
+            name="exam_llm2_user",
+            version=1,
+            content="conteudo 3.0 legado",
+            is_active=True,
+        )
+        call_command("seed_prompts")
+
+        active = PromptTemplate.get_active("exam_llm2_user")
+        assert active is not None
+        assert active.version == 2
+        assert active.content == LLM2_V4_DEFAULT_USER_PROMPT
+        # A versão 3.0 permanece como histórico inativo (nunca apagada).
+        legacy = PromptTemplate.objects.get(name="exam_llm2_user", version=1)
+        assert legacy.is_active is False
 
 
 @pytest.mark.django_db

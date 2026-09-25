@@ -27,7 +27,10 @@ from apps.cases.models import (
     ProcedureType,
 )
 from apps.cases.procedures import (
+    PROCEDURE_LABELS,
+    SELECTION_KEYS,
     get_declared_procedure_types,
+    procedure_types_for_selection,
     reset_detection_and_doctor_statuses,
     set_declared_procedures,
     sync_declared_projection,
@@ -69,34 +72,35 @@ def is_cpre_intake_enabled() -> bool:
     return bool(getattr(settings, "CPRE_INTAKE_ENABLED", False))
 
 
-# Seleção declarada aceita no intake: EDA, Colonoscopia, a combinação
-# eda_colonoscopy e (sob flag própria) echoendoscopy e cpre. O valor combinado
-# NÃO é membro de ProcedureType.values — é chave de seleção derivada da
-# projeção, não field choice.
-_DECLARED_SELECTION_VALUES: frozenset[str] = frozenset(
-    {
-        ProcedureType.EDA,
-        ProcedureType.COLONOSCOPY,
-        EDA_COLONOSCOPY,
-        ProcedureType.ECHOENDOSCOPY,
-        ProcedureType.CPRE,
-    }
-)
+# Seleção declarada aceita no intake: derivada de ``SELECTION_KEYS`` do
+# catálogo (design D10) — cada código atômico mais a chave derivada
+# ``eda_colonoscopy``. O valor combinado NÃO é membro de
+# ``ProcedureType.values``. Expor as chaves aqui NÃO expõe opções na UI: as
+# flags de rollout continuam explicitamente em ``ensure_*_allowed`` e o helper
+# de opções por jornada lista somente os códigos publicados.
+_DECLARED_SELECTION_VALUES: frozenset[str] = frozenset(SELECTION_KEYS)
+
+
+def _selection_label(key: str) -> str:
+    """Label legível de uma chave de seleção, derivada das labels do catálogo."""
+    return " + ".join(PROCEDURE_LABELS[code] for code in procedure_types_for_selection(key))
+
+
+_SELECTION_CHOICES_LABEL: str = ", ".join(_selection_label(key) for key in SELECTION_KEYS)
 
 
 def validate_exam_type(exam_type: str | None) -> str:
     """Valida e normaliza a seleção declarada (intake e correção NIR).
 
-    Levanta ``ValueError`` se ausente/inválida. Aceita EDA, Colonoscopia,
-    Ecoendoscopia, CPRE ou a combinação ``eda_colonoscopy`` (chave de seleção
-    derivada) — nunca inferência por texto (R1). Desde o Slice 005 a correção
-    NIR aceita as seleções, então esta validação é compartilhada por novos
-    intakes/reenvios e pela correção; o gate de flag de intake fica em
-    ``ensure_exam_type_allowed`` (não aqui).
+    Levanta ``ValueError`` se ausente/inválida. Aceita as chaves canônicas do
+    catálogo (``SELECTION_KEYS``) — nunca inferência por texto (R1). Desde o
+    Slice 005 a correção NIR aceita as seleções, então esta validação é
+    compartilhada por novos intakes/reenvios e pela correção; o gate de flag de
+    intake fica em ``ensure_exam_type_allowed`` (não aqui).
     """
     value = (exam_type or "").strip()
     if value not in _DECLARED_SELECTION_VALUES:
-        raise ValueError("Selecione o tipo de exame (EDA, Colonoscopia, EDA + Colonoscopia, Ecoendoscopia ou CPRE).")
+        raise ValueError(f"Selecione o tipo de exame ({_SELECTION_CHOICES_LABEL}).")
     return value
 
 
@@ -141,17 +145,6 @@ def ensure_exam_type_allowed(exam_type: str | None) -> str:
             "Envie lotes apenas de EDA."
         )
     return value
-
-
-def _procedure_types_for_selection(exam_type: str) -> tuple[str, ...]:
-    """Mapeia a seleção declarada para o conjunto de procedimentos.
-
-    ``eda_colonoscopy`` (chave derivada) → (eda, colonoscopy); tipos únicos →
-    o próprio.
-    """
-    if exam_type == EDA_COLONOSCOPY:
-        return (ProcedureType.EDA, ProcedureType.COLONOSCOPY)
-    return (exam_type,)
 
 
 # ── Correção de tipo e confirmação NIR serializadas (Slice 006) ───────────
@@ -323,7 +316,7 @@ def correct_case_exam_type(
             raise ValueError("Caso não está em revisão manual elegível para correção de tipo.")
         # Slice 008 (R2): igualdade/old/new usam CONJUNTOS de CaseProcedure —
         # o conjunto declarado vem das rows (coluna ponte removida no 011-C).
-        new_procedures = list(_procedure_types_for_selection(validated_exam_type))
+        new_procedures = list(procedure_types_for_selection(validated_exam_type))
         old_procedures = list(get_declared_procedure_types(case))
         if set(new_procedures) == set(old_procedures):
             raise ValueError("O novo conjunto de procedimentos deve ser diferente do declarado.")
@@ -799,7 +792,7 @@ def _create_case_from_file(
         # vira UM Case com DUAS rows; falha aqui reverte o caso.
         set_declared_procedures(
             case=case,
-            procedure_types=_procedure_types_for_selection(exam_type),
+            procedure_types=procedure_types_for_selection(exam_type),
             actor=user,
         )
 
@@ -887,7 +880,7 @@ def create_corrected_resubmission(
 
         set_declared_procedures(
             case=new_case,
-            procedure_types=_procedure_types_for_selection(validated_exam_type),
+            procedure_types=procedure_types_for_selection(validated_exam_type),
             actor=user,
         )
 

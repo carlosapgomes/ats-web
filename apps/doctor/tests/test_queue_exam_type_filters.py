@@ -54,11 +54,17 @@ QUEUE_FILTER_JS = REPO_ROOT / "static" / "js" / "doctor_queue_filter.js"
 DECISION_HTML = REPO_ROOT / "templates" / "doctor" / "decision.html"
 
 # Universo de filtros do catálogo (design D13): `all` + cada singleton +
-# o combinado exato EDA + Colonoscopia. Derivado dos helpers centrais para
-# não duplicar catálogo no teste.
+# o combinado exato EDA + Colonoscopia.
 CATALOG_FILTER_VALUES = {"all", selection_key(("eda", "colonoscopy"))} | {
     selection_key((procedure_type,)) for procedure_type in SUPPORTED_PROCEDURE_TYPES
 }
+
+# Cutover 4.0: a fila médica ainda publica SOMENTE as opções anteriores ao
+# catálogo ampliado. A expansão de filtros/badges para as dez identidades é do
+# Slice 008 (design D12), que deve voltar a exigir igualdade com
+# ``CATALOG_FILTER_VALUES``. Enquanto isso, este teste fixa o universo
+# publicado para provar que o Slice 001 não alterou a fila.
+PUBLISHED_QUEUE_FILTER_VALUES = {"all", "eda", "colonoscopy", "eda_colonoscopy", "echoendoscopy", "cpre"}
 
 
 def _radio_values(html: str, name: str) -> list[str]:
@@ -284,8 +290,9 @@ class TestDoctorQueueExamTypeFilters:
     def test_pending_filter_universe_is_the_catalog(self, client) -> None:
         """R1: Pendentes oferece Todos, EDA, Colonoscopia, combinado, Eco e CPRE.
 
-        O combina exatamente com o catálogo central + combinado (D13): nenhum
-        tipo é omitido e `none` não pertence a este universo.
+        O universo publicado coincide com as opções vigentes e `none` não
+        pertence a este universo. A expansão para as dez identidades do
+        catálogo (igualdade derivada) é do Slice 008 (design D12).
         """
         self._login_as(client, "doctor")
         response = client.get("/doctor/")
@@ -293,7 +300,7 @@ class TestDoctorQueueExamTypeFilters:
         content = response.content.decode()
         values = _radio_values(content, "doctor-queue-exam-type")
         assert values == ["all", "eda", "colonoscopy", "eda_colonoscopy", "echoendoscopy", "cpre"]
-        assert set(values) == CATALOG_FILTER_VALUES
+        assert set(values) == PUBLISHED_QUEUE_FILTER_VALUES
         assert 'id="doctor-queue-type-filter"' in content
         assert 'data-exam-type-count="echoendoscopy"' in content
         assert 'data-exam-type-count="cpre"' in content
@@ -308,7 +315,7 @@ class TestDoctorQueueExamTypeFilters:
         content = response.content.decode()
         values = _radio_values(content, "doctor-decided-exam-type")
         assert values == ["all", "eda", "colonoscopy", "eda_colonoscopy", "echoendoscopy", "cpre", "none"]
-        assert set(values) == CATALOG_FILTER_VALUES | {"none"}
+        assert set(values) == PUBLISHED_QUEUE_FILTER_VALUES | {"none"}
         assert 'value="all" checked' in content
         assert "Nenhum autorizado" in content
         assert 'id="doctor-decided-type-filter"' in content

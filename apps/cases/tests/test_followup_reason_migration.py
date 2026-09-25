@@ -81,7 +81,15 @@ class TestMigrationIsAlterFieldOnly:
 
 
 class TestShuttleMigrationPreservesLegacyRows:
-    """R4 — ``0019 → 0020 → 0019 → 0020`` preserva rows legadas."""
+    """R4 — ``0019 → 0020 → 0019 → 0020`` preserva rows legadas.
+
+    Executa fora do bloco atômico do pytest: a leaf atual inclui a migration
+    ``0021`` (choices/``max_length`` do catálogo ampliado) e o PostgreSQL recusa
+    ``ALTER COLUMN`` numa tabela com eventos de trigger pendentes do próprio
+    teste.
+    """
+
+    pytestmark = pytest.mark.django_db(transaction=True)
 
     @pytest.fixture(autouse=True)
     def _migration_sandbox(self):

@@ -5,9 +5,12 @@ conjunto declarado é derivado exclusivamente das rows (Slice 011-C removeu a
 coluna ponte ``Case.exam_type``).
 
 Catálogo, ordem canônica e matriz válida ficam centralizados aqui (design D1)
-e são a fonte única dos consumidores. A matriz é fechada: somente EDA,
-Colonoscopia, EDA+Colonoscopia, Ecoendoscopia e CPRE são conjuntos válidos; o
-agendamento casado é exatamente ``{EDA, Colonoscopia}`` (nunca ``len == 2``).
+e são a fonte única dos consumidores. ``PROCEDURE_CATALOG`` registra as dez
+identidades atômicas na ordem canônica, com label, família e ``profile_key``
+clínico; ``SUPPORTED_PROCEDURE_TYPES``, ``PROCEDURE_ORDER``, labels e
+``ALLOWED_PROCEDURE_SETS`` são derivados dele. A matriz é fechada: qualquer
+singleton canônico mais exatamente ``{EDA, Colonoscopia}``; o agendamento
+casado é exatamente ``{EDA, Colonoscopia}`` (nunca ``len == 2``).
 
 Writes críticos (declaração) passam por este módulo: nenhuma view escreve rows
 diretamente. A declaração é atômica — falha em uma row não deixa caso/projeção
@@ -18,6 +21,7 @@ parcial. Detecção (``set_detected_procedures``) e decisão médica
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from typing import Any
 
 from django.db import transaction
@@ -32,28 +36,106 @@ from apps.cases.models import (
     ProcedureType,
 )
 
-# Catálogo canônico e ordem de exibição (design D1). EDA antes de Colonoscopia
-# antes de Ecoendoscopia antes de CPRE.
-SUPPORTED_PROCEDURE_TYPES: tuple[str, ...] = (
-    ProcedureType.EDA,
-    ProcedureType.COLONOSCOPY,
-    ProcedureType.ECHOENDOSCOPY,
-    ProcedureType.CPRE,
+
+@dataclass(frozen=True)
+class ProcedureDefinition:
+    """Metadados canônicos de uma identidade atômica do catálogo (design D1).
+
+    ``family`` é a dimensão de apresentação (agrupamento de badge/CSS e
+    afinidade operacional) e ``profile_key`` resolve as regras clínicas em
+    ``apps.cases.exam_profiles``. Aliases/detalhes de detecção entram nos
+    slices que os consomem (002-005) — o catálogo começa somente com os
+    metadados exigidos pelo cutover.
+    """
+
+    code: str
+    label: str
+    family: str  # "eda" | "colonoscopy" | "specialized"
+    profile_key: str
+
+
+# Ordem canônica única (design D1/D2): EDA e seus pacotes, depois Colonoscopia
+# e a família Retossigmoidoscopia, depois os especializados.
+PROCEDURE_CATALOG: tuple[ProcedureDefinition, ...] = (
+    ProcedureDefinition(
+        code=ProcedureType.EDA,
+        label=ProcedureType.EDA.label,
+        family="eda",
+        profile_key="eda",
+    ),
+    ProcedureDefinition(
+        code=ProcedureType.EDA_GASTROSTOMY,
+        label=ProcedureType.EDA_GASTROSTOMY.label,
+        family="eda",
+        profile_key="eda",
+    ),
+    ProcedureDefinition(
+        code=ProcedureType.EDA_CAPSULE,
+        label=ProcedureType.EDA_CAPSULE.label,
+        family="eda",
+        profile_key="eda",
+    ),
+    ProcedureDefinition(
+        code=ProcedureType.EDA_DILATION,
+        label=ProcedureType.EDA_DILATION.label,
+        family="eda",
+        profile_key="eda",
+    ),
+    ProcedureDefinition(
+        code=ProcedureType.COLONOSCOPY,
+        label=ProcedureType.COLONOSCOPY.label,
+        family="colonoscopy",
+        profile_key="colonoscopy",
+    ),
+    ProcedureDefinition(
+        code=ProcedureType.RECTOSIGMOIDOSCOPY,
+        label=ProcedureType.RECTOSIGMOIDOSCOPY.label,
+        family="colonoscopy",
+        profile_key="colonoscopy",
+    ),
+    ProcedureDefinition(
+        code=ProcedureType.RECTOSIGMOIDOSCOPY_DILATION,
+        label=ProcedureType.RECTOSIGMOIDOSCOPY_DILATION.label,
+        family="colonoscopy",
+        profile_key="colonoscopy",
+    ),
+    ProcedureDefinition(
+        code=ProcedureType.RECTOSIGMOIDOSCOPY_ARGON,
+        label=ProcedureType.RECTOSIGMOIDOSCOPY_ARGON.label,
+        family="colonoscopy",
+        profile_key="colonoscopy",
+    ),
+    ProcedureDefinition(
+        code=ProcedureType.ECHOENDOSCOPY,
+        label=ProcedureType.ECHOENDOSCOPY.label,
+        family="specialized",
+        profile_key="echoendoscopy",
+    ),
+    ProcedureDefinition(
+        code=ProcedureType.CPRE,
+        label=ProcedureType.CPRE.label,
+        family="specialized",
+        profile_key="cpre",
+    ),
 )
 
-# Contratos procedure-neutral legíveis pelo domínio: 2.0 (histórico) e 3.0
-# (writer atual). 1.1 continua suportado apenas pelos adapters/presenters como
-# leitura histórica.
-PROCEDURE_NEUTRAL_SCHEMA_VERSIONS: frozenset[str] = frozenset({"2.0", "3.0"})
+# Catálogo canônico e ordem de exibição (design D1), derivados do registro.
+SUPPORTED_PROCEDURE_TYPES: tuple[str, ...] = tuple(definition.code for definition in PROCEDURE_CATALOG)
+
+PROCEDURE_LABELS: dict[str, str] = {definition.code: definition.label for definition in PROCEDURE_CATALOG}
+
+# Contratos procedure-neutral legíveis pelo domínio: 2.0 (histórico), 3.0
+# (writer anterior) e 4.0 (writer atual). 1.1 continua suportado apenas pelos
+# adapters/presenters como leitura histórica.
+PROCEDURE_NEUTRAL_SCHEMA_VERSIONS: frozenset[str] = frozenset({"2.0", "3.0", "4.0"})
 
 
 def is_procedure_neutral_structured_data(structured_data: Any) -> bool:
     """True quando o artefato estruturado usa o contrato procedure-neutral.
 
-    Aceita 2.0 (histórico) e 3.0 (writer atual) — os quatro tipos e a decisão
-    por componente exigem um dos dois; artefatos 1.1 continuam no caminho
-    legado. Substitui os gates literais ``== "2.0"`` espalhados pela UI médica
-    (R6 do cutover 3.0).
+    Aceita 2.0/3.0 (históricos) e 4.0 (writer atual) — a decisão por componente
+    exige um deles; artefatos 1.1 continuam no caminho legado. Substitui os
+    gates literais ``== "2.0"`` espalhados pela UI médica (R6 do cutover 3.0).
     """
     return (
         isinstance(structured_data, dict) and structured_data.get("schema_version") in PROCEDURE_NEUTRAL_SCHEMA_VERSIONS
@@ -65,27 +147,21 @@ PROCEDURE_ORDER: dict[str, int] = {type_: position for position, type_ in enumer
 # Agendamento casado: igualdade exata com {EDA, Colonoscopia} (design D1/D2).
 PAIRED_APPOINTMENT_SET: frozenset[str] = frozenset({ProcedureType.EDA, ProcedureType.COLONOSCOPY})
 
-# Matriz fechada: os únicos conjuntos válidos em qualquer fronteira (D2).
+# Matriz fechada (design D2): qualquer singleton canônico mais o par exato.
 ALLOWED_PROCEDURE_SETS: frozenset[frozenset[str]] = frozenset(
-    {
-        frozenset({ProcedureType.EDA}),
-        frozenset({ProcedureType.COLONOSCOPY}),
-        PAIRED_APPOINTMENT_SET,
-        frozenset({ProcedureType.ECHOENDOSCOPY}),
-        frozenset({ProcedureType.CPRE}),
-    }
+    {frozenset({code}) for code in SUPPORTED_PROCEDURE_TYPES} | {PAIRED_APPOINTMENT_SET}
 )
 
-# Chave textual do badge/CSS por conjunto válido (design D13).
-_SELECTION_KEY_BY_SET: dict[frozenset[str], str] = {
-    frozenset({ProcedureType.EDA}): ProcedureType.EDA,
-    frozenset({ProcedureType.COLONOSCOPY}): ProcedureType.COLONOSCOPY,
-    PAIRED_APPOINTMENT_SET: EDA_COLONOSCOPY,
-    frozenset({ProcedureType.ECHOENDOSCOPY}): ProcedureType.ECHOENDOSCOPY,
-    frozenset({ProcedureType.CPRE}): ProcedureType.CPRE,
-}
+# Chaves de seleção válidas (design D10): cada código atômico mais a chave
+# derivada do combinado. Aliases e labels nunca são valores válidos.
+SELECTION_KEYS: tuple[str, ...] = (*SUPPORTED_PROCEDURE_TYPES, EDA_COLONOSCOPY)
 
-_SUPPORTED_LABEL = ", ".join(SUPPORTED_PROCEDURE_TYPES)
+# Sentinela reservado de ``selection_key`` para conjunto não-vazio fora da
+# matriz (design D2/D12): nunca o primeiro elemento, nunca categoria válida.
+INVALID_SELECTION_KEY: str = "invalid"
+
+_SUPPORTED_LABEL = ", ".join(PROCEDURE_LABELS[code] for code in SUPPORTED_PROCEDURE_TYPES)
+_SELECTION_LABEL = ", ".join(PROCEDURE_LABELS[code] for code in SUPPORTED_PROCEDURE_TYPES)
 
 
 def _ordered_supported(procedure_types: Any) -> tuple[str, ...]:
@@ -413,19 +489,44 @@ def get_approved_procedure_types(case: Case) -> tuple[str, ...]:
 
 
 def selection_key(procedure_types: tuple[str, ...]) -> str:
-    """Chave textual do badge/CSS derivada do conjunto (design D13).
+    """Chave textual do badge/CSS derivada do conjunto (design D2/D12).
 
-    ``eda`` | ``colonoscopy`` | ``eda_colonoscopy`` | ``echoendoscopy`` |
-    ``cpre``. O agendamento casado exige igualdade exata com
-    ``PAIRED_APPOINTMENT_SET`` — nunca ``len == 2``.
+    Função total — nunca levanta, pois leitores tolerantes a consomem:
+
+    - par exato ``{eda, colonoscopy}`` → ``eda_colonoscopy``;
+    - singleton canônico → o próprio código (mesmo quando a label contém ``+``);
+    - conjunto vazio → ``""``;
+    - conjunto não-vazio fora da matriz (ou valor fora do catálogo) →
+      :data:`INVALID_SELECTION_KEY` — nunca o primeiro elemento e nunca uma
+      categoria válida.
     """
     types = tuple(str(raw) for raw in (procedure_types or ()))
     if frozenset(types) == PAIRED_APPOINTMENT_SET:
         return EDA_COLONOSCOPY
-    return types[0] if types else ""
+    if len(types) == 1 and types[0] in PROCEDURE_ORDER:
+        return types[0]
+    if not types:
+        return ""
+    return INVALID_SELECTION_KEY
+
+
+def procedure_types_for_selection(key: str) -> tuple[str, ...]:
+    """Converte uma chave de seleção declarada em procedimentos (design D10).
+
+    ``eda_colonoscopy`` (chave derivada) → ``(eda, colonoscopy)``; qualquer
+    código atômico canônico → singleton. Chave desconhecida (alias, label ou
+    valor livre) falha explicitamente com ``ValueError`` — nunca é interpretada
+    por proximidade textual e nunca cria procedimento fora do catálogo.
+    """
+    value = str(key or "").strip()
+    if value == EDA_COLONOSCOPY:
+        return (ProcedureType.EDA, ProcedureType.COLONOSCOPY)
+    if value not in PROCEDURE_ORDER:
+        raise ValueError(f"Seleção de procedimento inválida: {value!r}. Aceitas: {_SELECTION_LABEL}.")
+    return (value,)
 
 
 def format_procedure_selection(procedure_types: Any) -> str:
     """Label textual ordenado: 'EDA', 'Colonoscopia' ou 'EDA + Colonoscopia'."""
     ordered = normalize_procedure_selection(procedure_types)
-    return " + ".join(ProcedureType(t).label for t in ordered)
+    return " + ".join(PROCEDURE_LABELS[t] for t in ordered)
