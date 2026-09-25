@@ -25,7 +25,7 @@
 - [x] 4.1 Implementar o Slice 006 (`slices/slice-006-doctor-catalog-decisions-and-history.md`) e provar decisão/troca médica pelo catálogo, combobox de destino, atomicidade, ausência de rerun e histórico por código exato.
 - [x] 4.2 Implementar o Slice 007 (`slices/slice-007-nir-correction-and-catalog-queues.md`) e provar correção/reenvio pesquisável, acompanhamento, resposta final, encerrados e filtros NIR pelas identidades exatas.
 - [x] 4.3 Implementar o Slice 008 (`slices/slice-008-doctor-scheduler-followup-catalog.md`) e provar filtros/badges médicos e CHD, histórico/agendamento/follow-up de todo o catálogo e agendamento casado exclusivamente para EDA + Colonoscopia.
-- [ ] 4.4 Implementar o Slice 009 (`slices/slice-009-manager-analytics-expanded-catalog.md`) e provar categorias case-level exclusivas, filtros dimensionais e volumes por componente sem agregar famílias.
+- [x] 4.4 Implementar o Slice 009 (`slices/slice-009-manager-analytics-expanded-catalog.md`) e provar categorias case-level exclusivas, filtros dimensionais e volumes por componente sem agregar famílias.
 
 ## 5. Operação e encerramento
 
