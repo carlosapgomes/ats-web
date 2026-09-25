@@ -29,7 +29,7 @@
 
 ## 5. Operação e encerramento
 
-- [ ] 5.1 Implementar o Slice 010 (`slices/slice-010-coordinated-cutover-and-final-gate.md`) e verificar prompts 4.0, drenagem/prechecks, ausência de novas flags, inventário de pressupostos, smoke das onze seleções e runbook fix-forward.
+- [x] 5.1 Implementar o Slice 010 (`slices/slice-010-coordinated-cutover-and-final-gate.md`) e verificar prompts 4.0, drenagem/prechecks, ausência de novas flags, inventário de pressupostos, smoke das onze seleções e runbook fix-forward. *(Smoke funcional/acessível R4/R5 registrado como gate pendente: sem browser/ambiente ats-web neste host — checklists completos no runbook; precheck evoluiu para a fronteira first_4_0_write com aprovação do parent, D14.)*
 - [ ] 5.2 Executar uma única vez o gate final `uv run ruff check . && uv run ruff format --check . && uv run mypy . && uv run pytest`, seguido de `openspec validate support-expanded-endoscopy-procedure-catalog --strict`, `git diff --check` e `git status --short`; registrar resultados no relatório final.
 - [ ] 5.3 Revisar evidências de todos os slices, atualizar somente checkboxes comprovados, gerar relatório final com snippets antes/depois, fazer commit/push rastreáveis, informar `REPORT_PATH` e parar para aprovação humana antes de arquivar.
 

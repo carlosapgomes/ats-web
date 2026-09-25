@@ -35,3 +35,15 @@ específica usam `<change-id>.md`, o mesmo ID de
     (`check_specialized_procedure_downgrade`), monitoramento sem texto clínico
     e rollback pela fronteira do primeiro write 3.0 (flags off + imagem/schema
     3.0 + fix-forward; sem deleção para downgrade).
+- [`expanded-endoscopy-procedure-catalog-cutover.md`](./expanded-endoscopy-procedure-catalog-cutover.md)
+  — Catálogo ampliado (dez identidades atômicas): cutover único do writer
+    strict 4.0, drenagem de jobs 3.0, migration 0021 de choices/`max_length`,
+    exatamente uma versão 4.0 ativa por prompt neutro, imagem única em `web` e
+    workers (uma build com as três tags derivadas do Compose e assert de Image ID
+    idêntico por `docker inspect` nos três containers de app, antes do smoke),
+    smoke funcional (dez singletons, combinado, conjunto proibido, GTT
+    normal/preocupante, dilatação com/sem local, filtros/analytics) e acessível
+    (busca sem acentos, teclado/ARIA, sem JavaScript) — ambos explicitamente
+    **pendentes de gate** nesta entrega — precheck de downgrade pela fronteira
+    do primeiro write 4.0/row de identidade nova e rollback fix-forward (nunca
+    reativar o writer 3.0, nunca apagar/reclassificar).
