@@ -224,14 +224,20 @@ function addOption(select, value, text, extra) {
   return option;
 }
 
+// Copy da jornada de upload (Slice 001): o fixture espelha o atributo real do
+// select em `templates/intake/intake_home.html`.
+const SEARCH_PLACEHOLDER = 'Digite para buscar — ex.: EDA, cápsula, dilatação…';
+const DESCRIBEDBY = 'exam-type-guidance exam-type-search-hint';
+
 function buildFixture(document) {
   const root = document.createElement('div');
   const select = document.createElement('select');
   select.setAttribute('id', 'exam-type-select');
   select.setAttribute('name', 'exam_type');
   select.setAttribute('aria-labelledby', 'exam-type-select-label');
-  select.setAttribute('aria-describedby', 'exam-type-guidance');
+  select.setAttribute('aria-describedby', DESCRIBEDBY);
   select.setAttribute('data-procedure-combobox', '');
+  select.setAttribute('data-combobox-placeholder', SEARCH_PLACEHOLDER);
 
   addOption(select, '', 'Selecione o tipo de exame…');
   addOption(select, 'eda', 'EDA');
@@ -319,7 +325,7 @@ test('enhance expõe combobox ARIA sobre o select canônico', () => {
   assert.equal(control.input.getAttribute('aria-controls'), control.list.id);
   assert.equal(control.input.getAttribute('aria-autocomplete'), 'list');
   assert.equal(control.input.getAttribute('aria-labelledby'), 'exam-type-select-label');
-  assert.equal(control.input.getAttribute('aria-describedby'), 'exam-type-guidance');
+  assert.equal(control.input.getAttribute('aria-describedby'), DESCRIBEDBY);
   assert.equal(control.list.getAttribute('role'), 'listbox');
   assert.equal(control.input.value, '', 'sem seleção inicial');
 
@@ -453,7 +459,7 @@ test('a busca filtra por label/alias sem alterar o valor submetido', () => {
 
   type(control.input, 'eda');
   assert.equal(control.empty.hidden, true);
-  assert.equal(control.input.getAttribute('aria-describedby'), 'exam-type-guidance');
+  assert.equal(control.input.getAttribute('aria-describedby'), DESCRIBEDBY);
 });
 
 test('clique em opção confirma o valor; clique fora apenas fecha', () => {
@@ -483,6 +489,90 @@ test('clique em opção confirma o valor; clique fora apenas fecha', () => {
   assert.equal(control.input.getAttribute('aria-expanded'), 'false');
   assert.equal(fixture.select.value, 'eda', 'clique fora não altera o valor');
   assert.equal(changes, 1);
+});
+
+// ── Affordances visuais do componente (Slice 001, R1/R2/R6) ───────────────
+
+test('enhance propaga data-combobox-placeholder para o input', () => {
+  const combobox = loadCombobox();
+  const document = createFakeDocument();
+  const fixture = buildFixture(document);
+  const control = combobox.enhance(fixture.select, { document: document });
+
+  assert.equal(control.input.getAttribute('placeholder'), SEARCH_PLACEHOLDER);
+});
+
+test('sem data-combobox-placeholder o input não ganha placeholder', () => {
+  const combobox = loadCombobox();
+  const document = createFakeDocument();
+  const fixture = buildFixture(document);
+  fixture.select.removeAttribute('data-combobox-placeholder');
+  const control = combobox.enhance(fixture.select, { document: document });
+
+  assert.equal(control.input.getAttribute('placeholder'), null);
+});
+
+test('placeholder permanece no atributo após syncFromSelect com valor selecionado', () => {
+  const combobox = loadCombobox();
+  const document = createFakeDocument();
+  const fixture = buildFixture(document);
+  const control = combobox.enhance(fixture.select, { document: document });
+
+  fixture.select.value = 'eda';
+  fixture.select.dispatchEvent(new FakeEvent('change'));
+
+  assert.equal(control.input.value, 'EDA');
+  assert.equal(control.input.getAttribute('placeholder'), SEARCH_PLACEHOLDER);
+});
+
+test('a row do valor selecionado é marcada na construção e distinta da ativa', () => {
+  const combobox = loadCombobox();
+  const document = createFakeDocument();
+  const fixture = buildFixture(document);
+  fixture.select.value = 'eda';
+  const control = combobox.enhance(fixture.select, { document: document });
+
+  const selected = rowByValue(control.list, 'eda');
+  assert.equal(selected.classList.contains('procedure-combobox__option--selected'), true);
+  assert.equal(selected.getAttribute('aria-selected'), 'true');
+
+  const other = rowByValue(control.list, 'colonoscopy');
+  assert.equal(other.classList.contains('procedure-combobox__option--selected'), false);
+  assert.equal(other.getAttribute('aria-selected'), null);
+  assert.equal(control.input.getAttribute('aria-activedescendant'), null, 'seleção não é navegação');
+});
+
+test('commit move a marca de selecionada e syncFromSelect a limpa', () => {
+  const combobox = loadCombobox();
+  const document = createFakeDocument();
+  const fixture = buildFixture(document);
+  const control = combobox.enhance(fixture.select, { document: document });
+
+  assert.deepEqual(
+    rowsOf(control.list).map((row) => row.getAttribute('aria-selected')),
+    [null, null, null, null, null],
+    'sem valor confirmado nenhuma row fica marcada',
+  );
+
+  rowByValue(control.list, 'eda').dispatchEvent(new FakeEvent('click'));
+  assert.equal(rowByValue(control.list, 'eda').getAttribute('aria-selected'), 'true');
+  assert.equal(rowByValue(control.list, 'colonoscopy').getAttribute('aria-selected'), null);
+
+  rowByValue(control.list, 'colonoscopy').dispatchEvent(new FakeEvent('click'));
+  assert.equal(rowByValue(control.list, 'eda').getAttribute('aria-selected'), null);
+  assert.equal(
+    rowByValue(control.list, 'eda').classList.contains('procedure-combobox__option--selected'),
+    false,
+  );
+  assert.equal(rowByValue(control.list, 'colonoscopy').getAttribute('aria-selected'), 'true');
+
+  fixture.select.value = '';
+  fixture.select.dispatchEvent(new FakeEvent('change'));
+  assert.deepEqual(
+    rowsOf(control.list).map((row) => row.getAttribute('aria-selected')),
+    [null, null, null, null, null],
+    'valor limpo no select remove a marca das rows',
+  );
 });
 
 test('mudança externa no select (re-render) reflete o label no combobox', () => {

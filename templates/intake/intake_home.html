@@ -53,8 +53,10 @@
       <div class="procedure-combobox">
         <label class="visually-hidden" for="exam-type-select" id="exam-type-select-label">Tipo de exame</label>
         <select class="form-select procedure-combobox__select" id="exam-type-select" name="exam_type"
-                data-procedure-combobox aria-labelledby="exam-type-select-label"
-                aria-describedby="exam-type-guidance{% if exam_type_error %} exam-type-error{% endif %}"
+                data-procedure-combobox
+                data-combobox-placeholder="Digite para buscar — ex.: EDA, cápsula, dilatação…"
+                aria-labelledby="exam-type-select-label"
+                aria-describedby="exam-type-guidance exam-type-search-hint{% if exam_type_error %} exam-type-error{% endif %}"
                 {% if exam_type_error %}aria-invalid="true"{% endif %}>
           <option value=""{% if not selected_exam_type %} selected{% endif %}>Selecione o tipo de exame…</option>
           {% for option in exam_type_options %}
@@ -62,6 +64,7 @@
           {% endfor %}
         </select>
       </div>
+      <p class="form-text procedure-combobox__hint" id="exam-type-search-hint">Busca ignora acentos e aceita sinônimos aprovados. Navegue com ↑ ↓ e confirme com Enter.</p>
       {% if exam_type_error %}
       <p class="procedure-combobox__error" id="exam-type-error" role="alert">{{ exam_type_error }}</p>
       {% endif %}

@@ -149,6 +149,12 @@
     if (labelledBy) {
       input.setAttribute('aria-labelledby', labelledBy);
     }
+    // Placeholder é decoração (D2): só existe quando a superfície declara o
+    // copy da jornada em `data-combobox-placeholder`; sem ele nada é definido.
+    var placeholder = select.getAttribute('data-combobox-placeholder');
+    if (placeholder) {
+      input.setAttribute('placeholder', placeholder);
+    }
     if (select.getAttribute('aria-invalid')) {
       input.setAttribute('aria-invalid', 'true');
     }
@@ -273,6 +279,22 @@
       setActive(isOpen() ? nextActiveIndex(rows, -1, 1) : -1);
     }
 
+    /**
+     * Marca na listbox a row do valor confirmado (D6) — distinta da row ativa
+     * de teclado (`--active`/`aria-activedescendant`).
+     */
+    function syncSelectedRow() {
+      for (var r = 0; r < rows.length; r++) {
+        if (rows[r].value === select.value) {
+          rows[r].element.classList.add('procedure-combobox__option--selected');
+          rows[r].element.setAttribute('aria-selected', 'true');
+        } else {
+          rows[r].element.classList.remove('procedure-combobox__option--selected');
+          rows[r].element.removeAttribute('aria-selected');
+        }
+      }
+    }
+
     function syncFromSelect() {
       var selected = null;
       for (var r = 0; r < rows.length; r++) {
@@ -281,6 +303,7 @@
         }
       }
       input.value = selected ? selected.text : '';
+      syncSelectedRow();
     }
 
     // Só a seleção de uma opção existente escreve no select (nunca texto livre).
