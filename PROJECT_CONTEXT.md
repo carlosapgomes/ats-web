@@ -209,7 +209,7 @@ static/          # css/app.css (paleta hospitalar), js/upload.js, js/password-to
 
 ## State do Sistema
 
-- **Fase atual:** change CRÍTICO `support-expanded-endoscopy-procedure-catalog` implementado, aceito, **arquivado** (`openspec/changes/archive/2026-09-25-support-expanded-endoscopy-procedure-catalog/`) e com specs canônicas promovidas; branch sincronizada no remoto; **deploy pendente** — exige smoke funcional/acessível em ambiente real (checklists no runbook) e execução do cutover por `docs/deploy/expanded-endoscopy-procedure-catalog-cutover.md`; produção segue em 3.0/quatro tipos até lá.
+- **Fase atual:** `v0.10.0-rc.1` preparada no `main` (merge `3dce24e` do change `support-expanded-endoscopy-procedure-catalog`; gate do candidato: 4445 testes, ruff/mypy clean) — validação de produção pendente: smoke funcional/acessível (20 cenários + teclado/no-JS, Passos 8–9 do runbook, executado na janela pelo operador) e execução do cutover por `docs/deploy/expanded-endoscopy-procedure-catalog-cutover.md`; promoção estável `v0.10.0` somente após validação.
 - **Fase anterior:** promoção estável `v0.9.0` a partir da candidata validada `v0.9.0-rc.2`; change CRÍTICO `align-followup-causes-with-suspension-form` implementado, aceito, arquivado e com specs canônicas promovidas; upgrade de produção pendente.
 - **Change concluído:** `openspec/archive/align-followup-causes-with-suspension-form/`; taxonomia oficial de follow-up e projeção histórica implementadas, ainda sem deploy.
 - **Release anterior:** `v0.9.0-rc.1`, com `prioritize-specialized-procedure-requests` arquivado e publicado como candidata.
