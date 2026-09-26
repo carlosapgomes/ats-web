@@ -47,11 +47,19 @@
   de vínculo ausente e colédoco sem edição; suíte completa executada pelo
   worker como segurança extra: 4491 passed; ruff/format/mypy ok. P2
   adiados: nenhum deste slice.)*
-- [ ] 1.3 Implementar o Slice 003
+- [x] 1.3 Implementar o Slice 003
   (`slices/slice-003-family-umbrella-precedence.md`): precedência
   `family_umbrella_over_colonoscopy` na reconciliação — caso corrigido para
   `rectosigmoidoscopy_dilation` reprocessa e prossegue (fim do loop de
   revisão); declarado `colonoscopy` vira `exam_type_mismatch` claro.
+  *(1 rodada de review, veredito `OK` sem achados; guarda de não-vacuidade
+  do worker (>=1 ocorrência current de colonoscopy em vez de all() vacuo)
+  endossada pelo reviewer frente a D6; dict de precedência preservado +
+  campo aditivo procedure_precedence_rules fiado nos 3 destinos;
+  presenter com copy própria da família; 1 teste do Slice 001 editado com
+  justificativa (desfecho mismatch previsto no R3, intenção preservada);
+  187 passed nas suítes de regressão + suíte completa 4501 passed pelo
+  worker; ruff/format/mypy ok. 5 dos 6 arquivos orçados.)*
 - [ ] 1.4 Implementar o Slice 004
   (`slices/slice-004-structured-item-conflict-gate.md`): item estruturado do
   LLM1 contraditado por ocorrência não-atual gera

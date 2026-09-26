@@ -23,6 +23,13 @@ exatamente uma variação atômica atual (``eda_gastrostomy``/``eda_capsule``/
 ``rectosigmoidoscopy_argon`` sobre ``rectosigmoidoscopy``); o item estruturado
 sem ocorrência atual não suprime e o conjunto permanece misto (fail-closed na
 matriz, sem descartar valores).
+
+Slice 003 (D3): a MESMA proveniência sustenta ainda a precedência de FAMÍLIA —
+exatamente uma identidade atual de Retossigmoidoscopia absorve a ``colonoscopy``
+cujo conjunto só se sustenta pelo alias guarda-chuva do Motivo ``endoscopia
+digestiva baixa`` (``section == motivo_da_solicitacao``). Evidência atual
+explícita de colonoscopia, guarda-chuva atual citado no corpo ou ausência de
+ocorrência atual da família mantêm o conflito fail-closed na matriz.
 """
 
 from __future__ import annotations
@@ -108,6 +115,23 @@ _VARIATIONS_REQUIRING_LOCAL_LINK: frozenset[str] = frozenset(
 )
 # Identificador da regra de pacote registrado em evento/sugestão (D3).
 VARIATION_PRECEDENCE_RULE = "variation_over_base"
+# Identidades da família Retossigmoidoscopia (D3/Slice 003).
+_FAMILY_PROCEDURE_TYPES: frozenset[str] = frozenset(
+    {
+        ProcedureType.RECTOSIGMOIDOSCOPY,
+        ProcedureType.RECTOSIGMOIDOSCOPY_DILATION,
+        ProcedureType.RECTOSIGMOIDOSCOPY_ARGON,
+    }
+)
+# Alias guarda-chuva do Motivo: ``Endoscopia Digestiva Baixa`` é casado como
+# Colonoscopia (``_COLONOSCOPY_TERM_PATTERN``) sem ser solicitação de
+# colonoscopia por si (D3).
+_UMBRELLA_COLONOSCOPY_EXCERPT = "endoscopia digestiva baixa"
+# Seção de proveniência que autoriza a supressão (D1): o guarda-chuva citado no
+# CORPO (Justificativa/Resumo) NÃO autoriza.
+_MOTIVO_DA_SOLICITACAO_SECTION = "motivo_da_solicitacao"
+# Identificador da regra de família registrado em evento/sugestão (D3/Slice 003).
+FAMILY_UMBRELLA_PRECEDENCE_RULE = "family_umbrella_over_colonoscopy"
 
 
 def _current_request_occurrence_types(occurrences: Any) -> set[str]:
@@ -162,6 +186,66 @@ def _apply_variation_precedence(*, any_set: set[str], occurrences: Any) -> tuple
     return any_set - {base}, selected, (base,)
 
 
+def _family_identity_is_current(*, selected: str, occurrences: Any) -> bool:
+    """A identidade da família tem ocorrência atual que autoriza a regra (D3).
+
+    Variações ambíguas reutilizam o regime de ``_current_request_variation_types``
+    (vínculo local ``linked_base``); a base exige apenas ocorrência atual.
+    """
+    if selected in _VARIATION_BASE_TYPES:
+        return selected in _current_request_variation_types(occurrences)
+    return selected in _current_request_occurrence_types(occurrences)
+
+
+def _colonoscopy_is_only_the_motive_umbrella(*, occurrences: Any) -> bool:
+    """Toda ocorrência ATUAL de colonoscopia é o guarda-chuva marcado no Motivo (D3).
+
+    Exige ao menos uma ocorrência atual: a colonoscopia sustentada apenas pelo
+    item estruturado do LLM1 (sem evidência textual) não é "só guarda-chuva" e
+    não autoriza a supressão (fail-closed). Ocorrência atual do termo explícito
+    ou guarda-chuva atual citado no CORPO (``section`` ≠ Motivo) reprovam.
+    """
+    current_occurrences = [
+        occurrence
+        for occurrence in occurrences or ()
+        if str(getattr(occurrence, "procedure_type", "")) == ProcedureType.COLONOSCOPY
+        and str(getattr(occurrence, "qualification", "")) == _QUALIFICATION_CURRENT_REQUEST
+    ]
+    if not current_occurrences:
+        return False
+    return all(
+        str(getattr(occurrence, "excerpt", "")) == _UMBRELLA_COLONOSCOPY_EXCERPT
+        and str(getattr(occurrence, "section", "")) == _MOTIVO_DA_SOLICITACAO_SECTION
+        for occurrence in current_occurrences
+    )
+
+
+def _apply_family_umbrella_precedence(*, any_set: set[str], occurrences: Any) -> tuple[set[str], str, tuple[str, ...]]:
+    """Supressão da colonoscopia que só existe pelo guarda-chuva do Motivo (D3).
+
+    Condições (todas): exatamente uma identidade da família Retossigmoidoscopia
+    no conjunto; essa identidade com ocorrência atual (mesmo regime de
+    proveniência das variações); ``colonoscopy`` presente e TODA ocorrência sua
+    de solicitação atual sendo o alias guarda-chuva ``endoscopia digestiva
+    baixa`` marcado em ``motivo_da_solicitacao`` (D1). Qualquer evidência atual
+    explícita, guarda-chuva fora do Motivo ou ausência de ocorrência atual da
+    família mantém o conjunto bruto e falha fechado na matriz. Retorna o
+    conjunto reconciliado, a identidade selecionada e o tipo suprimido —
+    vazios quando não houve redução.
+    """
+    family = any_set & _FAMILY_PROCEDURE_TYPES
+    if len(family) != 1:
+        return any_set, "", ()
+    selected = str(next(iter(family)))
+    if not _family_identity_is_current(selected=selected, occurrences=occurrences):
+        return any_set, "", ()
+    if ProcedureType.COLONOSCOPY not in any_set:
+        return any_set, "", ()
+    if not _colonoscopy_is_only_the_motive_umbrella(occurrences=occurrences):
+        return any_set, "", ()
+    return any_set - {ProcedureType.COLONOSCOPY}, selected, (ProcedureType.COLONOSCOPY,)
+
+
 def _apply_specialized_precedence(*, any_set: set[str], occurrences: Any) -> tuple[set[str], str, tuple[str, ...]]:
     """Precedência de especializado único sobre convencionais (D1/ADR-0008).
 
@@ -198,8 +282,11 @@ class ProcedureReconciliationResult:
     ``suppressed_conventional_types`` carregam a precedência especializada
     efetivamente aplicada (D3); ``variation_precedence_applied``/
     ``selected_variation_type``/``suppressed_base_types`` carregam a supressão
-    da base EDA por um pacote atômico (Slices 003/004). Todos são vazios quando
-    não houve redução.
+    da base EDA por um pacote atômico (Slices 003/004);
+    ``family_umbrella_precedence_applied``/``selected_family_type``/
+    ``suppressed_umbrella_types`` carregam a supressão da colonoscopia que só
+    existe pelo guarda-chuva do Motivo (Slice 003). Todos são vazios quando não
+    houve redução.
     """
 
     action: str  # "proceed" | "auto_upgrade" | "nir_review"
@@ -213,6 +300,9 @@ class ProcedureReconciliationResult:
     variation_precedence_applied: bool = False
     selected_variation_type: str = ""
     suppressed_base_types: tuple[str, ...] = ()
+    family_umbrella_precedence_applied: bool = False
+    selected_family_type: str = ""
+    suppressed_umbrella_types: tuple[str, ...] = ()
 
 
 def _proceed(
@@ -222,6 +312,8 @@ def _proceed(
     suppressed_conventional_types: tuple[str, ...] = (),
     selected_variation_type: str = "",
     suppressed_base_types: tuple[str, ...] = (),
+    selected_family_type: str = "",
+    suppressed_umbrella_types: tuple[str, ...] = (),
 ) -> ProcedureReconciliationResult:
     return ProcedureReconciliationResult(
         action="proceed",
@@ -234,6 +326,9 @@ def _proceed(
         variation_precedence_applied=bool(selected_variation_type and suppressed_base_types),
         selected_variation_type=selected_variation_type,
         suppressed_base_types=suppressed_base_types,
+        family_umbrella_precedence_applied=bool(selected_family_type and suppressed_umbrella_types),
+        selected_family_type=selected_family_type,
+        suppressed_umbrella_types=suppressed_umbrella_types,
     )
 
 
@@ -256,6 +351,8 @@ def _nir_review(
     suppressed_conventional_types: tuple[str, ...] = (),
     selected_variation_type: str = "",
     suppressed_base_types: tuple[str, ...] = (),
+    selected_family_type: str = "",
+    suppressed_umbrella_types: tuple[str, ...] = (),
 ) -> ProcedureReconciliationResult:
     return ProcedureReconciliationResult(
         action="nir_review",
@@ -268,6 +365,9 @@ def _nir_review(
         variation_precedence_applied=bool(selected_variation_type and suppressed_base_types),
         selected_variation_type=selected_variation_type,
         suppressed_base_types=suppressed_base_types,
+        family_umbrella_precedence_applied=bool(selected_family_type and suppressed_umbrella_types),
+        selected_family_type=selected_family_type,
+        suppressed_umbrella_types=suppressed_umbrella_types,
     )
 
 
@@ -342,11 +442,21 @@ def reconcile_detected_procedures(
         any_set=any_set,
         occurrences=occurrences,
     )
+    # D3/Slice 003 — a família Retossigmoidoscopia atual absorve a colonoscopia
+    # que só se sustenta pelo alias guarda-chuva do Motivo. Roda DEPOIS da
+    # variação (a base já foi absorvida) e ANTES da matriz; qualquer evidência
+    # atual explícita de colonoscopia mantém o conflito fail-closed.
+    any_set, selected_family_type, suppressed_umbrella_types = _apply_family_umbrella_precedence(
+        any_set=any_set,
+        occurrences=occurrences,
+    )
     precedence_kwargs: dict[str, Any] = {
         "selected_specialized_type": selected_specialized_type,
         "suppressed_conventional_types": suppressed_conventional_types,
         "selected_variation_type": selected_variation_type,
         "suppressed_base_types": suppressed_base_types,
+        "selected_family_type": selected_family_type,
+        "suppressed_umbrella_types": suppressed_umbrella_types,
     }
 
     if any_set and frozenset(any_set) not in ALLOWED_PROCEDURE_SETS:
@@ -419,28 +529,61 @@ def reconcile_detected_procedures(
     )
 
 
+def _precedence_rule(*, rule: str, selected: str, suppressed: tuple[str, ...]) -> dict[str, object]:
+    """Metadado enxuto de UMA redução: regra, selecionado e suprimidos (D3)."""
+    return {"rule": rule, "selected": selected, "suppressed": list(suppressed)}
+
+
+def serialize_procedure_precedence_rules(reconciliation: ProcedureReconciliationResult) -> list[dict[str, object]]:
+    """TODAS as reduções aplicadas, da mais significativa para a menos (D3).
+
+    A ordem é especializado → variação → família (a mesma do dict único de
+    ``serialize_procedure_precedence``); lista vazia quando nenhuma regra foi
+    aplicada. Existe separado porque o orchestrator atribui o retorno daquele
+    serializer direto a ``procedure_precedence`` (formato dict consumido pelo
+    presenter e por casos já persistidos).
+    """
+    rules: list[dict[str, object]] = []
+    if reconciliation.precedence_applied:
+        rules.append(
+            _precedence_rule(
+                rule=PROCEDURE_PRECEDENCE_RULE,
+                selected=reconciliation.selected_specialized_type,
+                suppressed=reconciliation.suppressed_conventional_types,
+            )
+        )
+    if reconciliation.variation_precedence_applied:
+        rules.append(
+            _precedence_rule(
+                rule=VARIATION_PRECEDENCE_RULE,
+                selected=reconciliation.selected_variation_type,
+                suppressed=reconciliation.suppressed_base_types,
+            )
+        )
+    if reconciliation.family_umbrella_precedence_applied:
+        rules.append(
+            _precedence_rule(
+                rule=FAMILY_UMBRELLA_PRECEDENCE_RULE,
+                selected=reconciliation.selected_family_type,
+                suppressed=reconciliation.suppressed_umbrella_types,
+            )
+        )
+    return rules
+
+
 def serialize_procedure_precedence(reconciliation: ProcedureReconciliationResult) -> dict[str, object] | None:
     """Metadados enxutos de precedência para evento e sugestão (D3).
 
     Retorna ``None`` quando nenhuma regra foi aplicada (singleton normal,
     conflito fail-closed, legado), evitando confundir correção determinística
-    com operação normal. As duas reduções (especializado sobre convencionais e
-    variação atômica sobre a base) usam o MESMO formato de proveniência —
-    regra, selecionado e suprimidos — nunca excerpt ou texto clínico.
+    com operação normal. Quando mais de uma redução se aplica, devolve a MAIS
+    SIGNIFICATIVA (a primeira de ``serialize_procedure_precedence_rules``) para
+    preservar o formato dict dos consumidores existentes. Todas as reduções usam
+    o MESMO formato de proveniência — regra, selecionado e suprimidos —, nunca
+    excerpt ou texto clínico.
     """
-    if reconciliation.precedence_applied:
-        return {
-            "rule": PROCEDURE_PRECEDENCE_RULE,
-            "selected": reconciliation.selected_specialized_type,
-            "suppressed": list(reconciliation.suppressed_conventional_types),
-        }
-    if reconciliation.variation_precedence_applied:
-        return {
-            "rule": VARIATION_PRECEDENCE_RULE,
-            "selected": reconciliation.selected_variation_type,
-            "suppressed": list(reconciliation.suppressed_base_types),
-        }
-    return None
+    rules = serialize_procedure_precedence_rules(reconciliation)
+    return rules[0] if rules else None
 
 
 def _project_review_evidence_spans(evidence_spans: list[dict[str, str]]) -> list[dict[str, str]]:

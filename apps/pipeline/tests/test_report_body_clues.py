@@ -12,13 +12,25 @@ Slice 002 — conectores instrumentais no vínculo variação↔base: `via`, `po
 da família na mesma cláusula (R1–R3), sem afetar a demotion do termo sem vínculo
 nem o bloqueio de anatomia dilatada (R4), com a detecção v4 do texto-exemplo
 completo (R5).
+
+Slice 003 — precedência de família sobre o guarda-chuva do Motivo: exatamente
+uma identidade atual da família Retossigmoidoscopia absorve a `colonoscopy`
+cujo conjunto só se sustenta pelo alias guarda-chuva `Endoscopia Digestiva
+Baixa` marcado em `motivo_da_solicitacao` (R1–R5), com metadado de regra
+própria no dict único e na lista aditiva (R2/R6b).
 """
 
 from __future__ import annotations
 
 import pytest
 
-from apps.pipeline.procedure_reconciliation import ProcedureReconciliationResult, reconcile_detected_procedures
+from apps.cases.models import Case, CaseEvent, CaseStatus
+from apps.pipeline.procedure_reconciliation import (
+    ProcedureReconciliationResult,
+    reconcile_detected_procedures,
+    serialize_procedure_precedence,
+    serialize_procedure_precedence_rules,
+)
 from apps.pipeline.scope_detection import (
     ProcedureOccurrence,
     _justificativa_section_spans,
@@ -27,6 +39,12 @@ from apps.pipeline.scope_detection import (
     detect_procedure_occurrences,
     detect_requested_procedures_v4,
 )
+from apps.pipeline.tests.test_rectosigmoidoscopy_pipeline_v4 import (
+    _recto_procedure,
+    _run,
+    _suggested_action,
+)
+from apps.pipeline.tests.test_slice_002_pipeline import _llm1_json, _single_procedure_recommendation
 
 JUSTIFICATIVA_SECTION = "justificativa_da_transferencia"
 MOTIVO_SECTION = "motivo_da_solicitacao"
@@ -295,11 +313,19 @@ def _reconcile(*, declared: tuple[str, ...], cleaned_text: str) -> ProcedureReco
 
 
 def test_justificativa_naming_a_divergent_family_fails_closed() -> None:
+    """Slice 003: a família absorve o guarda-chuva; a divergência segue fail-closed.
+
+    Antes do Slice 003 a colonoscopia do Motivo sobrevivia e o conflito era o da
+    matriz (``unsupported_procedure_combination``); agora o alias guarda-chuva é
+    absorvido pela família e o desfecho é o mismatch limpo — declarado divergente
+    NUNCA prossegue.
+    """
     result = _reconcile(declared=("colonoscopy",), cleaned_text=REGULATION_REPORT_TEXT)
     assert result.action == "nir_review"
-    assert result.reason_code == "unsupported_procedure_combination"
-    assert "colonoscopy" in result.detected_procedure_types
-    assert "rectosigmoidoscopy" in result.detected_procedure_types
+    assert result.reason_code == "exam_type_mismatch"
+    assert result.detected_procedure_types == ("rectosigmoidoscopy",)
+    assert result.family_umbrella_precedence_applied is True
+    assert result.suppressed_umbrella_types == ("colonoscopy",)
 
 
 def test_justificativa_naming_the_declared_family_is_detected_as_current_request() -> None:
@@ -390,3 +416,233 @@ def test_v4_detection_detects_combined_example() -> None:
     detection = detect_requested_procedures_v4(llm1_structured_data={}, cleaned_text=VIA_LINK_REPORT_TEXT)
     assert detection["rectosigmoidoscopy_dilation"] == {"strong": True, "any": True}
     assert detection["rectosigmoidoscopy"] == {"strong": True, "any": True}
+
+
+# ── Slice 003 (R1–R6b): precedência de família sobre o guarda-chuva ─────────
+
+# Justificativa nomeando a família BASE + Motivo com o alias guarda-chuva: a
+# família tem exatamente UMA identidade atual e a colonoscopia do conjunto vem
+# SÓ do guarda-chuva do Motivo (R1).
+FAMILY_MOTIVE_UMBRELLA_TEXT = (
+    "RELATÓRIO DE OCORRÊNCIAS\n"
+    "Motivo da Solicitação: Endoscopia Digestiva Baixa - Colonoscopia\n"
+    "Unid. Origem: Hospital Central\n"
+    "Justificativa da Transferência: Paciente com sangramento retal há dois meses. "
+    "Solicito Retossigmoidoscopia para investigação.\n"
+    "RELATÓRIO DE OCORRÊNCIAS\n"
+    "Informado por: Dra. Fulana\n"
+)
+
+BASE_ONLY_TEXT = "Justificativa da Transferência: Solicito Retossigmoidoscopia para investigação."
+
+
+def test_family_umbrella_absorbs_motive_colonoscopy() -> None:
+    """A família atual absorve a colonoscopia que só existe pelo guarda-chuva (R1)."""
+    result = _reconcile(declared=("rectosigmoidoscopy",), cleaned_text=FAMILY_MOTIVE_UMBRELLA_TEXT)
+    assert result.action == "proceed"
+    assert result.detected_procedure_types == ("rectosigmoidoscopy",)
+    assert result.family_umbrella_precedence_applied is True
+    assert result.selected_family_type == "rectosigmoidoscopy"
+    assert result.suppressed_umbrella_types == ("colonoscopy",)
+    assert result.variation_precedence_applied is False
+    assert serialize_procedure_precedence(result) == {
+        "rule": "family_umbrella_over_colonoscopy",
+        "selected": "rectosigmoidoscopy",
+        "suppressed": ["colonoscopy"],
+    }
+
+
+# ── R3: o relatório-exemplo real deixa de alternar com o NIR ────────────────
+
+
+def test_corrected_family_case_proceeds() -> None:
+    """NIR declarou a variação: variação + família reduzem ao declarado (R3)."""
+    result = _reconcile(declared=("rectosigmoidoscopy_dilation",), cleaned_text=VIA_LINK_REPORT_TEXT)
+    assert result.action == "proceed"
+    assert result.detected_procedure_types == ("rectosigmoidoscopy_dilation",)
+    assert result.variation_precedence_applied is True
+    assert result.family_umbrella_precedence_applied is True
+    assert result.selected_family_type == "rectosigmoidoscopy_dilation"
+    assert result.suppressed_umbrella_types == ("colonoscopy",)
+
+
+def test_declared_colonoscopy_mismatches_cleanly() -> None:
+    """NIR declarou Colonoscopia: mismatch limpo, sem conflito genérico (R3)."""
+    result = _reconcile(declared=("colonoscopy",), cleaned_text=VIA_LINK_REPORT_TEXT)
+    assert result.action == "nir_review"
+    assert result.reason_code == "exam_type_mismatch"
+    assert result.detected_procedure_types == ("rectosigmoidoscopy_dilation",)
+    assert result.family_umbrella_precedence_applied is True
+    assert result.suppressed_umbrella_types == ("colonoscopy",)
+
+
+# ── R2: metadado compatível (dict único + lista aditiva) ────────────────────
+
+
+def test_family_umbrella_precedence_metadata() -> None:
+    """Dict único preserva a regra mais significativa; a lista traz todas (R2)."""
+    result = _reconcile(declared=("rectosigmoidoscopy_dilation",), cleaned_text=VIA_LINK_REPORT_TEXT)
+    assert serialize_procedure_precedence(result) == {
+        "rule": "variation_over_base",
+        "selected": "rectosigmoidoscopy_dilation",
+        "suppressed": ["rectosigmoidoscopy"],
+    }
+    assert serialize_procedure_precedence_rules(result) == [
+        {
+            "rule": "variation_over_base",
+            "selected": "rectosigmoidoscopy_dilation",
+            "suppressed": ["rectosigmoidoscopy"],
+        },
+        {
+            "rule": "family_umbrella_over_colonoscopy",
+            "selected": "rectosigmoidoscopy_dilation",
+            "suppressed": ["colonoscopy"],
+        },
+    ]
+
+
+def test_precedence_rules_list_is_empty_without_reduction() -> None:
+    """Sem redução o dict é ``None`` e a lista é vazia (R2, compatibilidade)."""
+    result = _reconcile(declared=("rectosigmoidoscopy",), cleaned_text=BASE_ONLY_TEXT)
+    assert result.action == "proceed"
+    assert serialize_procedure_precedence(result) is None
+    assert serialize_procedure_precedence_rules(result) == []
+
+
+# ── R4: proveniência — só o guarda-chuva do MOTIVO autoriza ─────────────────
+
+
+def test_explicit_colonoscopy_current_not_absorbed() -> None:
+    """R4-i: ocorrência ATUAL do termo explícito não é guarda-chuva."""
+    text = (
+        "Motivo da Solicitação: Colonoscopia.\n"
+        "Justificativa da Transferência: Solicito Retossigmoidoscopia para investigação.\n"
+    )
+    explicit = _occurrence(occurrences=_occurrences(text), procedure_type="colonoscopy")
+    assert explicit.qualification == "current_request"
+    assert explicit.excerpt == "colonoscopia"
+
+    result = _reconcile(declared=("rectosigmoidoscopy",), cleaned_text=text)
+
+    assert result.family_umbrella_precedence_applied is False
+    assert result.action == "nir_review"
+    assert result.reason_code == "unsupported_procedure_combination"
+    assert set(result.detected_procedure_types) == {"rectosigmoidoscopy", "colonoscopy"}
+
+
+def test_body_umbrella_current_not_absorbed() -> None:
+    """R4-ii: guarda-chuva ATUAL citado no corpo (seção ≠ Motivo) não autoriza."""
+    text = (
+        "Motivo da Solicitação: Endoscopia Digestiva Baixa - Colonoscopia\n"
+        "Unid. Origem: Hospital Central\n"
+        "Justificativa da Transferência: Paciente com anemia. "
+        "Solicito Retossigmoidoscopia e Endoscopia Digestiva Baixa para investigação.\n"
+    )
+    body_umbrella = [
+        occurrence
+        for occurrence in _occurrences(text)
+        if occurrence.procedure_type == "colonoscopy" and occurrence.section == JUSTIFICATIVA_SECTION
+    ]
+    assert len(body_umbrella) == 1
+    assert body_umbrella[0].qualification == "current_request"
+    assert body_umbrella[0].excerpt == "endoscopia digestiva baixa"
+
+    result = _reconcile(declared=("rectosigmoidoscopy",), cleaned_text=text)
+
+    assert result.family_umbrella_precedence_applied is False
+    assert result.reason_code == "unsupported_procedure_combination"
+    assert set(result.detected_procedure_types) == {"rectosigmoidoscopy", "colonoscopy"}
+
+
+# ── R5: regime de proveniência da família ───────────────────────────────────
+
+
+def test_family_mention_does_not_absorb() -> None:
+    """Sem ocorrência ATUAL da família, a colonoscopia do Motivo permanece (R5)."""
+    text = (
+        "Motivo da Solicitação: Endoscopia Digestiva Baixa - Colonoscopia\n"
+        "Unid. Origem: Hospital Central\n"
+        "Complemento da Solicitação: paciente aguardando vaga. Retossigmoidoscopia.\n"
+    )
+    occurrences = _occurrences(text)
+    mention = _occurrence(occurrences=occurrences, procedure_type="rectosigmoidoscopy")
+    assert mention.qualification == "mention"
+
+    result = reconcile_detected_procedures(
+        declared=("rectosigmoidoscopy",),
+        strong=(),
+        any_evidence=("rectosigmoidoscopy", "colonoscopy"),
+        occurrences=occurrences,
+    )
+
+    assert result.family_umbrella_precedence_applied is False
+    assert result.reason_code == "unsupported_procedure_combination"
+    assert set(result.detected_procedure_types) == {"rectosigmoidoscopy", "colonoscopy"}
+
+
+# ── R6b: wiring do campo aditivo nos três destinos do orchestrator ──────────
+
+FAMILY_RULES_METADATA: list[dict[str, object]] = [
+    {
+        "rule": "variation_over_base",
+        "selected": "rectosigmoidoscopy_dilation",
+        "suppressed": ["rectosigmoidoscopy"],
+    },
+    {
+        "rule": "family_umbrella_over_colonoscopy",
+        "selected": "rectosigmoidoscopy_dilation",
+        "suppressed": ["colonoscopy"],
+    },
+]
+
+
+@pytest.mark.django_db
+class TestFamilyUmbrellaPipelineWiring:
+    """O dict legado segue sozinho; a lista aditiva acompanha os três destinos."""
+
+    def _target_case(self, user, *, declared_type: str) -> tuple[Case, int]:
+        case, client = _run(
+            user,
+            procedure_types=(declared_type,),
+            extracted_text=VIA_LINK_REPORT_TEXT,
+            llm1=_llm1_json(
+                procedures=[
+                    _recto_procedure(
+                        "rectosigmoidoscopy_dilation",
+                        excerpt="DILATAÇÃO DE ANASTOMOSE COLORRETAL VIA RETOSSIGMOIDOSCOPIA FLEXIVEL",
+                    )
+                ],
+                one_liner="Retossigmoidoscopia + Dilatação indicada.",
+            ),
+            recommendations=_single_procedure_recommendation("rectosigmoidoscopy_dilation"),
+        )
+        return case, len(client.calls)
+
+    def test_precedence_rules_wired_in_three_destinations(self, django_user_model) -> None:
+        user = django_user_model.objects.create_user(username="nir-family-wiring")
+        # (i) evento de detecção + (iii) sugestão final: NIR declarou a família.
+        case, calls = self._target_case(user, declared_type="rectosigmoidoscopy_dilation")
+        assert calls == 2
+        assert case.status == CaseStatus.WAIT_DOCTOR
+        detection_payload = (
+            CaseEvent.objects.filter(case=case, event_type="CASE_PROCEDURES_DETECTED").latest("timestamp").payload
+        )
+        assert detection_payload["procedure_precedence"] == FAMILY_RULES_METADATA[0]
+        assert detection_payload["procedure_precedence_rules"] == FAMILY_RULES_METADATA
+        suggested = _suggested_action(case)
+        assert suggested["procedure_precedence"] == FAMILY_RULES_METADATA[0]
+        assert suggested["procedure_precedence_rules"] == FAMILY_RULES_METADATA
+
+        # (i) evento de detecção + (ii) payload de revisão: NIR declarou Colonoscopia.
+        review_case, review_calls = self._target_case(user, declared_type="colonoscopy")
+        assert review_calls == 1
+        assert review_case.status == CaseStatus.WAIT_R1_CLEANUP_THUMBS
+        review_event = CaseEvent.objects.filter(case=review_case, event_type="CASE_PROCEDURES_DETECTED").latest(
+            "timestamp"
+        )
+        assert review_event.payload["procedure_precedence"] == FAMILY_RULES_METADATA[0]
+        assert review_event.payload["procedure_precedence_rules"] == FAMILY_RULES_METADATA
+        review_payload = _suggested_action(review_case)
+        assert review_payload["reason_code"] == "exam_type_mismatch"
+        assert review_payload["procedure_precedence"] == FAMILY_RULES_METADATA[0]
+        assert review_payload["procedure_precedence_rules"] == FAMILY_RULES_METADATA

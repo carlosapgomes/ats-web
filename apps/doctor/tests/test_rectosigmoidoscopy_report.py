@@ -218,6 +218,27 @@ class TestRectosigmoidoscopyProcedureSections:
         assert "Retossigmoidoscopia + Dilatação" in notices
         assert "especializado" not in notices
 
+    def test_family_umbrella_suppression_uses_the_family_copy(self, django_user_model) -> None:
+        """Slice 003/R7: a regra de família tem copy própria (não a de especializado)."""
+        user = django_user_model.objects.create_user(username="doc-recto-family-precedence")
+        case = _recto_case(
+            user,
+            procedure_types=(ProcedureType.RECTOSIGMOIDOSCOPY,),
+            precedence={
+                "rule": "family_umbrella_over_colonoscopy",
+                "selected": ProcedureType.RECTOSIGMOIDOSCOPY,
+                "suppressed": [ProcedureType.COLONOSCOPY],
+            },
+        )
+
+        notices = " ".join(_report(case)["notices"])
+
+        assert "Retossigmoidoscopia" in notices
+        assert "Colonoscopia" in notices
+        assert "descreve o procedimento da família correspondente" in notices
+        assert "especializado" not in notices
+        assert "pacote atômico" not in notices
+
 
 # ── R4/D11: histórico anterior pelo código exato ───────────────────────────
 
