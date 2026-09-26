@@ -38,10 +38,15 @@
   fail-safe documentado; variação ambígua promovida pela seção e demovida
   pelo vínculo local (interação coberta no Slice 002). Focado: 192 passed,
   ruff/format ok, mypy apps/pipeline ok.)*
-- [ ] 1.2 Implementar o Slice 002
+- [x] 1.2 Implementar o Slice 002
   (`slices/slice-002-via-link-separators.md`): conectores `via`/`por`/
   `atraves de`/`com uso de` no vínculo variação↔base; o
   relatório-exemplo passa a detectar `rectosigmoidoscopy_dilation` atual.
+  *(1 rodada de review, veredito `OK` sem achados; RED confirmado com 5
+  falhas pelos motivos previstos; regressão 204 passed incluindo os testes
+  de vínculo ausente e colédoco sem edição; suíte completa executada pelo
+  worker como segurança extra: 4491 passed; ruff/format/mypy ok. P2
+  adiados: nenhum deste slice.)*
 - [ ] 1.3 Implementar o Slice 003
   (`slices/slice-003-family-umbrella-precedence.md`): precedência
   `family_umbrella_over_colonoscopy` na reconciliação — caso corrigido para

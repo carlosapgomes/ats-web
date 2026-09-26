@@ -1159,9 +1159,10 @@ def detect_requested_procedures_v2(
 # D3: o contrato entre detecção e reconciliação não transporta apenas conjuntos
 # ``strong/any``. Cada ocorrência relevante leva tipo, qualificação
 # (``current_request|historical|negated|mention``), trecho/offsets (evidence id)
-# e o vínculo textual ``com/e EDA`` quando a expressão é composta. Só assim a
-# reconciliação distingue "EDA com Ecoendoscopia" (colapsa para Eco) de duas
-# solicitações independentes incompatíveis (vão ao NIR).
+# e o vínculo textual (``com``/``e`` ou conector instrumental) com a base
+# quando a expressão é composta. Só assim a reconciliação distingue "EDA com
+# Ecoendoscopia" (colapsa para Eco) de duas solicitações independentes
+# incompatíveis (vão ao NIR).
 
 _QUALIFICATION_CURRENT = "current_request"
 _QUALIFICATION_HISTORICAL = "historical"
@@ -1218,7 +1219,7 @@ _V4_VARIATION_TYPES: tuple[str, ...] = (
 # não traz NENHUMA ocorrência do termo (D3).
 _V4_STRUCTURED_CANDIDATE_TYPES: tuple[str, ...] = (*_V4_VARIATION_TYPES, "rectosigmoidoscopy")
 
-# Termos que exigem vínculo local ``com/e`` com a base na mesma expressão.
+# Termos que exigem vínculo local (conector + base) na mesma expressão.
 _VARIATIONS_REQUIRING_LOCAL_LINK: frozenset[str] = frozenset(
     {"eda_dilation", "rectosigmoidoscopy_dilation", "rectosigmoidoscopy_argon"}
 )
@@ -1240,8 +1241,12 @@ _VARIATION_BASE_PATTERNS: dict[str, re.Pattern[str]] = {
 # correspondente aparece ligado na mesma expressão.
 _BASE_IDENTITY_TYPES: frozenset[str] = frozenset({"eda", "rectosigmoidoscopy"})
 
-# Termos que expressam a MESMA ocorrência composta "<base> com/e <termo>".
-_LINK_SEPARATOR_PATTERN = re.compile(r"\b(?:com|e)\b")
+# Termos que expressam a MESMA ocorrência composta "<base> <conector> <termo>":
+# `com`/`e` históricos e os conectores instrumentais `via`, `por`,
+# `através de` e `com uso de` (D2). Escritos sobre o texto NORMALIZADO (sem
+# acentos) e com word boundaries; o vínculo continua exigindo a base na MESMA
+# cláusula — o conector sozinho nunca colapsa nada.
+_LINK_SEPARATOR_PATTERN = re.compile(r"\b(?:com uso de|atraves de|com|e|via|por)\b")
 
 
 # ── Seções rotuladas do relatório (Slice 001, D1) ────────────────────────────
@@ -1341,8 +1346,8 @@ class ProcedureOccurrence:
 
     ``start``/``end`` são offsets no texto normalizado e formam, com o tipo, o
     ``evidence_id`` determinístico da ocorrência (proveniência auditável).
-    ``linked_base`` marca a expressão composta ``<base> com/e <termo>`` no mesmo
-    contexto — ``EDA com <especializado>`` ou ``Retossigmoidoscopia com
+    ``linked_base`` marca a expressão composta ``<base> <conector> <termo>`` no
+    mesmo contexto — ``EDA com <especializado>`` ou ``Retossigmoidoscopia com
     dilatação/argônio`` —, que a reconciliação colapsa (D3). ``section`` nomeia
     a seção rotulada que contém a ocorrência (``""`` fora delas), para que a
     proveniência da Justificativa e do Motivo não se confunda.
@@ -1401,11 +1406,12 @@ def _family_base_type(procedure_type: str) -> str:
 
 
 def _linked_base_in_clause(*, clause: str, specialized: ProcedureOccurrence) -> bool:
-    """True quando há ocorrência da BASE ligada ao termo por ``com``/``e``.
+    """True quando há ocorrência da BASE ligada ao termo por um conector conhecido.
 
     O vínculo é textual e local: exige uma ocorrência da base da família no
-    MESMO contexto e um separador ``com``/``e`` entre as duas ocorrências.
-    Conjunto por si só nunca colapsa (D3).
+    MESMO contexto e um separador (``com``/``e``/``via``/``por``/``através
+    de``/``com uso de``) entre as duas ocorrências. Conjunto por si só nunca
+    colapsa (D3).
     """
     base_pattern = _VARIATION_BASE_PATTERNS.get(specialized.procedure_type, _EDA_PROCEDURE_OCCURRENCE_PATTERN)
     for match in base_pattern.finditer(clause):
@@ -1518,8 +1524,8 @@ def detect_procedure_occurrences(
 
     occurrences = _apply_section_context(occurrences=occurrences, normalized_text=normalized_text)
 
-    # Vínculo ``com/e`` é avaliado por cláusula, após todas as ocorrências da
-    # cláusula existirem (o separador pode preceder ou suceder o especializado).
+    # O vínculo é avaliado por cláusula, após todas as ocorrências da cláusula
+    # existirem (o conector pode preceder ou suceder o especializado).
     # Uma expressão composta cuja ocorrência da BASE é solicitação ATUAL é, por
     # definição, uma solicitação atual do termo composto (``EDA com Eco`` = Eco;
     # ``Retossigmoidoscopia com dilatação`` = Retossigmoidoscopia + Dilatação).
@@ -1618,7 +1624,7 @@ def replace_occurrence_link(
     linked: bool,
     qualification: str | None = None,
 ) -> ProcedureOccurrence:
-    """Devolve a ocorrência com o vínculo ``com/e <base>`` e a qualificação resolvidos."""
+    """Devolve a ocorrência com o vínculo ao termo/base e a qualificação resolvidos."""
     return ProcedureOccurrence(
         procedure_type=occurrence.procedure_type,
         qualification=qualification or occurrence.qualification,

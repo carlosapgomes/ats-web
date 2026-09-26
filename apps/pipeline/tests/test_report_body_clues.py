@@ -1,10 +1,17 @@
-"""Slice 001 — `Justificativa da Transferência` como contexto de solicitação.
+"""Pistas de procedimentos no corpo do relatório.
 
-Prova R1–R5b do slice: spans da seção no texto normalizado (R1), coleta de
-ocorrências com offsets absolutos por cláusula em vez de ``str.find`` (R1b),
-promoção de menção dentro da seção para solicitação atual (R2), não-promoção de
-histórico/negação e de ocorrências fora da seção (R3), rótulo de proveniência
-``section`` (R4) e direção de falha da reconciliação (R5b).
+Slice 001 — `Justificativa da Transferência` como contexto de solicitação:
+spans da seção no texto normalizado (R1), coleta de ocorrências com offsets
+absolutos por cláusula em vez de ``str.find`` (R1b), promoção de menção dentro
+da seção para solicitação atual (R2), não-promoção de histórico/negação e de
+ocorrências fora da seção (R3), rótulo de proveniência ``section`` (R4) e
+direção de falha da reconciliação (R5b).
+
+Slice 002 — conectores instrumentais no vínculo variação↔base: `via`, `por`,
+`através de` e `com uso de` (além de `com`/`e`) vinculam o termo ambíguo à base
+da família na mesma cláusula (R1–R3), sem afetar a demotion do termo sem vínculo
+nem o bloqueio de anatomia dilatada (R4), com a detecção v4 do texto-exemplo
+completo (R5).
 """
 
 from __future__ import annotations
@@ -301,4 +308,85 @@ def test_justificativa_naming_the_declared_family_is_detected_as_current_request
     assert occurrence.qualification == "current_request"
     assert occurrence.section == JUSTIFICATIVA_SECTION
     detection = detect_requested_procedures_v4(llm1_structured_data={}, cleaned_text=text)
+    assert detection["rectosigmoidoscopy"] == {"strong": True, "any": True}
+
+
+# ── Slice 002 (R1–R5): conectores instrumentais no vínculo ──────────────────
+
+# Trecho fiel do relatório-exemplo: a Justificativa traz a cláusula
+# `DILATAÇÃO DE ANASTOMOSE COLORRETAL VIA RETOSSIGMOIDOSCOPIA FLEXIVEL` — a
+# variação AMBÍGUA vem ANTES da base, unida pelo conector `via`.
+VIA_LINK_REPORT_TEXT = (
+    "RELATÓRIO DE OCORRÊNCIAS\n"
+    "Governo do Estado da Bahia\n"
+    "Motivo da Solicitação: Endoscopia Digestiva Baixa - Colonoscopia\n"
+    "Unid. Origem: Hospital Central\n"
+    "Justificativa da Transferência: Paciente com quadro de constipação intestinal crônica "
+    "refratária a tratamento clínico. DILATAÇÃO DE ANASTOMOSE COLORRETAL VIA "
+    "RETOSSIGMOIDOSCOPIA FLEXIVEL\n"
+    "RELATÓRIO DE OCORRÊNCIAS\n"
+    "Informado por: Dra. Fulana\n"
+)
+
+# `com`/`e` são os conectores históricos; `via`/`por`/`através de`/`com uso de`
+# são os instrumentais acrescentados no Slice 002 (R1).
+INSTRUMENTAL_CONNECTORS: tuple[str, ...] = ("via", "por", "através de", "com uso de", "com", "e")
+
+
+def test_via_link_in_justificativa_example() -> None:
+    """A base promovida pela seção estende o vínculo à variação via `via` (R2)."""
+    occurrences = _occurrences(VIA_LINK_REPORT_TEXT)
+    dilation = _occurrence(occurrences=occurrences, procedure_type="rectosigmoidoscopy_dilation")
+    assert dilation.qualification == "current_request"
+    assert dilation.linked_base is True
+    assert dilation.section == JUSTIFICATIVA_SECTION
+    base = _occurrence(occurrences=occurrences, procedure_type="rectosigmoidoscopy")
+    assert base.qualification == "current_request"
+    assert base.linked_base is True
+    # Mesmo termo na família EDA: sem base EDA na cláusula, segue mera menção.
+    eda_dilation = _occurrence(occurrences=occurrences, procedure_type="eda_dilation")
+    assert eda_dilation.qualification == "mention"
+    assert eda_dilation.linked_base is False
+    detection = detect_requested_procedures_v4(llm1_structured_data={}, cleaned_text=VIA_LINK_REPORT_TEXT)
+    assert detection["rectosigmoidoscopy_dilation"] == {"strong": True, "any": True}
+
+
+@pytest.mark.parametrize("connector", INSTRUMENTAL_CONNECTORS)
+def test_via_link_without_section(connector: str) -> None:
+    """Ordem invertida sem seção: verbo de solicitação + conector une o termo (R3)."""
+    text = f"Solicito dilatação de estenose {connector} retossigmoidoscopia."
+    occurrences = _occurrences(text)
+    dilation = _occurrence(occurrences=occurrences, procedure_type="rectosigmoidoscopy_dilation")
+    assert dilation.qualification == "current_request"
+    assert dilation.linked_base is True
+    assert dilation.section == ""
+    detection = detect_requested_procedures_v4(llm1_structured_data={}, cleaned_text=text)
+    assert detection["rectosigmoidoscopy_dilation"] == {"strong": True, "any": True}
+
+
+@pytest.mark.parametrize("connector", ("via", "por", "através de", "com uso de"))
+def test_unlinked_and_blocked_terms_stay_mention(connector: str) -> None:
+    """Conector novo não substitui o vínculo com a base nem vence o sítio bloqueado (R4)."""
+    unlinked_text = (
+        f"Relatório de imagem descreve dilatação de anastomose {connector} tomografia. Solicito retossigmoidoscopia."
+    )
+    for procedure_type in ("eda_dilation", "rectosigmoidoscopy_dilation"):
+        occurrence = _occurrence(occurrences=_occurrences(unlinked_text), procedure_type=procedure_type)
+        assert occurrence.qualification == "mention", (procedure_type, connector)
+        assert occurrence.linked_base is False, (procedure_type, connector)
+    unlinked_detection = detect_requested_procedures_v4(llm1_structured_data={}, cleaned_text=unlinked_text)
+    assert unlinked_detection["rectosigmoidoscopy_dilation"] == {"strong": False, "any": False}
+
+    blocked_text = f"Solicito dilatação de colédoco {connector} retossigmoidoscopia."
+    blocked = _occurrence(occurrences=_occurrences(blocked_text), procedure_type="rectosigmoidoscopy_dilation")
+    assert blocked.qualification == "mention"
+    assert blocked.linked_base is False
+    blocked_detection = detect_requested_procedures_v4(llm1_structured_data={}, cleaned_text=blocked_text)
+    assert blocked_detection["rectosigmoidoscopy_dilation"] == {"strong": False, "any": False}
+
+
+def test_v4_detection_detects_combined_example() -> None:
+    """O texto-exemplo completo resolve a variação sem item estruturado do LLM1 (R5)."""
+    detection = detect_requested_procedures_v4(llm1_structured_data={}, cleaned_text=VIA_LINK_REPORT_TEXT)
+    assert detection["rectosigmoidoscopy_dilation"] == {"strong": True, "any": True}
     assert detection["rectosigmoidoscopy"] == {"strong": True, "any": True}
