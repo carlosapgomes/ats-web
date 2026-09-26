@@ -77,10 +77,19 @@
   preservados). Focado: 265 passed; suíte completa 4509 passed; ruff/
   format/mypy ok. Nota residual: união fora da matriz pula projeção e
   deixa rows pending — consequência documentada da guarda de projeção.)*
-- [ ] 1.5 Implementar o Slice 005
+- [x] 1.5 Implementar o Slice 005
   (`slices/slice-005-nir-review-body-clues.md`): payload de revisão 2.1 com
   `detected_body_clues` e card de correção exibindo as pistas no momento da
   seleção do novo conjunto.
+  *(1 rodada de review, veredito `OK` sem achados; desvio menor documentado:
+  reuso do constant _MOTIVO_DA_SOLICITACAO_SECTION já existente em
+  procedure_reconciliation.py (Slice 003) em vez de import de
+  scope_detection — evita acoplamento e mantém o blast radius; seção
+  renderizada como identificador canônico (justificativa_da_transferencia),
+  sem section_label traduzida — nota P2 potencial de UX futura. Template
+  só com classes Bootstrap existentes (verificado por grep de classes no
+  diff); Focado: 232 passed; suíte completa 4526 passed; ruff/format/mypy
+  ok.)*
 
 ## 2. Gate final e encerramento
 

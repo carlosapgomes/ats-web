@@ -61,6 +61,7 @@ from apps.pipeline.policy import (
 from apps.pipeline.prior_case import PriorCaseContext, lookup_prior_case_context
 from apps.pipeline.procedure_reconciliation import (
     build_v2_review_payload,
+    project_body_clues,
     reconcile_detected_procedures,
     serialize_procedure_precedence,
     serialize_procedure_precedence_rules,
@@ -556,6 +557,7 @@ def _run_v4_pipeline(
             declared=declared,
             detected=reconciliation.detected_procedure_types,
             evidence_spans=_collect_v4_evidence_spans(result1.structured_data),
+            body_clues=project_body_clues(occurrences),
         )
         if precedence_metadata is not None:
             review_payload = {**review_payload, "procedure_precedence": precedence_metadata}

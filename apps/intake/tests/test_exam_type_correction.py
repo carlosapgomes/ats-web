@@ -1907,3 +1907,81 @@ class TestSpecializedCorrectionGate:
             content = client.get(reverse("intake:case_detail", args=[case.case_id])).content.decode()
         assert 'value="echoendoscopy"' in content
         assert 'value="cpre"' in content
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# Slice 005 — pistas do corpo no card de correção (R4/R5/R7)
+# ═══════════════════════════════════════════════════════════════════════════
+
+BODY_CLUES_SECTION_TITLE = "Pistas detectadas no corpo do relatório"
+
+
+def _case_with_body_clues(user, *, clues: list[dict[str, str]]) -> Case:
+    """Caso elegível cujo ``suggested_action`` carrega ``detected_body_clues``."""
+    case = _eligible_case(user=user)
+    case.suggested_action = {**(case.suggested_action or {}), "detected_body_clues": clues}
+    case.save()
+    return case
+
+
+@pytest.mark.django_db
+class TestCorrectionCardBodyClues:
+    """R4/R5/R7 — pistas do corpo renderizadas apenas quando presentes."""
+
+    CLUE: dict[str, str] = {
+        "procedure_type": "rectosigmoidoscopy_dilation",
+        "procedure_label": "Retossigmoidoscopia + Dilatação",
+        "qualification": "current_request",
+        "qualification_label": "Solicitação atual",
+        "section": "justificativa_da_transferencia",
+        "excerpt": "dilatação de anastomose colorretal via retossigmoidoscopia flexível",
+    }
+
+    def test_correction_card_shows_body_clues(self, client) -> None:
+        """R4/R5/R7: título, label, qualificação, seção e excerpt no card de correção."""
+        client, user = _nir_client(client, "nir-body-clues@test.com")
+        case = _case_with_body_clues(user, clues=[self.CLUE])
+
+        content = client.get(reverse("intake:case_detail", args=[case.case_id])).content.decode()
+
+        assert "Correção de Tipo de Exame" in content
+        assert BODY_CLUES_SECTION_TITLE in content
+        assert self.CLUE["procedure_label"] in content
+        assert self.CLUE["qualification_label"] in content
+        assert self.CLUE["section"] in content
+        assert self.CLUE["excerpt"] in content
+
+    def test_correction_card_without_clues_unchanged(self, client) -> None:
+        """R7: payload legado sem o campo → card sem a seção de pistas."""
+        client, user = _nir_client(client, "nir-no-body-clues@test.com")
+        case = _eligible_case(user=user)  # suggested_action sem `detected_body_clues`
+
+        content = client.get(reverse("intake:case_detail", args=[case.case_id])).content.decode()
+
+        assert "Correção de Tipo de Exame" in content
+        assert BODY_CLUES_SECTION_TITLE not in content
+
+    def test_motivo_clue_never_reaches_the_card(self, client) -> None:
+        """R7: a projeção exclui o Motivo — nenhuma pista dele chega ao card."""
+        from apps.pipeline.procedure_reconciliation import project_body_clues
+        from apps.pipeline.scope_detection import detect_procedure_occurrences
+
+        text = (
+            "RELATÓRIO DE OCORRÊNCIAS\n"
+            "Motivo da Solicitação: Endoscopia Digestiva Baixa - Colonoscopia\n"
+            "Unid. Origem: Hospital Central\n"
+            "Justificativa da Transferência: Solicitação de Retossigmoidoscopia para investigação.\n"
+        )
+        clues = project_body_clues(detect_procedure_occurrences(llm1_structured_data={}, cleaned_text=text))
+        assert clues, "a Justificativa deve produzir ao menos uma pista"
+        assert all(clue["section"] != "motivo_da_solicitacao" for clue in clues)
+
+        client, user = _nir_client(client, "nir-motivo-clue@test.com")
+        case = _case_with_body_clues(user, clues=clues)
+
+        content = client.get(reverse("intake:case_detail", args=[case.case_id])).content.decode()
+
+        assert BODY_CLUES_SECTION_TITLE in content
+        assert "Retossigmoidoscopia" in content
+        # O alias guarda-chuva do Motivo nunca é projetado como pista do corpo.
+        assert "endoscopia digestiva baixa" not in content

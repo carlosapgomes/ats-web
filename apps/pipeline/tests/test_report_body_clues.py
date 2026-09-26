@@ -31,9 +31,11 @@ from __future__ import annotations
 
 import pytest
 
-from apps.cases.models import Case, CaseEvent, CaseStatus
+from apps.cases.models import Case, CaseEvent, CaseStatus, ProcedureType
 from apps.pipeline.procedure_reconciliation import (
     ProcedureReconciliationResult,
+    build_v2_review_payload,
+    project_body_clues,
     reconcile_detected_procedures,
     serialize_procedure_precedence,
     serialize_procedure_precedence_rules,
@@ -812,3 +814,252 @@ def test_orchestrator_passes_conflicting(django_user_model) -> None:
     assert set(payload["detected_procedures"]) == {"colonoscopy", "rectosigmoidoscopy_dilation"}
     detection_event = CaseEvent.objects.filter(case=case, event_type="CASE_PROCEDURES_DETECTED").latest("timestamp")
     assert detection_event.payload["reason_code"] == "conflicting_procedure_evidence"
+
+
+# ── Slice 005 (R1/R2/R6/R9): pistas do corpo na revisão NIR ─────────────────
+
+# Ordem canônica do catálogo (``apps.cases.procedures``) para o teto de 8.
+ALL_PROCEDURE_TYPES: tuple[str, ...] = tuple(procedure_type.value for procedure_type in ProcedureType)
+
+
+def _occurrence_at(
+    procedure_type: str,
+    qualification: str,
+    *,
+    excerpt: str,
+    start: int,
+    section: str = "",
+) -> ProcedureOccurrence:
+    """Ocorrência construída à mão para isolar a projeção de R1."""
+    return ProcedureOccurrence(
+        procedure_type=procedure_type,
+        qualification=qualification,
+        excerpt=excerpt,
+        start=start,
+        end=start + len(excerpt),
+        section=section,
+    )
+
+
+# R1 — projeção pura das ocorrências do corpo
+
+
+def test_project_body_clues_shape_and_labels() -> None:
+    """A pista carrega tipo, label do catálogo, seção e excerpt (R1)."""
+    occurrence = _occurrence_at(
+        "rectosigmoidoscopy_dilation",
+        "current_request",
+        excerpt="retossigmoidoscopia com dilatacao",
+        start=10,
+        section=JUSTIFICATIVA_SECTION,
+    )
+    assert project_body_clues((occurrence,)) == [
+        {
+            "procedure_type": "rectosigmoidoscopy_dilation",
+            "procedure_label": "Retossigmoidoscopia + Dilatação",
+            "qualification": "current_request",
+            "qualification_label": "Solicitação atual",
+            "section": JUSTIFICATIVA_SECTION,
+            "excerpt": "retossigmoidoscopia com dilatacao",
+        }
+    ]
+
+
+@pytest.mark.parametrize(
+    ("qualification", "label"),
+    [
+        ("current_request", "Solicitação atual"),
+        ("mention", "Menção"),
+        ("historical", "Histórico"),
+        ("negated", "Negado"),
+    ],
+)
+def test_project_body_clues_translates_qualification(qualification: str, label: str) -> None:
+    """Qualificações são traduzidas para pt-BR (R1)."""
+    occurrence = _occurrence_at("eda", qualification, excerpt="eda", start=0)
+    assert project_body_clues((occurrence,))[0]["qualification_label"] == label
+
+
+def test_project_body_clues_orders_current_request_first_then_canonical() -> None:
+    """``current_request`` primeiro; restante na ordem canônica do tipo (R1)."""
+    occurrences = (
+        _occurrence_at("colonoscopy", "mention", excerpt="colonoscopia", start=0),
+        _occurrence_at("cpre", "current_request", excerpt="cpre", start=20),
+        _occurrence_at("eda", "current_request", excerpt="eda", start=30),
+    )
+    assert [clue["procedure_type"] for clue in project_body_clues(occurrences)] == ["eda", "cpre", "colonoscopy"]
+
+
+def test_project_body_clues_caps_at_eight_entries() -> None:
+    """Tetô de 8 entradas, cortando pela ordem canônica do tipo (R1)."""
+    occurrences = tuple(
+        _occurrence_at(procedure_type, "mention", excerpt=procedure_type, start=index)
+        for index, procedure_type in enumerate(reversed(ALL_PROCEDURE_TYPES))
+    )
+    clues = project_body_clues(occurrences)
+    assert len(clues) == 8
+    assert [clue["procedure_type"] for clue in clues] == list(ALL_PROCEDURE_TYPES[:8])
+
+
+def test_project_body_clues_truncates_excerpt_to_200_chars() -> None:
+    """``excerpt`` limitado a 200 chars (R1)."""
+    excerpt = "d" * 250
+    clue = project_body_clues((_occurrence_at("eda", "current_request", excerpt=excerpt, start=0),))[0]
+    assert clue["excerpt"] == "d" * 200
+
+
+def test_project_body_clues_excludes_motivo_section() -> None:
+    """Ocorrências do Motivo não são pistas do corpo (R1/D5)."""
+    clues = project_body_clues(_occurrences(REGULATION_REPORT_TEXT))
+    assert [clue["procedure_type"] for clue in clues] == ["rectosigmoidoscopy"]
+    assert clues[0]["section"] == JUSTIFICATIVA_SECTION
+    assert all(clue["section"] != MOTIVO_SECTION for clue in clues)
+
+
+def test_project_body_clues_empty_without_occurrences() -> None:
+    """Sem ocorrências a projeção é vazia (R1)."""
+    assert project_body_clues(()) == []
+
+
+# R2/R6 — o payload de revisão carrega as pistas (schema 2.1, aditivo)
+
+
+def test_review_payload_2_1_carries_clues() -> None:
+    """Schema 2.1 preserva os campos existentes e agrega ``detected_body_clues`` (R2/R6)."""
+    clues = project_body_clues(_occurrences(VIA_LINK_REPORT_TEXT))
+    payload = build_v2_review_payload(
+        case_id="case-1",
+        agency_record_number="12345",
+        reason_code="exam_type_mismatch",
+        reason_text="Tipo declarado difere do detectado.",
+        declared=("colonoscopy",),
+        detected=("rectosigmoidoscopy_dilation",),
+        evidence_spans=[{"field_path": "requested_procedures.0", "excerpt": "solicitacao"}],
+        body_clues=clues,
+    )
+    assert payload["schema_version"] == "2.1"
+    # Campos existentes permanecem (compatibilidade aditiva).
+    assert payload["language"] == "pt-BR"
+    assert payload["case_id"] == "case-1"
+    assert payload["agency_record_number"] == "12345"
+    assert payload["decision"] == "manual_review_required"
+    assert payload["suggestion"] == "manual_review_required"
+    assert payload["reason_code"] == "exam_type_mismatch"
+    assert payload["reason_text"] == "Tipo declarado difere do detectado."
+    assert payload["declared_procedures"] == ["colonoscopy"]
+    assert payload["detected_procedures"] == ["rectosigmoidoscopy_dilation"]
+    assert payload["exam_type"] == "rectosigmoidoscopy_dilation"
+    assert payload["declared_exam_type"] == "colonoscopy"
+    assert payload["detected_exam_type"] == "rectosigmoidoscopy_dilation"
+    assert payload["evidence_spans"] == [{"field_path": "requested_procedures.0", "excerpt": "solicitacao"}]
+    assert payload["detected_body_clues"] == clues
+
+    dilation = [clue for clue in clues if clue["procedure_type"] == "rectosigmoidoscopy_dilation"]
+    assert len(dilation) == 1
+    assert dilation[0]["qualification"] == "current_request"
+    assert dilation[0]["qualification_label"] == "Solicitação atual"
+    assert dilation[0]["section"] == JUSTIFICATIVA_SECTION
+    assert dilation[0]["excerpt"] == "dilatacao"
+    assert all(clue["section"] != MOTIVO_SECTION for clue in clues)
+
+
+def test_review_payload_without_clues_keeps_empty_list() -> None:
+    """Default ``body_clues=None`` mantém o formato aditivo (lista vazia) (R2)."""
+    payload = build_v2_review_payload(
+        case_id="case-1",
+        agency_record_number="12345",
+        reason_code="exam_type_mismatch",
+        reason_text="Tipo declarado difere do detectado.",
+        declared=("eda",),
+        detected=("colonoscopy",),
+        evidence_spans=[],
+    )
+    assert payload["schema_version"] == "2.1"
+    assert payload["detected_body_clues"] == []
+
+
+# R3 — o orchestrator repassa as pistas ao payload do gate NIR
+
+
+@pytest.mark.django_db
+def test_orchestrator_review_payload_has_clues(django_user_model) -> None:
+    """O gate de revisão NIR do pipeline real publica as pistas do corpo (R3)."""
+    user = django_user_model.objects.create_user(username="nir-body-clues-wiring")
+    case, client = _run(
+        user,
+        procedure_types=("colonoscopy",),
+        extracted_text=VIA_LINK_REPORT_TEXT,
+        llm1=_llm1_json(
+            procedures=[
+                _recto_procedure(
+                    "rectosigmoidoscopy_dilation",
+                    excerpt="DILATAÇÃO DE ANASTOMOSE COLORRETAL VIA RETOSSIGMOIDOSCOPIA FLEXIVEL",
+                )
+            ],
+            one_liner="Retossigmoidoscopia + Dilatação indicada.",
+        ),
+        recommendations=_single_procedure_recommendation("rectosigmoidoscopy_dilation"),
+    )
+    assert len(client.calls) == 1
+    assert case.status == CaseStatus.WAIT_R1_CLEANUP_THUMBS
+    payload = _suggested_action(case)
+    assert payload["reason_code"] == "exam_type_mismatch"
+    assert payload["schema_version"] == "2.1"
+
+    clues = payload["detected_body_clues"]
+    dilation = [clue for clue in clues if clue["procedure_type"] == "rectosigmoidoscopy_dilation"]
+    assert len(dilation) == 1
+    assert dilation[0]["qualification"] == "current_request"
+    assert dilation[0]["section"] == JUSTIFICATIVA_SECTION
+    assert all(clue["section"] != MOTIVO_SECTION for clue in clues)
+
+
+# R9 — cadeia pura ponta a ponta sobre o texto-exemplo real
+
+
+def test_end_to_end_example_flow() -> None:
+    """detect → reconcile → project → payload sem LLM/banco sobre o exemplo real (R9)."""
+    occurrences = _occurrences(VIA_LINK_REPORT_TEXT)
+    detection = detect_requested_procedures_v4(llm1_structured_data={}, cleaned_text=VIA_LINK_REPORT_TEXT)
+    signals = _signals(detection)
+
+    mismatch = reconcile_detected_procedures(
+        declared=("colonoscopy",),
+        strong=signals["strong"],
+        any_evidence=signals["any_evidence"],
+        occurrences=occurrences,
+        conflicting=signals["conflicting"],
+    )
+    assert mismatch.action == "nir_review"
+    assert mismatch.reason_code == "exam_type_mismatch"
+
+    proceed = reconcile_detected_procedures(
+        declared=("rectosigmoidoscopy_dilation",),
+        strong=signals["strong"],
+        any_evidence=signals["any_evidence"],
+        occurrences=occurrences,
+        conflicting=signals["conflicting"],
+    )
+    assert proceed.action == "proceed"
+    assert proceed.detected_procedure_types == ("rectosigmoidoscopy_dilation",)
+
+    clues = project_body_clues(occurrences)
+    payload = build_v2_review_payload(
+        case_id="case-1",
+        agency_record_number="12345",
+        reason_code=mismatch.reason_code,
+        reason_text=mismatch.reason_text,
+        declared=("colonoscopy",),
+        detected=mismatch.detected_procedure_types,
+        evidence_spans=[],
+        body_clues=clues,
+    )
+    assert payload["schema_version"] == "2.1"
+    assert payload["detected_procedures"] == ["rectosigmoidoscopy_dilation"]
+    assert payload["detected_body_clues"] == clues
+
+    dilation = [clue for clue in clues if clue["procedure_type"] == "rectosigmoidoscopy_dilation"]
+    assert len(dilation) == 1
+    assert dilation[0]["section"] == JUSTIFICATIVA_SECTION
+    assert dilation[0]["excerpt"] == "dilatacao"
+    assert all(clue["section"] != MOTIVO_SECTION for clue in clues)

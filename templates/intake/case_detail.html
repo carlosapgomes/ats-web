@@ -384,6 +384,24 @@
       <p class="mb-0">{{ correction_form_context.reason_text }}</p>
     </div>
   </div>
+  {# Slice 005 (R5/D5): pistas do corpo — só classes Bootstrap existentes. #}
+  {% if correction_form_context.body_clues %}
+  <div class="mb-3">
+    <p class="fw-semibold small mb-2">Pistas detectadas no corpo do relatório</p>
+    <ul class="list-group">
+      {% for clue in correction_form_context.body_clues %}
+      <li class="list-group-item">
+        <span class="fw-medium">{{ clue.procedure_label }}</span>
+        <span class="badge text-bg-secondary ms-1">{{ clue.qualification_label }}</span>
+        <blockquote class="blockquote mb-0 mt-1">
+          <p class="small mb-0">{{ clue.excerpt }}</p>
+          {% if clue.section %}<footer class="blockquote-footer">{{ clue.section }}</footer>{% endif %}
+        </blockquote>
+      </li>
+      {% endfor %}
+    </ul>
+  </div>
+  {% endif %}
   <form method="post" action="{% url 'intake:exam_type_correction' case.case_id %}">
     {% csrf_token %}
     <input type="hidden" name="lock_token" value="{{ lock_token }}">

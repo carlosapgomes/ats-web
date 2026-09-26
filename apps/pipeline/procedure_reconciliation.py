@@ -622,6 +622,50 @@ def _project_review_evidence_spans(evidence_spans: list[dict[str, str]]) -> list
     return projected
 
 
+# D5 (Slice 005) — limites e traduções da projeção de pistas do corpo.
+_BODY_CLUE_QUALIFICATION_LABELS: dict[str, str] = {
+    "current_request": "Solicitação atual",
+    "mention": "Menção",
+    "historical": "Histórico",
+    "negated": "Negado",
+}
+_BODY_CLUE_LIMIT = 8
+_BODY_CLUE_EXCERPT_LIMIT = 200
+
+
+def project_body_clues(occurrences: Any) -> list[dict[str, str]]:
+    """Projeta ocorrências do CORPO do relatório como pistas da revisão NIR (D5).
+
+    Exclui ocorrências marcadas na seção ``motivo_da_solicitacao`` (D1/Slice 001):
+    a evidência do Motivo não é pista do corpo — declarado e detectado já estão no
+    card de correção.
+    Ordena ``current_request`` primeiro e o restante pela ordem canônica do tipo,
+    limita a ``_BODY_CLUE_LIMIT`` entradas e trunca ``excerpt`` a
+    ``_BODY_CLUE_EXCERPT_LIMIT`` chars. Função pura sobre ``ProcedureOccurrence``:
+    sem ocorrências devolve lista vazia.
+    """
+    eligible = [occurrence for occurrence in occurrences or () if occurrence.section != _MOTIVO_DA_SOLICITACAO_SECTION]
+    eligible.sort(
+        key=lambda occurrence: (
+            occurrence.qualification != "current_request",
+            PROCEDURE_ORDER.get(occurrence.procedure_type, len(PROCEDURE_ORDER)),
+        )
+    )
+    return [
+        {
+            "procedure_type": occurrence.procedure_type,
+            "procedure_label": ProcedureType(occurrence.procedure_type).label,
+            "qualification": occurrence.qualification,
+            "qualification_label": _BODY_CLUE_QUALIFICATION_LABELS.get(
+                occurrence.qualification, occurrence.qualification
+            ),
+            "section": occurrence.section,
+            "excerpt": occurrence.excerpt[:_BODY_CLUE_EXCERPT_LIMIT],
+        }
+        for occurrence in eligible[:_BODY_CLUE_LIMIT]
+    ]
+
+
 def build_v2_review_payload(
     *,
     case_id: str,
@@ -631,12 +675,15 @@ def build_v2_review_payload(
     declared: tuple[str, ...],
     detected: tuple[str, ...],
     evidence_spans: list[dict[str, str]],
+    body_clues: Any = None,
 ) -> dict[str, object]:
-    """Payload enxuto de revisão NIR para contrato 2.0 (conjuntos + reason).
+    """Payload enxuto de revisão NIR para contrato 2.1 (conjuntos + reason + pistas).
 
     Mantém campos legados (``declared_exam_type``/``detected_exam_type``)
     apenas para compatibilidade de exibição; a informação canônica são os
-    conjuntos ``declared_procedures``/``detected_procedures``.
+    conjuntos ``declared_procedures``/``detected_procedures``. ``body_clues``
+    recebe a lista já projetada por ``project_body_clues`` (D5); o campo
+    ``detected_body_clues`` é aditivo e vazio quando ausente.
     """
     declared_types = _ordered(declared)
     detected_types = _ordered(detected)
@@ -645,7 +692,7 @@ def build_v2_review_payload(
         EDA_COLONOSCOPY if is_paired_appointment_set(declared_types) else (declared_types[0] if declared_types else "")
     )
     return {
-        "schema_version": "2.0",
+        "schema_version": "2.1",
         "language": "pt-BR",
         "case_id": case_id,
         "agency_record_number": agency_record_number,
@@ -659,4 +706,5 @@ def build_v2_review_payload(
         "declared_exam_type": declared_label,
         "detected_exam_type": detected_label,
         "evidence_spans": _project_review_evidence_spans(evidence_spans),
+        "detected_body_clues": list(body_clues or []),
     }
