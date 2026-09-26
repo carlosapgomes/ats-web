@@ -394,13 +394,17 @@
            enhancement em procedure_combobox.js. -->
       <div class="procedure-combobox">
         <select class="form-select procedure-combobox__select" id="correction-exam-type-select" name="exam_type"
-                data-procedure-combobox aria-labelledby="correction-exam-type-label" required>
+                data-procedure-combobox
+                data-combobox-placeholder="Buscar novo conjunto de procedimentos…"
+                aria-labelledby="correction-exam-type-label"
+                aria-describedby="correction-exam-type-search-hint" required>
           <option value=""{% if not correction_form_context.selected_exam_type %} selected{% endif %}>Selecione o novo conjunto de procedimentos…</option>
           {% for option in correction_form_context.exam_type_options %}
           <option value="{{ option.key }}"{% if option.aliases %} data-search-aliases="{{ option.aliases|join:', ' }}"{% endif %}{% if option.key == correction_form_context.declared_type_key %} disabled{% endif %}{% if option.key == correction_form_context.selected_exam_type %} selected{% endif %}>{{ option.label }}{% if option.key == correction_form_context.declared_type_key %} (atual){% endif %}</option>
           {% endfor %}
         </select>
       </div>
+      <p class="form-text procedure-combobox__hint" id="correction-exam-type-search-hint">Busca ignora acentos e aceita sinônimos aprovados. Navegue com ↑ ↓ e confirme com Enter.</p>
     </div>
     <div class="mb-3">
       <label for="correction-reason-code" class="form-label fw-semibold">

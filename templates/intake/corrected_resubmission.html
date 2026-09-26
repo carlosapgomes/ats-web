@@ -93,13 +93,17 @@
            o select é o valor submetido; progressive enhancement em JS. -->
       <div class="procedure-combobox">
         <select class="form-select procedure-combobox__select" id="exam-type-select" name="exam_type"
-                data-procedure-combobox aria-labelledby="exam-type-label" required>
+                data-procedure-combobox
+                data-combobox-placeholder="Buscar tipo de exame do novo envio…"
+                aria-labelledby="exam-type-label"
+                aria-describedby="exam-type-guidance exam-type-search-hint" required>
           <option value=""{% if not selected_exam_type %} selected{% endif %}>Selecione o tipo de exame…</option>
           {% for option in exam_type_options %}
           <option value="{{ option.key }}"{% if option.aliases %} data-search-aliases="{{ option.aliases|join:', ' }}"{% endif %}{% if not option.enabled %} disabled{% endif %}{% if option.key == selected_exam_type %} selected{% endif %}>{{ option.label }}{% if not option.enabled %} — indisponível para novos envios{% endif %}</option>
           {% endfor %}
         </select>
       </div>
+      <p class="form-text procedure-combobox__hint" id="exam-type-search-hint">Busca ignora acentos e aceita sinônimos aprovados. Navegue com ↑ ↓ e confirme com Enter.</p>
     </fieldset>
 
     <!-- Novo PDF principal -->

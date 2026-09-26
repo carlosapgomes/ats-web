@@ -92,6 +92,12 @@ GATED_SELECTIONS = (
     (ProcedureType.CPRE, "CPRE_INTAKE_ENABLED"),
 )
 
+# Affordances de busca da correção (Slice 002, R1/D2/D3): copy decorativo do
+# placeholder da jornada e hint persistente associado por aria-describedby.
+SEARCH_HINT = "Busca ignora acentos e aceita sinônimos aprovados. Navegue com ↑ ↓ e confirme com Enter."
+CORRECTION_SEARCH_PLACEHOLDER = "Buscar novo conjunto de procedimentos…"
+CORRECTION_SEARCH_HINT_ID = "correction-exam-type-search-hint"
+
 
 # ── Helpers ──────────────────────────────────────────────────────────────
 
@@ -207,13 +213,29 @@ def _option_values(block: str) -> list[str]:
     return values
 
 
-def _correction_select(html: str, case_id) -> str:
-    """Select canônico dentro do formulário de correção daquele caso."""
+def _correction_form(html: str, case_id) -> str:
+    """Formulário de correção daquele caso (ação canônica de exam_type)."""
     url = reverse("intake:exam_type_correction", args=[case_id])
     form = re.search(r"<form[^>]*action=\"" + re.escape(url) + r"\"[^>]*>.*?</form>", html, re.DOTALL)
     assert form is not None, "formulário de correção ausente"
     assert not re.search(r"<input[^>]*name=[\"']exam_type[\"']", form.group(0)), "radios de exam_type persistidos"
-    return _select_block(form.group(0))
+    return form.group(0)
+
+
+def _correction_select(html: str, case_id) -> str:
+    """Select canônico dentro do formulário de correção daquele caso."""
+    return _select_block(_correction_form(html, case_id))
+
+
+def _hint_paragraph(html: str, hint_id: str) -> str:
+    """Parágrafo do hint persistente de busca da superfície."""
+    match = re.search(
+        r'<p class="form-text procedure-combobox__hint" id="' + re.escape(hint_id) + r'">(.*?)</p>',
+        html,
+        re.DOTALL,
+    )
+    assert match is not None, f"hint persistente de busca ausente: {hint_id}"
+    return match.group(0)
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -237,6 +259,18 @@ class TestCorrectionCatalogSelection:
         assert _option_values(block) == list(PUBLISHED_SELECTION_KEYS)
         assert ProcedureType.EDA_CAPSULE.label in block
         assert ProcedureType.EDA_GASTROSTOMY.label in block
+
+    def test_correction_search_affordances_are_wired(self, client) -> None:
+        """R1/D2/D3: placeholder da jornada e hint persistente associado ao select."""
+        client, user = _nir_client(client, "nir-cor-search@test.com")
+        case = _make_eligible_case(user)
+
+        content = client.get(reverse("intake:case_detail", args=[case.case_id])).content.decode()
+        form = _correction_form(content, case.case_id)
+        select = _select_tag(form)
+        assert f'data-combobox-placeholder="{CORRECTION_SEARCH_PLACEHOLDER}"' in select
+        assert f'aria-describedby="{CORRECTION_SEARCH_HINT_ID}"' in select
+        assert SEARCH_HINT in _hint_paragraph(form, CORRECTION_SEARCH_HINT_ID)
 
     def test_correction_offers_only_flag_enabled_identities(self, client) -> None:
         """R1/D10: só o que a jornada permite — flags preexistentes continuam gate."""
@@ -288,6 +322,10 @@ class TestCorrectionCatalogSelection:
         attempted = _option_tag(block, ProcedureType.EDA_CAPSULE)
         assert "selected" in attempted
         assert "selected" not in _option_tag(block, ProcedureType.COLONOSCOPY)
+        # R4: hint e associação sobrevivem ao re-render com erro.
+        form = _correction_form(content, case.case_id)
+        assert f'aria-describedby="{CORRECTION_SEARCH_HINT_ID}"' in _select_tag(form)
+        assert SEARCH_HINT in _hint_paragraph(form, CORRECTION_SEARCH_HINT_ID)
         # Nada foi corrigido nem enfileirado.
         assert enqueue == []
         reloaded = Case.objects.get(pk=case.pk)

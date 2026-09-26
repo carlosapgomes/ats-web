@@ -12,6 +12,13 @@ Resumo executivo para retomada rapida apos pausas e para onboarding de novos con
 - `openspec/changes/` — changes ativos com proposals, designs e slices
 - Em caso de conflito: artefatos mais recentes no Git prevalecem.
 
+## Change Concluído — Affordances visuais da seleção de procedimentos
+
+- **Change arquivado:** `openspec/changes/archive/2026-09-25-procedure-selection-visual-affordances/` — presentation-only, nascido do smoke da `v0.10.0-rc.1` em produção; 2 slices verticais aceitos com reviewer independente (2 e 1 rodadas), gate final verde em 2026-09-25 (4456 testes = baseline 4445 + 11, ruff/format/mypy/node clean, validate strict ok); delta promovido a `searchable-procedure-selection` (+2 requisitos: affordances visuais e hint persistente).
+- **Branch:** `feature/procedure-selection-visual-affordances` (BASE_REF `3e2753a` = main; `8a562b2` slice 001 · `e4fde6c` slice 002 · `9d085c6` artefatos), mergeada em main. **Release `v0.10.0-rc.2` deliberadamente NÃO feita** (decisão operacional pendente).
+- **Entregue:** as quatro superfícies `data-procedure-combobox` (upload, correção, reenvio, destino médico) com placeholder da jornada (`data-combobox-placeholder` propagado ao input aprimorado), hint uniforme associado por `aria-describedby` (reenvio soma o `exam-type-guidance` pré-existente), chevron CSS-only rotativo via `:has([aria-expanded])`, borda de repouso `--hospital-control-border` em seletor vencedor de `.hospital-shell .form-control`, hover, alvo 44 px e `--selected`/`aria-selected` na listbox; guarda de vocabulário CSS `tests/test_procedure_combobox_css.py`. Contrato POST/ARIA-base/fallback SSR intocado.
+- **P2 diferidos:** ids para erro/guidance do destino médico; consolidação de helpers de teste de hint; guard de ordem de cascata; assert R4 médico select-scoped.
+
 ## Change Concluído — Catálogo ampliado de procedimentos endoscópicos
 
 - **Change arquivado:** `openspec/changes/archive/2026-09-25-support-expanded-endoscopy-procedure-catalog/` — proposal, design (D1–D15), 9 specs promovidas ao canônico (7 modificadas + `gastrostomy-infection-review` e `searchable-procedure-selection` novas) e 10 slices verticais aceitos com reviewer independente em 2026-09-25; gate final verde (4445 testes, ruff/mypy clean, change validate strict ok).

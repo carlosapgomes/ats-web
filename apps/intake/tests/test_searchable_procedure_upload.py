@@ -85,6 +85,12 @@ COMBOBOX_CSS_SELECTORS = (
     ".procedure-combobox__error",
 )
 
+# Affordances visuais da jornada de upload (Slice 001, R3/D2/D3): copy do
+# placeholder (decorativo) e do hint persistente (associado por describedby).
+SEARCH_PLACEHOLDER = "Digite para buscar — ex.: EDA, cápsula, dilatação…"
+SEARCH_HINT = "Busca ignora acentos e aceita sinônimos aprovados. Navegue com ↑ ↓ e confirme com Enter."
+SEARCH_HINT_ID = "exam-type-search-hint"
+
 
 # ── Helpers ──────────────────────────────────────────────────────────────
 
@@ -270,9 +276,25 @@ class TestUploadControlMarkup:
         html = self._home_html(client)
         select = _select_tag(html)
         assert 'aria-labelledby="exam-type-select-label"' in select
-        assert 'aria-describedby="exam-type-guidance"' in select
+        assert 'aria-describedby="exam-type-guidance exam-type-search-hint"' in select
         assert 'id="exam-type-select-label"' in html
         assert "js/procedure_combobox.js" in html, "combobox progressivo não carregado"
+
+    def test_search_placeholder_carries_the_journey_copy(self, client) -> None:
+        html = self._home_html(client)
+        assert f'data-combobox-placeholder="{SEARCH_PLACEHOLDER}"' in _select_tag(html)
+
+    def test_persistent_search_hint_is_visible_and_associated(self, client) -> None:
+        html = self._home_html(client)
+        hint = re.search(
+            r'<p class="form-text procedure-combobox__hint" id="[^"]+">(.*?)</p>',
+            html,
+            re.DOTALL,
+        )
+        assert hint is not None, "hint persistente de busca ausente"
+        assert f'id="{SEARCH_HINT_ID}"' in hint.group(0), "hint sem id estável"
+        assert SEARCH_HINT in hint.group(1)
+        assert f'aria-describedby="exam-type-guidance {SEARCH_HINT_ID}"' in _select_tag(html)
 
 
 # ── R4: fallback SSR, re-render e gating do submit ────────────────────────
@@ -314,7 +336,8 @@ class TestFallbackAndRerender:
 
         select = _select_tag(html)
         assert 'aria-invalid="true"' in select
-        assert 'aria-describedby="exam-type-guidance exam-type-error"' in select
+        assert 'aria-describedby="exam-type-guidance exam-type-search-hint exam-type-error"' in select
+        assert f'id="{SEARCH_HINT_ID}"' in html, "hint de busca perdido no re-render com erro"
         assert "data-procedure-combobox" in select
 
         error = re.search(r"<[^>]*id=\"exam-type-error\"[^>]*>", html)
