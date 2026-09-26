@@ -1244,6 +1244,97 @@ _BASE_IDENTITY_TYPES: frozenset[str] = frozenset({"eda", "rectosigmoidoscopy"})
 _LINK_SEPARATOR_PATTERN = re.compile(r"\b(?:com|e)\b")
 
 
+# ── Seções rotuladas do relatório (Slice 001, D1) ────────────────────────────
+#
+# O corpo do relatório de regulação é cortado por rótulos operacionais. Duas
+# seções carregam significado de solicitação: a Justificativa da Transferência,
+# onde o solicitante declara o que quer do regulador, e o próprio Motivo da
+# Solicitação. A lista de terminadores é LOCAL e conservadora — deliberadamente
+# sem import cruzado de ``apps.intake.regulation_gate``, que conhece uma lista
+# apenas parcialmente sobreposta.
+_SECTION_JUSTIFICATIVA = "justificativa_da_transferencia"
+_SECTION_MOTIVO = "motivo_da_solicitacao"
+
+_JUSTIFICATIVA_SECTION_LABEL = "justificativa da transferencia"
+_MOTIVO_SOLICITACAO_SECTION_LABEL = "motivo da solicitacao"
+
+# Rótulos que encerram uma seção rotulada: o cabeçalho de página e os rótulos
+# operacionais conhecidos, incluindo os das próprias seções (a seguinte começa
+# onde a anterior termina).
+_SECTION_TERMINATOR_LABELS: tuple[str, ...] = (
+    _JUSTIFICATIVA_SECTION_LABEL,
+    _MOTIVO_SOLICITACAO_SECTION_LABEL,
+    "relatorio de ocorrencias",
+    "informado por",
+    "complemento da solicitacao",
+    "resumo clinico",
+    "hipotese do diagnostico",
+    "encaminhamento",
+    "mot. solicit.",
+    "unid. origem",
+)
+
+# Seções rotuladas reconhecidas, com o nome canônico de proveniência (R4).
+_LABELLED_SECTIONS: tuple[tuple[str, str], ...] = (
+    (_JUSTIFICATIVA_SECTION_LABEL, _SECTION_JUSTIFICATIVA),
+    (_MOTIVO_SOLICITACAO_SECTION_LABEL, _SECTION_MOTIVO),
+)
+
+
+def _first_section_terminator(*, normalized_text: str, start: int) -> int:
+    """Fim de uma seção rotulada: primeiro terminador após ``start``.
+
+    Sem terminador, a seção corre até o fim do texto (D1).
+    """
+    end = len(normalized_text)
+    for label in _SECTION_TERMINATOR_LABELS:
+        position = normalized_text.find(label, start)
+        if 0 <= position < end:
+            end = position
+    return end
+
+
+def _labelled_section_spans(*, normalized_text: str, label: str) -> tuple[tuple[int, int], ...]:
+    """Spans ``(início no rótulo, fim no terminador seguinte)`` de uma seção rotulada."""
+    spans: list[tuple[int, int]] = []
+    search_from = 0
+    while True:
+        label_start = normalized_text.find(label, search_from)
+        if label_start < 0:
+            return tuple(spans)
+        content_start = label_start + len(label)
+        span_end = _first_section_terminator(normalized_text=normalized_text, start=content_start)
+        spans.append((label_start, span_end))
+        search_from = content_start + 1 if span_end <= content_start else span_end
+
+
+def _justificativa_section_spans(*, normalized_text: str) -> tuple[tuple[int, int], ...]:
+    """Spans da seção ``Justificativa da Transferência`` no texto normalizado (R1/D1)."""
+    return _labelled_section_spans(normalized_text=normalized_text, label=_JUSTIFICATIVA_SECTION_LABEL)
+
+
+def _section_marks(*, normalized_text: str) -> tuple[tuple[int, int, str], ...]:
+    """Marcadores ``(início, fim, nome da seção)`` para a proveniência das ocorrências (R4)."""
+    return tuple(
+        (span_start, span_end, name)
+        for label, name in _LABELLED_SECTIONS
+        for span_start, span_end in _labelled_section_spans(normalized_text=normalized_text, label=label)
+    )
+
+
+def _section_at(*, marks: tuple[tuple[int, int, str], ...], start: int) -> str:
+    """Nome da seção rotulada que contém a posição (``""`` fora de todas elas)."""
+    for span_start, span_end, name in marks:
+        if span_start <= start < span_end:
+            return name
+    return ""
+
+
+def _span_contains(*, spans: tuple[tuple[int, int], ...], start: int) -> bool:
+    """True quando a posição cai em algum dos spans informados."""
+    return any(span_start <= start < span_end for span_start, span_end in spans)
+
+
 @dataclass(frozen=True)
 class ProcedureOccurrence:
     """Ocorrência qualificada de um procedimento no texto da solicitação.
@@ -1252,7 +1343,9 @@ class ProcedureOccurrence:
     ``evidence_id`` determinístico da ocorrência (proveniência auditável).
     ``linked_base`` marca a expressão composta ``<base> com/e <termo>`` no mesmo
     contexto — ``EDA com <especializado>`` ou ``Retossigmoidoscopia com
-    dilatação/argônio`` —, que a reconciliação colapsa (D3).
+    dilatação/argônio`` —, que a reconciliação colapsa (D3). ``section`` nomeia
+    a seção rotulada que contém a ocorrência (``""`` fora delas), para que a
+    proveniência da Justificativa e do Motivo não se confunda.
     """
 
     procedure_type: str
@@ -1261,6 +1354,7 @@ class ProcedureOccurrence:
     start: int
     end: int
     linked_base: bool = False
+    section: str = ""
 
     @property
     def evidence_id(self) -> str:
@@ -1327,6 +1421,52 @@ def _linked_base_in_clause(*, clause: str, specialized: ProcedureOccurrence) -> 
     return False
 
 
+def _procedure_clause_spans(*, normalized_text: str) -> tuple[tuple[int, int], ...]:
+    """Spans absolutos das cláusulas usadas na coleta de ocorrências (R1b).
+
+    Mantém a regra histórica de corte (``[.;!?]`` seguido de espaço, ou quebra
+    de linha) com offsets ABSOLUTOS: relatórios reais repetem cláusulas
+    idênticas entre páginas e ``str.find`` devolvia sempre a primeira, o que
+    colapsava ocorrências distintas na mesma posição.
+    """
+    spans: list[tuple[int, int]] = []
+    cursor = 0
+    for boundary in re.finditer(r"(?<=[.;!?])\s+|\n", normalized_text):
+        spans.append((cursor, boundary.start()))
+        cursor = boundary.end()
+    spans.append((cursor, len(normalized_text)))
+    return tuple(spans)
+
+
+def _apply_section_context(
+    *,
+    occurrences: list[ProcedureOccurrence],
+    normalized_text: str,
+) -> list[ProcedureOccurrence]:
+    """Marca a seção de proveniência e pontua menções dentro da Justificativa (D1).
+
+    A promoção só alcança a mera menção: histórico e negação dentro da seção
+    permanecem como os padrões existentes os classificaram.
+    """
+    justificativa_spans = _justificativa_section_spans(normalized_text=normalized_text)
+    section_marks = _section_marks(normalized_text=normalized_text)
+    marked: list[ProcedureOccurrence] = []
+    for occurrence in occurrences:
+        qualification = occurrence.qualification
+        if qualification == _QUALIFICATION_MENTION and _span_contains(
+            spans=justificativa_spans, start=occurrence.start
+        ):
+            qualification = _QUALIFICATION_CURRENT
+        marked.append(
+            replace_occurrence_section(
+                occurrence=occurrence,
+                section=_section_at(marks=section_marks, start=occurrence.start),
+                qualification=qualification,
+            )
+        )
+    return marked
+
+
 def detect_procedure_occurrences(
     *,
     llm1_structured_data: dict[str, object],
@@ -1337,18 +1477,24 @@ def detect_procedure_occurrences(
     Determinístico e puro (sem ORM/I-O). ``llm1_structured_data`` é aceito para
     paridade de assinatura com os demais detectores; a proveniência textual
     vem exclusivamente de ``cleaned_text`` (relatório principal).
+
+    Identidade nomeada dentro da seção ``Justificativa da Transferência`` é
+    solicitação atual por definição documental (D1): a promoção da mera menção
+    acontece ANTES do passe de vínculo, para que a base promovida estenda o
+    vínculo à variação na mesma cláusula. Histórico e negação permanecem
+    intocados (os padrões existentes seguem como rede de segurança).
     """
     del llm1_structured_data  # proveniência textual é a autoridade aqui
     normalized_text = _normalize_scope_keyword_text(value=cleaned_text or "")
     if not normalized_text:
         return ()
 
-    clauses = [clause for clause in re.split(r"(?<=[.;!?])\s+|\n", normalized_text) if clause.strip()]
     occurrences: list[ProcedureOccurrence] = []
     seen: set[tuple[str, int, int]] = set()
-    for clause in clauses:
-        clause_start = normalized_text.find(clause)
-        if clause_start < 0:
+    clause_span_by_occurrence: dict[int, tuple[int, int]] = {}
+    for clause_start, clause_end in _procedure_clause_spans(normalized_text=normalized_text):
+        clause = normalized_text[clause_start:clause_end]
+        if not clause.strip():
             continue
         for procedure_type, pattern in _PROCEDURE_OCCURRENCE_PATTERNS:
             for match in pattern.finditer(clause):
@@ -1358,6 +1504,7 @@ def detect_procedure_occurrences(
                 if key in seen:
                     continue
                 seen.add(key)
+                clause_span_by_occurrence[start] = (clause_start, clause_end)
                 prefix, suffix = _clause_context(normalized_text, start, end)
                 occurrences.append(
                     ProcedureOccurrence(
@@ -1369,38 +1516,38 @@ def detect_procedure_occurrences(
                     )
                 )
 
+    occurrences = _apply_section_context(occurrences=occurrences, normalized_text=normalized_text)
+
     # Vínculo ``com/e`` é avaliado por cláusula, após todas as ocorrências da
     # cláusula existirem (o separador pode preceder ou suceder o especializado).
     # Uma expressão composta cuja ocorrência da BASE é solicitação ATUAL é, por
     # definição, uma solicitação atual do termo composto (``EDA com Eco`` = Eco;
     # ``Retossigmoidoscopia com dilatação`` = Retossigmoidoscopia + Dilatação).
-    clause_for = {
-        occurrence.start: _clause_text_at(normalized_text=normalized_text, start=occurrence.start)
-        for occurrence in occurrences
-    }
-    current_types_by_clause: dict[str, set[str]] = {}
+    # O agrupamento é por INTERVALO da cláusula (R1b): cláusulas de texto
+    # idêntico em páginas diferentes não compartilham contexto.
+    current_types_by_clause: dict[tuple[int, int], set[str]] = {}
     for occurrence in occurrences:
         if occurrence.qualification != _QUALIFICATION_CURRENT:
             continue
-        clause = clause_for[occurrence.start]
-        current_types_by_clause.setdefault(clause, set()).add(occurrence.procedure_type)
+        clause_span = clause_span_by_occurrence[occurrence.start]
+        current_types_by_clause.setdefault(clause_span, set()).add(occurrence.procedure_type)
 
     linked: list[ProcedureOccurrence] = []
-    linked_base_by_clause: dict[str, set[str]] = {}
+    linked_base_by_clause: dict[tuple[int, int], set[str]] = {}
     resolved: list[ProcedureOccurrence] = []
     for occurrence in occurrences:
-        clause = clause_for[occurrence.start]
+        clause_span = clause_span_by_occurrence[occurrence.start]
         if occurrence.procedure_type in _BASE_IDENTITY_TYPES:
             # A própria base é resolvida no final (vínculo simétrico).
             resolved.append(occurrence)
             continue
         base_type = _family_base_type(occurrence.procedure_type)
-        clause_start = normalized_text.find(clause)
-        local = replace_occurrence_offsets(occurrence=occurrence, clause_start=clause_start)
+        clause = normalized_text[clause_span[0] : clause_span[1]]
+        local = replace_occurrence_offsets(occurrence=occurrence, clause_start=clause_span[0])
         if _linked_base_in_clause(clause=clause, specialized=local):
-            linked_base_by_clause.setdefault(clause, set()).add(base_type)
+            linked_base_by_clause.setdefault(clause_span, set()).add(base_type)
             qualification = occurrence.qualification
-            if base_type in current_types_by_clause.get(clause, set()) and qualification == _QUALIFICATION_MENTION:
+            if base_type in current_types_by_clause.get(clause_span, set()) and qualification == _QUALIFICATION_MENTION:
                 qualification = _QUALIFICATION_CURRENT
             resolved.append(replace_occurrence_link(occurrence=occurrence, linked=True, qualification=qualification))
         else:
@@ -1409,7 +1556,8 @@ def detect_procedure_occurrences(
     # O vínculo é simétrico: a ocorrência da BASE da expressão composta também é
     # marcada, para que a reconciliação veja a proveniência de ambos os lados.
     for occurrence in resolved:
-        if occurrence.procedure_type in linked_base_by_clause.get(clause_for[occurrence.start], set()):
+        clause_span = clause_span_by_occurrence[occurrence.start]
+        if occurrence.procedure_type in linked_base_by_clause.get(clause_span, set()):
             linked.append(replace_occurrence_link(occurrence=occurrence, linked=True))
         else:
             linked.append(occurrence)
@@ -1451,16 +1599,6 @@ def _qualify_variation_occurrences(
     return qualified
 
 
-def _clause_text_at(*, normalized_text: str, start: int) -> str:
-    """Retorna a cláusula que contém a posição informada."""
-    left = 0
-    for boundary in re.finditer(r"[.;!?]\s+|\n", normalized_text):
-        if boundary.end() > start:
-            return normalized_text[left : boundary.start()]
-        left = boundary.end()
-    return normalized_text[left:]
-
-
 def replace_occurrence_offsets(*, occurrence: ProcedureOccurrence, clause_start: int) -> ProcedureOccurrence:
     """Reprojeta os offsets da ocorrência no referencial da cláusula."""
     return ProcedureOccurrence(
@@ -1470,6 +1608,7 @@ def replace_occurrence_offsets(*, occurrence: ProcedureOccurrence, clause_start:
         start=occurrence.start - clause_start,
         end=occurrence.end - clause_start,
         linked_base=occurrence.linked_base,
+        section=occurrence.section,
     )
 
 
@@ -1487,6 +1626,25 @@ def replace_occurrence_link(
         start=occurrence.start,
         end=occurrence.end,
         linked_base=linked,
+        section=occurrence.section,
+    )
+
+
+def replace_occurrence_section(
+    *,
+    occurrence: ProcedureOccurrence,
+    section: str,
+    qualification: str,
+) -> ProcedureOccurrence:
+    """Devolve a ocorrência com a seção de proveniência e a qualificação resolvidas."""
+    return ProcedureOccurrence(
+        procedure_type=occurrence.procedure_type,
+        qualification=qualification,
+        excerpt=occurrence.excerpt,
+        start=occurrence.start,
+        end=occurrence.end,
+        linked_base=occurrence.linked_base,
+        section=section,
     )
 
 
