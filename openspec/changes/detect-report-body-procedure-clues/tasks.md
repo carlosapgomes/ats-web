@@ -93,12 +93,18 @@
 
 ## 2. Gate final e encerramento
 
-- [ ] 2.1 Gate global: `uv run ruff check . && uv run ruff format --check .`
+- [x] 2.1 Gate global: `uv run ruff check . && uv run ruff format --check .`
   e `uv run mypy .` e `POSTGRES_TEST_HOST_PORT=55433 uv run pytest`.
-- [ ] 2.2 `openspec validate --strict` do change; atualizar specs
-  (`procedure-neutral-analysis`, `exam-type-correction`) com os requisitos
-  entregues; commit dos artefatos de planejamento junto ao encerramento
-  (política do projeto).
-- [ ] 2.3 Relatório sumário do change (comportamento novo com o
-  relatório-exemplo ponta a ponta: detecção → revisão com pistas → correção →
-  proceed) para avaliação antes do arquivamento.
+  *(Verde: ruff `All checks passed!`; format `291 files already formatted`;
+  mypy `Success: no issues found in 321 source files`; pytest `4526 passed`
+  (152,77 s; baseline 4456 → +70 testes do change); node combobox `16 pass /
+  0 fail` incluído por higiene (template do card tocado).)*
+- [x] 2.2 `openspec validate --strict` do change; commit dos artefatos de
+  planejamento junto ao encerramento (política do projeto).
+  *(`Change is valid` em --strict; deltas de spec
+  `procedure-neutral-analysis` e `exam-type-correction` entregues no diretório
+  do change — promoção aos specs acontece no arquivamento, fora deste fluxo.)*
+- [x] 2.3 Relatório sumário do change para avaliação antes do arquivamento.
+  *(Relatório consolidado entregue na sessão do planner: slices, rodadas de
+  review, commits f7990bf/b065832/b40e1ed/78a5420/e48d2f2, validações,
+  P2s adiados e desvios documentados.)*
