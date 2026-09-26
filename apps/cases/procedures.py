@@ -152,6 +152,18 @@ ALLOWED_PROCEDURE_SETS: frozenset[frozenset[str]] = frozenset(
     {frozenset({code}) for code in SUPPORTED_PROCEDURE_TYPES} | {PAIRED_APPOINTMENT_SET}
 )
 
+# Relação base⊂pacote (ADR-0011 decisão 1): cada pacote atômico clínico contém
+# a base convencional da sua família. Constante autoritativa em ``apps.cases``;
+# ``apps.pipeline`` a importa (direção cases←pipeline) no lugar do mapa local,
+# eliminando o drift entre detecção e normalização.
+PROCEDURE_PACKAGE_BASES: dict[str, str] = {
+    ProcedureType.EDA_GASTROSTOMY: ProcedureType.EDA,
+    ProcedureType.EDA_CAPSULE: ProcedureType.EDA,
+    ProcedureType.EDA_DILATION: ProcedureType.EDA,
+    ProcedureType.RECTOSIGMOIDOSCOPY_DILATION: ProcedureType.RECTOSIGMOIDOSCOPY,
+    ProcedureType.RECTOSIGMOIDOSCOPY_ARGON: ProcedureType.RECTOSIGMOIDOSCOPY,
+}
+
 # Chaves de seleção válidas (design D10): cada código atômico mais a chave
 # derivada do combinado. Aliases e labels nunca são valores válidos.
 SELECTION_KEYS: tuple[str, ...] = (*SUPPORTED_PROCEDURE_TYPES, EDA_COLONOSCOPY)
@@ -507,6 +519,54 @@ def selection_key(procedure_types: tuple[str, ...]) -> str:
         return types[0]
     if not types:
         return ""
+    return INVALID_SELECTION_KEY
+
+
+def best_covering_selection(procedure_types: Any) -> str:
+    """Seleção válida mais completa que cobre ``procedure_types`` (ADR-0011 D1).
+
+    Função pura e total (sem I/O, nunca levanta): aceita uma coleção arbitrária
+    de identidades do catálogo — duplicatas exatas são deduplicadas primeiro —
+    e devolve a chave da combinação de ``ALLOWED_PROCEDURE_SETS`` que cobre
+    TODAS as identidades, ou :data:`INVALID_SELECTION_KEY` quando nenhuma
+    cobre. Regras, nesta ordem:
+
+    1. singleton canônico exato → a própria chave;
+    2. par exato ``{eda, colonoscopy}`` → ``eda_colonoscopy``;
+    3. base contida em pacote presente → o pacote absorve a base
+       (``{eda, eda_dilation}`` → ``eda_dilation``;
+       ``{rectosigmoidoscopy, rectosigmoidoscopy_argon}`` →
+       ``rectosigmoidoscopy_argon``);
+    4. qualquer outro conjunto → :data:`INVALID_SELECTION_KEY`: duas variações
+       da mesma base, variação + colonoscopia, dois especializados,
+       especializado + convencional, valor fora do catálogo (sozinho ou misto —
+       desconhecido nunca é filtrado para fabricar validade) e conjuntos sem
+       cobertura. A matriz atual não produz ambiguidade: quando a cobertura
+       existe, ela é única (ambiente ambíguo resolvido como inválido, nunca
+       arbitrário).
+
+    Divergência deliberada de :func:`selection_key`: o conjunto vazio devolve
+    :data:`INVALID_SELECTION_KEY` (e não ``""``), pois a comparação de decisão
+    exige uma declaração canônica não-vazia e nunca deve igualar o vazio (D2).
+
+    Relação com :func:`selection_key`: esta função normaliza o conjunto
+    detectado para decisão/exibição; a evidência bruta permanece na auditoria.
+    A função é pura e não aplica precedências de detecção (especializado sobre
+    convencional, variação sobre base — ADR-0008/ADR-0010): elas acontecem
+    ANTES, fora do helper, sobre o conjunto bruto detectado — por isso
+    ``{eda, echoendoscopy}`` aqui é ``invalid``, não ``echoendoscopy``.
+    """
+    types = frozenset(str(raw) for raw in (procedure_types or ()))
+    if not types:
+        return INVALID_SELECTION_KEY
+    if len(types) == 1:
+        code = next(iter(types))
+        return code if code in PROCEDURE_ORDER else INVALID_SELECTION_KEY
+    if types == PAIRED_APPOINTMENT_SET:
+        return EDA_COLONOSCOPY
+    for package, base in PROCEDURE_PACKAGE_BASES.items():
+        if types == {package, base}:
+            return package
     return INVALID_SELECTION_KEY
 
 
