@@ -1,0 +1,6 @@
+schema: spec-driven
+created: 2026-09-26
+goal: Normalizar o conjunto detectado para a seleção válida mais completa que
+  o cobre na decisão e na exibição, tornar o gate de conflito declarado-aware
+  (corrigir para a best-covering prossegue) e preservar a evidência bruta na
+  auditoria, encerrando o beco sem saída da correção NIR.

@@ -175,3 +175,5 @@ evento; payload passa a ser normalizado).
   ∅`, resolução também no branch de matriz, payload só fora da matriz, evento
   bruto via campo explícito, riscos residuais LLM1/card×tabela). Status mudado
   de Proposed para Accepted pelo operador.
+- 2026-09-26: Implementada no change `normalize-detected-set-to-valid-selection`
+  (3 slices, gate final 4602 testes; commit de fechamento `de4420a`).
