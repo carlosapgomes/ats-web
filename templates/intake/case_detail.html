@@ -384,9 +384,12 @@
       <p class="mb-0">{{ correction_form_context.reason_text }}</p>
     </div>
   </div>
-  {# Item 1.0: a listagem de pistas saiu do card — o payload `detected_body_clues`
-     permanece em `suggested_action` apenas para auditoria; a origem da detecção
-     vive no motivo da revisão. #}
+  {% comment %}
+    Item 1.0 (followup-body-clue-detection-hardening): a listagem de pistas
+    saiu do card — o payload `detected_body_clues` permanece em
+    `suggested_action` apenas para auditoria; a origem da detecção vive no
+    motivo da revisão.
+  {% endcomment %}
   <form method="post" action="{% url 'intake:exam_type_correction' case.case_id %}">
     {% csrf_token %}
     <input type="hidden" name="lock_token" value="{{ lock_token }}">
