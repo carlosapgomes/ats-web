@@ -912,10 +912,9 @@ def case_detail(request: HttpRequest, case_id: uuid.UUID) -> HttpResponse:
             # para marcar "(atual)" — nunca a coluna removida.
             "declared_type_key": declared_badge["declared_type_key"],
             "detected_exam_type_label": _correction_detected_label(suggested),
+            # Item 1.0: a origem da detecção vive no motivo; as pistas seguem
+            # apenas no payload de auditoria (`detected_body_clues`), sem render.
             "reason_text": suggested.get("reason_text", ""),
-            # Slice 005 (R4/D5): pistas do corpo projetadas no payload de revisão;
-            # payload legado sem o campo → lista vazia (card inalterado).
-            "body_clues": suggested.get("detected_body_clues", []),
             "correction_reason_choices": list(EXAM_TYPE_CORRECTION_REASONS.items()),
             # R1 (Slice 007): MESMO combobox/chaves do upload; só as identidades
             # habilitadas pelas flags preexistentes são oferecidas.

@@ -1910,78 +1910,98 @@ class TestSpecializedCorrectionGate:
 
 
 # ═══════════════════════════════════════════════════════════════════════════
-# Slice 005 — pistas do corpo no card de correção (R4/R5/R7)
+# Item 1.0 — card só com declarado/detectado/motivo (origem vive no motivo)
 # ═══════════════════════════════════════════════════════════════════════════
 
 BODY_CLUES_SECTION_TITLE = "Pistas detectadas no corpo do relatório"
+ORIGIN_REASON_TEXT = (
+    "Tipo de procedimento declarado difere do detectado na solicitação atual; "
+    "revisão manual obrigatória. Origem da detecção: Justificativa da Transferência."
+)
+CLUE_EXCERPT = "dilatacao de anastomose colorretal via retossigmoidoscopia flexivel"
 
 
-def _case_with_body_clues(user, *, clues: list[dict[str, str]]) -> Case:
-    """Caso elegível cujo ``suggested_action`` carrega ``detected_body_clues``."""
+def _case_with_review_payload(user, *, suggested: dict[str, object]) -> Case:
+    """Caso elegível cujo ``suggested_action`` carrega o payload de revisão dado."""
     case = _eligible_case(user=user)
-    case.suggested_action = {**(case.suggested_action or {}), "detected_body_clues": clues}
+    case.suggested_action = {**(case.suggested_action or {}), **suggested}
     case.save()
     return case
 
 
-@pytest.mark.django_db
-class TestCorrectionCardBodyClues:
-    """R4/R5/R7 — pistas do corpo renderizadas apenas quando presentes."""
-
-    CLUE: dict[str, str] = {
+def _body_clue() -> dict[str, str]:
+    """Pista no formato do payload 2.1 (``detected_body_clues``) mantido para auditoria."""
+    return {
         "procedure_type": "rectosigmoidoscopy_dilation",
         "procedure_label": "Retossigmoidoscopia + Dilatação",
         "qualification": "current_request",
         "qualification_label": "Solicitação atual",
         "section": "justificativa_da_transferencia",
-        "excerpt": "dilatação de anastomose colorretal via retossigmoidoscopia flexível",
+        "excerpt": CLUE_EXCERPT,
     }
 
-    def test_correction_card_shows_body_clues(self, client) -> None:
-        """R4/R5/R7: título, label, qualificação, seção e excerpt no card de correção."""
-        client, user = _nir_client(client, "nir-body-clues@test.com")
-        case = _case_with_body_clues(user, clues=[self.CLUE])
 
-        content = client.get(reverse("intake:case_detail", args=[case.case_id])).content.decode()
+@pytest.mark.django_db
+class TestCorrectionCardReviewReason:
+    """Item 1.0 — sem listagem de pistas; o motivo informa a origem da detecção."""
 
-        assert "Correção de Tipo de Exame" in content
-        assert BODY_CLUES_SECTION_TITLE in content
-        assert self.CLUE["procedure_label"] in content
-        assert self.CLUE["qualification_label"] in content
-        assert self.CLUE["section"] in content
-        assert self.CLUE["excerpt"] in content
-
-    def test_correction_card_without_clues_unchanged(self, client) -> None:
-        """R7: payload legado sem o campo → card sem a seção de pistas."""
-        client, user = _nir_client(client, "nir-no-body-clues@test.com")
-        case = _eligible_case(user=user)  # suggested_action sem `detected_body_clues`
+    def test_card_never_renders_body_clues_listing(self, client) -> None:
+        """Payload 2.1 com pistas → card sem listagem e sem excerpt."""
+        client, user = _nir_client(client, "nir-review-reason@test.com")
+        case = _case_with_review_payload(user, suggested={"detected_body_clues": [_body_clue()]})
 
         content = client.get(reverse("intake:case_detail", args=[case.case_id])).content.decode()
 
         assert "Correção de Tipo de Exame" in content
         assert BODY_CLUES_SECTION_TITLE not in content
+        assert CLUE_EXCERPT not in content
+        # As três colunas de revisão seguem sendo as únicas do bloco.
+        assert "Tipo declarado" in content
+        assert "Tipo detectado" in content
+        assert "Motivo da revisão" in content
 
-    def test_motivo_clue_never_reaches_the_card(self, client) -> None:
-        """R7: a projeção exclui o Motivo — nenhuma pista dele chega ao card."""
-        from apps.pipeline.procedure_reconciliation import project_body_clues
-        from apps.pipeline.scope_detection import detect_procedure_occurrences
-
-        text = (
-            "RELATÓRIO DE OCORRÊNCIAS\n"
-            "Motivo da Solicitação: Endoscopia Digestiva Baixa - Colonoscopia\n"
-            "Unid. Origem: Hospital Central\n"
-            "Justificativa da Transferência: Solicitação de Retossigmoidoscopia para investigação.\n"
-        )
-        clues = project_body_clues(detect_procedure_occurrences(llm1_structured_data={}, cleaned_text=text))
-        assert clues, "a Justificativa deve produzir ao menos uma pista"
-        assert all(clue["section"] != "motivo_da_solicitacao" for clue in clues)
-
-        client, user = _nir_client(client, "nir-motivo-clue@test.com")
-        case = _case_with_body_clues(user, clues=clues)
+    def test_card_renders_reason_text_with_detection_origin(self, client) -> None:
+        """O motivo do payload (com sufixo de origem) é exibido no card."""
+        client, user = _nir_client(client, "nir-origin-reason@test.com")
+        case = _case_with_review_payload(user, suggested={"reason_text": ORIGIN_REASON_TEXT})
 
         content = client.get(reverse("intake:case_detail", args=[case.case_id])).content.decode()
 
-        assert BODY_CLUES_SECTION_TITLE in content
-        assert "Retossigmoidoscopia" in content
-        # O alias guarda-chuva do Motivo nunca é projetado como pista do corpo.
-        assert "endoscopia digestiva baixa" not in content
+        assert ORIGIN_REASON_TEXT in content
+        assert BODY_CLUES_SECTION_TITLE not in content
+
+    def test_legacy_payload_without_clues_renders_unchanged_card(self, client) -> None:
+        """Payload legado sem ``detected_body_clues`` → card inalterado."""
+        client, user = _nir_client(client, "nir-legacy-reason@test.com")
+        case = _eligible_case(user=user)  # suggested_action legado, sem pistas
+
+        content = client.get(reverse("intake:case_detail", args=[case.case_id])).content.decode()
+
+        assert "Correção de Tipo de Exame" in content
+        assert BODY_CLUES_SECTION_TITLE not in content
+        assert "Tipo declarado" in content
+        assert "Tipo detectado" in content
+        assert "Motivo da revisão" in content
+        assert "Tipo de exame declarado difere da solicitacao atual." in content
+
+    def test_card_form_contract_keys_unchanged(self, client) -> None:
+        """O formulário do card mantém URL, csrf e chaves submetidas."""
+        client, user = _nir_client(client, "nir-form-contract@test.com")
+        case = _case_with_review_payload(user, suggested={"detected_body_clues": [_body_clue()]})
+
+        content = client.get(reverse("intake:case_detail", args=[case.case_id])).content.decode()
+
+        assert reverse("intake:exam_type_correction", args=[case.case_id]) in content
+        assert 'name="csrfmiddlewaretoken"' in content
+        assert 'name="exam_type"' in content
+        assert 'name="reason_code"' in content
+        assert 'name="lock_token"' in content
+
+    def test_card_hidden_for_payload_outside_eligible_reason_codes(self, client) -> None:
+        """Elegibilidade server-side permanece a única porta do card."""
+        client, user = _nir_client(client, "nir-not-eligible@test.com")
+        case = _eligible_case(user=user, reason_code="auto_upgrade_strong_evidence")
+
+        content = client.get(reverse("intake:case_detail", args=[case.case_id])).content.decode()
+
+        assert "Correção de Tipo de Exame" not in content
