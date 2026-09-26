@@ -91,6 +91,21 @@
   diff); Focado: 232 passed; suíte completa 4526 passed; ruff/format/mypy
   ok.)*
 
+- [x] 1.6 Implementar o Slice 006
+  (`slices/slice-006-llm1-body-section-prompt.md`, emenda aprovada pelo
+  usuário): prompt LLM1 v4 instrui que Justificativa da Transferência e
+  Complemento da Solicitação são fontes legítimas de solicitação atual, com
+  field_path canônicos recomendados — guidance no conteúdo canônico (nova
+  versão via seed) e no sufixo sempre anexado do renderizador; guardrails
+  preservados; deploy exige re-rodar seed_prompts.
+  *(1 rodada de review, veredito `OK` sem achados; desvio menor documentado:
+  teste de bump do seed renomeado/estendido para os 4 nomes neutros (adapt/
+  extend, semântica llm2 inalterada); RED com 4 falhas pelos motivos
+  previstos; focado 182 passed + apps/pipeline+apps/llm 841 passed; ruff/
+  format/mypy ok. Risco residual: comportamento do modelo valida-se no rc
+  (versão de prompt por evento para atribuição); janela deploy→seed coberta
+  pelo sufixo garantido.)*
+
 ## 2. Gate final e encerramento
 
 - [x] 2.1 Gate global: `uv run ruff check . && uv run ruff format --check .`

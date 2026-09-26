@@ -214,6 +214,40 @@ declarado → `proceed` (confirmação, não desvio).
 `declared_by_nir` e `set_detected_procedures` permanecem intocados (contrato
 "detecção nunca altera declaração").
 
+### D8 — Prompt LLM1 v4 reconhece seções do corpo como fonte de solicitação
+
+Emenda aprovada pelo usuário após o gate final dos slices 001-005 (fecha o
+modo de falha residual: redação fora da rede determinística + LLM
+sub-reportando porque o prompt não legitimava a Justificativa → proceed
+silencioso). Guidance em DUAS camadas:
+
+- **(a) Conteúdo canônico** (`LLM1_V4_DEFAULT_SYSTEM_PROMPT` e
+  `LLM1_V4_DEFAULT_USER_PROMPT`/instruções de schema em
+  `apps/pipeline/llm1_service_v4.py`): o `seed_prompts` é idempotente por
+  conteúdo exato (`active.content == content`) — re-executar cria nova
+  versão ativa (max+1) e desativa a anterior sem apagar histórico; os
+  eventos `CASE_PROCEDURES_DETECTED`/payload já registram
+  `prompt_{system,user}_version` → atribuição auditável no rc.
+- **(b) Sufixo sempre anexado** em `_render_user_prompt` (~224-249, onde
+  vivem os guardrails atuais): UMA linha de garantia nomeando
+  Justificativa/Complemento como fontes legítimas — presente mesmo com
+  template de banco desatualizado na janela deploy→seed.
+
+Conteúdo das instruções: o `Motivo da Solicitação` costuma registrar apenas o
+exame base porque a central de regulação não oferece subtipos; o
+procedimento efetivamente solicitado frequentemente está no corpo —
+`Justificativa da Transferência` e `Complemento da Solicitação` são fontes
+legítimas de solicitação atual quando o texto sustenta; `field_path`
+canônicos RECOMENDADOS (string livre no schema 4.0, sem mudança de
+contrato): `motivo_da_solicitacao`, `justificativa_da_transferencia`,
+`complemento_da_solicitacao`, `resumo_clinico`, `relatorio_medico`.
+Guardrails inalterados: histórico/negação nunca criam solicitação atual;
+`evidence_spans` com excerpt real obrigatórios; estilo sem acentos do prompt
+preservado (convenção dos constants atuais). Testável: contratos de texto
+(constants, sufixo renderizado com template arbitrário, bump de versão do
+seed); comportamento do modelo valida-se no rc (fora do escopo de teste
+unitário). Deploy exige re-executar `seed_prompts` (runbook/release notes).
+
 ### D7 — Deliberadamente não feito
 
 Prompts LLM (o gate D4 cria o landing zone seguro para future change),

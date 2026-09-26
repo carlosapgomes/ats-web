@@ -112,6 +112,31 @@ A reconciliação MUST suprimir `colonoscopy` do conjunto detectado quando: exat
 - **THEN** nenhuma supressão de família ocorre
 - **AND** o conjunto segue para a matriz (fail-closed).
 
+### Requirement: Prompt do LLM1 reconhece seções do corpo como fonte de solicitação atual
+
+O prompt do LLM1 MUST instruir que os campos `Justificativa da Transferência` e `Complemento da Solicitação` são fontes legítimas de evidência de solicitação atual (dado que o `Motivo da Solicitação` costuma registrar apenas o exame base), MUST preservar os guardrails de histórico/negação e a exigência de `evidence_spans` com excerpt real, e MUST recomendar valores canônicos de `field_path` sem alterar o schema 4.0. A instrução MUST estar presente no conteúdo canônico semeado e no sufixo sempre anexado pelo renderizador do user prompt (garantia com template de banco desatualizado).
+
+#### Scenario: Instrução presente no prompt canônico e no sufixo
+
+- **GIVEN** o conteúdo canônico 4.0 e o render do user prompt com um template arbitrário
+- **WHEN** o contrato de texto é verificado
+- **THEN** ambos nomeiam a Justificativa como fonte legítima de solicitação atual
+- **AND** os guardrails de histórico/negação permanecem
+- **AND** `field_path` canônicos são recomendados sem mudança de schema.
+
+#### Scenario: Seed cria nova versão auditável
+
+- **GIVEN** versão ativa de prompt com conteúdo anterior
+- **WHEN** `seed_prompts` é executado
+- **THEN** uma nova versão ativa é criada com o conteúdo novo
+- **AND** versões históricas são preservadas com exatamente uma ativa por nome.
+
+#### Scenario: Schema inalterado
+
+- **GIVEN** `evidence_spans` do schema 4.0
+- **THEN** `field_path` permanece string livre (1-120) sem enum
+- **AND** os contratos strict existentes do LLM1 continuam válidos sem edição.
+
 ### Requirement: Item estruturado contraditado por ocorrência não-atual gera revisão NIR
 
 Quando o LLM1 reporta um procedimento estruturado cujo termo tem ocorrência não-atual (menção, histórico ou negação) no texto, a detecção MUST sinalizar conflito e a reconciliação MUST retornar `nir_review` com reason `conflicting_procedure_evidence`, incluindo o tipo conflitante no conjunto detectado. O item contraditado MUST NOT virar detecção (`strong`/`any` permanecem falsos) e o caso MUST NOT prosseguir silenciosamente quando o conjunto restante coincidir com o declarado.

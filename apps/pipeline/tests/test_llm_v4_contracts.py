@@ -13,6 +13,7 @@ Cobre:
 from __future__ import annotations
 
 import json
+import re
 from typing import Any, cast
 
 import pytest
@@ -21,6 +22,11 @@ from pydantic import ValidationError
 from apps.cases.procedures import (
     PROCEDURE_NEUTRAL_SCHEMA_VERSIONS,
     is_procedure_neutral_structured_data,
+)
+from apps.pipeline.llm1_service_v4 import (
+    LLM1_V4_DEFAULT_SYSTEM_PROMPT,
+    LLM1_V4_DEFAULT_USER_PROMPT,
+    _render_user_prompt,
 )
 from apps.pipeline.schemas.llm1_v2 import Llm1ResponseV2
 from apps.pipeline.schemas.llm1_v3 import Llm1ResponseV3
@@ -421,3 +427,113 @@ class TestAdaptersRecognizeV4:
         assert is_procedure_neutral_structured_data({"schema_version": "4.0"}) is True
         assert is_procedure_neutral_structured_data({"schema_version": "3.0"}) is True
         assert is_procedure_neutral_structured_data({"schema_version": "1.1"}) is False
+
+
+# ── Slice 006 (D8): o corpo do relatorio e fonte legitima de solicitacao atual ──
+
+
+CANONICAL_EVIDENCE_FIELD_PATHS: tuple[str, ...] = (
+    "motivo_da_solicitacao",
+    "justificativa_da_transferencia",
+    "complemento_da_solicitacao",
+    "resumo_clinico",
+    "relatorio_medico",
+)
+
+# Template de banco MINIMO e desatualizado (simula a janela deploy -> seed_prompts):
+# nenhuma instrucao de corpo de relatorio vem daqui.
+STALE_USER_PROMPT_TEMPLATE = "Template minimo desatualizado do banco: {case_id}"
+
+_ACCENTED_CHARACTERS: frozenset[str] = frozenset("áàâãäéèêëíìîïóòôõöúùûüçÁÀÂÃÄÉÈÊËÍÌÎÏÓÒÔÕÖÚÙÛÜÇ")
+
+
+def _accented_characters_in(text: str) -> set[str]:
+    return set(text) & _ACCENTED_CHARACTERS
+
+
+class TestLlm1V4BodySectionPromptGuidance:
+    """R1-R5: Justificativa/Complemento da Solicitacao sao fontes legitimas.
+
+    Guardrails permanecem: historico/negacao nunca criam solicitacao atual e
+    cada procedimento exige evidence_spans com excerpt real do relatorio.
+    """
+
+    def _rendered_prompt(self, template: str) -> str:
+        return _render_user_prompt(
+            template=template,
+            case_id="case-1",
+            agency_record_number="12345",
+            declared_procedure_types=("eda",),
+            clean_text="Texto clinico do relatorio.",
+        )
+
+    def test_system_prompt_names_body_sections_as_request_source(self) -> None:
+        """R1/R5-i: a instrucao nomeia as secoes do corpo como solicitação atual."""
+        prompt = LLM1_V4_DEFAULT_SYSTEM_PROMPT
+        lowered = prompt.lower()
+        assert "motivo da solicitacao" in lowered
+        assert "exame base" in lowered
+
+        instructive_segment = next(
+            segment
+            for segment in re.split(r"(?<=\.)\s+", prompt)
+            if "justificativa da transferencia" in segment.lower()
+        )
+        segment_lowered = instructive_segment.lower()
+        assert "complemento da solicitacao" in segment_lowered
+        assert "solicitacao atual" in segment_lowered
+
+        # Guardrails atuais preservados literalmente.
+        assert "cada item exige evidence_spans com field_path e excerpt" in prompt
+        assert "Nao invente procedimento, subtipo, dado laboratorial ou medicamento" in prompt
+
+    def test_user_prompt_recommends_canonical_field_paths(self) -> None:
+        """R2/R5-ii: o user prompt canonico recomenda field_path canonicos."""
+        prompt = LLM1_V4_DEFAULT_USER_PROMPT
+        assert "field_path canonicos" in prompt
+        for field_path in CANONICAL_EVIDENCE_FIELD_PATHS:
+            assert field_path in prompt, field_path
+
+    def test_rendered_prompt_keeps_body_section_guarantee_with_stale_template(self) -> None:
+        """R3/R5-iii: o sufixo sempre anexado garante a regra mesmo com template
+        de banco arbitrario, sem remover os guardrails existentes."""
+        rendered = self._rendered_prompt(STALE_USER_PROMPT_TEMPLATE)
+        lowered = rendered.lower()
+        assert "justificativa da transferencia" in lowered
+        assert "complemento da solicitacao" in lowered
+        assert "solicitacao atual" in lowered
+
+        assert "Historico/negacao nunca criam solicitacao atual" in rendered
+        assert "Cada procedimento de requested_procedures exige evidence_spans" in rendered
+        assert "excerpt reais do texto" in rendered
+
+    def test_body_section_prompt_text_is_accent_free(self) -> None:
+        """R5-iv: o texto novo segue o estilo sem acentos dos prompts canonicos."""
+        canonical = f"{LLM1_V4_DEFAULT_SYSTEM_PROMPT}\n{LLM1_V4_DEFAULT_USER_PROMPT}"
+        for snippet in (
+            "Motivo da Solicitacao",
+            "exame base",
+            "Justificativa da Transferencia",
+            "Complemento da Solicitacao",
+            "field_path canonicos",
+            *CANONICAL_EVIDENCE_FIELD_PATHS,
+        ):
+            assert snippet in canonical, snippet
+
+        motive_segment = next(
+            segment
+            for segment in re.split(r"(?<=\.)\s+", LLM1_V4_DEFAULT_SYSTEM_PROMPT)
+            if "Motivo da Solicitacao" in segment
+        )
+        field_path_segment = next(
+            segment
+            for segment in re.split(r"(?<=\.)\s+", LLM1_V4_DEFAULT_USER_PROMPT)
+            if "field_path canonicos" in segment
+        )
+        guarantee_line = next(
+            line
+            for line in self._rendered_prompt(STALE_USER_PROMPT_TEMPLATE).splitlines()
+            if "legitimas de solicitacao atual" in line
+        )
+        for new_prompt_text in (motive_segment, field_path_segment, guarantee_line):
+            assert not _accented_characters_in(new_prompt_text), new_prompt_text

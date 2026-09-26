@@ -78,6 +78,13 @@ as pistas detectadas no corpo do relatório para fundamentar a seleção.
   `detected_body_clues` (procedimento, qualificação, seção, excerpt —
   limitado) e o card de correção de tipo exibe essas pistas no momento da
   seleção do novo conjunto.
+- **Prompt LLM1 v4 (emenda aprovada):** o prompt passa a instruir que
+  `Justificativa da Transferência` e `Complemento da Solicitação` são fontes
+  legítimas de solicitação atual (o Motivo costuma trazer só o exame base),
+  com recomendação de `field_path` canônicos — guidance no conteúdo canônico
+  semeado (nova versão de prompt auditável por evento) E no sufixo sempre
+  anexado pelo renderizador (garantia mesmo com template de banco
+  desatualizado na janela deploy→seed).
 
 ## Capabilities
 
@@ -98,9 +105,14 @@ as pistas detectadas no corpo do relatório para fundamentar a seleção.
 - **Intake/UI:** `apps/intake/services.py` (reason code elegível),
   `apps/intake/views.py` + `templates/intake/case_detail.html` (exibição das
   pistas; apenas classes Bootstrap existentes, sem vocabulário CSS novo).
-- **Sem impacto pretendido:** FSM, catálogo/matriz de combinações, prompts
-  LLM, schemas LLM 4.0, declaração NIR (`declared_by_nir` intocado),
-  priority signals, filas/agendamento, analytics.
+- **Prompts (emenda):** `apps/pipeline/llm1_service_v4.py` (constants
+  canônicos + sufixo do renderizador); deploy exige re-executar
+  `seed_prompts` (idempotente por conteúdo; cria nova versão ativa e
+  preserva histórico) — passo de runbook/release notes.
+- **Sem impacto pretendido:** FSM, catálogo/matriz de combinações, schemas
+  LLM 4.0 (field_path permanece string livre), declaração NIR
+  (`declared_by_nir` intocado), priority signals, filas/agendamento,
+  analytics.
 
 ## Sucesso
 
@@ -113,6 +125,9 @@ as pistas detectadas no corpo do relatório para fundamentar a seleção.
   `rectosigmoidoscopy_dilation` e reprocessado, prossegue (sem loop).
 - Item estruturado do LLM1 contraditado por menção nunca mais permite
   `proceed` quando declarado == detectado-by-Motivo.
+- O prompt do LLM1 nomeia a Justificativa como fonte legítima de pedido
+  atual (contrato testado no texto; comportamento do modelo valida-se no rc,
+  com versão de prompt registrada por evento para atribuição).
 - Negações/históricos dentro da Justificativa continuam sem criar
   solicitação atual; termos ambíguos sem vínculo continuam menção.
 - Toda nova regra falha na direção NIR review (fail-closed), nunca na
@@ -120,9 +135,6 @@ as pistas detectadas no corpo do relatório para fundamentar a seleção.
 
 ## Fora de escopo (explícito)
 
-- Alterações de prompt LLM1/LLM2 (indicar a Justificativa como fonte de
-  evidence span) — change futuro; o gate de conflito deste change já cria o
-  landing zone seguro para isso.
 - Variantes ortográficas (ex.: `retosigmoidoscopia`) e novos termos de
   vocabulário (`plasma de argonio`, `APC`, `PEG`, sítios de dilatação).
 - Rework do extrator do Motivo (terminadores frágeis).
