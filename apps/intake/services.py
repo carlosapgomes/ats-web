@@ -288,6 +288,7 @@ EXAM_TYPE_CORRECTION_ELIGIBLE_REASON_CODES: frozenset[str] = frozenset(
         "mixed_exam_request",
         "unknown_exam_type",
         "unsupported_procedure_combination",
+        "conflicting_procedure_evidence",
     }
 )
 

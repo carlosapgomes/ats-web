@@ -126,24 +126,47 @@ class TestSeedPromptsV4CanonicalContent:
             assert active is not None
             assert "schema_version 4.0" in active.content
 
-    def test_active_3_0_prompt_is_upgraded_to_a_new_v4_version(self) -> None:
-        from apps.pipeline.llm2_service_v4 import LLM2_V4_DEFAULT_USER_PROMPT
+    def test_seed_creates_new_version_when_content_changes(self) -> None:
+        """R4: conteúdo ativo anterior → seed cria v+1 ativa com o conteúdo novo,
+        desativa a anterior e mantém exatamente uma versão ativa por nome.
 
-        PromptTemplate.objects.create(
-            name="exam_llm2_user",
-            version=1,
-            content="conteudo 3.0 legado",
-            is_active=True,
+        Cobre os quatro nomes neutros — inclusive os prompts LLM1 alterados pelo
+        slice 006.
+        """
+        from apps.pipeline.llm1_service_v4 import (
+            LLM1_V4_DEFAULT_SYSTEM_PROMPT,
+            LLM1_V4_DEFAULT_USER_PROMPT,
         )
+        from apps.pipeline.llm2_service_v4 import (
+            LLM2_V4_DEFAULT_SYSTEM_PROMPT,
+            LLM2_V4_DEFAULT_USER_PROMPT,
+        )
+
+        expected = {
+            "exam_llm1_system": LLM1_V4_DEFAULT_SYSTEM_PROMPT,
+            "exam_llm1_user": LLM1_V4_DEFAULT_USER_PROMPT,
+            "exam_llm2_system": LLM2_V4_DEFAULT_SYSTEM_PROMPT,
+            "exam_llm2_user": LLM2_V4_DEFAULT_USER_PROMPT,
+        }
+        for name in expected:
+            PromptTemplate.objects.create(
+                name=name,
+                version=1,
+                content=f"conteudo anterior legado {name}",
+                is_active=True,
+            )
+
         call_command("seed_prompts")
 
-        active = PromptTemplate.get_active("exam_llm2_user")
-        assert active is not None
-        assert active.version == 2
-        assert active.content == LLM2_V4_DEFAULT_USER_PROMPT
-        # A versão 3.0 permanece como histórico inativo (nunca apagada).
-        legacy = PromptTemplate.objects.get(name="exam_llm2_user", version=1)
-        assert legacy.is_active is False
+        for name, content in expected.items():
+            active = PromptTemplate.get_active(name)
+            assert active is not None, f"Missing active template: {name}"
+            assert active.version == 2
+            assert active.content == content
+            assert PromptTemplate.objects.filter(name=name, is_active=True).count() == 1
+            # A versão anterior permanece como histórico inativo (nunca apagada).
+            previous = PromptTemplate.objects.get(name=name, version=1)
+            assert previous.is_active is False
 
 
 @pytest.mark.django_db

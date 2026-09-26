@@ -139,7 +139,7 @@ class TestPackageDetectionV4:
 
     def test_eda_with_capsule_is_a_current_package_request(self) -> None:
         detection = self._detect(CAPSULE_TEXT)
-        assert detection["eda_capsule"] == {"strong": True, "any": True}
+        assert detection["eda_capsule"] == {"strong": True, "any": True, "conflicting": False}
         # A base EDA continua detectada: o colapso é decisão da reconciliação.
         assert detection["eda"]["any"] is True
 
@@ -150,7 +150,7 @@ class TestPackageDetectionV4:
 
     def test_eda_with_dilation_is_a_current_package_request(self) -> None:
         detection = self._detect(DILATION_ESOPHAGUS_TEXT)
-        assert detection["eda_dilation"] == {"strong": True, "any": True}
+        assert detection["eda_dilation"] == {"strong": True, "any": True, "conflicting": False}
         assert detection["eda"]["any"] is True
 
     def test_historical_capsule_does_not_create_a_package(self) -> None:
@@ -186,19 +186,19 @@ class TestPackageDetectionV4:
     def test_structured_item_alone_marks_the_package_as_candidate(self) -> None:
         structured: dict[str, object] = {"requested_procedures": [_capsule_procedure()]}
         detection = self._detect("Solicito EDA.", structured_data=structured)
-        assert detection["eda_capsule"] == {"strong": True, "any": True}
+        assert detection["eda_capsule"] == {"strong": True, "any": True, "conflicting": False}
 
     def test_negated_capsule_occurrence_overrides_the_structured_item(self) -> None:
         """P1 review: item estruturado não autoriza o pacote quando a ÚNICA
         ocorrência textual é negada — o caso falha fechado ao NIR."""
         structured: dict[str, object] = {"requested_procedures": [_capsule_procedure()]}
         detection = self._detect("Nao solicito capsula endoscopica neste momento.", structured_data=structured)
-        assert detection["eda_capsule"] == {"strong": False, "any": False}
+        assert detection["eda_capsule"] == {"strong": False, "any": False, "conflicting": True}
 
     def test_historical_capsule_occurrence_overrides_the_structured_item(self) -> None:
         structured: dict[str, object] = {"requested_procedures": [_capsule_procedure()]}
         detection = self._detect("Cápsula endoscópica realizada em 2023.", structured_data=structured)
-        assert detection["eda_capsule"] == {"strong": False, "any": False}
+        assert detection["eda_capsule"] == {"strong": False, "any": False, "conflicting": True}
 
     def test_loose_dilation_term_overrides_the_structured_item(self) -> None:
         """Termo solto (sem vínculo local com EDA) contradiz o item estruturado."""
@@ -207,7 +207,7 @@ class TestPackageDetectionV4:
             "Paciente encaminhado para dilatação esofágica por estenose.",
             structured_data=structured,
         )
-        assert detection["eda_dilation"] == {"strong": False, "any": False}
+        assert detection["eda_dilation"] == {"strong": False, "any": False, "conflicting": True}
 
 
 # ── R2/R3: reconciliação — colapso da base e fail-closed ───────────────────
@@ -433,24 +433,29 @@ class TestPackageReachesDoctor:
         assert len(client.calls) == 1
         payload = _suggested_action(case)
         assert payload["decision"] == "manual_review_required"
-        # P1 review: a ocorrência histórica não é solicitação atual, então o item
-        # estruturado NÃO detecta o pacote; só a base EDA fica detectada e o
-        # conjunto diverge do declarado (singleton) → fail closed ao NIR.
-        assert payload["reason_code"] == "exam_type_mismatch"
-        assert set(payload["detected_procedures"]) == {"eda"}
+        # Slice 004/R5: a ocorrência histórica contradiz o item estruturado. O
+        # pacote não vira detecção (strong/any falsos), mas fica sinalizado como
+        # conflito e entra no conjunto detectado → revisão NIR por conflito.
+        assert payload["reason_code"] == "conflicting_procedure_evidence"
+        assert set(payload["detected_procedures"]) == {"eda", "eda_dilation"}
+        # Conjunto fora da matriz: a projeção é pulada e a row declarada fica no
+        # estado pendente (nenhum NOT_DETECTED silencioso para o pacote).
         row = CaseProcedure.objects.get(case=case, procedure_type="eda_dilation")
-        assert row.detection_status == DetectionStatus.NOT_DETECTED
+        assert row.detection_status == DetectionStatus.PENDING
 
 
 # ── P1 review fix: item estruturado não sobrepõe texto não-atual ──────────
 
 
 class TestStructuredItemWithoutCurrentOccurrence:
-    """Item estruturado só autoriza o pacote quando o texto não o contradiz.
+    """Item estruturado não autoriza o pacote quando o texto o contradiz.
 
     Se a ÚNICA ocorrência do termo for histórica ou negada (ou apenas menção),
-    o pacote não é detectado e o caso falha fechado ao NIR — nunca prossegue
-    só porque o item estruturado coincide com a declaração (P1 review round 1).
+    o pacote não vira detecção (``strong``/``any`` falsos) e o caso falha fechado
+    ao NIR — nunca prossegue só porque o item estruturado coincide com a
+    declaração. Slice 004/R5: o item contraditado deixa de ser invisível — ele é
+    sinalizado como conflito e INCLUÍDO no conjunto detectado
+    (``conflicting_procedure_evidence``), não mais descartado em silêncio.
     """
 
     def test_negated_capsule_with_structured_item_fails_closed(self, django_user_model) -> None:
@@ -466,10 +471,10 @@ class TestStructuredItemWithoutCurrentOccurrence:
         assert case.status == CaseStatus.WAIT_R1_CLEANUP_THUMBS
         payload = _suggested_action(case)
         assert payload["decision"] == "manual_review_required"
-        assert payload["reason_code"] == "unknown_exam_type"
-        assert payload["detected_procedures"] == []
+        assert payload["reason_code"] == "conflicting_procedure_evidence"
+        assert payload["detected_procedures"] == ["eda_capsule"]
         row = CaseProcedure.objects.get(case=case, procedure_type="eda_capsule")
-        assert row.detection_status == DetectionStatus.NOT_DETECTED
+        assert row.detection_status == DetectionStatus.DETECTED
 
     def test_historical_capsule_with_structured_item_fails_closed(self, django_user_model) -> None:
         user = django_user_model.objects.create_user(username="nir3_historical_structured")
@@ -484,8 +489,10 @@ class TestStructuredItemWithoutCurrentOccurrence:
         assert case.status == CaseStatus.WAIT_R1_CLEANUP_THUMBS
         payload = _suggested_action(case)
         assert payload["decision"] == "manual_review_required"
+        assert payload["reason_code"] == "conflicting_procedure_evidence"
+        assert payload["detected_procedures"] == ["eda_capsule"]
         row = CaseProcedure.objects.get(case=case, procedure_type="eda_capsule")
-        assert row.detection_status == DetectionStatus.NOT_DETECTED
+        assert row.detection_status == DetectionStatus.DETECTED
 
 
 # ── R5: local da dilatação ancorado no relatório principal ────────────────

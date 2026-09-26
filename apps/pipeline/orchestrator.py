@@ -61,8 +61,10 @@ from apps.pipeline.policy import (
 from apps.pipeline.prior_case import PriorCaseContext, lookup_prior_case_context
 from apps.pipeline.procedure_reconciliation import (
     build_v2_review_payload,
+    project_body_clues,
     reconcile_detected_procedures,
     serialize_procedure_precedence,
+    serialize_procedure_precedence_rules,
 )
 from apps.pipeline.schemas.adapters import project_v4_to_llm1_shape, requested_procedure_for_type
 from apps.pipeline.scope_detection import detect_procedure_occurrences, detect_requested_procedures_v4
@@ -463,11 +465,16 @@ def _run_v4_pipeline(
     )
     strong = tuple(t for t in _DETECTABLE_PROCEDURE_TYPES if detection[t]["strong"])
     any_evidence = tuple(t for t in _DETECTABLE_PROCEDURE_TYPES if detection[t]["any"])
+    # Slice 004 (R3): o item estruturado contraditado por ocorrência não-atual
+    # acompanha a reconciliação. ``.get`` protege entradas sem o campo (dicts
+    # derivados de v3 antes desta slice).
+    conflicting = tuple(t for t in _DETECTABLE_PROCEDURE_TYPES if detection[t].get("conflicting"))
     reconciliation = reconcile_detected_procedures(
         declared=declared,
         strong=strong,
         any_evidence=any_evidence,
         occurrences=occurrences,
+        conflicting=conflicting,
     )
 
     # ── 3. Projeção de detecção atômica (R4) ───────────────────────────
@@ -509,6 +516,9 @@ def _run_v4_pipeline(
     # o mesmo metadado enxuto (regra/selecionado/suprimidos, sem texto clínico)
     # acompanha o evento de detecção, a sugestão final e o payload de revisão.
     precedence_metadata = serialize_procedure_precedence(reconciliation)
+    # D3/Slice 003: a lista aditiva registra TODAS as reduções aplicadas (o dict
+    # acima preserva a mais significativa para os consumidores existentes).
+    precedence_rules = serialize_procedure_precedence_rules(reconciliation)
     detection_payload: dict[str, object] = {
         "schema_version": _SCHEMA_VERSION,
         "declared_procedures": list(declared),
@@ -521,6 +531,8 @@ def _run_v4_pipeline(
     }
     if precedence_metadata is not None:
         detection_payload["procedure_precedence"] = precedence_metadata
+    if precedence_rules:
+        detection_payload["procedure_precedence_rules"] = precedence_rules
     case._record_event("CASE_PROCEDURES_DETECTED", payload=detection_payload)
     case.save()
     if reconciliation.upgraded:
@@ -545,9 +557,12 @@ def _run_v4_pipeline(
             declared=declared,
             detected=reconciliation.detected_procedure_types,
             evidence_spans=_collect_v4_evidence_spans(result1.structured_data),
+            body_clues=project_body_clues(occurrences),
         )
         if precedence_metadata is not None:
             review_payload = {**review_payload, "procedure_precedence": precedence_metadata}
+        if precedence_rules:
+            review_payload = {**review_payload, "procedure_precedence_rules": precedence_rules}
         case.suggested_action = review_payload
         case.save()
         case._record_event(
@@ -724,6 +739,8 @@ def _run_v4_pipeline(
         case.suggested_action[INFECTION_EVIDENCE_ARTIFACT_KEY] = infection_review
     if precedence_metadata is not None:
         case.suggested_action["procedure_precedence"] = precedence_metadata
+    if precedence_rules:
+        case.suggested_action["procedure_precedence_rules"] = precedence_rules
     case.save()
 
     # ── 11. Transições finais (LLM_SUGGEST → R2_POST_WIDGET → WAIT_DOCTOR) ─

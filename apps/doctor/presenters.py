@@ -336,15 +336,19 @@ class DoctorReportPresenter:
 
         Informativo e não bloqueante: não altera policy, formulário, validação
         nem FSM. Existe somente quando ``suggested_action.procedure_precedence``
-        registra uma supressão (especializado sobre convencionais ou variação
-        atômica sobre a base) — singleton normal, conflito fail-closed e
-        artefatos legados não geram aviso. Os labels vêm do catálogo/perfis,
-        nunca de valores técnicos crus, e a copy acompanha a regra aplicada.
+        registra uma supressão (especializado sobre convencionais, variação
+        atômica sobre a base ou família sobre o guarda-chuva do Motivo) —
+        singleton normal, conflito fail-closed e artefatos legados não geram
+        aviso. Os labels vêm do catálogo/perfis, nunca de valores técnicos crus,
+        e a copy acompanha a regra aplicada.
         """
         metadata = self.suggested_action.get("procedure_precedence")
         if not isinstance(metadata, dict):
             return None
-        from apps.pipeline.procedure_reconciliation import VARIATION_PRECEDENCE_RULE
+        from apps.pipeline.procedure_reconciliation import (
+            FAMILY_UMBRELLA_PRECEDENCE_RULE,
+            VARIATION_PRECEDENCE_RULE,
+        )
 
         selected = metadata.get("selected")
         suppressed = metadata.get("suppressed")
@@ -365,6 +369,13 @@ class DoctorReportPresenter:
                 f"O sistema priorizou {self._canonical_label_for_type(selected)} porque a solicitação "
                 "atual descreve o pacote atômico correspondente. Revise o texto original e ajuste a "
                 "decisão se necessário."
+            )
+        if metadata.get("rule") == FAMILY_UMBRELLA_PRECEDENCE_RULE:
+            return (
+                f"O relatório apresentou também solicitação de {'/'.join(suppressed_labels)}. "
+                f"O sistema priorizou {self._canonical_label_for_type(selected)} porque a "
+                "Justificativa/Motivo descreve o procedimento da família correspondente. Revise o "
+                "texto original e ajuste a decisão se necessário."
             )
         return (
             f"O relatório apresentou também solicitação de {'/'.join(suppressed_labels)}. "
