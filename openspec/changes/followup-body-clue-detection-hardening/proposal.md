@@ -22,7 +22,20 @@ implementar nada antes da evidência de produção.
 
 ## What Changes (itens condicionais; executar apenas sob o gatilho)
 
-1. **Ancoragem de terminadores de seção** — hoje os terminadores da seção
+1. **Simplificação do card de revisão NIR (EXECUTADO — decisão do dono durante
+   o smoke do rc.2, 2026-09-26)**: a listagem crua de pistas
+   (`Pistas detectadas no corpo do relatório`) confundia mais do que
+   informava (tokens duplicados sob múltiplas identidades, excerpt = termo
+   casado, ruído de outras famílias). O card volta a exibir apenas
+   Tipo declarado / Tipo detectado / Motivo da revisão, e o **motivo passa a
+   informar a origem da detecção** quando disponível (ex.: "Origem da
+   detecção: Justificativa da Transferência"). O payload
+   `detected_body_clues` (schema 2.1) PERMANECE em `suggested_action`/eventos
+   para auditoria — apenas deixa de ser renderizado. Sem mudança na detecção,
+   reconciliação de conjuntos, precedências ou gate de conflito (apenas o
+   `reason_text` ganha o sufixo de origem derivado das `section`s das
+   ocorrências atuais do conjunto detectado).
+2. **Ancoragem de terminadores de seção** — hoje os terminadores da seção
    `Justificativa da Transferência` casam como substring sem exigir `:`
    (`scope_detection.py`, `_first_section_terminator`/`_SECTION_TERMINATOR_LABELS`),
    então uma palavra narrativa (ex.: "encaminhamento", "complemento") no meio
@@ -41,20 +54,24 @@ implementar nada antes da evidência de produção.
    por regra aplicada.
    *Gatilho:* feedback do médico querendo visibilidade da supressão de
    colonoscopia no cenário combinado.
-3. **Polimento NIR/consistência** — (a) label traduzida da seção no card de
-   correção ("Justificativa da Transferência" em vez do identificador
-   canônico `justificativa_da_transferencia`); (b) pinar em teste o
-   `reason_text` de `conflicting_procedure_evidence` (hoje só o reason_code
-   é testado).
+3. **Polimento NIR/consistência** — pinar em teste o texto do
+   `reason_text` dos reasons de revisão (agora incluindo o sufixo de origem
+   do item 1 — regressões de copy devem quebrar teste). *(A label traduzida
+   de seção no card caiu: sem listagem, não há o que traduzir; a origem
+   traduzida vive agora no motivo.)*
    *Gatilho:* oportunidade de polimento ou feedback NIR de legibilidade.
 
 ## Impacto por item (estimado)
 
-- Item 1: `apps/pipeline/scope_detection.py` + `test_report_body_clues.py`
-  (2 arquivos; QUICK/slice único).
-- Item 2: `apps/doctor/presenters.py` + teste de copy (2 arquivos).
-- Item 3: `apps/intake/views.py` + `templates/intake/case_detail.html` +
-  testes de view/payload (≤4 arquivos).
+- Item 1 (executado): `apps/pipeline/procedure_reconciliation.py` (sufixo de
+  origem no reason_text) + `apps/intake/views.py` +
+  `templates/intake/case_detail.html` (remoção da listagem) + testes
+  (`test_report_body_clues.py`, `test_exam_type_correction.py`) — 5 arquivos.
+- Item 2 (ancoragem): `apps/pipeline/scope_detection.py` +
+  `test_report_body_clues.py` (2 arquivos; QUICK/slice único).
+- Item 3 (avisos múltiplos): `apps/doctor/presenters.py` + teste de copy
+  (2 arquivos).
+- Item 4 (polimento): testes de copy/payload (≤2 arquivos).
 
 ## Não-goals
 

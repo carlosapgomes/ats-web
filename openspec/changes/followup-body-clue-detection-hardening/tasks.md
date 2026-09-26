@@ -2,17 +2,32 @@
 
 ## 0. Precondições do change
 
-- [ ] 0.1 `detect-report-body-procedure-clues` implantado como rc (incluindo
+- [x] 0.1 `detect-report-body-procedure-clues` implantado como rc (incluindo
   o passo operacional `seed_prompts`) e smoke em andamento com os três
   sinais monitorados: (i) volume de `conflicting_procedure_evidence`;
   (ii) casos de `exam_type_mismatch` com pista da família no card;
   (iii) zero `PIPELINE_FAILED`.
-- [ ] 0.2 Ao acionar o PRIMEIRO item: criar branch a partir do main vigente,
-  registrar `BASE_REF` e baseline verde conhecida (suíte completa uma única
-  vez, se a tree divergir do último gate registrado).
+  *(rc.2 implantado em produção em 2026-09-26T02:2xZ; cenário-alvo
+  confirmado pelo dono com caso real: declarado colonoscopia → detectado
+  Retossigmoidoscopia + Dilatação com mismatch limpo.)*
+- [x] 0.2 Branch `feature/followup-body-clue-detection-hardening` a partir do
+  `main` `49871f0` (BASE_REF); baseline verde conhecida = gate do rc.2
+  (4530 passed) na mesma árvore de código — reexecutar suíte completa só se
+  a tree divergir (divergiu apenas em docs).
 
 ## 1. Itens condicionais (executar apenas sob o gatilho; ordem por valor)
 
+- [x] 1.0 **Simplificar card de revisão NIR (opção B do dono)**: remover a
+  listagem de pistas do card; motivo da revisão informa a origem da detecção
+  (seções das ocorrências atuais do conjunto detectado); payload
+  `detected_body_clues` mantido para auditoria; spec delta atualizada
+  (REMOVED do requisito de listagem + ADDED do motivo com origem).
+  *Gatilho: feedback do dono no smoke do rc.2 (a listagem crua confundia).*
+  *(1 rodada de review, veredito `OK` sem achados; sufixo aplicado
+  uniformemente a TODOS os nir_review (conforme spec); focado 206 passed;
+  suíte completa 4541 passed (baseline rc.2 4530, +11); ruff/format/mypy
+  ok. Nota: o sufixo persiste no reason_text e aparece nas superfícies que
+  exibem motivo — pretendido; pinnar copy segue no item de polimento.)*
 - [ ] 1.1 **Ancorar terminadores de seção** (`:` ou início de linha) em
   `apps/pipeline/scope_detection.py` + `test_report_body_clues.py` — TDD com
   fixture multi-seção real contendo palavra-terminadora no meio da

@@ -30,6 +30,12 @@ cujo conjunto só se sustenta pelo alias guarda-chuva do Motivo ``endoscopia
 digestiva baixa`` (``section == motivo_da_solicitacao``). Evidência atual
 explícita de colonoscopia, guarda-chuva atual citado no corpo ou ausência de
 ocorrência atual da família mantêm o conflito fail-closed na matriz.
+
+Item 1.0 (change ``followup-body-clue-detection-hardening``): o motivo da revisão
+NIR ganha o sufixo de ORIGEM (seções das ocorrências atuais do conjunto
+detectado) e a listagem de pistas deixa de ser renderizada na UI — a projeção
+``project_body_clues``/payload ``detected_body_clues`` seguem intactos para
+auditoria.
 """
 
 from __future__ import annotations
@@ -130,6 +136,20 @@ _UMBRELLA_COLONOSCOPY_EXCERPT = "endoscopia digestiva baixa"
 # Seção de proveniência que autoriza a supressão (D1): o guarda-chuva citado no
 # CORPO (Justificativa/Resumo) NÃO autoriza.
 _MOTIVO_DA_SOLICITACAO_SECTION = "motivo_da_solicitacao"
+# Item 1.0 — seções de origem reconhecidas e rótulos estáveis exibidos no motivo
+# da revisão NIR (o card não renderiza mais a listagem de pistas).
+_JUSTIFICATIVA_DA_TRANSFERENCIA_SECTION = "justificativa_da_transferencia"
+_DETECTION_ORIGIN_LABELS: dict[str, str] = {
+    _JUSTIFICATIVA_DA_TRANSFERENCIA_SECTION: "Justificativa da Transferência",
+    _MOTIVO_DA_SOLICITACAO_SECTION: "Motivo da Solicitação",
+}
+# Ordem canônica de exibição (Justificativa antes do Motivo), independente da
+# ordem textual das ocorrências no relatório.
+_DETECTION_ORIGIN_ORDER: tuple[str, ...] = (
+    _JUSTIFICATIVA_DA_TRANSFERENCIA_SECTION,
+    _MOTIVO_DA_SOLICITACAO_SECTION,
+)
+_DETECTION_ORIGIN_PREFIX = " Origem da detecção: "
 # Identificador da regra de família registrado em evento/sugestão (D3/Slice 003).
 FAMILY_UMBRELLA_PRECEDENCE_RULE = "family_umbrella_over_colonoscopy"
 
@@ -141,6 +161,27 @@ def _current_request_occurrence_types(occurrences: Any) -> set[str]:
         for occurrence in occurrences or ()
         if str(getattr(occurrence, "qualification", "")) == _QUALIFICATION_CURRENT_REQUEST
     }
+
+
+def _detection_origin_suffix(*, detected: tuple[str, ...], occurrences: Any) -> str:
+    """Sufixo do motivo NIR com a origem textual da detecção (item 1.0).
+
+    Considera apenas ocorrências de solicitação ATUAL cujo tipo está no conjunto
+    detectado e cuja seção tem rótulo estável; seções vazias ou desconhecidas são
+    ignoradas. Os rótulos são deduplicados e exibidos na ordem canônica. Sem
+    origem elegível devolve ``""`` e o motivo permanece intacto.
+    """
+    detected_set = set(detected)
+    sections = {
+        str(getattr(occurrence, "section", ""))
+        for occurrence in occurrences or ()
+        if str(getattr(occurrence, "qualification", "")) == _QUALIFICATION_CURRENT_REQUEST
+        and str(getattr(occurrence, "procedure_type", "")) in detected_set
+    }
+    labels = [_DETECTION_ORIGIN_LABELS[section] for section in _DETECTION_ORIGIN_ORDER if section in sections]
+    if not labels:
+        return ""
+    return f"{_DETECTION_ORIGIN_PREFIX}{', '.join(labels)}."
 
 
 def _current_request_variation_types(occurrences: Any) -> set[str]:
@@ -347,6 +388,7 @@ def _nir_review(
     reason_code: str,
     reason_text: str,
     detected: tuple[str, ...],
+    occurrences: Any = (),
     selected_specialized_type: str = "",
     suppressed_conventional_types: tuple[str, ...] = (),
     selected_variation_type: str = "",
@@ -354,11 +396,13 @@ def _nir_review(
     selected_family_type: str = "",
     suppressed_umbrella_types: tuple[str, ...] = (),
 ) -> ProcedureReconciliationResult:
+    # Item 1.0: a origem da detecção (seções das ocorrências atuais do conjunto
+    # detectado) entra no motivo; sem origem elegível o texto permanece intacto.
     return ProcedureReconciliationResult(
         action="nir_review",
         detected_procedure_types=detected,
         reason_code=reason_code,
-        reason_text=reason_text,
+        reason_text=f"{reason_text}{_detection_origin_suffix(detected=detected, occurrences=occurrences)}",
         precedence_applied=bool(selected_specialized_type and suppressed_conventional_types),
         selected_specialized_type=selected_specialized_type,
         suppressed_conventional_types=suppressed_conventional_types,
@@ -387,7 +431,9 @@ def reconcile_detected_procedures(
         any_evidence: procedimentos com qualquer evidência de solicitação atual.
         occurrences: ocorrências qualificadas (``scope_detection``) que provam a
             atualidade textual do especializado; sem ocorrência ``current_request``
-            do próprio tipo não há supressão de convencionais (D1/ADR-0008).
+            do próprio tipo não há supressão de convencionais (D1/ADR-0008). As
+            seções dessas ocorrências também alimentam o sufixo de origem do
+            motivo NIR (item 1.0).
         conflicting: tipos cujo item estruturado do LLM1 foi contraditado por
             ocorrência não-atual no texto (``scope_detection`` v4); qualquer tipo
             conhecido aqui força ``nir_review`` ANTES de precedência/proceed
@@ -411,6 +457,7 @@ def reconcile_detected_procedures(
             reason_code="unknown_exam_type",
             reason_text="Procedimento fora do catálogo suportado na solicitação; revisão manual obrigatória.",
             detected=any_partition.ordered,
+            occurrences=occurrences,
         )
 
     if declared_partition.had_duplicates or any_partition.had_duplicates or strong_partition.had_duplicates:
@@ -418,6 +465,7 @@ def reconcile_detected_procedures(
             reason_code="unsupported_procedure_combination",
             reason_text="Solicitação com procedimento duplicado; revisão manual obrigatória.",
             detected=any_partition.ordered,
+            occurrences=occurrences,
         )
 
     declared_set = set(declared_partition.ordered)
@@ -439,6 +487,7 @@ def reconcile_detected_procedures(
                 "(ocorrência não-atual do termo); revisão manual obrigatória."
             ),
             detected=_ordered(any_set | conflicting_set),
+            occurrences=occurrences,
         )
 
     if declared_set and frozenset(declared_set) not in ALLOWED_PROCEDURE_SETS:
@@ -446,6 +495,7 @@ def reconcile_detected_procedures(
             reason_code="unsupported_procedure_combination",
             reason_text="Conjunto declarado fora da matriz suportada; revisão manual obrigatória.",
             detected=_ordered(any_set),
+            occurrences=occurrences,
         )
 
     # D1/ADR-0008 — precedência do especializado único: um tipo especializado
@@ -487,6 +537,7 @@ def reconcile_detected_procedures(
             reason_code="unsupported_procedure_combination",
             reason_text="Combinação de procedimentos não suportada; revisão manual obrigatória.",
             detected=_ordered(any_set),
+            occurrences=occurrences,
             **precedence_kwargs,
         )
 
@@ -495,6 +546,7 @@ def reconcile_detected_procedures(
             reason_code="unknown_exam_type",
             reason_text="Nenhum procedimento suportado detectado na solicitação atual; revisão manual obrigatória.",
             detected=(),
+            occurrences=occurrences,
             **precedence_kwargs,
         )
 
@@ -511,6 +563,7 @@ def reconcile_detected_procedures(
                 "detectado na solicitação atual; revisão manual obrigatória."
             ),
             detected=_ordered(any_set),
+            occurrences=occurrences,
             **precedence_kwargs,
         )
 
@@ -529,6 +582,7 @@ def reconcile_detected_procedures(
                 "possui evidência forte; revisão manual obrigatória."
             ),
             detected=_ordered(any_set),
+            occurrences=occurrences,
             **precedence_kwargs,
         )
 
@@ -540,6 +594,7 @@ def reconcile_detected_procedures(
                 "Tipo de procedimento declarado difere do detectado na solicitação atual; revisão manual obrigatória."
             ),
             detected=_ordered(any_set),
+            occurrences=occurrences,
             **precedence_kwargs,
         )
 
@@ -548,6 +603,7 @@ def reconcile_detected_procedures(
         reason_code="exam_type_mismatch",
         reason_text="Conjunto detectado diverge do declarado; revisão manual obrigatória.",
         detected=_ordered(any_set),
+        occurrences=occurrences,
         **precedence_kwargs,
     )
 

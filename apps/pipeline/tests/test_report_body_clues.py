@@ -25,6 +25,11 @@ no dict de detecção (por tipo, default `False` — R1) e a reconciliação dev
 `nir_review`/`conflicting_procedure_evidence` em vez de prosseguir em silêncio
 (R2/R5); o wiring do orchestrator (R3) e o reason code elegível no intake (R4)
 fecham a falha aberta. Sem item estruturado, a menção isolada segue inerte (R6).
+
+Item 1.0 (change ``followup-body-clue-detection-hardening``) — o motivo da
+revisão NIR informa a ORIGEM da detecção (seções das ocorrências atuais do
+conjunto detectado) e a listagem de pistas deixa de ser renderizada na UI; a
+projeção/payload ``detected_body_clues`` permanece para auditoria.
 """
 
 from __future__ import annotations
@@ -1063,3 +1068,195 @@ def test_end_to_end_example_flow() -> None:
     assert dilation[0]["section"] == JUSTIFICATIVA_SECTION
     assert dilation[0]["excerpt"] == "dilatacao"
     assert all(clue["section"] != MOTIVO_SECTION for clue in clues)
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# Item 1.0 — origem da detecção no motivo da revisão NIR
+# ═══════════════════════════════════════════════════════════════════════════
+
+MISMATCH_REASON_TEXT = (
+    "Tipo de procedimento declarado difere do detectado na solicitação atual; revisão manual obrigatória."
+)
+CONFLICTING_REASON_TEXT = (
+    "Item estruturado do LLM contradiz o corpo do relatório (ocorrência não-atual do termo); "
+    "revisão manual obrigatória."
+)
+ORIGIN_JUSTIFICATIVA = "Origem da detecção: Justificativa da Transferência"
+ORIGIN_MOTIVO = "Origem da detecção: Motivo da Solicitação"
+
+
+def test_mismatch_reason_text_reports_justificativa_origin() -> None:
+    """Ocorrência atual do detectado na Justificativa vira origem no motivo (R1)."""
+    text = (
+        "Justificativa da Transferência: Paciente com sangramento retal há dois meses. "
+        "Solicito retossigmoidoscopia para investigação.\n"
+    )
+    occurrence = _occurrence(occurrences=_occurrences(text), procedure_type="rectosigmoidoscopy")
+    assert occurrence.qualification == "current_request"
+    assert occurrence.section == JUSTIFICATIVA_SECTION
+
+    result = _reconcile(declared=("colonoscopy",), cleaned_text=text)
+
+    assert result.action == "nir_review"
+    assert result.reason_code == "exam_type_mismatch"
+    assert result.detected_procedure_types == ("rectosigmoidoscopy",)
+    assert result.reason_text == f"{MISMATCH_REASON_TEXT} {ORIGIN_JUSTIFICATIVA}."
+
+
+def test_reason_text_is_unchanged_without_identified_section() -> None:
+    """Sem seção elegível o motivo permanece o texto atual, byte a byte (R1)."""
+    text = "Solicito retossigmoidoscopia para investigação."
+    occurrence = _occurrence(occurrences=_occurrences(text), procedure_type="rectosigmoidoscopy")
+    assert occurrence.qualification == "current_request"
+    assert occurrence.section == ""
+
+    result = _reconcile(declared=("colonoscopy",), cleaned_text=text)
+
+    assert result.action == "nir_review"
+    assert result.reason_code == "exam_type_mismatch"
+    assert result.reason_text == MISMATCH_REASON_TEXT
+
+
+def test_proceed_reason_text_has_no_origin_suffix() -> None:
+    """``proceed`` não ganha sufixo de origem (R1)."""
+    text = "Justificativa da Transferência: Solicito retossigmoidoscopia para investigação."
+
+    result = _reconcile(declared=("rectosigmoidoscopy",), cleaned_text=text)
+
+    assert result.action == "proceed"
+    assert result.reason_text == ""
+
+
+def test_auto_upgrade_reason_text_has_no_origin_suffix() -> None:
+    """``auto_upgrade`` não ganha sufixo de origem (R1)."""
+    occurrence = _occurrence_at(
+        "eda",
+        "current_request",
+        excerpt="eda",
+        start=0,
+        section=JUSTIFICATIVA_SECTION,
+    )
+
+    result = reconcile_detected_procedures(
+        declared=("eda",),
+        strong=("eda", "colonoscopy"),
+        any_evidence=("eda", "colonoscopy"),
+        occurrences=(occurrence,),
+    )
+
+    assert result.action == "auto_upgrade"
+    assert result.reason_text == (
+        "Solicitações atuais de EDA e Colonoscopia com evidência forte; upgrade automático auditado."
+    )
+
+
+def test_mismatch_reason_text_reports_motivo_origin() -> None:
+    """Ocorrência atual do detectado no Motivo vira origem no motivo (R1)."""
+    text = "Motivo da Solicitação: Retossigmoidoscopia para investigação.\nUnid. Origem: Hospital Central\n"
+    occurrence = _occurrence(occurrences=_occurrences(text), procedure_type="rectosigmoidoscopy")
+    assert occurrence.qualification == "current_request"
+    assert occurrence.section == MOTIVO_SECTION
+
+    result = _reconcile(declared=("colonoscopy",), cleaned_text=text)
+
+    assert result.action == "nir_review"
+    assert result.reason_code == "exam_type_mismatch"
+    assert result.reason_text == f"{MISMATCH_REASON_TEXT} {ORIGIN_MOTIVO}."
+
+
+def test_origin_labels_are_deduplicated_in_canonical_order() -> None:
+    """Várias ocorrências por seção viram um rótulo; Justificativa antes do Motivo (R1)."""
+    text = (
+        "Motivo da Solicitação: Retossigmoidoscopia para investigação.\n"
+        "Unid. Origem: Hospital Central\n"
+        "Justificativa da Transferência: Paciente com sangramento retal. "
+        "Solicito retossigmoidoscopia para investigação. Retossigmoidoscopia com sedação.\n"
+    )
+    sections = [
+        occurrence.section
+        for occurrence in _occurrences(text)
+        if occurrence.procedure_type == "rectosigmoidoscopy" and occurrence.qualification == "current_request"
+    ]
+    assert sections == [MOTIVO_SECTION, JUSTIFICATIVA_SECTION, JUSTIFICATIVA_SECTION]
+
+    result = _reconcile(declared=("colonoscopy",), cleaned_text=text)
+
+    assert result.action == "nir_review"
+    assert result.reason_text == (
+        f"{MISMATCH_REASON_TEXT} Origem da detecção: Justificativa da Transferência, Motivo da Solicitação."
+    )
+
+
+def test_reason_text_ignores_unknown_section() -> None:
+    """Seção sem rótulo estável é ignorada e não vira origem (R1)."""
+    occurrence = _occurrence_at(
+        "rectosigmoidoscopy",
+        "current_request",
+        excerpt="retossigmoidoscopia",
+        start=0,
+        section="complemento_da_solicitacao",
+    )
+
+    result = reconcile_detected_procedures(
+        declared=("colonoscopy",),
+        strong=(),
+        any_evidence=("rectosigmoidoscopy",),
+        occurrences=(occurrence,),
+    )
+
+    assert result.action == "nir_review"
+    assert result.reason_code == "exam_type_mismatch"
+    assert result.reason_text == MISMATCH_REASON_TEXT
+
+
+def test_conflicting_reason_text_ignores_non_current_and_undetected_occurrences() -> None:
+    """Menção com seção e tipo fora do detectado não viram origem no conflito (R4-vi)."""
+    mention = _occurrence_at(
+        "rectosigmoidoscopy_dilation",
+        "mention",
+        excerpt="dilatacao",
+        start=0,
+        section=JUSTIFICATIVA_SECTION,
+    )
+    undetected = _occurrence_at(
+        "eda_dilation",
+        "current_request",
+        excerpt="dilatacao esofagica",
+        start=0,
+        section=JUSTIFICATIVA_SECTION,
+    )
+
+    result = reconcile_detected_procedures(
+        declared=("colonoscopy",),
+        strong=("colonoscopy",),
+        any_evidence=("colonoscopy",),
+        occurrences=(mention, undetected),
+        conflicting=("rectosigmoidoscopy_dilation",),
+    )
+
+    assert result.action == "nir_review"
+    assert result.reason_code == "conflicting_procedure_evidence"
+    assert result.reason_text == CONFLICTING_REASON_TEXT
+
+
+def test_conflicting_reason_text_reports_current_origin_of_detected_set() -> None:
+    """Ocorrência ATUAL de tipo do conjunto detectado vira origem no conflito (R4-vi)."""
+    current = _occurrence_at(
+        "rectosigmoidoscopy_dilation",
+        "current_request",
+        excerpt="dilatacao",
+        start=0,
+        section=JUSTIFICATIVA_SECTION,
+    )
+
+    result = reconcile_detected_procedures(
+        declared=("colonoscopy",),
+        strong=("colonoscopy",),
+        any_evidence=("colonoscopy", "rectosigmoidoscopy_dilation"),
+        occurrences=(current,),
+        conflicting=("rectosigmoidoscopy_dilation",),
+    )
+
+    assert result.action == "nir_review"
+    assert result.reason_code == "conflicting_procedure_evidence"
+    assert result.reason_text == f"{CONFLICTING_REASON_TEXT} {ORIGIN_JUSTIFICATIVA}."
