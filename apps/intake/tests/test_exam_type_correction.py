@@ -1955,6 +1955,10 @@ class TestCorrectionCardReviewReason:
         assert "Correção de Tipo de Exame" in content
         assert BODY_CLUES_SECTION_TITLE not in content
         assert CLUE_EXCERPT not in content
+        # Comentários de template nunca vazam para o HTML renderizado
+        # (guarda do bug multi-linha `{# ... #}` do rc.3 — Django só comenta
+        # em linha única; comentários longos usam {% comment %}).
+        assert "{#" not in content
         # As três colunas de revisão seguem sendo as únicas do bloco.
         assert "Tipo declarado" in content
         assert "Tipo detectado" in content
