@@ -344,6 +344,12 @@ class TestCorrectionService:
         )
         assert Case.objects.get(pk=case.pk).status == CaseStatus.LLM_STRUCT
 
+    def test_conflicting_procedure_evidence_eligible(self, django_user_model) -> None:
+        """Slice 004/R4: conflito do item estruturado habilita o card de correção."""
+        user = _nir_user(django_user_model, "nir-conflict-eligible@test.com")
+        case = _eligible_case(user=user, reason_code="conflicting_procedure_evidence", detected="unknown")
+        assert is_exam_type_correction_eligible(case) is True
+
     def test_same_type_rejected_without_mutation(self, django_user_model) -> None:
         """R1: novo tipo igual ao atual é rejeitado sem mutação."""
         user = _nir_user(django_user_model, "nir-same-type@test.com")

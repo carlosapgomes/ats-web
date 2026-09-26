@@ -18,6 +18,13 @@ uma identidade atual da família Retossigmoidoscopia absorve a `colonoscopy`
 cujo conjunto só se sustenta pelo alias guarda-chuva `Endoscopia Digestiva
 Baixa` marcado em `motivo_da_solicitacao` (R1–R5), com metadado de regra
 própria no dict único e na lista aditiva (R2/R6b).
+
+Slice 004 — gate de conflito do item estruturado: o item estruturado do LLM1
+contraditado por ocorrência não-atual do termo passa a sinalizar `conflicting`
+no dict de detecção (por tipo, default `False` — R1) e a reconciliação devolve
+`nir_review`/`conflicting_procedure_evidence` em vez de prosseguir em silêncio
+(R2/R5); o wiring do orchestrator (R3) e o reason code elegível no intake (R4)
+fecham a falha aberta. Sem item estruturado, a menção isolada segue inerte (R6).
 """
 
 from __future__ import annotations
@@ -205,7 +212,7 @@ def test_mention_inside_justificativa_becomes_current() -> None:
     assert occurrence.excerpt == "retossigmoidoscopia"
     assert occurrence.section == JUSTIFICATIVA_SECTION
     detection = detect_requested_procedures_v4(llm1_structured_data={}, cleaned_text=REGULATION_REPORT_TEXT)
-    assert detection["rectosigmoidoscopy"] == {"strong": True, "any": True}
+    assert detection["rectosigmoidoscopy"] == {"strong": True, "any": True, "conflicting": False}
 
 
 def test_historical_and_negated_inside_section_not_promoted() -> None:
@@ -218,8 +225,8 @@ def test_historical_and_negated_inside_section_not_promoted() -> None:
     assert negated.qualification == "negated"
     assert negated.section == JUSTIFICATIVA_SECTION
     detection = detect_requested_procedures_v4(llm1_structured_data={}, cleaned_text=text)
-    assert detection["rectosigmoidoscopy"] == {"strong": False, "any": False}
-    assert detection["colonoscopy"] == {"strong": False, "any": False}
+    assert detection["rectosigmoidoscopy"] == {"strong": False, "any": False, "conflicting": False}
+    assert detection["colonoscopy"] == {"strong": False, "any": False, "conflicting": False}
 
 
 def test_outside_section_stays_mention() -> None:
@@ -334,7 +341,7 @@ def test_justificativa_naming_the_declared_family_is_detected_as_current_request
     assert occurrence.qualification == "current_request"
     assert occurrence.section == JUSTIFICATIVA_SECTION
     detection = detect_requested_procedures_v4(llm1_structured_data={}, cleaned_text=text)
-    assert detection["rectosigmoidoscopy"] == {"strong": True, "any": True}
+    assert detection["rectosigmoidoscopy"] == {"strong": True, "any": True, "conflicting": False}
 
 
 # ── Slice 002 (R1–R5): conectores instrumentais no vínculo ──────────────────
@@ -374,7 +381,7 @@ def test_via_link_in_justificativa_example() -> None:
     assert eda_dilation.qualification == "mention"
     assert eda_dilation.linked_base is False
     detection = detect_requested_procedures_v4(llm1_structured_data={}, cleaned_text=VIA_LINK_REPORT_TEXT)
-    assert detection["rectosigmoidoscopy_dilation"] == {"strong": True, "any": True}
+    assert detection["rectosigmoidoscopy_dilation"] == {"strong": True, "any": True, "conflicting": False}
 
 
 @pytest.mark.parametrize("connector", INSTRUMENTAL_CONNECTORS)
@@ -387,7 +394,7 @@ def test_via_link_without_section(connector: str) -> None:
     assert dilation.linked_base is True
     assert dilation.section == ""
     detection = detect_requested_procedures_v4(llm1_structured_data={}, cleaned_text=text)
-    assert detection["rectosigmoidoscopy_dilation"] == {"strong": True, "any": True}
+    assert detection["rectosigmoidoscopy_dilation"] == {"strong": True, "any": True, "conflicting": False}
 
 
 @pytest.mark.parametrize("connector", ("via", "por", "através de", "com uso de"))
@@ -401,21 +408,21 @@ def test_unlinked_and_blocked_terms_stay_mention(connector: str) -> None:
         assert occurrence.qualification == "mention", (procedure_type, connector)
         assert occurrence.linked_base is False, (procedure_type, connector)
     unlinked_detection = detect_requested_procedures_v4(llm1_structured_data={}, cleaned_text=unlinked_text)
-    assert unlinked_detection["rectosigmoidoscopy_dilation"] == {"strong": False, "any": False}
+    assert unlinked_detection["rectosigmoidoscopy_dilation"] == {"strong": False, "any": False, "conflicting": False}
 
     blocked_text = f"Solicito dilatação de colédoco {connector} retossigmoidoscopia."
     blocked = _occurrence(occurrences=_occurrences(blocked_text), procedure_type="rectosigmoidoscopy_dilation")
     assert blocked.qualification == "mention"
     assert blocked.linked_base is False
     blocked_detection = detect_requested_procedures_v4(llm1_structured_data={}, cleaned_text=blocked_text)
-    assert blocked_detection["rectosigmoidoscopy_dilation"] == {"strong": False, "any": False}
+    assert blocked_detection["rectosigmoidoscopy_dilation"] == {"strong": False, "any": False, "conflicting": False}
 
 
 def test_v4_detection_detects_combined_example() -> None:
     """O texto-exemplo completo resolve a variação sem item estruturado do LLM1 (R5)."""
     detection = detect_requested_procedures_v4(llm1_structured_data={}, cleaned_text=VIA_LINK_REPORT_TEXT)
-    assert detection["rectosigmoidoscopy_dilation"] == {"strong": True, "any": True}
-    assert detection["rectosigmoidoscopy"] == {"strong": True, "any": True}
+    assert detection["rectosigmoidoscopy_dilation"] == {"strong": True, "any": True, "conflicting": False}
+    assert detection["rectosigmoidoscopy"] == {"strong": True, "any": True, "conflicting": False}
 
 
 # ── Slice 003 (R1–R6b): precedência de família sobre o guarda-chuva ─────────
@@ -646,3 +653,162 @@ class TestFamilyUmbrellaPipelineWiring:
         assert review_payload["reason_code"] == "exam_type_mismatch"
         assert review_payload["procedure_precedence"] == FAMILY_RULES_METADATA[0]
         assert review_payload["procedure_precedence_rules"] == FAMILY_RULES_METADATA
+
+
+# ── Slice 004 (R1–R6): gate de conflito do item estruturado ─────────────────
+
+# Relatório-exemplo da FALHA ABERTA: o Motivo dá colonoscopia ATUAL (coincide
+# com o declarado → prosseguia em silêncio) e o LLM1 reporta
+# `rectosigmoidoscopy_dilation` com evidence span, mas o corpo só traz MENÇÃO do
+# termo, fora das seções de solicitação (Complemento, não Justificativa/Motivo).
+CONFLICT_REPORT_TEXT = (
+    "RELATÓRIO DE OCORRÊNCIAS\n"
+    "Governo do Estado da Bahia\n"
+    "Motivo da Solicitação: Colonoscopia\n"
+    "Unid. Origem: Hospital Central\n"
+    "Justificativa da Transferência: Paciente com constipação intestinal crônica.\n"
+    "Complemento da Solicitação: paciente aguardando vaga. Dilatação de anastomose colorretal.\n"
+    "RELATÓRIO DE OCORRÊNCIAS\n"
+    "Informado por: Dra. Fulana\n"
+)
+
+CONFLICT_STRUCTURED: dict[str, object] = {"requested_procedures": [_recto_procedure("rectosigmoidoscopy_dilation")]}
+
+
+def _signals(detection: dict[str, dict[str, bool]]) -> dict[str, tuple[str, ...]]:
+    """Projeta strong/any/conflicting do dict de detecção para a reconciliação."""
+    return {
+        "strong": tuple(procedure_type for procedure_type, flags in detection.items() if flags["strong"]),
+        "any_evidence": tuple(procedure_type for procedure_type, flags in detection.items() if flags["any"]),
+        "conflicting": tuple(procedure_type for procedure_type, flags in detection.items() if flags["conflicting"]),
+    }
+
+
+# R1 — o sinal `conflicting` por tipo do dict de detecção
+
+
+def test_structured_item_vs_mention_flags_conflict() -> None:
+    """Item estruturado + ocorrência não-atual do termo ⇒ conflicting=True (R1)."""
+    detection = detect_requested_procedures_v4(
+        llm1_structured_data=CONFLICT_STRUCTURED,
+        cleaned_text=CONFLICT_REPORT_TEXT,
+    )
+    assert detection["rectosigmoidoscopy_dilation"] == {"strong": False, "any": False, "conflicting": True}
+    # Demais tipos carregam o sinal default False (inclusive os derivados de v3).
+    assert all(
+        flags["conflicting"] is False
+        for procedure_type, flags in detection.items()
+        if procedure_type != "rectosigmoidoscopy_dilation"
+    )
+
+
+def test_conflicting_defaults_false_without_contradiction() -> None:
+    """Sem item estruturado ou sem ocorrência, `conflicting` é False em todo tipo (R1)."""
+    current = detect_requested_procedures_v4(
+        llm1_structured_data={},
+        cleaned_text="Solicito EDA com dilatação esofágica.",
+    )
+    assert current["eda_dilation"] == {"strong": True, "any": True, "conflicting": False}
+    candidate = detect_requested_procedures_v4(
+        llm1_structured_data=CONFLICT_STRUCTURED,
+        cleaned_text="Relatorio clinico sem mencao ao procedimento.",
+    )
+    assert candidate["rectosigmoidoscopy_dilation"] == {"strong": True, "any": True, "conflicting": False}
+    assert all(flags["conflicting"] is False for flags in candidate.values())
+
+
+# R2 — a reconciliação vira `nir_review` antes de qualquer proceed
+
+
+def test_conflicting_evidence_forces_nir_review() -> None:
+    """Tipo conhecido em `conflicting` força nir_review/conflicting_procedure_evidence (R2)."""
+    result = reconcile_detected_procedures(
+        declared=("colonoscopy",),
+        strong=("colonoscopy",),
+        any_evidence=("colonoscopy",),
+        occurrences=(),
+        conflicting=("rectosigmoidoscopy_dilation",),
+    )
+    assert result.action == "nir_review"
+    assert result.reason_code == "conflicting_procedure_evidence"
+    assert result.detected_procedure_types == ("colonoscopy", "rectosigmoidoscopy_dilation")
+
+
+def test_reconciliation_without_conflicting_is_unchanged() -> None:
+    """Sem o parâmetro (default ()) o desfecho é o de hoje — retrocompatível (R2)."""
+    result = reconcile_detected_procedures(
+        declared=("colonoscopy",),
+        strong=("colonoscopy",),
+        any_evidence=("colonoscopy",),
+    )
+    assert result.action == "proceed"
+
+
+# R5 — a falha aberta do relatório-exemplo agora falha fechado
+
+
+def test_fail_open_scenario_now_fail_closed() -> None:
+    """Declarado == Motivo + item estruturado contraditado ⇒ nir_review, não proceed (R5)."""
+    detection = detect_requested_procedures_v4(
+        llm1_structured_data=CONFLICT_STRUCTURED,
+        cleaned_text=CONFLICT_REPORT_TEXT,
+    )
+    assert detection["rectosigmoidoscopy_dilation"] == {"strong": False, "any": False, "conflicting": True}
+    signals = _signals(detection)
+    result = reconcile_detected_procedures(
+        declared=("colonoscopy",),
+        strong=signals["strong"],
+        any_evidence=signals["any_evidence"],
+        occurrences=_occurrences(CONFLICT_REPORT_TEXT),
+        conflicting=signals["conflicting"],
+    )
+    assert result.action == "nir_review"
+    assert result.reason_code == "conflicting_procedure_evidence"
+    assert set(result.detected_procedure_types) == {"colonoscopy", "rectosigmoidoscopy_dilation"}
+
+
+# R6 — sem item estruturado, a menção isolada continua inerte
+
+
+def test_mention_alone_still_inert() -> None:
+    """Sem item estruturado, a menção não cria identidade nem conflito (R6)."""
+    detection = detect_requested_procedures_v4(
+        llm1_structured_data={},
+        cleaned_text=CONFLICT_REPORT_TEXT,
+    )
+    assert detection["rectosigmoidoscopy_dilation"] == {"strong": False, "any": False, "conflicting": False}
+    signals = _signals(detection)
+    result = reconcile_detected_procedures(
+        declared=("colonoscopy",),
+        strong=signals["strong"],
+        any_evidence=signals["any_evidence"],
+        occurrences=_occurrences(CONFLICT_REPORT_TEXT),
+        conflicting=signals["conflicting"],
+    )
+    assert result.action == "proceed"
+
+
+# R3 — o orchestrator repassa o sinal à reconciliação (teste de contrato)
+
+
+@pytest.mark.django_db
+def test_orchestrator_passes_conflicting(django_user_model) -> None:
+    """Pipeline real do relatório-exemplo termina em revisão por conflito (R3/R5)."""
+    user = django_user_model.objects.create_user(username="nir-conflict-wiring")
+    case, client = _run(
+        user,
+        procedure_types=("colonoscopy",),
+        extracted_text=CONFLICT_REPORT_TEXT,
+        llm1=_llm1_json(
+            procedures=[_recto_procedure("rectosigmoidoscopy_dilation")],
+            one_liner="Retossigmoidoscopia + Dilatação indicada.",
+        ),
+        recommendations=_single_procedure_recommendation("rectosigmoidoscopy_dilation"),
+    )
+    assert len(client.calls) == 1
+    assert case.status == CaseStatus.WAIT_R1_CLEANUP_THUMBS
+    payload = _suggested_action(case)
+    assert payload["reason_code"] == "conflicting_procedure_evidence"
+    assert set(payload["detected_procedures"]) == {"colonoscopy", "rectosigmoidoscopy_dilation"}
+    detection_event = CaseEvent.objects.filter(case=case, event_type="CASE_PROCEDURES_DETECTED").latest("timestamp")
+    assert detection_event.payload["reason_code"] == "conflicting_procedure_evidence"

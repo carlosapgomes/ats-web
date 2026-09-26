@@ -377,6 +377,7 @@ def reconcile_detected_procedures(
     strong: Any,
     any_evidence: Any,
     occurrences: Any = (),
+    conflicting: Any = (),
 ) -> ProcedureReconciliationResult:
     """Matriz D2/D3 completa (declarado × detectado) com gate de evidência forte.
 
@@ -387,12 +388,17 @@ def reconcile_detected_procedures(
         occurrences: ocorrências qualificadas (``scope_detection``) que provam a
             atualidade textual do especializado; sem ocorrência ``current_request``
             do próprio tipo não há supressão de convencionais (D1/ADR-0008).
+        conflicting: tipos cujo item estruturado do LLM1 foi contraditado por
+            ocorrência não-atual no texto (``scope_detection`` v4); qualquer tipo
+            conhecido aqui força ``nir_review`` ANTES de precedência/proceed
+            (Slice 004/D4). Default vazio preserva o comportamento anterior.
 
     Returns:
         ``proceed`` (conjunto reconciliado = declarado), ``auto_upgrade``
         (declarado único EDA/Colon + ambos detectados com evidência forte do
         segundo) ou ``nir_review`` (tipo desconhecido, combinação não
-        suportada, combined→single, mismatch único ou evidência insuficiente).
+        suportada, combined→single, mismatch único, item estruturado
+        contraditado ou evidência insuficiente).
     """
     declared_partition = _partition_procedures(declared)
     strong_partition = _partition_procedures(strong)
@@ -417,6 +423,23 @@ def reconcile_detected_procedures(
     declared_set = set(declared_partition.ordered)
     strong_set = set(strong_partition.ordered)
     any_set = set(any_partition.ordered)
+
+    # Slice 004 (R2/D4) — item estruturado contraditado por ocorrência não-atual:
+    # qualquer tipo CONHECIDO em ``conflicting`` força revisão NIR ANTES de
+    # precedência/proceed. Fecha a falha aberta em que o conjunto restante coincide
+    # com o declarado (ex.: declarado == detectado-pelo-Motivo) e a contradição do
+    # LLM1 era descartada em silêncio. Tipos fora do catálogo nesse parâmetro não
+    # criam revisão própria (aqui o item contraditado é proveniência do catálogo).
+    conflicting_set = set(_partition_procedures(conflicting).ordered)
+    if conflicting_set:
+        return _nir_review(
+            reason_code="conflicting_procedure_evidence",
+            reason_text=(
+                "Item estruturado do LLM contradiz o corpo do relatório "
+                "(ocorrência não-atual do termo); revisão manual obrigatória."
+            ),
+            detected=_ordered(any_set | conflicting_set),
+        )
 
     if declared_set and frozenset(declared_set) not in ALLOWED_PROCEDURE_SETS:
         return _nir_review(

@@ -464,11 +464,16 @@ def _run_v4_pipeline(
     )
     strong = tuple(t for t in _DETECTABLE_PROCEDURE_TYPES if detection[t]["strong"])
     any_evidence = tuple(t for t in _DETECTABLE_PROCEDURE_TYPES if detection[t]["any"])
+    # Slice 004 (R3): o item estruturado contraditado por ocorrência não-atual
+    # acompanha a reconciliação. ``.get`` protege entradas sem o campo (dicts
+    # derivados de v3 antes desta slice).
+    conflicting = tuple(t for t in _DETECTABLE_PROCEDURE_TYPES if detection[t].get("conflicting"))
     reconciliation = reconcile_detected_procedures(
         declared=declared,
         strong=strong,
         any_evidence=any_evidence,
         occurrences=occurrences,
+        conflicting=conflicting,
     )
 
     # ── 3. Projeção de detecção atômica (R4) ───────────────────────────

@@ -163,12 +163,12 @@ class TestRectosigmoidoscopyDetectionV4:
 
     def test_canonical_current_name_detects_the_exact_identity(self) -> None:
         detection = self._detect(BASE_TEXT)
-        assert detection["rectosigmoidoscopy"] == {"strong": True, "any": True}
+        assert detection["rectosigmoidoscopy"] == {"strong": True, "any": True, "conflicting": False}
 
     def test_identity_never_detects_colonoscopy(self) -> None:
         """R2/D4: compartilhar profile não transforma a identidade."""
         detection = self._detect(BASE_TEXT)
-        assert detection["colonoscopy"] == {"strong": False, "any": False}
+        assert detection["colonoscopy"] == {"strong": False, "any": False, "conflicting": False}
         assert detection["eda"]["any"] is False
 
     def test_history_negation_and_isolated_mention_do_not_create_the_identity(self) -> None:
@@ -185,13 +185,13 @@ class TestRectosigmoidoscopyDetectionV4:
 
     def test_dilation_linked_to_the_base_detects_the_variation(self) -> None:
         detection = self._detect(DILATION_TEXT)
-        assert detection["rectosigmoidoscopy_dilation"] == {"strong": True, "any": True}
+        assert detection["rectosigmoidoscopy_dilation"] == {"strong": True, "any": True, "conflicting": False}
         # A base segue detectada: o colapso é decisão da reconciliação.
         assert detection["rectosigmoidoscopy"]["any"] is True
 
     def test_argon_linked_to_the_base_detects_the_variation(self) -> None:
         detection = self._detect(ARGON_TEXT)
-        assert detection["rectosigmoidoscopy_argon"] == {"strong": True, "any": True}
+        assert detection["rectosigmoidoscopy_argon"] == {"strong": True, "any": True, "conflicting": False}
         assert detection["rectosigmoidoscopy"]["any"] is True
 
     def test_dilation_never_links_to_eda(self) -> None:
@@ -226,15 +226,26 @@ class TestRectosigmoidoscopyDetectionV4:
     def test_structured_item_without_text_occurrence_is_a_candidate(self) -> None:
         structured: dict[str, object] = {"requested_procedures": [_recto_procedure("rectosigmoidoscopy_dilation")]}
         detection = self._detect("Relatorio clinico sem mencao ao procedimento.", structured_data=structured)
-        assert detection["rectosigmoidoscopy_dilation"] == {"strong": True, "any": True}
+        assert detection["rectosigmoidoscopy_dilation"] == {"strong": True, "any": True, "conflicting": False}
         # A identidade base não é inferida do item da variação (singleton).
         assert detection["rectosigmoidoscopy"]["any"] is False
 
     def test_non_current_occurrence_overrides_the_structured_item(self) -> None:
-        """Slice 003 gate: o item estruturado não autoriza sem ocorrência atual."""
+        """Slice 003/004 gate: o item contraditado sinaliza conflito e vai ao NIR."""
         structured: dict[str, object] = {"requested_procedures": [_recto_procedure("rectosigmoidoscopy_dilation")]}
-        detection = self._detect("Dilatação de anastomose realizada em 2022.", structured_data=structured)
-        assert detection["rectosigmoidoscopy_dilation"] == {"strong": False, "any": False}
+        text = "Dilatação de anastomose realizada em 2022."
+        detection = self._detect(text, structured_data=structured)
+        assert detection["rectosigmoidoscopy_dilation"] == {"strong": False, "any": False, "conflicting": True}
+        result = reconcile_detected_procedures(
+            declared=("rectosigmoidoscopy_dilation",),
+            strong=tuple(t for t, flags in detection.items() if flags["strong"]),
+            any_evidence=tuple(t for t, flags in detection.items() if flags["any"]),
+            occurrences=detect_procedure_occurrences(llm1_structured_data={}, cleaned_text=text),
+            conflicting=tuple(t for t, flags in detection.items() if flags["conflicting"]),
+        )
+        assert result.action == "nir_review"
+        assert result.reason_code == "conflicting_procedure_evidence"
+        assert "rectosigmoidoscopy_dilation" in result.detected_procedure_types
 
 
 # ── R2/R3: reconciliação — colapso da base e fail-closed ───────────────────

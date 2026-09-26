@@ -60,11 +60,23 @@
   justificativa (desfecho mismatch previsto no R3, intenção preservada);
   187 passed nas suítes de regressão + suíte completa 4501 passed pelo
   worker; ruff/format/mypy ok. 5 dos 6 arquivos orçados.)*
-- [ ] 1.4 Implementar o Slice 004
+- [x] 1.4 Implementar o Slice 004
   (`slices/slice-004-structured-item-conflict-gate.md`): item estruturado do
   LLM1 contraditado por ocorrência não-atual gera
   `nir_review`/`conflicting_procedure_evidence` (nunca `proceed`
   silencioso); reason code elegível para correção no intake.
+  *(1 rodada de review, veredito `OK` sem achados. 2 desvios aprovados
+  pelo parent durante a implementação (escalonamento do worker, sem nova
+  decisão de produto): (a) correção de blast radius — a chave por tipo
+  `conflicting` (design D4, todos os tipos) exige ajustar literals de
+  igualdade exata de dict em test_eda_package_pipeline_v4.py (6) e
+  test_gastrostomy_infection_review.py (3), além dos in-scope (10+6);
+  (b) 3 testes de integração que codificavam o contrato antigo "item
+  contraditado = invisível" tiveram SOMENTE outcomes ajustados ao novo
+  contrato da spec (reason/detected/detection_status; fixtures
+  preservados). Focado: 265 passed; suíte completa 4509 passed; ruff/
+  format/mypy ok. Nota residual: união fora da matriz pula projeção e
+  deixa rows pending — consequência documentada da guarda de projeção.)*
 - [ ] 1.5 Implementar o Slice 005
   (`slices/slice-005-nir-review-body-clues.md`): payload de revisão 2.1 com
   `detected_body_clues` e card de correção exibindo as pistas no momento da

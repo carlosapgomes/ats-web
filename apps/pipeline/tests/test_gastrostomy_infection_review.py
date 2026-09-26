@@ -149,7 +149,7 @@ class TestGastrostomyDetectionV4:
 
     def test_eda_with_gtt_is_a_current_package_request(self) -> None:
         detection = self._detect(GTT_TEXT)
-        assert detection["eda_gastrostomy"] == {"strong": True, "any": True}
+        assert detection["eda_gastrostomy"] == {"strong": True, "any": True, "conflicting": False}
         assert detection["eda"]["any"] is True
 
     def test_isolated_gtt_request_detects_the_package_and_the_base(self) -> None:
@@ -176,12 +176,12 @@ class TestGastrostomyDetectionV4:
     def test_structured_item_alone_marks_the_package_as_candidate(self) -> None:
         structured: dict[str, object] = {"requested_procedures": [_gastrostomy_procedure()]}
         detection = self._detect("Solicito EDA.", structured)
-        assert detection["eda_gastrostomy"] == {"strong": True, "any": True}
+        assert detection["eda_gastrostomy"] == {"strong": True, "any": True, "conflicting": False}
 
     def test_historical_gtt_occurrence_overrides_the_structured_item(self) -> None:
         structured: dict[str, object] = {"requested_procedures": [_gastrostomy_procedure()]}
         detection = self._detect("Gastrostomia realizada em 2023.", structured)
-        assert detection["eda_gastrostomy"] == {"strong": False, "any": False}
+        assert detection["eda_gastrostomy"] == {"strong": False, "any": False, "conflicting": True}
 
 
 # ── R1: reconciliação — uma row, supressão da base e fail-closed ─────────

@@ -1709,6 +1709,13 @@ def detect_requested_procedures_v4(
     declaração (P1 review round 1). Sem qualquer ocorrência, o item estruturado
     permanece candidato (conjunto misto → fail-closed na matriz), comportamento
     preservado.
+
+    Slice 004 (R1/D4): o item contraditado por ocorrência não-atual deixou de ser
+    invisível — TODO tipo do dict carrega ``conflicting`` (default ``False``),
+    ``True`` somente quando está no payload estruturado, tem ocorrência no texto e
+    NENHUMA ocorrência ``current_request``. A reconciliação usa o sinal para
+    abrir revisão NIR mesmo quando o conjunto restante coincide com o declarado;
+    ``strong``/``any`` do item contraditado permanecem ``False``.
     """
     detection = detect_requested_procedures_v3(
         llm1_structured_data=llm1_structured_data,
@@ -1723,9 +1730,21 @@ def detect_requested_procedures_v4(
         occurrence.procedure_type for occurrence in occurrences if occurrence.qualification == _QUALIFICATION_CURRENT
     }
     occurrence_types = {occurrence.procedure_type for occurrence in occurrences}
+    conflicting_types = {
+        procedure_type
+        for procedure_type in _V4_STRUCTURED_CANDIDATE_TYPES
+        if procedure_type in structured
+        and procedure_type in occurrence_types
+        and procedure_type not in current_occurrences
+    }
     for procedure_type in _V4_STRUCTURED_CANDIDATE_TYPES:
         present = procedure_type in current_occurrences or (
             procedure_type in structured and procedure_type not in occurrence_types
         )
         detection[procedure_type] = {"strong": present, "any": present}
+    # O sinal acompanha TODO tipo do dict (default False), inclusive os derivados
+    # de v3 (``eda``/``colonoscopy``/``echoendoscopy``/``cpre``), que não tinham o
+    # campo antes desta slice.
+    for procedure_type, flags in detection.items():
+        flags["conflicting"] = procedure_type in conflicting_types
     return detection
