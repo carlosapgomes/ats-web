@@ -1,5 +1,0 @@
-schema: spec-driven
-created: 2026-09-25
-goal: Comunicar a funcionalidade do combobox de seleção de procedimentos por
-  affordances visuais (placeholder, hint persistente, chevron, bordas e estado
-  selecionado) sem alterar contrato POST, catálogo ou semântica ARIA existente.
