@@ -110,10 +110,11 @@
 
 - [x] 2.1 Gate global: `uv run ruff check . && uv run ruff format --check .`
   e `uv run mypy .` e `POSTGRES_TEST_HOST_PORT=55433 uv run pytest`.
-  *(Verde: ruff `All checks passed!`; format `291 files already formatted`;
-  mypy `Success: no issues found in 321 source files`; pytest `4526 passed`
-  (152,77 s; baseline 4456 → +70 testes do change); node combobox `16 pass /
-  0 fail` incluído por higiene (template do card tocado).)*
+  *(Re-executado após a emenda do Slice 006: ruff `All checks passed!`;
+  format `291 files already formatted`; mypy `Success: no issues found in
+  321 source files`; pytest `4530 passed` (152,18 s; baseline 4456 → +74
+  testes do change; primeira execução pós-slices 001-005: 4526 passed);
+  node combobox `16 pass / 0 fail`; `openspec validate --strict` válido.)*
 - [x] 2.2 `openspec validate --strict` do change; commit dos artefatos de
   planejamento junto ao encerramento (política do projeto).
   *(`Change is valid` em --strict; deltas de spec
