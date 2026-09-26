@@ -21,6 +21,7 @@ Cobre:
 
 from __future__ import annotations
 
+import importlib
 from typing import Any
 
 import pytest
@@ -169,9 +170,15 @@ class TestProcedurePackageBasesContract:
         used = set(PROCEDURE_PACKAGE_BASES) | set(PROCEDURE_PACKAGE_BASES.values())
         assert used <= set(SUPPORTED_PROCEDURE_TYPES)
 
-    def test_matches_the_pipeline_variation_base_map(self) -> None:
-        # Import local: ``apps.cases`` (produção) não importa ``apps.pipeline``
-        # (layering cases←pipeline). Aqui é só a guarda anti-drift do slice 001.
-        from apps.pipeline.procedure_reconciliation import _VARIATION_BASE_TYPES
+    def test_pipeline_consumes_the_shared_package_base_constant(self) -> None:
+        # Slice 002: ``procedure_reconciliation`` importa ``PROCEDURE_PACKAGE_BASES``
+        # de ``apps.cases`` no lugar do mapa privado ``_VARIATION_BASE_TYPES``;
+        # não há mais mapa duplicado para divergir. O pin agora prova que o
+        # pipeline consome o MESMO objeto compartilhado (e não reintroduz cópia).
+        # ``procedure_reconciliation`` USA o mapa autoritativo (não o reexporta),
+        # então a introspecção é feita em runtime para não brigar com
+        # ``no_implicit_reexport``.
+        procedure_reconciliation = importlib.import_module("apps.pipeline.procedure_reconciliation")
 
-        assert PROCEDURE_PACKAGE_BASES == _VARIATION_BASE_TYPES
+        assert procedure_reconciliation.PROCEDURE_PACKAGE_BASES is PROCEDURE_PACKAGE_BASES
+        assert not hasattr(procedure_reconciliation, "_VARIATION_BASE_TYPES")

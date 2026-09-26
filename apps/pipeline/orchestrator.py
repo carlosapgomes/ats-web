@@ -522,7 +522,12 @@ def _run_v4_pipeline(
     detection_payload: dict[str, object] = {
         "schema_version": _SCHEMA_VERSION,
         "declared_procedures": list(declared),
-        "detected_procedures": list(reconciliation.detected_procedure_types),
+        # D3/ADR-0011 (R5): o evento registra a UNIÃO BRUTA do ponto de decisão,
+        # não o conjunto reconciliado — na passada de resolução
+        # ``detected_procedure_types`` carrega o declarado e não pode ser a fonte
+        # do histórico append-only (a união crua vem de
+        # ``conflicting_evidence_types``).
+        "detected_procedures": list(reconciliation.conflicting_evidence_types),
         "reason_code": reconciliation.reason_code,
         "prompt_system_name": result1.prompt_system_name,
         "prompt_system_version": result1.prompt_system_version,
