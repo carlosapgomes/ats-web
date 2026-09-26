@@ -122,5 +122,10 @@
   do change — promoção aos specs acontece no arquivamento, fora deste fluxo.)*
 - [x] 2.3 Relatório sumário do change para avaliação antes do arquivamento.
   *(Relatório consolidado entregue na sessão do planner: slices, rodadas de
-  review, commits f7990bf/b065832/b40e1ed/78a5420/e48d2f2, validações,
-  P2s adiados e desvios documentados.)*
+  review, commits f7990bf/b065832/b40e1ed/78a5420/e48d2f2/5383d64,
+  validações, P2s adiados e desvios documentados.)*
+- [x] 2.4 Backlog pós-rc registrado em change dedicado
+  `followup-body-clue-detection-hardening` (3 itens gated por gatilhos do
+  smoke: ancoragem de terminadores, avisos múltiplos de precedência ao
+  médico, polimento de label/copy). Avaliação de risco documentada lá:
+  nenhum item bloqueia o deploy do rc.
