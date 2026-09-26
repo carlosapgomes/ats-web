@@ -36,6 +36,7 @@ from apps.cases.navigation import resolve_safe_next_url
 from apps.cases.priority_signals import build_priority_signal_badges
 from apps.cases.procedures import (
     PROCEDURE_ORDER,
+    PROCEDURE_PACKAGE_BASES,
     SUPPORTED_PROCEDURE_TYPES,
     format_procedure_selection,
     get_approved_procedure_types,
@@ -188,23 +189,53 @@ def _correction_rerender_url(case_id: uuid.UUID, attempted_key: str) -> str:
     return base
 
 
+def _detected_type_order(type_: str) -> int:
+    """Posição canônica de uma identidade; desconhecidas vão para o fim (total)."""
+    return PROCEDURE_ORDER.get(type_, len(PROCEDURE_ORDER))
+
+
+def _render_detected_set(detected_types: list[object]) -> str:
+    """Renderiza o conjunto detectado sem combinação impossível (ADR-0011 D4).
+
+    Regra anti-duplicação: base contida em ao menos um pacote presente
+    (``PROCEDURE_PACKAGE_BASES``) não é listada separadamente; os pacotes
+    completos restantes juntam-se com ``" e "`` e as demais identidades com
+    ``" + "`` — ``{eda, eda_dilation}`` vira ``EDA + Dilatação``, nunca
+    ``EDA + EDA + Dilatação``. Função total: identidade fora do catálogo segue
+    exibida pelo código cru, com ou sem identidades conhecidas ao lado.
+    """
+    ordered = sorted({str(raw) for raw in detected_types}, key=_detected_type_order)
+    present = set(ordered)
+    absorbed = {PROCEDURE_PACKAGE_BASES[t] for t in present if t in PROCEDURE_PACKAGE_BASES}
+    remaining = [t for t in ordered if t not in absorbed]
+    labels = {t: ProcedureType(t).label if t in ProcedureType.values else t for t in remaining}
+    segments: list[tuple[int, str]] = []
+    for group, separator in (
+        ([t for t in remaining if t not in PROCEDURE_PACKAGE_BASES], " + "),
+        ([t for t in remaining if t in PROCEDURE_PACKAGE_BASES], " e "),
+    ):
+        if group:
+            segments.append((min(_detected_type_order(t) for t in group), separator.join(labels[t] for t in group)))
+    segments.sort(key=lambda segment: segment[0])
+    return " + ".join(text for _, text in segments)
+
+
 def _correction_detected_label(suggested: dict[str, object]) -> str:
     """Label do conjunto DETECTADO no card de correção (R2/D13, Slice 007).
 
     Prefere o conjunto do payload (``detected_procedures``): um conjunto fora
     da matriz — ex.: ``Solicito EDA. Solicito CPRE.`` independentes — é
     rotulado pelo PRÓPRIO conjunto (``EDA + CPRE``), nunca pela chave legada
-    ``mixed``, que afirma EDA + Colonoscopia. Cai para a chave singular legada
-    quando o payload não traz o conjunto (casos 1.1/2.0 e fixtures antigas) e
-    nunca levanta: a projeção de card não valida a matriz.
+    ``mixed``, que afirma EDA + Colonoscopia. A renderização aplica a regra
+    anti-duplicação da ADR-0011 D4 (``_render_detected_set``), de modo que uma
+    união bruta legada como ``{eda, eda_dilation}`` não vire combinação
+    inexistente. Cai para a chave singular legada quando o payload não traz o
+    conjunto (casos 1.1/2.0 e fixtures antigas) e nunca levanta: a projeção de
+    card não valida a matriz.
     """
     detected_types = suggested.get("detected_procedures")
     if isinstance(detected_types, list) and detected_types:
-        ordered = sorted(
-            {str(raw) for raw in detected_types},
-            key=lambda t: PROCEDURE_ORDER.get(t, len(PROCEDURE_ORDER)),
-        )
-        return " + ".join(ProcedureType(t).label if t in ProcedureType.values else t for t in ordered)
+        return _render_detected_set(detected_types)
     legacy = str(suggested.get("detected_exam_type") or suggested.get("exam_type") or "")
     return CORRECTION_DETECTED_TYPE_LABELS.get(legacy, legacy or "—")
 

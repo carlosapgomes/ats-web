@@ -24,6 +24,7 @@ from apps.cases.procedures import set_declared_procedures
 from apps.pipeline.llm import RecordingLlmClient
 from apps.pipeline.orchestrator import run_pipeline
 from apps.pipeline.procedure_reconciliation import (
+    build_v2_review_payload,
     reconcile_detected_procedures,
     serialize_procedure_precedence,
 )
@@ -261,16 +262,23 @@ class TestPackageReconciliationV4:
         assert result.action == "proceed"
         assert result.detected_procedure_types == ("eda_capsule",)
 
-    def test_structured_item_without_current_occurrence_does_not_suppress(self) -> None:
+    def test_declared_package_covers_the_union_at_the_detected_matrix(self) -> None:
+        # ADR-0011 decisão 2 / D2 (Ponto B) — re-baseline intencional: o item
+        # estruturado sem ocorrência atual NÃO colapsa pela precedência de
+        # variação (sem evidência textual atual), mas quando o declarado é a
+        # seleção canônica mais completa que cobre o union {eda, eda_dilation}
+        # (``eda_dilation``) a resolução declarado-aware prossegue — inclusive
+        # porque ``any_set ≠ ∅`` (há evidência atual de EDA). O fail-closed por
+        # ausência de evidência atual segue coberto pelos testes de cápsula
+        # negada/histórica (any=∅).
         result = self._reconcile(
             declared=("eda_dilation",),
             strong=("eda", "eda_dilation"),
             any_evidence=("eda", "eda_dilation"),
             cleaned_text="Solicito EDA. Dilatação esofágica realizada em 2022.",
         )
-        assert result.action == "nir_review"
-        assert result.reason_code == "unsupported_procedure_combination"
-        assert set(result.detected_procedure_types) == {"eda", "eda_dilation"}
+        assert result.action == "proceed"
+        assert result.detected_procedure_types == ("eda_dilation",)
         assert result.variation_precedence_applied is False
 
     def test_two_current_variations_fail_closed_without_discarding_values(self) -> None:
@@ -418,7 +426,14 @@ class TestPackageReachesDoctor:
             "suppressed": ["eda"],
         }
 
-    def test_historical_dilation_with_declared_package_returns_to_nir(self, django_user_model) -> None:
+    def test_historical_dilation_with_declared_package_reaches_the_doctor(self, django_user_model) -> None:
+        # ADR-0011 decisão 2 / D2 (Ponto A) — re-baseline intencional: é o
+        # pass-2 do caso real 26/09. A ocorrência histórica contradiz o item
+        # estruturado (conflito) e o pacote não colapsa pela precedência de
+        # variação, MAS há evidência atual (``any_set = {eda} ≠ ∅``) e o
+        # declarado ``eda_dilation`` é a seleção canônica mais completa que
+        # cobre o union bruto ``{eda, eda_dilation}`` — a correção do NIR
+        # destrava o caso (a auditoria preserva a união bruta, D3/R5).
         user = django_user_model.objects.create_user(username="nir3_hist")
         case, client = _run(
             user,
@@ -430,18 +445,15 @@ class TestPackageReachesDoctor:
             ),
             recommendations=_single_procedure_recommendation("eda_dilation"),
         )
-        assert len(client.calls) == 1
-        payload = _suggested_action(case)
-        assert payload["decision"] == "manual_review_required"
-        # Slice 004/R5: a ocorrência histórica contradiz o item estruturado. O
-        # pacote não vira detecção (strong/any falsos), mas fica sinalizado como
-        # conflito e entra no conjunto detectado → revisão NIR por conflito.
-        assert payload["reason_code"] == "conflicting_procedure_evidence"
-        assert set(payload["detected_procedures"]) == {"eda", "eda_dilation"}
-        # Conjunto fora da matriz: a projeção é pulada e a row declarada fica no
-        # estado pendente (nenhum NOT_DETECTED silencioso para o pacote).
+        assert case.status == CaseStatus.WAIT_DOCTOR
+        assert len(client.calls) == 2
+        assert [item["procedure_type"] for item in _recommendations(case)] == ["eda_dilation"]
+        # R5/D3: a união bruta (eda + eda_dilation) permanece no evento, embora
+        # a projeção carregue o declarado.
+        event = CaseEvent.objects.filter(case=case, event_type="CASE_PROCEDURES_DETECTED").latest("timestamp")
+        assert set(event.payload["detected_procedures"]) == {"eda", "eda_dilation"}
         row = CaseProcedure.objects.get(case=case, procedure_type="eda_dilation")
-        assert row.detection_status == DetectionStatus.PENDING
+        assert row.detection_status == DetectionStatus.DETECTED
 
 
 # ── P1 review fix: item estruturado não sobrepõe texto não-atual ──────────
@@ -473,6 +485,13 @@ class TestStructuredItemWithoutCurrentOccurrence:
         assert payload["decision"] == "manual_review_required"
         assert payload["reason_code"] == "conflicting_procedure_evidence"
         assert payload["detected_procedures"] == ["eda_capsule"]
+        # ADR-0011 (guarda do discriminador ``any_set ≠ ∅``): a única evidência é
+        # o item contraditado/negado (any=∅), então a resolução declarado-aware
+        # NÃO se aplica e a ação não muda — permanece revisão NIR por conflito
+        # (o evento de auditoria confirma o mesmo desfecho).
+        event = CaseEvent.objects.filter(case=case, event_type="CASE_PROCEDURES_DETECTED").latest("timestamp")
+        assert event.payload["reason_code"] == "conflicting_procedure_evidence"
+        assert event.payload["detected_procedures"] == ["eda_capsule"]
         row = CaseProcedure.objects.get(case=case, procedure_type="eda_capsule")
         assert row.detection_status == DetectionStatus.DETECTED
 
@@ -578,3 +597,38 @@ class TestDilationSiteAnchoring:
         )
         recommendations = _recommendations(case)
         assert "dilation_detail" not in recommendations[0]
+
+
+# ── R4/D3: normalização do payload só fora da matriz ──────────────────────
+
+
+class TestReviewPayloadNormalization:
+    def _payload(self, *, declared: tuple[str, ...], detected: tuple[str, ...]) -> dict[str, Any]:
+        return build_v2_review_payload(
+            case_id="case-1",
+            agency_record_number="12345",
+            reason_code="conflicting_procedure_evidence",
+            reason_text="Item estruturado contradiz o corpo.",
+            declared=declared,
+            detected=detected,
+            evidence_spans=[],
+        )
+
+    def test_base_plus_package_is_normalized_to_the_best_covering_selection(self) -> None:
+        # ADR-0011 decisão 3: conjunto fora da matriz com cobertura válida sai
+        # normalizado no payload (a união bruta segue no evento, R5).
+        payload = self._payload(declared=("eda",), detected=("eda", "eda_dilation"))
+        assert payload["detected_procedures"] == ["eda_dilation"]
+
+    def test_valid_pair_is_never_collapsed_to_the_internal_key(self) -> None:
+        # Conjunto já válido não é tocado: a chave ``eda_colonoscopy`` nunca vaza
+        # para a UI e o par permanece a lista de duas identidades.
+        payload = self._payload(declared=("eda",), detected=("eda", "colonoscopy"))
+        assert payload["detected_procedures"] == ["eda", "colonoscopy"]
+        assert payload["exam_type"] == "mixed"
+
+    def test_uncovered_union_keeps_the_raw_detected_set(self) -> None:
+        # Sem cobertura (``invalid``) a normalização não fabrica validade: o
+        # union bruto permanece no payload.
+        payload = self._payload(declared=("eda_capsule",), detected=("eda_capsule", "colonoscopy"))
+        assert payload["detected_procedures"] == ["eda_capsule", "colonoscopy"]

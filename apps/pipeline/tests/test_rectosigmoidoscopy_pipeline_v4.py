@@ -301,16 +301,24 @@ class TestRectosigmoidoscopyReconciliation:
         assert result.variation_precedence_applied is True
         assert result.suppressed_base_types == ("rectosigmoidoscopy",)
 
-    def test_structured_item_without_current_occurrence_does_not_suppress(self) -> None:
+    def test_declared_package_covers_the_union_at_the_detected_matrix(self) -> None:
+        # ADR-0011 decisão 2 / D2 (Ponto B) — re-baseline intencional, simétrico
+        # do caso EDA (:264-277): a regra é genérica (D1 regra 3 inclui os pacotes
+        # de Retossigmoidoscopia em ``best_covering_selection``; D2 não restringe
+        # família). O item estruturado sem ocorrência atual NÃO colapsa pela
+        # precedência de variação, mas há evidência atual (``any_set ≠ ∅``) e o
+        # declarado é a seleção canônica mais completa que cobre o union
+        # {rectosigmoidoscopy, rectosigmoidoscopy_dilation} — a resolução
+        # declarado-aware prossegue. A guarda de coincidência sem evidência atual
+        # (any=∅) permanece coberta por :233-247.
         result = self._reconcile(
             declared=("rectosigmoidoscopy_dilation",),
             strong=("rectosigmoidoscopy", "rectosigmoidoscopy_dilation"),
             any_evidence=("rectosigmoidoscopy", "rectosigmoidoscopy_dilation"),
             cleaned_text="Solicito Retossigmoidoscopia. Dilatação de anastomose realizada em 2022.",
         )
-        assert result.action == "nir_review"
-        assert result.reason_code == "unsupported_procedure_combination"
-        assert set(result.detected_procedure_types) == {"rectosigmoidoscopy", "rectosigmoidoscopy_dilation"}
+        assert result.action == "proceed"
+        assert result.detected_procedure_types == ("rectosigmoidoscopy_dilation",)
         assert result.variation_precedence_applied is False
 
     def test_two_current_variations_fail_closed_without_discarding_values(self) -> None:

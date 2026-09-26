@@ -46,9 +46,14 @@ from typing import Any
 from apps.cases.models import EDA_COLONOSCOPY, ProcedureType
 from apps.cases.procedures import (
     ALLOWED_PROCEDURE_SETS,
+    INVALID_SELECTION_KEY,
     PAIRED_APPOINTMENT_SET,
     PROCEDURE_ORDER,
+    PROCEDURE_PACKAGE_BASES,
+    best_covering_selection,
     is_paired_appointment_set,
+    procedure_types_for_selection,
+    selection_key,
 )
 
 
@@ -102,14 +107,10 @@ PROCEDURE_PRECEDENCE_RULE = "specialized_over_conventional"
 # Variações atômicas e a base que elas clinicamente contêm (D3, Slices
 # 003/004/005): exatamente UMA variação com ocorrência textual atual suprime a
 # base detectada em qualquer trecho (mesma expressão ou trecho independente), no
-# mesmo regime de proveniência da precedência especializada (ADR-0008).
-_VARIATION_BASE_TYPES: dict[str, str] = {
-    ProcedureType.EDA_GASTROSTOMY: ProcedureType.EDA,
-    ProcedureType.EDA_CAPSULE: ProcedureType.EDA,
-    ProcedureType.EDA_DILATION: ProcedureType.EDA,
-    ProcedureType.RECTOSIGMOIDOSCOPY_DILATION: ProcedureType.RECTOSIGMOIDOSCOPY,
-    ProcedureType.RECTOSIGMOIDOSCOPY_ARGON: ProcedureType.RECTOSIGMOIDOSCOPY,
-}
+# mesmo regime de proveniência da precedência especializada (ADR-0008). A
+# relação autoritativa base⊂pacote vive em ``apps.cases.procedures``
+# (``PROCEDURE_PACKAGE_BASES``, ADR-0011 decisão 1) e é IMPORTADA aqui — sem
+# mapa privado duplicado para divergir.
 # Termos ambíguos exigem vínculo local com a base na MESMA expressão; GTT e
 # cápsula são marcadores autoevidentes da família e não exigem vínculo (D3).
 _VARIATIONS_REQUIRING_LOCAL_LINK: frozenset[str] = frozenset(
@@ -194,7 +195,7 @@ def _current_request_variation_types(occurrences: Any) -> set[str]:
     result: set[str] = set()
     for occurrence in occurrences or ():
         procedure_type = str(getattr(occurrence, "procedure_type", ""))
-        if procedure_type not in _VARIATION_BASE_TYPES:
+        if procedure_type not in PROCEDURE_PACKAGE_BASES:
             continue
         if str(getattr(occurrence, "qualification", "")) != _QUALIFICATION_CURRENT_REQUEST:
             continue
@@ -212,13 +213,13 @@ def _apply_variation_precedence(*, any_set: set[str], occurrences: Any) -> tuple
     família), variação sem ocorrência atual e conjunto sem a base permanecem
     inalterados (fail-closed na matriz, sem descartar valores).
     """
-    variations = any_set & set(_VARIATION_BASE_TYPES)
+    variations = any_set & set(PROCEDURE_PACKAGE_BASES)
     if len(variations) != 1:
         return any_set, "", ()
     selected = str(next(iter(variations)))
     if selected not in _current_request_variation_types(occurrences):
         return any_set, "", ()
-    base = _VARIATION_BASE_TYPES[selected]
+    base = PROCEDURE_PACKAGE_BASES[selected]
     if base not in any_set:
         return any_set, "", ()
     # Somente a base é absorvida pela variação: qualquer outro componente do
@@ -233,7 +234,7 @@ def _family_identity_is_current(*, selected: str, occurrences: Any) -> bool:
     Variações ambíguas reutilizam o regime de ``_current_request_variation_types``
     (vínculo local ``linked_base``); a base exige apenas ocorrência atual.
     """
-    if selected in _VARIATION_BASE_TYPES:
+    if selected in PROCEDURE_PACKAGE_BASES:
         return selected in _current_request_variation_types(occurrences)
     return selected in _current_request_occurrence_types(occurrences)
 
@@ -328,6 +329,13 @@ class ProcedureReconciliationResult:
     ``suppressed_umbrella_types`` carregam a supressão da colonoscopia que só
     existe pelo guarda-chuva do Motivo (Slice 003). Todos são vazios quando não
     houve redução.
+
+    ``conflicting_evidence_types`` carrega a **união bruta do ponto de decisão**
+    (D3/ADR-0011): no branch de conflito é ``any ∪ conflicting``; nos demais é o
+    union do ponto. O orchestrator grava ``CASE_PROCEDURES_DETECTED`` a partir
+    dele em TODOS os desfechos porque, na passada de resolução, o
+    ``detected_procedure_types`` carrega o declarado (não pode ser a fonte do
+    evento).
     """
 
     action: str  # "proceed" | "auto_upgrade" | "nir_review"
@@ -344,6 +352,7 @@ class ProcedureReconciliationResult:
     family_umbrella_precedence_applied: bool = False
     selected_family_type: str = ""
     suppressed_umbrella_types: tuple[str, ...] = ()
+    conflicting_evidence_types: tuple[str, ...] = ()
 
 
 def _proceed(
@@ -355,6 +364,7 @@ def _proceed(
     suppressed_base_types: tuple[str, ...] = (),
     selected_family_type: str = "",
     suppressed_umbrella_types: tuple[str, ...] = (),
+    conflicting_evidence_types: tuple[str, ...] = (),
 ) -> ProcedureReconciliationResult:
     return ProcedureReconciliationResult(
         action="proceed",
@@ -370,6 +380,10 @@ def _proceed(
         family_umbrella_precedence_applied=bool(selected_family_type and suppressed_umbrella_types),
         selected_family_type=selected_family_type,
         suppressed_umbrella_types=suppressed_umbrella_types,
+        # União bruta do ponto: explícita na resolução declarado-aware (onde o
+        # declarado é o conjunto reconciliado); nos demais proceed coincide com
+        # o detectado.
+        conflicting_evidence_types=conflicting_evidence_types or detected,
     )
 
 
@@ -380,6 +394,7 @@ def _auto_upgrade(detected: tuple[str, ...]) -> ProcedureReconciliationResult:
         reason_code="auto_upgrade_strong_evidence",
         reason_text=("Solicitações atuais de EDA e Colonoscopia com evidência forte; upgrade automático auditado."),
         upgraded=True,
+        conflicting_evidence_types=detected,
     )
 
 
@@ -395,6 +410,7 @@ def _nir_review(
     suppressed_base_types: tuple[str, ...] = (),
     selected_family_type: str = "",
     suppressed_umbrella_types: tuple[str, ...] = (),
+    conflicting_evidence_types: tuple[str, ...] = (),
 ) -> ProcedureReconciliationResult:
     # Item 1.0: a origem da detecção (seções das ocorrências atuais do conjunto
     # detectado) entra no motivo; sem origem elegível o texto permanece intacto.
@@ -412,7 +428,37 @@ def _nir_review(
         family_umbrella_precedence_applied=bool(selected_family_type and suppressed_umbrella_types),
         selected_family_type=selected_family_type,
         suppressed_umbrella_types=suppressed_umbrella_types,
+        conflicting_evidence_types=conflicting_evidence_types or detected,
     )
+
+
+def _declared_resolves_to_best_covering(
+    *, declared_ordered: tuple[str, ...], any_set: set[str], union: set[str]
+) -> bool:
+    """D2 (ADR-0011 decisão 2): o declarado destrava o ponto de decisão.
+
+    Prossegue com o declarado somente quando TODAS valem:
+
+    1. ``any_set ≠ ∅`` — discriminador que mantém fechada a coincidência
+       declaração == item contraditado SEM evidência atual (ex.: cápsula
+       negada/histórica): sem ocorrência atual o fail-open original permanece
+       fechado;
+    2. o declarado é seleção canônica válida não-vazia (``selection_key``
+       devolve a chave da matriz — nunca ``""`` nem ``invalid``);
+    3. ``selection_key(declared) == best_covering_selection(union)`` — o
+       declarado é a seleção válida mais completa que cobre a união bruta do
+       ponto.
+
+    Conjuntos não cobertos (dois pacotes, variação + colonoscopia,
+    especializados) devolvem ``invalid`` da cobertura máxima e nunca igualam
+    uma declaração válida — fail-closed preservado.
+    """
+    if not any_set:
+        return False
+    declared_key = selection_key(declared_ordered)
+    if declared_key in ("", INVALID_SELECTION_KEY):
+        return False
+    return declared_key == best_covering_selection(union)
 
 
 def reconcile_detected_procedures(
@@ -480,13 +526,27 @@ def reconcile_detected_procedures(
     # criam revisão própria (aqui o item contraditado é proveniência do catálogo).
     conflicting_set = set(_partition_procedures(conflicting).ordered)
     if conflicting_set:
+        raw_union = any_set | conflicting_set
+        if _declared_resolves_to_best_covering(
+            declared_ordered=declared_partition.ordered,
+            any_set=any_set,
+            union=raw_union,
+        ):
+            # D2/Ponto A (ADR-0011 decisão 2): há evidência ATUAL e o declarado é
+            # a cobertura máxima do union bruto → prossegue com o declarado; a
+            # evidência bruta permanece no evento de auditoria (D3/R5) e a
+            # revisão médica acontece a jusante (não é prosseguimento silencioso).
+            return _proceed(
+                declared_partition.ordered,
+                conflicting_evidence_types=_ordered(raw_union),
+            )
         return _nir_review(
             reason_code="conflicting_procedure_evidence",
             reason_text=(
                 "Item estruturado do LLM contradiz o corpo do relatório "
                 "(ocorrência não-atual do termo); revisão manual obrigatória."
             ),
-            detected=_ordered(any_set | conflicting_set),
+            detected=_ordered(raw_union),
             occurrences=occurrences,
         )
 
@@ -533,6 +593,20 @@ def reconcile_detected_procedures(
     }
 
     if any_set and frozenset(any_set) not in ALLOWED_PROCEDURE_SETS:
+        if _declared_resolves_to_best_covering(
+            declared_ordered=declared_partition.ordered,
+            any_set=any_set,
+            union=any_set,
+        ):
+            # D2/Ponto B (ADR-0011 decisão 2): fecha o beco "covered-but-
+            # unsupported" (item estruturado sem NENHUMA ocorrência textual +
+            # declaração do pacote) — há evidência atual e o declarado é a
+            # cobertura máxima do union bruto; a evidência bruta fica no evento.
+            return _proceed(
+                declared_partition.ordered,
+                conflicting_evidence_types=_ordered(any_set),
+                **precedence_kwargs,
+            )
         return _nir_review(
             reason_code="unsupported_procedure_combination",
             reason_text="Combinação de procedimentos não suportada; revisão manual obrigatória.",
@@ -740,9 +814,26 @@ def build_v2_review_payload(
     conjuntos ``declared_procedures``/``detected_procedures``. ``body_clues``
     recebe a lista já projetada por ``project_body_clues`` (D5); o campo
     ``detected_body_clues`` é aditivo e vazio quando ausente.
+
+    D3/ADR-0011: ``detected_procedures`` é normalizado para a seleção válida
+    mais completa (``best_covering_selection`` + ``procedure_types_for_selection``)
+    apenas quando o conjunto detectado NÃO pertence à matriz fechada e há
+    cobertura — a normalização nunca fabrica validade para conjuntos sem
+    cobertura nem altera conjuntos já válidos.
     """
     declared_types = _ordered(declared)
     detected_types = _ordered(detected)
+    # D3/ADR-0011: o payload normaliza o conjunto detectado SOMENTE quando ele
+    # não pertence à matriz fechada E há cobertura válida (seleção mais
+    # completa). O par válido ``{eda, colonoscopy}`` permanece
+    # ``["eda","colonoscopy"]`` (a chave interna ``eda_colonoscopy`` nunca vaza
+    # para a UI) e conjuntos sem cobertura (``invalid``) permanecem a união
+    # bruta. O evento de auditoria preserva o union cru em TODOS os desfechos
+    # (R5) — a normalização é só do payload de revisão/exibição.
+    if detected_types and frozenset(detected_types) not in ALLOWED_PROCEDURE_SETS:
+        best = best_covering_selection(detected_types)
+        if best != INVALID_SELECTION_KEY:
+            detected_types = procedure_types_for_selection(best)
     detected_label = "mixed" if len(detected_types) == 2 else (detected_types[0] if detected_types else "unknown")
     declared_label = (
         EDA_COLONOSCOPY if is_paired_appointment_set(declared_types) else (declared_types[0] if declared_types else "")
