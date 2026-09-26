@@ -1874,7 +1874,7 @@ class TestSpecializedCorrectionGate:
         assert pipeline_calls == [case.case_id]
 
     def test_incompatible_combination_card_labels_detected_set(self, client) -> None:
-        """R2: card rotula o CONJUNTO detectado (EDA + CPRE), nunca ``mixed``."""
+        """R2/Slice 003: card rotula o CONJUNTO detectado, nunca ``mixed`` nem duplicação."""
         from django.test import override_settings
 
         client, user = _nir_client(client, "nir-incompatible-card@test.com")
@@ -1887,6 +1887,35 @@ class TestSpecializedCorrectionGate:
         assert "EDA + CPRE" in content
         assert "Solicitação mista" not in content
         assert 'value="cpre"' in content
+
+        # R4/Slice 003 (ADR-0011 D4): na revisão por conflito, o label do
+        # "Tipo detectado" não duplica a base — tanto com o payload já
+        # normalizado pelo Slice 002 (``{eda, eda_dilation}`` →
+        # ``["eda_dilation"]``) quanto com o union bruto de payloads
+        # persistidos antes da normalização (caso real de 26/09).
+        for detected_procedures in (
+            [ProcedureType.EDA_DILATION],
+            [ProcedureType.EDA, ProcedureType.EDA_DILATION],
+        ):
+            conflict_case = _eligible_case(
+                user=user,
+                exam_type=ProcedureType.EDA,
+                reason_code="conflicting_procedure_evidence",
+                detected=ProcedureType.EDA_DILATION,
+            )
+            conflict_case.suggested_action = {
+                **(conflict_case.suggested_action or {}),
+                "declared_procedures": [ProcedureType.EDA],
+                "detected_procedures": detected_procedures,
+            }
+            conflict_case.save()
+
+            content = client.get(reverse("intake:case_detail", args=[conflict_case.case_id])).content.decode()
+
+            assert "Correção de Tipo de Exame" in content
+            assert "Tipo detectado" in content
+            assert "EDA + Dilatação" in content
+            assert "EDA + EDA + Dilatação" not in content
 
     def test_correction_card_offers_specialized_option_only_with_flag(self, client) -> None:
         """R2/R3: o card oferece Eco/CPRE somente quando a flag correspondente está ligada."""
