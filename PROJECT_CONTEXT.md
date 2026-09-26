@@ -12,6 +12,15 @@ Resumo executivo para retomada rapida apos pausas e para onboarding de novos con
 - `openspec/changes/` — changes ativos com proposals, designs e slices
 - Em caso de conflito: artefatos mais recentes no Git prevalecem.
 
+## Change Concluído — Normalização do conjunto detectado (best-covering) e resolução declarada-aware
+
+- **Change arquivado:** `openspec/changes/archive/2026-09-26-normalize-detected-set-to-valid-selection/` — correction do beco sem saída de produção (caso real 26/09: card NIR "EDA + EDA + Dilatação" impossível; correção que não desfez a revisão). 3 slices verticais, revisão independente por slice (1 rodada cada, 0 P0/P1); gate final 4602 passed (~4542 + 60); 3 specs promovidas (procedure-neutral-analysis, exam-type-correction, procedure-combination-policy).
+- **ADR-0011 (Accepted):** conjunto detectado normalizado para a seleção válida mais completa na decisão/exibição (payload só fora da matriz); resolução declarada-aware nos DOIS pontos da reconciliação com discriminador `any_set ≠ ∅` (coincidência sem evidência atual permanece fail-closed); evento `CASE_PROCEDURES_DETECTED` preserva o union bruto em todos os desfechos (`conflicting_evidence_types`); card sem duplicação de base (" e " entre pacotes).
+- **Implantado:** `v0.10.0-rc.5` em produção (eon) em 2026-09-26T16:11Z — troca de imagem pura (sem migrations/prompts/dados); Image ID único `96f30f2d…`; rollback = imagem rc.4. Smoke-pendente: re-correção do caso preso deve prosseguir ao médico.
+- **Branch:** `feature/normalize-detected-set-to-valid-selection` (BASE_REF `53d7967`; `d0637db` ADR · `3d05fb1`/`b4b74dc`/`de4420a` slices · `0179af8` artefatos), merge `1f5cff4`, pack `a93d0ba`.
+- **P2s diferidos** (tasks.md do archive): pin da classe "negado coberto por declarado mais amplo com any≠∅"; sentinel `None` para 3º caller de `conflicting_evidence_types`; assert do card escopado à célula; separadores mistos ≥2 pacotes; consolidação order→label (3 lugares).
+- **Coordenação:** item 1.3 do `followup-body-clue-detection-hardening` (polimento card/reason_text) deve considerar o label normalizado. Change irmão `solicitation-complement-as-current-request` SHELVED em `.pi/shelved-changes/` (sem amostras anonimizadas; conhecimento no relatório de investigação).
+
 ## Change Concluído — Affordances visuais da seleção de procedimentos
 
 - **Change arquivado:** `openspec/changes/archive/2026-09-25-procedure-selection-visual-affordances/` — presentation-only, nascido do smoke da `v0.10.0-rc.1` em produção; 2 slices verticais aceitos com reviewer independente (2 e 1 rodadas), gate final verde em 2026-09-25 (4456 testes = baseline 4445 + 11, ruff/format/mypy/node clean, validate strict ok); delta promovido a `searchable-procedure-selection` (+2 requisitos: affordances visuais e hint persistente).
