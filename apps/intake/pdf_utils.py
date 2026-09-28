@@ -9,8 +9,8 @@ from collections import Counter
 import fitz  # type: ignore[import-untyped]  # PyMuPDF
 
 # Patterns for watermark detection
-_REPEATED_FIVE_DIGIT_LINE_PATTERN = re.compile(r"^\s*(\d{5,6})(?:\s+\1){3,}\s*$")
-_DIGIT_TOKEN_PATTERN = re.compile(r"\b(\d{5,6})\b")
+_WATERMARK_DIGIT_TOKEN_PATTERN = re.compile(r"\b([0-9]{3,})\b")
+_WATERMARK_MIN_OCCURRENCES = 11
 
 # Patterns to extract agency record number from text
 _CODE_LABEL_PATTERN = re.compile(
@@ -46,13 +46,13 @@ def extract_pdf_text(pdf_path: str) -> str:
 def strip_watermark_and_extract_record(text: str) -> tuple[str, str]:
     """Remove marca d'água do texto e extrai número de registro.
 
-    A marca d'água é uma sequência de 5-6 dígitos que se repete ao longo
-    do texto extraído (normalmente o número do registro do paciente).
+    A marca d'água é um token numérico de 3 ou mais dígitos que aparece
+    mais de 10 vezes ao longo do texto extraído.
 
     Strategy (portado do legado record_number.py):
     1. Detectar padrões explícitos de registro (Código: XXXXX, RELATÓRIO...)
     2. Se encontrado, usar como registro e remover todas as ocorrências
-    3. Remover linhas de marca d'água (5-6 dígitos repetidos 3+ vezes)
+    3. Remover tokens numéricos repetidos mais de 10 vezes no documento
     4. Fallback: usar timestamp se nenhum registro encontrado
 
     Returns:
@@ -67,7 +67,7 @@ def strip_watermark_and_extract_record(text: str) -> tuple[str, str]:
     # 2. Remove all occurrences of the record number
     cleaned = re.sub(rf"\b{re.escape(record_number)}\b", " ", text)
 
-    # 3. Strip repeated watermark lines
+    # 3. Strip repeated numeric watermark tokens
     cleaned = _strip_repeated_digit_watermarks(cleaned, protected_token=record_number)
 
     # 4. Normalize whitespace
@@ -91,41 +91,13 @@ def _current_epoch_millis() -> int:
 
 
 def _strip_repeated_digit_watermarks(text: str, *, protected_token: str) -> str:
-    """Remove repeated 5-6 digit watermark bands and residual isolated tokens."""
-    lines = text.splitlines()
+    """Remove 3+ digit tokens repeated more than 10 times in the document."""
+    token_counts = Counter(_WATERMARK_DIGIT_TOKEN_PATTERN.findall(text))
+    watermark_tokens = {token for token, count in token_counts.items() if count >= _WATERMARK_MIN_OCCURRENCES}
+    watermark_tokens.discard(protected_token)
 
-    # Detect which 5-6 digit tokens appear in repeated watermark lines
-    repeated_token_counts: Counter[str] = Counter()
-    for line in lines:
-        match = _REPEATED_FIVE_DIGIT_LINE_PATTERN.match(line)
-        if match:
-            repeated_token_counts[match.group(1)] += 1
-
-    candidate_tokens = {token for token, count in repeated_token_counts.items() if count >= 1}
-    candidate_tokens.discard(protected_token)
-
-    if not candidate_tokens:
-        return text
-
-    # Remove watermark lines
-    filtered_lines: list[str] = []
-    for line in lines:
-        match = _REPEATED_FIVE_DIGIT_LINE_PATTERN.match(line)
-        if match and match.group(1) in candidate_tokens:
-            continue
-        filtered_lines.append(line)
-
-    partially_cleaned = "\n".join(filtered_lines)
-
-    # Remove residual isolated tokens
-    token_counts = Counter(_DIGIT_TOKEN_PATTERN.findall(partially_cleaned))
-    removable_tokens = {token for token in candidate_tokens if token_counts.get(token, 0) >= 1}
-
-    if not removable_tokens:
-        return partially_cleaned
-
-    result = partially_cleaned
-    for token in removable_tokens:
+    result = text
+    for token in watermark_tokens:
         result = re.sub(rf"\b{re.escape(token)}\b", " ", result)
     return result
 
