@@ -16,8 +16,12 @@
   *(review `OK with notes` 1 rodada; P2: sem teste de sucesso direto no arquivo novo —
   coberto por `test_v4_existing_workflow.py`; focados 3 passed + schema 2 passed;
   ruff/format/mypy ok; full 4609 passed com `POSTGRES_TEST_HOST_PORT=55433`.)*
-- [ ] Slice 002 — Retry one-shot para echo mismatch com instrução corretiva
+- [x] Slice 002 — Retry one-shot para echo mismatch com instrução corretiva
   (`slices/slice-002-echo-mismatch-retry.md`)
+  *(review `OK with notes` 1 rodada; P2: retry reconstrói do prompt base — na rara sequência
+  language-retry→echo-mismatch a instrução de idioma é descartada (limitado, revalidado, máx 4 calls);
+  asserts R5 do slice 001 atualizados 1→2 calls conforme permitido; focados 7 passed +
+  schema 2 passed + orchestrator 28 passed; ruff/format/mypy ok.)*
 
 ## 2. Gate final (uma vez após todos os slices)
 

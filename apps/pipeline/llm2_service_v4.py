@@ -3,8 +3,9 @@
 Schema 4.0 (design D5 / ADR-0010): recebe exatamente o conjunto reconciliado
 sobre as dez identidades atômicas, valida igualdade exata de conjuntos (sem
 omissão/duplicata/adição) e devolve itens normalizados. Preserva os orçamentos
-finitos de correção já existentes: um retry one-shot para mismatch schema-válido
-(erro tipado) e um para idioma pt-BR, com máximo físico de três chamadas e
+finitos de correção: um retry one-shot para echo mismatch de IDs
+(``case_id``/``agency_record_number``), um para mismatch schema-válido de conjunto
+(erro tipado) e um para idioma pt-BR, com máximo físico de quatro chamadas e
 revalidação integral a cada resposta.
 """
 
@@ -138,7 +139,11 @@ class Llm2ServiceV4:
         system_prompt: str,
         user_prompt_template: str,
     ) -> Llm2V4Result:
-        """Executa a análise LLM2 conjunta com orçamentos finitos de correção."""
+        """Executa a análise LLM2 conjunta com orçamentos finitos de correção.
+
+        Máximo físico de quatro chamadas: 1 retry de echo (IDs), 1 retry de
+        conjunto de procedimentos e 1 retry de idioma pt-BR.
+        """
         user_prompt = _render_user_prompt(
             template=user_prompt_template,
             case_id=case_id,
@@ -149,6 +154,7 @@ class Llm2ServiceV4:
             detected_procedure_types=detected_procedure_types,
         )
         raw_response = self._client.complete(system_prompt=system_prompt, user_prompt=user_prompt)
+        echo_retry_used = False
         procedure_set_retry_used = False
         language_retry_used = False
         while True:
@@ -159,6 +165,22 @@ class Llm2ServiceV4:
                     agency_record_number=agency_record_number,
                     detected_procedure_types=detected_procedure_types,
                 )
+            except Llm2V4EchoMismatchError as error:
+                if echo_retry_used:
+                    raise
+                echo_retry_used = True
+                raw_response = self._client.complete(
+                    system_prompt=system_prompt,
+                    user_prompt=f"{user_prompt}\n\n"
+                    + _echo_retry_instruction(
+                        case_id=case_id,
+                        agency_record_number=agency_record_number,
+                        field=error.field,
+                        got=error.got,
+                        detected_procedure_types=detected_procedure_types,
+                    ),
+                )
+                continue
             except Llm2V4ProcedureSetMismatchError:
                 if procedure_set_retry_used:
                     raise
@@ -209,6 +231,27 @@ def _closed_list_declaration(detected_procedure_types: tuple[str, ...]) -> str:
 def _procedure_set_retry_instruction(detected_procedure_types: tuple[str, ...]) -> str:
     return "Correcao obrigatoria: sua resposta anterior omitiu ou adicionou procedimento.\n" + _closed_list_declaration(
         detected_procedure_types
+    )
+
+
+def _echo_retry_instruction(
+    *,
+    case_id: str,
+    agency_record_number: str,
+    field: str,
+    got: str,
+    detected_procedure_types: tuple[str, ...],
+) -> str:
+    """Correção one-shot para eco divergente: repete os IDs exatos esperados.
+
+    Ecoa apenas IDs operacionais (sem PHI clínica) além do que o prompt original
+    já carrega; ``got`` é repetido para orientar a correção.
+    """
+    return (
+        f"Correcao obrigatoria: o campo {field} da sua resposta anterior nao "
+        f"corresponde ao caso recebido. Reenvie o mesmo resultado com "
+        f"case_id={case_id!r} e agency_record_number={agency_record_number!r} "
+        f"exatamente como recebidos (voce enviou {got!r}).\n" + _closed_list_declaration(detected_procedure_types)
     )
 
 
