@@ -24,8 +24,15 @@
   3 arquivos de teste legados (só asserts de markup, sem produção) —
   `test_expanded_catalog_scheduler`, `test_slice_004_paired_scheduler_appointment`,
   `test_specialized_scheduler`.)*
-- [ ] Slice 002 — Médico: `<select>` com filtro imediato, composição tipo+busca
+- [x] Slice 002 — Médico: `<select>` com filtro imediato, composição tipo+busca
   (`slices/slice-002-doctor-select-filter.md`) — após o slice 001 aceito.
+  *(reviewer builtin indisponível: 2 tentativas falharam por limite de uso do
+  provider Codex — sem veredito independente; parent verificou diretamente:
+  diff restrito aos 4 arquivos (3 do slice + `test_expanded_catalog_queues`
+  test-only), sem radios/btn-group restantes, `change` sem botão de ação,
+  RED exit 1 em radios → GREEN 34 passed, regressão 17 passed, suite doctor
+  557 passed, ruff/format ok. P2 herdado do slice 001: JS provado por inspeção
+  estática, sem runner JS no projeto.)*
 
 ## 2. Gate final (uma vez após todos os slices)
 

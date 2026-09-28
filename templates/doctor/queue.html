@@ -11,16 +11,15 @@
 {% block content %}
 {% if active_tab == 'pending' %}
 <div class="mb-3" id="doctor-queue-search-bar">
-  <fieldset class="mb-3" id="doctor-queue-type-filter">
-    <legend class="form-label fw-semibold mb-2">Filtrar por tipo de exame</legend>
-    <div class="btn-group" role="group" aria-label="Filtrar por tipo de exame">
+  <div class="mb-3" id="doctor-queue-type-filter">
+    <label class="form-label fw-semibold mb-2" for="doctor-queue-exam-type">Filtrar por tipo de exame</label>
+    <select class="form-select" id="doctor-queue-exam-type" data-doctor-exam-filter>
       {# Opções derivadas do catálogo (R1/D12): label canônica + chave de seleção. #}
       {% for option in procedure_filter_options %}
-      <input type="radio" class="btn-check" name="doctor-queue-exam-type" id="doctor-exam-type-{{ option.key }}" value="{{ option.key }}" {% if option.key == 'all' %}checked{% endif %} data-doctor-exam-filter data-exam-type-label="{{ option.label }}">
-      <label class="btn btn-outline-secondary" for="doctor-exam-type-{{ option.key }}">{{ option.label }} <span class="badge text-bg-secondary" data-exam-type-count="{{ option.key }}">0</span></label>
+      <option value="{{ option.key }}" data-exam-type-label="{{ option.label }}" data-exam-type-count="{{ option.key }}" {% if option.key == 'all' %}selected{% endif %}>{{ option.label }} (0)</option>
       {% endfor %}
-    </div>
-  </fieldset>
+    </select>
+  </div>
   <label for="doctor-queue-search-input" class="form-label fw-semibold">
     Buscar por nome ou ocorrência
   </label>
@@ -65,16 +64,13 @@
 
 {% if active_tab == 'decided' %}
 <div class="mb-3" id="doctor-decided-type-filter">
-  <fieldset class="mb-3">
-    <legend class="form-label fw-semibold mb-2">Filtrar por tipo de exame</legend>
-    <div class="btn-group" role="group" aria-label="Filtrar por tipo de exame">
-      {# Opções derivadas do catálogo (R2/D12): Decididos Hoje filtra o AUTORIZADO e inclui `none`. #}
-      {% for option in procedure_filter_options %}
-      <input type="radio" class="btn-check" name="doctor-decided-exam-type" id="doctor-decided-type-{{ option.key }}" value="{{ option.key }}" {% if option.key == 'all' %}checked{% endif %} data-doctor-exam-filter data-exam-type-label="{{ option.label }}">
-      <label class="btn btn-outline-secondary" for="doctor-decided-type-{{ option.key }}">{{ option.label }} <span class="badge text-bg-secondary" data-exam-type-count="{{ option.key }}">0</span></label>
-      {% endfor %}
-    </div>
-  </fieldset>
+  <label class="form-label fw-semibold mb-2" for="doctor-decided-exam-type">Filtrar por tipo de exame</label>
+  <select class="form-select" id="doctor-decided-exam-type" data-doctor-exam-filter>
+    {# Opções derivadas do catálogo (R2/D12): Decididos Hoje filtra o AUTORIZADO e inclui `none`. #}
+    {% for option in procedure_filter_options %}
+    <option value="{{ option.key }}" data-exam-type-label="{{ option.label }}" data-exam-type-count="{{ option.key }}" {% if option.key == 'all' %}selected{% endif %}>{{ option.label }} (0)</option>
+    {% endfor %}
+  </select>
   <div
     data-doctor-queue-filter-status
     class="mt-2 text-muted small"

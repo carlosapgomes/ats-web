@@ -5,11 +5,13 @@
  * over the same catalog options plus Nenhum autorizado, without search.
  *
  * Keys, labels and counters are NOT listed here: the template renders one
- * radio per catalog-derived option (data-exam-type-label) and one counter
- * per option (data-exam-type-count), and this script reads both from the DOM
- * (R7). Adding a catalog identity never requires touching this file.
+ * <option> per catalog-derived option (data-exam-type-label) carrying its own
+ * counter marker (data-exam-type-count), and this script reads and recomposes
+ * both from the DOM (R7). Adding a catalog identity never requires touching
+ * this file. The <select> filters on its "change" event — no extra action
+ * button.
  *
- * The type selection lives in radio buttons ([data-doctor-exam-filter]) and
+ * The type selection lives in the <select> ([data-doctor-exam-filter]) and
  * the term in the search input; switching type never clears the term and
  * clearing the term never resets the type. HTMX polling re-applies both on
  * htmx:afterSwap because the controls live outside #doctor-queue-content.
@@ -24,16 +26,14 @@
   var clearButton = null;
   var statusEl = null;
   var noResultsEl = null;
-  var typeButtons = [];
+  var typeSelect = null;
 
   function resolveElements() {
     searchInput = document.querySelector("[data-doctor-queue-search]");
     clearButton = document.querySelector("[data-doctor-queue-clear]");
     statusEl = document.querySelector("[data-doctor-queue-filter-status]");
     noResultsEl = document.querySelector("[data-doctor-queue-no-results]");
-    typeButtons = Array.prototype.slice.call(
-      document.querySelectorAll("[data-doctor-exam-filter]")
-    );
+    typeSelect = document.querySelector("select[data-doctor-exam-filter]");
   }
 
   // ── Helpers ───────────────────────────────────────────────────────
@@ -57,25 +57,23 @@
     return document.querySelectorAll("[data-doctor-queue-card]");
   }
 
-  /** Return the selected exam type value (catalog selection key, "all" or
-   *  "none") — never a hardcoded list. */
-  function getSelectedType() {
-    for (var i = 0; i < typeButtons.length; i++) {
-      if (typeButtons[i].checked) {
-        return typeButtons[i].value;
-      }
-    }
-    return "all";
+  /** Selected <option> of the exam-type select (the rendered control owns the
+   *  catalog keys, labels and counters — never a hardcoded list). */
+  function selectedTypeOption() {
+    if (!typeSelect) return null;
+    return typeSelect.options[typeSelect.selectedIndex] || null;
   }
 
-  /** Human label of the active scope, read from the rendered control (R7). */
+  /** Return the selected exam type (catalog selection key, "all" or "none"). */
+  function getSelectedType() {
+    return typeSelect && typeSelect.value ? typeSelect.value : "all";
+  }
+
+  /** Human label of the active scope, read from the selected option (R7). */
   function scopeLabel() {
-    for (var i = 0; i < typeButtons.length; i++) {
-      if (typeButtons[i].checked) {
-        return typeButtons[i].getAttribute("data-exam-type-label") || typeButtons[i].value;
-      }
-    }
-    return "Todos";
+    var option = selectedTypeOption();
+    if (!option) return "Todos";
+    return option.getAttribute("data-exam-type-label") || option.value || "Todos";
   }
 
   /** Pluralize "caso"/"casos". */
@@ -106,7 +104,8 @@
     return counts;
   }
 
-  /** Recompute per-type counters from the persisted card attribute. */
+  /** Recompute per-type counters from the persisted card attribute and recompose
+   *  each option text as "<base label> (<count>)" (R4). */
   function updateCounts() {
     var cards = getCards();
     var counts = emptyCounts();
@@ -119,7 +118,9 @@
       document.querySelectorAll("[data-exam-type-count]"),
       function (el) {
         var type = el.getAttribute("data-exam-type-count") || "all";
-        el.textContent = String(counts[type] !== undefined ? counts[type] : 0);
+        var label = el.getAttribute("data-exam-type-label") || type;
+        var count = counts[type] !== undefined ? counts[type] : 0;
+        el.textContent = label + " (" + count + ")";
       }
     );
   }
@@ -185,7 +186,7 @@
     }
   }
 
-  /** Clear only the term; the selected type (radio state) is preserved. */
+  /** Clear only the term; the selected type (select state) is preserved. */
   function clearFilter() {
     if (!searchInput) return;
     searchInput.value = "";
@@ -226,7 +227,7 @@
 
   function init() {
     resolveElements();
-    if (!statusEl || !noResultsEl) return; // not on a queue page
+    if (!statusEl || !noResultsEl || !typeSelect) return; // not on a queue page
 
     if (searchInput) {
       searchInput.addEventListener("input", onInput);
@@ -235,9 +236,7 @@
     if (clearButton) {
       clearButton.addEventListener("click", onClearClick);
     }
-    typeButtons.forEach(function (btn) {
-      btn.addEventListener("change", onTypeChange);
-    });
+    typeSelect.addEventListener("change", onTypeChange);
 
     document.addEventListener("htmx:afterSwap", onHtmxAfterSwap);
 

@@ -59,9 +59,14 @@ SELECTION_LABELS = {
 PLUS_LABEL_CODES = tuple(code for code in SUPPORTED_PROCEDURE_TYPES if "+" in PROCEDURE_LABELS[code])
 
 
-def _radio_values(html: str, name: str) -> list[str]:
-    """Valores dos radios com `name` na ordem em que foram renderizados."""
-    return re.findall(rf'name="{name}"[^>]*?value="([^"]+)"', html)
+def _filter_block(html: str, filter_id: str) -> str:
+    """Trecho do controle de tipo — do wrapper até o alvo do poll htmx."""
+    return html[html.index(f'id="{filter_id}"') : html.index('id="doctor-queue-content"')]
+
+
+def _option_values(filter_html: str) -> list[str]:
+    """Valores das ``<option>`` renderizadas, na ordem do catálogo."""
+    return re.findall(r'<option value="([^"]+)"', filter_html)
 
 
 def _create_role(name: str) -> Any:
@@ -128,21 +133,26 @@ class TestDoctorCatalogFilterUniverse:
     def test_pending_filter_universe_is_the_catalog(self, client) -> None:
         _login_as(client, "doctor")
         content = client.get("/doctor/").content.decode()
-        values = _radio_values(content, "doctor-queue-exam-type")
+        filter_html = _filter_block(content, "doctor-queue-type-filter")
+        values = _option_values(filter_html)
         assert values == CATALOG_FILTER_VALUES
         assert "none" not in values
 
     def test_decided_filter_universe_is_the_catalog_plus_none(self, client) -> None:
         _login_as(client, "doctor")
         content = client.get("/doctor/?tab=decided").content.decode()
-        values = _radio_values(content, "doctor-decided-exam-type")
+        filter_html = _filter_block(content, "doctor-decided-type-filter")
+        values = _option_values(filter_html)
         assert values == DECIDED_FILTER_VALUES
 
     def test_pending_options_render_catalog_labels(self, client) -> None:
         _login_as(client, "doctor")
         content = client.get("/doctor/").content.decode()
+        filter_html = _filter_block(content, "doctor-queue-type-filter")
         for key, label in SELECTION_LABELS.items():
-            assert f">{label} <span" in content, f"label ausente no filtro Pendentes: {key} → {label}"
+            assert f'data-exam-type-label="{label}"' in filter_html, (
+                f"label ausente no filtro Pendentes: {key} → {label}"
+            )
 
     def test_every_option_exposes_count_and_label_markers(self, client) -> None:
         """R7: cada opção renderiza contador e label legíveis pelo script."""

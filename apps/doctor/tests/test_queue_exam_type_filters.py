@@ -40,6 +40,13 @@ Slice 008 — fila médica pelo catálogo ampliado (R1–R2, R7):
   chaves/contagens/rótulos pelos ``data-*`` renderizados, sem objeto literal
   fechado de tipos (a prova comportamental das novas identidades está em
   ``test_expanded_catalog_queues.py``).
+
+Change ``queue-exam-type-select-filter`` (slice 002) — os controles de tipo das
+abas Pendentes e Decididos Hoje passam a ser UM ``<select class="form-select">``
+que filtra no ``change`` (sem botão de ação); o contador de cada tipo vive no
+texto da option (``"Todos (0)"``; o servidor renderiza o slot e o JS recompõe
+com os valores reais), com o label-base preservado em ``data-exam-type-label``
+(R1/R2/R4).
 """
 
 from __future__ import annotations
@@ -77,9 +84,28 @@ CATALOG_FILTER_ORDER = ["all", *SELECTION_KEYS]
 DECIDED_FILTER_ORDER = [*CATALOG_FILTER_ORDER, "none"]
 
 
-def _radio_values(html: str, name: str) -> list[str]:
-    """Valores dos radios com `name` na ordem em que foram renderizados."""
-    return re.findall(rf'name="{name}"[^>]*?value="([^"]+)"', html)
+def _filter_block(html: str, filter_id: str) -> str:
+    """Trecho do controle de tipo — do wrapper até o alvo do poll htmx (R5)."""
+    return html[html.index(f'id="{filter_id}"') : html.index('id="doctor-queue-content"')]
+
+
+def _option_values(filter_html: str) -> list[str]:
+    """Valores das ``<option>`` renderizadas, na ordem do catálogo."""
+    return re.findall(r'<option value="([^"]+)"', filter_html)
+
+
+def _option_tag(filter_html: str, key: str) -> str:
+    """Tag de abertura da ``<option>`` de ``key`` (atributos inclusos)."""
+    match = re.search(rf'<option value="{key}"[^>]*>', filter_html)
+    assert match is not None, f"opção {key} ausente no filtro"
+    return match.group(0)
+
+
+def _option_text(filter_html: str, key: str) -> str:
+    """Texto da option de ``key`` (label-base + contador recomposto pelo JS)."""
+    match = re.search(rf'<option value="{key}"[^>]*>([^<]*)</option>', filter_html)
+    assert match is not None, f"opção {key} ausente no filtro"
+    return match.group(1).strip()
 
 
 @pytest.mark.django_db
@@ -177,17 +203,23 @@ class TestDoctorQueueExamTypeFilters:
         response = client.get("/doctor/")
         assert response.status_code == 200
         content = response.content.decode()
+        filter_html = _filter_block(content, "doctor-queue-type-filter")
         # Controle secundário dentro de Pendentes (não substitui tabs primárias).
         assert 'id="doctor-queue-type-filter"' in content
-        # Radios acessíveis Todos | EDA | Colonoscopia, Todos default.
-        assert "data-doctor-exam-filter" in content
-        assert 'value="all" checked' in content
-        assert 'value="eda"' in content
-        assert 'value="colonoscopy"' in content
-        # Contadores reais por opção (preenchidos pelo JS a partir do tipo persistido).
-        assert 'data-exam-type-count="all"' in content
-        assert 'data-exam-type-count="eda"' in content
-        assert 'data-exam-type-count="colonoscopy"' in content
+        # UM <select> acessível Todos default — sem radio-botões de filtro (R1).
+        assert '<select class="form-select"' in filter_html
+        assert 'for="doctor-queue-exam-type"' in filter_html
+        assert "data-doctor-exam-filter" in filter_html
+        assert "selected" in _option_tag(filter_html, "all")
+        assert "selected" not in _option_tag(filter_html, "eda")
+        assert 'value="eda"' in filter_html
+        assert 'value="colonoscopy"' in filter_html
+        assert 'type="radio"' not in filter_html
+        assert "btn-check" not in filter_html
+        # Contadores por opção (recalculados pelo JS a partir do tipo persistido).
+        assert 'data-exam-type-count="all"' in filter_html
+        assert 'data-exam-type-count="eda"' in filter_html
+        assert 'data-exam-type-count="colonoscopy"' in filter_html
         # Tabs primárias preservadas e busca ainda presente.
         assert "/doctor/?tab=pending" in content
         assert "/doctor/?tab=decided" in content
@@ -227,11 +259,15 @@ class TestDoctorQueueExamTypeFilters:
         response = client.get("/doctor/?tab=decided")
         assert response.status_code == 200
         content = response.content.decode()
-        # Filtro simples por tipo, sem busca.
+        filter_html = _filter_block(content, "doctor-decided-type-filter")
+        # Filtro simples por tipo (UM <select>, sem radios), sem busca.
         assert 'id="doctor-decided-type-filter"' in content
-        assert "data-doctor-exam-filter" in content
-        assert 'value="all" checked' in content
-        assert 'value="colonoscopy"' in content
+        assert '<select class="form-select"' in filter_html
+        assert 'for="doctor-decided-exam-type"' in filter_html
+        assert "data-doctor-exam-filter" in filter_html
+        assert "selected" in _option_tag(filter_html, "all")
+        assert 'value="colonoscopy"' in filter_html
+        assert 'type="radio"' not in filter_html
         assert "data-doctor-queue-search" not in content
 
     # ── R2 ───────────────────────────────────────────────────────────
@@ -307,13 +343,14 @@ class TestDoctorQueueExamTypeFilters:
         response = client.get("/doctor/")
         assert response.status_code == 200
         content = response.content.decode()
-        values = _radio_values(content, "doctor-queue-exam-type")
+        filter_html = _filter_block(content, "doctor-queue-type-filter")
+        values = _option_values(filter_html)
         assert values == CATALOG_FILTER_ORDER
         assert set(values) == CATALOG_FILTER_VALUES
         assert "none" not in values
         assert 'id="doctor-queue-type-filter"' in content
         for key in SELECTION_KEYS:
-            assert f'data-exam-type-count="{key}"' in content
+            assert f'data-exam-type-count="{key}"' in filter_html
         assert "Ecoendoscopia" in content
         assert "CPRE" in content
         assert "EDA + Gastrostomia (GTT)" in content
@@ -325,11 +362,12 @@ class TestDoctorQueueExamTypeFilters:
         response = client.get("/doctor/?tab=decided")
         assert response.status_code == 200
         content = response.content.decode()
-        values = _radio_values(content, "doctor-decided-exam-type")
+        filter_html = _filter_block(content, "doctor-decided-type-filter")
+        values = _option_values(filter_html)
         assert values == DECIDED_FILTER_ORDER
         assert set(values) == CATALOG_FILTER_VALUES | {"none"}
-        assert 'value="all" checked' in content
-        assert "Nenhum autorizado" in content
+        assert "selected" in _option_tag(filter_html, "all")
+        assert _option_text(filter_html, "none") == "Nenhum autorizado (0)"
         assert 'id="doctor-decided-type-filter"' in content
 
     def test_pending_specialized_filter_keeps_search_and_polling(self, client) -> None:
@@ -487,18 +525,63 @@ class TestDoctorQueueFilterStatic:
 
     def test_js_composes_type_and_term(self) -> None:
         js = self._read(QUEUE_FILTER_JS)
-        # Um único filtro composto por tipo + termo sobre os cards.
-        assert "data-doctor-exam-filter" in js
+        # Um único filtro composto por tipo + termo sobre os cards, alimentado
+        # pelo <select> (R2: aplica no change, sem botão de ação).
+        assert "select[data-doctor-exam-filter]" in js
         assert "getSelectedType" in js
         assert "data-exam-type" in js
         assert 'addEventListener("change"' in js
+
+    def test_template_renders_one_select_per_tab_without_radios(self) -> None:
+        """R1: um ``<select class="form-select">`` por aba, sem radio-botões."""
+        html = self._read(QUEUE_HTML)
+        assert html.count('<select class="form-select"') == 2
+        assert html.count("data-doctor-exam-filter") == 2
+        assert 'type="radio"' not in html
+        assert "btn-check" not in html
+
+    def test_selects_stay_outside_the_polling_target(self) -> None:
+        """R5: os selects ficam fora de ``#doctor-queue-content`` (sobrevivem ao poll)."""
+        html = self._read(QUEUE_HTML)
+        content_start = html.index('id="doctor-queue-content"')
+        for filter_id in ("doctor-queue-type-filter", "doctor-decided-type-filter"):
+            assert html.index(f'id="{filter_id}"') < content_start
+
+    def test_filter_has_no_action_button(self) -> None:
+        """R2: o ``change`` filtra na hora — nenhum botão Filtrar/Aplicar/submit."""
+        html = self._read(QUEUE_HTML)
+        assert "<form" not in html
+        assert 'type="submit"' not in html
+        assert ">Filtrar<" not in html
+        assert ">Aplicar<" not in html
+
+    def test_options_carry_base_label_and_count_slot(self) -> None:
+        """R1/R4: cada option preserva o label-base e o slot de contador."""
+        html = self._read(QUEUE_HTML)
+        for filter_id in ("doctor-queue-type-filter", "doctor-decided-type-filter"):
+            filter_html = _filter_block(html, filter_id)
+            assert 'data-exam-type-label="{{ option.label }}"' in filter_html
+            assert 'data-exam-type-count="{{ option.key }}"' in filter_html
+            assert "{{ option.label }} (0)" in filter_html
+
+    def test_js_recomposes_option_text_with_base_label_and_count(self) -> None:
+        """R4: o JS recompõe ``"<label> (<count>)"`` a partir dos ``data-*`` renderizados."""
+        js = self._read(QUEUE_FILTER_JS)
+        assert 'getAttribute("data-exam-type-label")' in js
+        assert 'el.textContent = label + " (" + count + ")"' in js
+
+    def test_js_has_no_persistence_nor_query_param(self) -> None:
+        """R6: filtro 100% client-side — sem storage, cookie, fetch ou GET novo."""
+        js = self._read(QUEUE_FILTER_JS)
+        for forbidden in ("localStorage", "sessionStorage", "document.cookie", "fetch("):
+            assert forbidden not in js
 
     def test_js_preserves_term_and_type_on_clear_escape_and_swap(self) -> None:
         js = self._read(QUEUE_FILTER_JS)
         assert "clearFilter" in js
         assert "Escape" in js
         assert "htmx:afterSwap" in js
-        # Limpar mexe apenas no termo; o estado do tipo (radios) fica intacto.
+        # Limpar mexe apenas no termo; o estado do tipo (select) fica intacto.
         assert 'searchInput.value = ""' in js
 
     def test_js_status_uses_casos_with_scope(self) -> None:
