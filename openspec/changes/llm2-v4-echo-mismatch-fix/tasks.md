@@ -25,8 +25,9 @@
 
 ## 2. Gate final (uma vez após todos os slices)
 
-- [ ] 2.1 Quality gate do `AGENTS.md` com banco de teste isolado:
-  `uv run ruff check . && uv run ruff format --check . && uv run mypy . && uv run pytest`
-  (subir `docker compose -f docker-compose.yml -f docker-compose.test.yml up -d` antes do pytest).
-- [ ] 2.2 `openspec change validate llm2-v4-echo-mismatch-fix --strict` (ou `openspec validate` conforme CLI).
-- [ ] 2.3 Commit + push da branch; relatório de cada slice em markdown temporário com `REPORT_PATH`.
+- [x] 2.1 Quality gate do `AGENTS.md`: ruff check ok, ruff format ok (295 files),
+  mypy ok (325 files), pytest **4613 passed** com `POSTGRES_TEST_HOST_PORT=55433`
+  (porta 5433 ocupada por `hmd-test-db-1` de outro projeto; `ats-web-test-db-1` remapeado
+  para 55433 — workaround local, sem mudança de código).
+- [x] 2.2 `openspec change validate llm2-v4-echo-mismatch-fix --strict` → `valid`.
+- [ ] 2.3 Push da branch + relatório consolidado: AGUARDANDO revisão humana final (não fazer push sem instrução).
