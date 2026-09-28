@@ -70,8 +70,24 @@ SELECTION_LABELS = {
 PLUS_LABEL_CODES = tuple(code for code in SUPPORTED_PROCEDURE_TYPES if "+" in PROCEDURE_LABELS[code])
 
 
-def _radio_values(html: str, name: str) -> list[str]:
-    return re.findall(rf'name="{name}"[^>]*?value="([^"]+)"', html)
+def _filter_block(html: str, filter_id: str) -> str:
+    """Trecho do controle de filtro — do wrapper até o alvo do poll htmx."""
+    return html[html.index(f'id="{filter_id}"') : html.index('id="scheduler-queue-content"')]
+
+
+def _filter_option_values(html: str, filter_id: str) -> list[str]:
+    """Chaves das options do ``<select>`` de filtro da aba."""
+    return re.findall(r'<option value="([^"]+)"', _filter_block(html, filter_id))
+
+
+def _filter_option_counts(html: str, filter_id: str) -> dict[str, int]:
+    """Contador renderizado no texto de cada option (``"<label> (N)"``)."""
+    counts: dict[str, int] = {}
+    for key, text in re.findall(r'<option value="([^"]+)"[^>]*>([^<]*)</option>', _filter_block(html, filter_id)):
+        match = re.search(r"\((\d+)\)$", text.strip())
+        assert match is not None, f"contador ausente na option {key}: {text!r}"
+        counts[key] = int(match.group(1))
+    return counts
 
 
 def _create_role(name: str) -> Any:
@@ -171,14 +187,14 @@ class TestSchedulerCatalogQueueUniverse:
     def test_pending_options_match_the_counted_universe(self, client) -> None:
         _login_as(client, "scheduler")
         content = client.get("/scheduler/").content.decode()
-        values = _radio_values(content, "scheduler-queue-exam-type")
+        values = _filter_option_values(content, "scheduler-queue-type-filter")
         assert values == BUCKET_FILTER_VALUES
         assert set(values) == set(CATALOG_FILTER_VALUES)
 
     def test_processed_options_match_the_counted_universe(self, client) -> None:
         _login_as(client, "scheduler")
         content = client.get("/scheduler/?tab=processed").content.decode()
-        values = _radio_values(content, "scheduler-processed-exam-type")
+        values = _filter_option_values(content, "scheduler-processed-type-filter")
         assert values == BUCKET_FILTER_VALUES
         assert set(values) == set(CATALOG_FILTER_VALUES)
 
@@ -187,9 +203,10 @@ class TestSchedulerCatalogQueueUniverse:
         content = client.get("/scheduler/").content.decode()
         for key in CATALOG_FILTER_VALUES:
             assert f'data-exam-type-count="{key}"' in content
-        assert 'data-exam-type-count="eda_gastrostomy">0<' in content
-        assert 'data-exam-type-count="rectosigmoidoscopy_argon">0<' in content
-        assert 'data-exam-type-count="eda_colonoscopy">0<' in content
+        counts = _filter_option_counts(content, "scheduler-queue-type-filter")
+        assert counts["eda_gastrostomy"] == 0
+        assert counts["rectosigmoidoscopy_argon"] == 0
+        assert counts["eda_colonoscopy"] == 0
 
     def test_package_is_counted_as_its_own_identity(self, client) -> None:
         nir = _login_as(client, "nir")
@@ -202,9 +219,10 @@ class TestSchedulerCatalogQueueUniverse:
         )
         _login_as(client, "scheduler")
         content = client.get("/scheduler/").content.decode()
-        assert 'data-exam-type-count="eda_dilation">1<' in content
-        assert 'data-exam-type-count="eda">0<' in content
-        assert 'data-exam-type-count="eda_colonoscopy">0<' in content
+        counts = _filter_option_counts(content, "scheduler-queue-type-filter")
+        assert counts["eda_dilation"] == 1
+        assert counts["eda"] == 0
+        assert counts["eda_colonoscopy"] == 0
         assert f'data-approved-selection="{ProcedureType.EDA_DILATION}"' in content
         assert f">{PROCEDURE_LABELS[ProcedureType.EDA_DILATION]}</span>" in content
         assert "Agendamento casado" not in content
@@ -220,9 +238,10 @@ class TestSchedulerCatalogQueueUniverse:
         )
         _login_as(client, "scheduler")
         content = client.get("/scheduler/").content.decode()
-        assert 'data-exam-type-count="rectosigmoidoscopy_argon">1<' in content
-        assert 'data-exam-type-count="rectosigmoidoscopy">0<' in content
-        assert 'data-exam-type-count="eda_colonoscopy">0<' in content
+        counts = _filter_option_counts(content, "scheduler-queue-type-filter")
+        assert counts["rectosigmoidoscopy_argon"] == 1
+        assert counts["rectosigmoidoscopy"] == 0
+        assert counts["eda_colonoscopy"] == 0
         assert content.count(f'data-approved-selection="{ProcedureType.RECTOSIGMOIDOSCOPY_ARGON}"') == 1
         assert f">{PROCEDURE_LABELS[ProcedureType.RECTOSIGMOIDOSCOPY_ARGON]}</span>" in content
         assert ">Retossigmoidoscopia</span>" not in content
@@ -239,9 +258,10 @@ class TestSchedulerCatalogQueueUniverse:
         )
         _login_as(client, "scheduler")
         content = client.get("/scheduler/").content.decode()
-        assert 'data-exam-type-count="eda_colonoscopy">1<' in content
-        assert 'data-exam-type-count="eda">0<' in content
-        assert 'data-exam-type-count="colonoscopy">0<' in content
+        counts = _filter_option_counts(content, "scheduler-queue-type-filter")
+        assert counts["eda_colonoscopy"] == 1
+        assert counts["eda"] == 0
+        assert counts["colonoscopy"] == 0
         assert content.count('data-approved-selection="eda_colonoscopy"') == 1
         assert "EDA + Colonoscopia · Agendamento casado" in content
 

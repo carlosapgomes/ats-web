@@ -1,0 +1,36 @@
+# Tasks: Filtro por tipo de exame com `<select>` nas filas
+
+## 0. Preflight (uma vez por change)
+
+- [x] 0.1 Tree limpa (só untracked do próprio change), branch
+  `fix/queue-exam-type-select-filter` a partir de `BASE_REF=a8d4c75347699639757ea00ddd4cfd5128712ec6`.
+- [ ] 0.2 Baseline: gate do RC7 verde em `main` (`ruff`, `mypy` 325 files,
+  `pytest` 4613 passed); suíte completa NÃO reexecutada no preflight —
+  focados por slice + gate final cobrem o risco (2 templates + 2 JS + 2
+  arquivos de teste, sem migração/FSM/schema/backend).
+  Banco de teste via `docker compose -f docker-compose.yml -f docker-compose.test.yml`
+  (host `55433` se a `5433` estiver ocupada por outro projeto).
+  *(preflight: `ats-web-test-db-1` Up healthy; baseline RC7 aceita sem rerun
+  global — mudança restrita a templates/JS/testes, sem backend.)*
+
+## 1. Slices verticais (ordem executável)
+
+- [x] Slice 001 — Scheduler: `<select>` com filtro imediato (pending + processed)
+  (`slices/slice-001-scheduler-select-filter.md`)
+  *(review `OK with notes` 1 rodada; P2: comportamento runtime do JS provado por
+  inspeção estática (sem runner JS no projeto — permitido pelo slice); RED 1 failed
+  em markup de radios → GREEN 37 passed; 4 arquivos 112 passed; scheduler 347 passed;
+  full 4618 passed; ruff/format/mypy ok. Decisão registrada: blast radius estendido a
+  3 arquivos de teste legados (só asserts de markup, sem produção) —
+  `test_expanded_catalog_scheduler`, `test_slice_004_paired_scheduler_appointment`,
+  `test_specialized_scheduler`.)*
+- [ ] Slice 002 — Médico: `<select>` com filtro imediato, composição tipo+busca
+  (`slices/slice-002-doctor-select-filter.md`) — após o slice 001 aceito.
+
+## 2. Gate final (uma vez após todos os slices)
+
+- [ ] 2.1 Quality gate do `AGENTS.md` com banco de teste isolado:
+  `uv run ruff check . && uv run ruff format --check . && uv run mypy . && uv run pytest`.
+- [ ] 2.2 `openspec change validate queue-exam-type-select-filter --strict`.
+- [ ] 2.3 Commit + push da branch; relatório de cada slice em markdown temporário
+  com `REPORT_PATH`. Push/merge final só com instrução explícita.

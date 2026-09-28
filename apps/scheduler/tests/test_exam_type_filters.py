@@ -30,6 +30,12 @@ derivam do catálogo (dez identidades + combinado), o template itera essas
 opções e o script inicializa chaves/contagens/rótulos pelos ``data-*``
 renderizados. A prova comportamental das novas identidades está em
 ``test_expanded_catalog_scheduler.py``.
+
+Change ``queue-exam-type-select-filter`` (slice 001) — o controle de tipo das
+duas abas do scheduler passa a ser UM ``<select class="form-select">`` que
+filtra no ``change`` (sem botão de ação); o contador de cada tipo vive no texto
+da option (``"Todos (6)"``) com o label-base preservado em
+``data-exam-type-label`` para recomposição pelo JS (R1/R3).
 """
 
 from __future__ import annotations
@@ -51,6 +57,25 @@ QUEUE_HTML = REPO_ROOT / "templates" / "scheduler" / "queue.html"
 QUEUE_CONTENT_HTML = REPO_ROOT / "templates" / "scheduler" / "_queue_content.html"
 HISTORICAL_HTML = REPO_ROOT / "templates" / "scheduler" / "historical_search.html"
 QUEUE_FILTER_JS = REPO_ROOT / "static" / "js" / "scheduler_queue_filter.js"
+
+
+def _filter_block(html: str, filter_id: str) -> str:
+    """Trecho do controle de filtro — do wrapper até o alvo do poll htmx (R5)."""
+    return html[html.index(f'id="{filter_id}"') : html.index('id="scheduler-queue-content"')]
+
+
+def _option_tag(filter_html: str, key: str) -> str:
+    """Tag ``<option>`` renderizada para ``key`` (abertura, com os atributos)."""
+    match = re.search(rf'<option value="{key}"[^>]*>', filter_html)
+    assert match is not None, f"opção {key} ausente no filtro"
+    return match.group(0)
+
+
+def _option_text(filter_html: str, key: str) -> str:
+    """Texto da option de ``key``: label-base + contador entre parênteses (R3)."""
+    match = re.search(rf'<option value="{key}"[^>]*>([^<]*)</option>', filter_html)
+    assert match is not None, f"opção {key} ausente no filtro"
+    return match.group(1).strip()
 
 
 @pytest.mark.django_db
@@ -179,10 +204,11 @@ class TestSchedulerQueueExamTypeFilters:
         response = client.get("/scheduler/")
         assert response.status_code == 200
         content = response.content.decode()
+        filter_html = _filter_block(content, "scheduler-queue-type-filter")
         # Todos default com total == soma EDA + colonoscopia == badge primário.
-        assert 'data-exam-type-count="all">6<' in content
-        assert 'data-exam-type-count="eda">3<' in content
-        assert 'data-exam-type-count="colonoscopy">3<' in content
+        assert _option_text(filter_html, "all") == "Todos (6)"
+        assert _option_text(filter_html, "eda") == "EDA (3)"
+        assert _option_text(filter_html, "colonoscopy") == "Colonoscopia (3)"
         assert 'data-count="6"' in content
 
     def test_pending_count_excludes_processed(self, client) -> None:
@@ -193,10 +219,11 @@ class TestSchedulerQueueExamTypeFilters:
         self._make_wait_appt(nir, selection="eda", name="EDA Wait", record="W-EDA")
         self._make_processed(scheduler_user, nir, selection="colonoscopy", name="COL Proc", record="P-COL")
         content = client.get("/scheduler/").content.decode()
+        filter_html = _filter_block(content, "scheduler-queue-type-filter")
         # Pendentes: 1 EDA e 0 colonoscopia — o processado colonoscopia não conta.
-        assert 'data-exam-type-count="all">1<' in content
-        assert 'data-exam-type-count="eda">1<' in content
-        assert 'data-exam-type-count="colonoscopy">0<' in content
+        assert _option_text(filter_html, "all") == "Todos (1)"
+        assert _option_text(filter_html, "eda") == "EDA (1)"
+        assert _option_text(filter_html, "colonoscopy") == "Colonoscopia (0)"
 
     # ── R2: controle acessível com Todos default ──────────────────────
 
@@ -206,12 +233,18 @@ class TestSchedulerQueueExamTypeFilters:
         self._make_wait_appt(nir, selection="colonoscopy", name="B", record="1002")
         self._login_as(client, "scheduler")
         content = client.get("/scheduler/").content.decode()
-        # Controle secundário dentro de Pendentes (não substitui tabs primárias).
-        assert 'id="scheduler-queue-type-filter"' in content
-        assert "data-scheduler-exam-filter" in content
-        assert 'value="all" checked' in content
-        assert 'value="eda"' in content
-        assert 'value="colonoscopy"' in content
+        filter_html = _filter_block(content, "scheduler-queue-type-filter")
+        # UM select com label associado e Todos default — sem radio-botões (R1).
+        assert '<select class="form-select"' in filter_html
+        assert 'for="scheduler-queue-exam-type"' in filter_html
+        assert "data-scheduler-exam-filter" in filter_html
+        assert "selected" in _option_tag(filter_html, "all")
+        assert "selected" not in _option_tag(filter_html, "eda")
+        assert "selected" not in _option_tag(filter_html, "colonoscopy")
+        assert 'value="eda"' in filter_html
+        assert 'value="colonoscopy"' in filter_html
+        assert 'type="radio"' not in filter_html
+        assert "btn-check" not in filter_html
         # Abas primárias preservadas.
         assert "?tab=pending" in content
         assert "?tab=processed" in content
@@ -262,14 +295,18 @@ class TestSchedulerQueueExamTypeFilters:
         response = client.get("/scheduler/?tab=processed")
         assert response.status_code == 200
         content = response.content.decode()
-        # Filtro simples por tipo com contadores reais.
-        assert 'id="scheduler-processed-type-filter"' in content
-        assert "data-scheduler-exam-filter" in content
-        assert 'value="all" checked' in content
-        assert 'value="colonoscopy"' in content
-        assert 'data-exam-type-count="all">2<' in content
-        assert 'data-exam-type-count="eda">1<' in content
-        assert 'data-exam-type-count="colonoscopy">1<' in content
+        filter_html = _filter_block(content, "scheduler-processed-type-filter")
+        # UM select por aba com contadores reais no texto das options (R1/R3).
+        assert '<select class="form-select"' in filter_html
+        assert 'for="scheduler-processed-exam-type"' in filter_html
+        assert "data-scheduler-exam-filter" in filter_html
+        assert "selected" in _option_tag(filter_html, "all")
+        assert "selected" not in _option_tag(filter_html, "colonoscopy")
+        assert 'value="colonoscopy"' in filter_html
+        assert 'type="radio"' not in filter_html
+        assert _option_text(filter_html, "all") == "Todos (2)"
+        assert _option_text(filter_html, "eda") == "EDA (1)"
+        assert _option_text(filter_html, "colonoscopy") == "Colonoscopia (1)"
         # Cards expõem tipo persistido e badge real.
         assert 'data-exam-type="eda"' in content
         assert 'data-exam-type="colonoscopy"' in content
@@ -288,12 +325,13 @@ class TestSchedulerQueueExamTypeFilters:
         self._make_wait_appt(nir, selection="cpre", name="CPRE", record="S-CPRE")
         self._login_as(client, "scheduler")
         content = client.get("/scheduler/").content.decode()
-        assert 'data-exam-type-count="all">5<' in content
-        assert 'data-exam-type-count="eda">1<' in content
-        assert 'data-exam-type-count="colonoscopy">1<' in content
-        assert 'data-exam-type-count="eda_colonoscopy">1<' in content
-        assert 'data-exam-type-count="echoendoscopy">1<' in content
-        assert 'data-exam-type-count="cpre">1<' in content
+        filter_html = _filter_block(content, "scheduler-queue-type-filter")
+        assert _option_text(filter_html, "all") == "Todos (5)"
+        assert _option_text(filter_html, "eda") == "EDA (1)"
+        assert _option_text(filter_html, "colonoscopy") == "Colonoscopia (1)"
+        assert _option_text(filter_html, "eda_colonoscopy") == "EDA + Colonoscopia (1)"
+        assert _option_text(filter_html, "echoendoscopy") == "Ecoendoscopia (1)"
+        assert _option_text(filter_html, "cpre") == "CPRE (1)"
 
     def test_pending_counter_universe_is_the_same_for_all_three_groups(self, client) -> None:
         """R3: WAIT_APPT, notices e issues fecham no MESMO universo de buckets."""
@@ -303,12 +341,13 @@ class TestSchedulerQueueExamTypeFilters:
         self._make_operational_issue(nir, selection="eda_colonoscopy", name="Comb Issue", record="G-COMB")
         self._login_as(client, "scheduler")
         content = client.get("/scheduler/").content.decode()
-        assert 'data-exam-type-count="all">3<' in content
-        assert 'data-exam-type-count="echoendoscopy">1<' in content
-        assert 'data-exam-type-count="cpre">1<' in content
-        assert 'data-exam-type-count="eda_colonoscopy">1<' in content
-        assert 'data-exam-type-count="eda">0<' in content
-        assert 'data-exam-type-count="colonoscopy">0<' in content
+        filter_html = _filter_block(content, "scheduler-queue-type-filter")
+        assert _option_text(filter_html, "all") == "Todos (3)"
+        assert _option_text(filter_html, "echoendoscopy") == "Ecoendoscopia (1)"
+        assert _option_text(filter_html, "cpre") == "CPRE (1)"
+        assert _option_text(filter_html, "eda_colonoscopy") == "EDA + Colonoscopia (1)"
+        assert _option_text(filter_html, "eda") == "EDA (0)"
+        assert _option_text(filter_html, "colonoscopy") == "Colonoscopia (0)"
         # Os cards dos três grupos expõem a chave aprovada do bucket.
         assert content.count('data-approved-selection="echoendoscopy"') == 1
         assert content.count('data-approved-selection="cpre"') == 1
@@ -320,9 +359,7 @@ class TestSchedulerQueueExamTypeFilters:
         self._make_wait_appt(nir, selection="cpre", name="CPRE Filtro", record="F-CPRE")
         self._login_as(client, "scheduler")
         content = client.get("/scheduler/").content.decode()
-        filter_html = content[
-            content.index('id="scheduler-queue-type-filter"') : content.index('id="scheduler-queue-content"')
-        ]
+        filter_html = _filter_block(content, "scheduler-queue-type-filter")
         assert 'value="echoendoscopy"' in filter_html
         assert 'value="cpre"' in filter_html
         assert "Ecoendoscopia" in filter_html
@@ -337,10 +374,11 @@ class TestSchedulerQueueExamTypeFilters:
         self._make_wait_appt(nir, selection="cpre", name="CPRE Nunca Casado", record="N-CPRE")
         self._login_as(client, "scheduler")
         content = client.get("/scheduler/").content.decode()
+        filter_html = _filter_block(content, "scheduler-queue-type-filter")
         assert "Ecoendoscopia" in content
         assert "CPRE" in content
         assert "Agendamento casado" not in content
-        assert 'data-exam-type-count="eda_colonoscopy">0<' in content
+        assert _option_text(filter_html, "eda_colonoscopy") == "EDA + Colonoscopia (0)"
 
     def test_processed_filter_lists_specialized_options_and_counts(self, client) -> None:
         """R1/R2/R3: Processados Hoje tem Eco/CPRE, contadores e cards próprios."""
@@ -350,17 +388,15 @@ class TestSchedulerQueueExamTypeFilters:
         self._make_processed(scheduler_user, nir, selection="echoendoscopy", name="Eco Proc", record="P-ECO")
         self._make_processed(scheduler_user, nir, selection="cpre", name="CPRE Proc", record="P-CPRE")
         content = client.get("/scheduler/?tab=processed").content.decode()
-        filter_html = content[
-            content.index('id="scheduler-processed-type-filter"') : content.index('id="scheduler-queue-content"')
-        ]
+        filter_html = _filter_block(content, "scheduler-processed-type-filter")
         assert 'value="echoendoscopy"' in filter_html
         assert 'value="cpre"' in filter_html
         assert "Ecoendoscopia" in filter_html
         assert "CPRE" in filter_html
-        assert 'data-exam-type-count="all">2<' in content
-        assert 'data-exam-type-count="echoendoscopy">1<' in content
-        assert 'data-exam-type-count="cpre">1<' in content
-        assert 'data-exam-type-count="eda_colonoscopy">0<' in content
+        assert _option_text(filter_html, "all") == "Todos (2)"
+        assert _option_text(filter_html, "echoendoscopy") == "Ecoendoscopia (1)"
+        assert _option_text(filter_html, "cpre") == "CPRE (1)"
+        assert _option_text(filter_html, "eda_colonoscopy") == "EDA + Colonoscopia (0)"
         assert content.count('data-approved-selection="echoendoscopy"') == 1
         assert content.count('data-approved-selection="cpre"') == 1
         assert "Agendamento casado" not in content
@@ -396,7 +432,8 @@ class TestSchedulerQueueExamTypeFilters:
         self._login_as(client, "scheduler")
         content = client.get("/scheduler/").content.decode()
         assert "EDA + Colonoscopia · Agendamento casado" in content
-        assert 'data-exam-type-count="eda_colonoscopy">1<' in content
+        filter_html = _filter_block(content, "scheduler-queue-type-filter")
+        assert _option_text(filter_html, "eda_colonoscopy") == "EDA + Colonoscopia (1)"
         assert 'data-approved-selection="eda_colonoscopy"' in content
         assert content.count("data-scheduler-queue-card") == 1
 
@@ -626,12 +663,46 @@ class TestSchedulerQueueFilterStatic:
 
     def test_js_filters_by_type_across_all_pending_groups(self) -> None:
         js = self._read(QUEUE_FILTER_JS)
-        assert "data-scheduler-exam-filter" in js
+        # R2: a seleção vem do <select> e aplica no change, sem botão de ação.
+        assert "select[data-scheduler-exam-filter]" in js
         assert "getSelectedType" in js
         assert "data-exam-type" in js
         assert "data-scheduler-queue-card" in js
         assert "data-scheduler-processed-card" in js
         assert 'addEventListener("change"' in js
+
+    def test_template_renders_one_select_per_tab_without_radios(self) -> None:
+        """R1: um ``<select class="form-select">`` por aba, sem radio-botões."""
+        html = self._read(QUEUE_HTML)
+        assert html.count('<select class="form-select"') == 2
+        assert html.count("data-scheduler-exam-filter") == 2
+        assert 'type="radio"' not in html
+        assert "btn-check" not in html
+
+    def test_selects_stay_outside_the_polling_target(self) -> None:
+        """R5: os selects ficam fora de ``#scheduler-queue-content`` (sobrevivem ao poll)."""
+        html = self._read(QUEUE_HTML)
+        content_start = html.index('id="scheduler-queue-content"')
+        for filter_id in ("scheduler-queue-type-filter", "scheduler-processed-type-filter"):
+            assert html.index(f'id="{filter_id}"') < content_start
+
+    def test_filter_block_has_no_action_button(self) -> None:
+        """R2: o ``change`` filtra na hora — nenhum botão Filtrar/Aplicar."""
+        html = self._read(QUEUE_HTML)
+        filter_html = _filter_block(html, "scheduler-queue-type-filter")
+        assert "<button" not in filter_html
+
+    def test_js_recomposes_option_text_with_base_label_and_count(self) -> None:
+        """R3: o JS recompõe ``"<label> (<count>)"`` a partir dos ``data-*`` renderizados."""
+        js = self._read(QUEUE_FILTER_JS)
+        assert 'getAttribute("data-exam-type-label")' in js
+        assert 'el.textContent = label + " (" + count + ")"' in js
+
+    def test_js_has_no_persistence_nor_query_param(self) -> None:
+        """R6: filtro 100% client-side — sem storage, cookie ou parâmetro novo."""
+        js = self._read(QUEUE_FILTER_JS)
+        for forbidden in ("localStorage", "sessionStorage", "document.cookie", "fetch("):
+            assert forbidden not in js
 
     def test_js_reaplies_after_polling(self) -> None:
         js = self._read(QUEUE_FILTER_JS)

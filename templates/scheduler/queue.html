@@ -11,16 +11,13 @@
 {% block content %}
 {% if active_tab == 'pending' %}
 <div class="mb-3" id="scheduler-queue-type-filter">
-  <fieldset class="mb-3">
-    <legend class="form-label fw-semibold mb-2">Filtrar por tipo de exame</legend>
-    <div class="btn-group" role="group" aria-label="Filtrar por tipo de exame">
-      {# Opções e contadores derivados do catálogo (R1/R3/D12): mesmo universo do predicado. #}
-      {% for option in exam_type_options %}
-      <input type="radio" class="btn-check" name="scheduler-queue-exam-type" id="scheduler-exam-type-{{ option.key }}" value="{{ option.key }}" {% if option.key == 'all' %}checked{% endif %} data-scheduler-exam-filter data-exam-type-label="{{ option.label }}">
-      <label class="btn btn-outline-secondary" for="scheduler-exam-type-{{ option.key }}">{{ option.label }} <span class="badge text-bg-secondary" data-exam-type-count="{{ option.key }}">{{ option.count }}</span></label>
-      {% endfor %}
-    </div>
-  </fieldset>
+  <label class="form-label fw-semibold mb-2" for="scheduler-queue-exam-type">Filtrar por tipo de exame</label>
+  <select class="form-select" id="scheduler-queue-exam-type" data-scheduler-exam-filter>
+    {# Opções e contadores derivados do catálogo (R1/R3/D12): mesmo universo do predicado. #}
+    {% for option in exam_type_options %}
+    <option value="{{ option.key }}" data-exam-type-label="{{ option.label }}" data-exam-type-count="{{ option.key }}" {% if option.key == 'all' %}selected{% endif %}>{{ option.label }} ({{ option.count }})</option>
+    {% endfor %}
+  </select>
   <div
     data-scheduler-queue-filter-status
     class="mt-2 text-muted small"
@@ -39,16 +36,13 @@
 
 {% if active_tab == 'processed' %}
 <div class="mb-3" id="scheduler-processed-type-filter">
-  <fieldset class="mb-3">
-    <legend class="form-label fw-semibold mb-2">Filtrar por tipo de exame</legend>
-    <div class="btn-group" role="group" aria-label="Filtrar por tipo de exame">
-      {# Opções e contadores derivados do catálogo (R1/R3/D12): mesmo universo do predicado. #}
-      {% for option in processed_exam_type_options %}
-      <input type="radio" class="btn-check" name="scheduler-processed-exam-type" id="scheduler-processed-type-{{ option.key }}" value="{{ option.key }}" {% if option.key == 'all' %}checked{% endif %} data-scheduler-exam-filter data-exam-type-label="{{ option.label }}">
-      <label class="btn btn-outline-secondary" for="scheduler-processed-type-{{ option.key }}">{{ option.label }} <span class="badge text-bg-secondary" data-exam-type-count="{{ option.key }}">{{ option.count }}</span></label>
-      {% endfor %}
-    </div>
-  </fieldset>
+  <label class="form-label fw-semibold mb-2" for="scheduler-processed-exam-type">Filtrar por tipo de exame</label>
+  <select class="form-select" id="scheduler-processed-exam-type" data-scheduler-exam-filter>
+    {# Opções e contadores derivados do catálogo (R1/R3/D12): mesmo universo do predicado. #}
+    {% for option in processed_exam_type_options %}
+    <option value="{{ option.key }}" data-exam-type-label="{{ option.label }}" data-exam-type-count="{{ option.key }}" {% if option.key == 'all' %}selected{% endif %}>{{ option.label }} ({{ option.count }})</option>
+    {% endfor %}
+  </select>
   <div
     data-scheduler-queue-filter-status
     class="mt-2 text-muted small"

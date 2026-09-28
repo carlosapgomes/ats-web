@@ -21,6 +21,7 @@ Prova R1–R6:
 
 from __future__ import annotations
 
+import re
 import uuid
 from datetime import timedelta
 from pathlib import Path
@@ -50,6 +51,17 @@ QUEUE_CONTENT_HTML = REPO_ROOT / "templates" / "scheduler" / "_queue_content.htm
 CONFIRM_HTML = REPO_ROOT / "templates" / "scheduler" / "confirm.html"
 HISTORICAL_HTML = REPO_ROOT / "templates" / "scheduler" / "historical_search.html"
 QUEUE_FILTER_JS = REPO_ROOT / "static" / "js" / "scheduler_queue_filter.js"
+
+
+def _filter_option_counts(html: str, filter_id: str) -> dict[str, int]:
+    """Contador renderizado no texto de cada option (``"<label> (N)"``)."""
+    block = html[html.index(f'id="{filter_id}"') : html.index('id="scheduler-queue-content"')]
+    counts: dict[str, int] = {}
+    for key, text in re.findall(r'<option value="([^"]+)"[^>]*>([^<]*)</option>', block):
+        match = re.search(r"\((\d+)\)$", text.strip())
+        assert match is not None, f"contador ausente na option {key}: {text!r}"
+        counts[key] = int(match.group(1))
+    return counts
 
 
 def _create_role(name: str) -> Any:
@@ -460,10 +472,11 @@ class TestSchedulerPairedQueueAndHistory:
         content = client.get("/scheduler/").content.decode()
         # 4 cards no escopo; combinado conta UMA vez por grupo (3 grupos).
         assert content.count("data-scheduler-queue-card") == 4
-        assert 'data-exam-type-count="all">4<' in content
-        assert 'data-exam-type-count="eda_colonoscopy">3<' in content
-        assert 'data-exam-type-count="eda">1<' in content
-        assert 'data-exam-type-count="colonoscopy">0<' in content
+        counts = _filter_option_counts(content, "scheduler-queue-type-filter")
+        assert counts["all"] == 4
+        assert counts["eda_colonoscopy"] == 3
+        assert counts["eda"] == 1
+        assert counts["colonoscopy"] == 0
         # Badge casado presente em cada grupo.
         assert content.count("Agendamento casado") == 3
         # ACK de notice combinado continua operacional (R6).
@@ -532,7 +545,7 @@ class TestSchedulerPairedQueueAndHistory:
         content = client.get("/scheduler/?tab=processed").content.decode()
         assert "EDA + Colonoscopia · Agendamento casado" in content
         assert 'data-approved-selection="eda_colonoscopy"' in content
-        assert 'data-exam-type-count="eda_colonoscopy">1<' in content
+        assert _filter_option_counts(content, "scheduler-processed-type-filter")["eda_colonoscopy"] == 1
         # Histórico: filtro combinado (server-side) retorna o caso.
         content = client.get("/scheduler/historical/?exam_type=eda_colonoscopy").content.decode()
         assert "EDA + Colonoscopia" in content
@@ -840,8 +853,7 @@ class TestSchedulerExcludesAndBlocksUnauthorized:
         assert "Autorizado Pendente" in content
         assert "Sem Aprovado Pendente" not in content
         # "Todos" conta somente o autorizado (1, não 2).
-        assert 'data-exam-type-count="all">1<' in content
-        assert 'data-exam-type-count="all">2<' not in content
+        assert _filter_option_counts(content, "scheduler-queue-type-filter")["all"] == 1
         # Sem CTA de agendamento para o caso não autorizado.
         assert f"/scheduler/{unauthorized.case_id}/" not in content
 
@@ -975,7 +987,7 @@ class TestSchedulerExcludesAndBlocksUnauthorized:
         assert content.count("data-scheduler-queue-card") == 1
         assert "Combinado Autorizado" in content
         assert "Combinado Sem Aprovado" not in content
-        assert 'data-exam-type-count="eda_colonoscopy">1<' in content
+        assert _filter_option_counts(content, "scheduler-queue-type-filter")["eda_colonoscopy"] == 1
 
     # ── R2 (correção 009-B): intercorrência direta também é fail-closed ──
     def _make_psi_case(

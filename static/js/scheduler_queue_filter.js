@@ -7,9 +7,10 @@
  * The queue filters by the AUTHORIZED procedure set (R5/D13). Every filterable
  * card exposes the projected selection via data-approved-selection; the legacy
  * bridge data-exam-type remains as fallback until cutover. Keys, labels and
- * counters are NOT listed here: the template renders one radio per
- * catalog-derived option (data-exam-type-label) and one counter per option
- * (data-exam-type-count) and this script reads both from the DOM (R7).
+ * counters are NOT listed here: the template renders one <option> per
+ * catalog-derived option (data-exam-type-label) carrying its own counter
+ * (data-exam-type-count) and this script reads and recomposes both from the DOM
+ * (R7). The <select> filters on its "change" event — no extra action button.
  *
  * HTMX polling re-applies the filter on htmx:afterSwap because the controls
  * live outside #scheduler-queue-content.
@@ -23,14 +24,12 @@
   // ── DOM references (lazily resolved) ──────────────────────────────
   var statusEl = null;
   var noResultsEl = null;
-  var typeButtons = [];
+  var typeSelect = null;
 
   function resolveElements() {
     statusEl = document.querySelector("[data-scheduler-queue-filter-status]");
     noResultsEl = document.querySelector("[data-scheduler-queue-no-results]");
-    typeButtons = Array.prototype.slice.call(
-      document.querySelectorAll("[data-scheduler-exam-filter]")
-    );
+    typeSelect = document.querySelector("select[data-scheduler-exam-filter]");
   }
 
   // ── Helpers ───────────────────────────────────────────────────────
@@ -42,25 +41,23 @@
     );
   }
 
-  /** Return the selected exam type (catalog selection key or "all") — never a
-   *  hardcoded list. */
-  function getSelectedType() {
-    for (var i = 0; i < typeButtons.length; i++) {
-      if (typeButtons[i].checked) {
-        return typeButtons[i].value;
-      }
-    }
-    return "all";
+  /** Selected <option> of the exam-type select (the rendered control owns the
+   *  catalog keys, labels and counters — never a hardcoded list). */
+  function selectedTypeOption() {
+    if (!typeSelect) return null;
+    return typeSelect.options[typeSelect.selectedIndex] || null;
   }
 
-  /** Human label of the active scope, read from the rendered control (R7). */
+  /** Return the selected exam type (catalog selection key or "all"). */
+  function getSelectedType() {
+    return typeSelect && typeSelect.value ? typeSelect.value : "all";
+  }
+
+  /** Human label of the active scope, read from the selected option (R7). */
   function scopeLabel() {
-    for (var i = 0; i < typeButtons.length; i++) {
-      if (typeButtons[i].checked) {
-        return typeButtons[i].getAttribute("data-exam-type-label") || typeButtons[i].value;
-      }
-    }
-    return "Todos";
+    var option = selectedTypeOption();
+    if (!option) return "Todos";
+    return option.getAttribute("data-exam-type-label") || option.value || "Todos";
   }
 
   /** Pluralize "caso"/"casos". */
@@ -94,7 +91,8 @@
     return counts;
   }
 
-  /** Recompute per-type counters from the projected card attribute. */
+  /** Recompute per-type counters from the projected card attribute and recompose
+   *  each option text as "<base label> (<count>)" (R3). */
   function updateCounts() {
     var cards = getCards();
     var counts = emptyCounts();
@@ -107,7 +105,9 @@
       document.querySelectorAll("[data-exam-type-count]"),
       function (el) {
         var type = el.getAttribute("data-exam-type-count") || "all";
-        el.textContent = String(counts[type] !== undefined ? counts[type] : 0);
+        var label = el.getAttribute("data-exam-type-label") || type;
+        var count = counts[type] !== undefined ? counts[type] : 0;
+        el.textContent = label + " (" + count + ")";
       }
     );
   }
@@ -167,11 +167,9 @@
 
   function init() {
     resolveElements();
-    if (!statusEl || !noResultsEl) return; // not on a scheduler queue page
+    if (!statusEl || !noResultsEl || !typeSelect) return; // not on a scheduler queue page
 
-    typeButtons.forEach(function (btn) {
-      btn.addEventListener("change", onTypeChange);
-    });
+    typeSelect.addEventListener("change", onTypeChange);
 
     document.addEventListener("htmx:afterSwap", onHtmxAfterSwap);
 

@@ -12,6 +12,7 @@ e ``slice-004-cpre-end-to-end``:
 
 from __future__ import annotations
 
+import re
 import uuid
 from typing import Any
 
@@ -31,6 +32,17 @@ from apps.cases.models import (
 from apps.scheduler.views import _approved_snapshot
 
 User = get_user_model()
+
+
+def _filter_option_counts(html: str, filter_id: str) -> dict[str, int]:
+    """Contador renderizado no texto de cada option (``"<label> (N)"``)."""
+    block = html[html.index(f'id="{filter_id}"') : html.index('id="scheduler-queue-content"')]
+    counts: dict[str, int] = {}
+    for key, text in re.findall(r'<option value="([^"]+)"[^>]*>([^<]*)</option>', block):
+        match = re.search(r"\((\d+)\)$", text.strip())
+        assert match is not None, f"contador ausente na option {key}: {text!r}"
+        counts[key] = int(match.group(1))
+    return counts
 
 
 def _create_role(name: str) -> Any:
@@ -450,8 +462,9 @@ class TestSpecializedSchedulerQueue:
         assert 'data-approved-selection="cpre"' in content
         assert "CPRE" in content
         assert "Agendamento casado" not in content
-        assert 'data-exam-type-count="cpre">1<' in content
-        assert 'data-exam-type-count="eda_colonoscopy">0<' in content
+        counts = _filter_option_counts(content, "scheduler-processed-type-filter")
+        assert counts["cpre"] == 1
+        assert counts["eda_colonoscopy"] == 0
         appointment_label = timezone.localtime(confirmed.appointment_at).strftime("%d/%m/%Y %H:%M")
         assert content.count(appointment_label) == 1
 
