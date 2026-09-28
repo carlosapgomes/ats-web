@@ -20,10 +20,32 @@ class TestWatermarkStripping:
         cleaned, record = strip_watermark_and_extract_record(text)
         assert record == "98765"
 
-    def test_strips_repeated_digit_lines(self) -> None:
-        text = "Paciente: João\n12345 12345 12345 12345\nRelatório"
-        cleaned, record = strip_watermark_and_extract_record(text)
-        assert "12345 12345" not in cleaned
+    def test_strips_five_digit_watermark_repeated_across_document(self) -> None:
+        text = "\n".join(["Paciente: João", *(["12345"] * 11), "Relatório"])
+        cleaned, _record = strip_watermark_and_extract_record(text)
+        assert "12345" not in cleaned
+        assert "Paciente: João" in cleaned
+        assert "Relatório" in cleaned
+
+    def test_strips_three_digit_watermark_repeated_more_than_ten_times(self) -> None:
+        text = "\n".join(["Paciente: João", *(["321"] * 11), "Relatório"])
+        cleaned, _record = strip_watermark_and_extract_record(text)
+        assert "321" not in cleaned
+
+    def test_strips_watermark_with_more_than_six_digits(self) -> None:
+        text = "\n".join(["Paciente: João", *(["123456789"] * 11), "Relatório"])
+        cleaned, _record = strip_watermark_and_extract_record(text)
+        assert "123456789" not in cleaned
+
+    def test_preserves_numeric_token_repeated_exactly_ten_times(self) -> None:
+        text = "\n".join(["Valor 321"] * 10)
+        cleaned, _record = strip_watermark_and_extract_record(text)
+        assert cleaned.count("321") == 10
+
+    def test_preserves_token_with_fewer_than_three_digits(self) -> None:
+        text = "\n".join(["Valor 42"] * 11)
+        cleaned, _record = strip_watermark_and_extract_record(text)
+        assert cleaned.count("42") == 11
 
     def test_fallback_to_epoch_when_no_record(self) -> None:
         text = "Paciente: João\nRelatório de endoscopia"
