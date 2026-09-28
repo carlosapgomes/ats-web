@@ -10,6 +10,7 @@ revalidação integral a cada resposta.
 
 from __future__ import annotations
 
+import hashlib
 import json
 from dataclasses import dataclass, field
 from typing import Any
@@ -72,6 +73,31 @@ class Llm2V4ValidationError(RuntimeError):
 
 class Llm2V4ProcedureSetMismatchError(Llm2V4ValidationError):
     """Resposta schema-válida divergiu do conjunto reconciliado (omissão/adição)."""
+
+
+#: Rótulos legados por campo do echo mismatch (``grep`` operacional em tracebacks).
+_ECHO_MISMATCH_LABELS: dict[str, str] = {
+    "case_id": "LLM2 v4 case_id mismatch",
+    "agency_record_number": "LLM2 v4 agency_record_number mismatch",
+}
+
+
+class Llm2V4EchoMismatchError(Llm2V4ValidationError):
+    """Resposta schema-válida ecoou ``case_id``/``agency_record_number`` divergentes.
+
+    Carrega os valores integrais (``expected``/``got`` — IDs operacionais, sem PHI)
+    e metadados não-clínicos do raw (``raw_len`` e ``raw_sha256`` de 12 hex) para
+    diagnóstico; nunca inclui conteúdo clínico.
+    """
+
+    def __init__(self, *, field_name: str, expected: str, got: str, raw_response: str) -> None:
+        self.field: str = field_name
+        self.expected: str = expected
+        self.got: str = got
+        raw_len, raw_sha256 = _raw_metadata(raw_response)
+        # Rótulos literais preservados para grep operacional (mensagens legadas).
+        label = _ECHO_MISMATCH_LABELS[field_name]
+        super().__init__(f"{label}: expected {expected!r} got {got!r} (raw_len={raw_len} raw_sha256={raw_sha256})")
 
 
 @dataclass
@@ -231,9 +257,19 @@ def _decode_and_validate(
         raise Llm2V4ValidationError(f"LLM2 v4 schema validation failed: {error}") from error
 
     if validated.case_id != str(case_id):
-        raise Llm2V4ValidationError(f"LLM2 v4 case_id mismatch: expected {case_id!r}")
+        raise Llm2V4EchoMismatchError(
+            field_name="case_id",
+            expected=str(case_id),
+            got=validated.case_id,
+            raw_response=raw_response,
+        )
     if validated.agency_record_number != str(agency_record_number):
-        raise Llm2V4ValidationError(f"LLM2 v4 agency_record_number mismatch: expected {agency_record_number!r}")
+        raise Llm2V4EchoMismatchError(
+            field_name="agency_record_number",
+            expected=str(agency_record_number),
+            got=validated.agency_record_number,
+            raw_response=raw_response,
+        )
 
     returned = {item.procedure_type for item in validated.procedure_recommendations}
     expected = set(detected_procedure_types)
@@ -242,6 +278,11 @@ def _decode_and_validate(
             f"LLM2 v4 procedure set mismatch: expected {sorted(expected)}, got {sorted(returned)}"
         )
     return validated
+
+
+def _raw_metadata(raw_response: str) -> tuple[int, str]:
+    """Comprimento e prefixo de sha256 (12 hex) do raw — sem despejar conteúdo."""
+    return len(raw_response), hashlib.sha256(raw_response.encode("utf-8")).hexdigest()[:12]
 
 
 def _collect_v4_forbidden_terms(*, validated: Llm2ResponseV4) -> list[str]:

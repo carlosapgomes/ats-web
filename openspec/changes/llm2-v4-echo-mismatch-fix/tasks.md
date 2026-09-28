@@ -11,8 +11,11 @@
 
 ## 1. Slices verticais (ordem executável)
 
-- [ ] Slice 001 — Erro de echo mismatch passa a expor `got` + metadados do raw
+- [x] Slice 001 — Erro de echo mismatch passa a expor `got` + metadados do raw
   (`slices/slice-001-echo-mismatch-observability.md`)
+  *(review `OK with notes` 1 rodada; P2: sem teste de sucesso direto no arquivo novo —
+  coberto por `test_v4_existing_workflow.py`; focados 3 passed + schema 2 passed;
+  ruff/format/mypy ok; full 4609 passed com `POSTGRES_TEST_HOST_PORT=55433`.)*
 - [ ] Slice 002 — Retry one-shot para echo mismatch com instrução corretiva
   (`slices/slice-002-echo-mismatch-retry.md`)
 
