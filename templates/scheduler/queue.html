@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% load static %}
 
 {% block title %}Fila de Agendamento — Agendador · {{ app_display_name }}{% endblock %}
 
@@ -70,5 +71,5 @@
 {% endblock %}
 
 {% block extra_js %}
-<script src="/static/js/scheduler_queue_filter.js"></script>
+<script src="{% static 'js/scheduler_queue_filter.js' %}"></script>
 {% endblock %}

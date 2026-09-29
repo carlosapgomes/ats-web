@@ -589,6 +589,13 @@ class TestDoctorQueueFilterStatic:
         assert "casos" in js
         assert "scopeLabel" in js
 
+    def test_template_loads_queue_filter_via_static_tag(self) -> None:
+        """R2 (Slice 001): o JS da fila vem de ``{% static %}``, nunca de URL hardcoded."""
+        html = self._read(QUEUE_HTML)
+        assert "{% load static %}" in html
+        assert "{% static 'js/doctor_queue_filter.js' %}" in html
+        assert 'src="/static/js/doctor_queue_filter.js"' not in html
+
     def test_html_clear_no_results_and_persisted_type_attribute(self) -> None:
         html = self._read(QUEUE_HTML)
         assert "Limpar" in html
