@@ -25,8 +25,8 @@
 
 ## 2. Gate final (uma vez após o slice)
 
-- [ ] 2.1 Quality gate do `AGENTS.md` com banco de teste isolado:
-  `uv run ruff check . && uv run ruff format --check . && uv run mypy . && uv run pytest`.
-- [ ] 2.2 `openspec change validate queue-filter-cache-busting --strict`.
-- [ ] 2.3 Commit + push da branch; relatório do slice em markdown temporário
-  com `REPORT_PATH`. Push/merge/release/deploy só com instrução explícita.
+- [x] 2.1 Quality gate do `AGENTS.md`: ruff check ok, ruff format ok (295 files),
+  mypy ok (325 files), pytest **4626 passed** com `POSTGRES_TEST_HOST_PORT=55433`
+  (5433 ocupada por `hmd-test-db-1` — workaround local, sem código).
+- [x] 2.2 `openspec change validate queue-filter-cache-busting --strict` → `valid`.
+- [ ] 2.3 Push/merge/release/deploy: AGUARDANDO instrução explícita.
