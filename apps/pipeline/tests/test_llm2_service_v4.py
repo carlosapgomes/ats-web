@@ -1,11 +1,7 @@
-"""Echo mismatch no LLM2 v4 (change ``llm2-v4-echo-mismatch-fix``, slices 001 e 002).
+"""Echo mismatch nao-fatal no LLM2 v4 (change ``llm2-v4-echo-nonfatal-overwrite``).
 
-Cobre o diagnóstico de resposta schema-válida que ecoa ``case_id`` /
-``agency_record_number`` divergentes (exceção tipada com ``field``/``expected``/
-``got`` e metadados não-clínicos do raw) e o retry one-shot corretivo: 1º mismatch
-→ 2ª chamada com os IDs esperados + o ``got`` recebido; 2º mismatch → aborta com o
-``got`` da 2ª tentativa; o retry de eco coexiste com o retry de procedure-set.
-
+Resposta schema-valida com ``case_id`` / ``agency_record_number`` divergentes
+prossegue via overwrite com warning observavel, sem retry de eco e sem FAILED.
 Sem DB.
 """
 
@@ -13,17 +9,12 @@ from __future__ import annotations
 
 import hashlib
 import json
+import logging
 import re
 from typing import Any
 
-import pytest
-
 from apps.pipeline.llm import RecordingLlmClient
-from apps.pipeline.llm2_service_v4 import (
-    Llm2ServiceV4,
-    Llm2V4EchoMismatchError,
-    Llm2V4ValidationError,
-)
+from apps.pipeline.llm2_service_v4 import Llm2ServiceV4
 
 RAW_SHA256_PATTERN = re.compile(r"raw_sha256=([0-9a-f]{12})(?![0-9a-f])")
 
@@ -91,141 +82,106 @@ def _run_service(
     )
 
 
-# ── R1/R4/R5: case_id divergente ────────────────────────────────────────────
+# ── R1/R3/R4/R5: case_id divergente → overwrite + warning, 1 chamada ────────
 
 
-def test_case_id_mismatch_reports_expected_and_got() -> None:
+def test_case_id_mismatch_overwrites_and_succeeds_with_single_call(caplog: Any) -> None:
     raw_response = json.dumps(_llm2_v4_payload(case_id="outro-id", agency_record_number="12345"))
-    # 2ª resposta repete o mismatch (slice 002): retry esgotado → aborta.
-    client = RecordingLlmClient(responses=[raw_response, raw_response])
+    client = RecordingLlmClient(responses=[raw_response])
 
-    with pytest.raises(Llm2V4EchoMismatchError) as exc_info:
-        _run_service(client, case_id="c1")
+    with caplog.at_level(logging.WARNING, logger="apps.pipeline.llm2_service_v4"):
+        result = _run_service(client, case_id="c1")
 
-    error = exc_info.value
-    assert isinstance(error, Llm2V4ValidationError)
-    assert error.field == "case_id"
-    assert error.expected == "c1"
-    assert error.got == "outro-id"
-    message = str(error)
-    assert "case_id mismatch" in message
-    assert "expected 'c1'" in message
-    assert "got 'outro-id'" in message
-    assert len(client.calls) == 2
-
-
-# ── R2/R5: agency_record_number divergente ──────────────────────────────────
+    assert [item["procedure_type"] for item in result.procedure_recommendations] == ["cpre"]
+    assert len(client.calls) == 1
+    warning_text = caplog.text
+    assert "case_id mismatch" in warning_text
+    assert "expected 'c1'" in warning_text
+    assert "got 'outro-id'" in warning_text
+    assert f"raw_len={len(raw_response)}" in warning_text
+    expected_sha256_prefix = hashlib.sha256(raw_response.encode("utf-8")).hexdigest()[:12]
+    match = RAW_SHA256_PATTERN.search(warning_text)
+    assert match is not None
+    assert match.group(1) == expected_sha256_prefix
 
 
-def test_agency_record_number_mismatch_reports_expected_and_got() -> None:
+# ── R2/R3/R4/R5: agency_record_number divergente → idem ─────────────────────
+
+
+def test_agency_record_number_mismatch_overwrites_and_succeeds_with_single_call(caplog: Any) -> None:
     raw_response = json.dumps(_llm2_v4_payload(case_id="c1", agency_record_number="99999"))
-    # 2ª resposta repete o mismatch (slice 002): retry esgotado → aborta.
-    client = RecordingLlmClient(responses=[raw_response, raw_response])
+    client = RecordingLlmClient(responses=[raw_response])
 
-    with pytest.raises(Llm2V4EchoMismatchError) as exc_info:
-        _run_service(client, agency_record_number="12345")
+    with caplog.at_level(logging.WARNING, logger="apps.pipeline.llm2_service_v4"):
+        result = _run_service(client, agency_record_number="12345")
 
-    error = exc_info.value
-    assert error.field == "agency_record_number"
-    assert error.expected == "12345"
-    assert error.got == "99999"
-    message = str(error)
-    assert "agency_record_number mismatch" in message
-    assert "expected '12345'" in message
-    assert "got '99999'" in message
-    assert len(client.calls) == 2
-
-
-# ── R3: metadados do raw sem conteúdo clínico ───────────────────────────────
+    assert [item["procedure_type"] for item in result.procedure_recommendations] == ["cpre"]
+    assert len(client.calls) == 1
+    warning_text = caplog.text
+    assert "agency_record_number mismatch" in warning_text
+    assert "expected '12345'" in warning_text
+    assert "got '99999'" in warning_text
+    assert f"raw_len={len(raw_response)}" in warning_text
+    expected_sha256_prefix = hashlib.sha256(raw_response.encode("utf-8")).hexdigest()[:12]
+    match = RAW_SHA256_PATTERN.search(warning_text)
+    assert match is not None
+    assert match.group(1) == expected_sha256_prefix
 
 
-def test_mismatch_message_carries_raw_metadata_without_clinical_text() -> None:
+# ── R3: warning sem conteúdo clínico ────────────────────────────────────────
+
+
+def test_mismatch_warning_carries_raw_metadata_without_clinical_text(caplog: Any) -> None:
     clinical_marker = "MARCADOR-CLINICO-NAO-DEVE-VAZAR"
     raw_response = json.dumps(
         _llm2_v4_payload(case_id="outro-id", agency_record_number="12345", short_reason=clinical_marker)
     )
-    # 2ª resposta repete o mismatch (slice 002): retry esgotado → aborta.
-    client = RecordingLlmClient(responses=[raw_response, raw_response])
+    client = RecordingLlmClient(responses=[raw_response])
 
-    with pytest.raises(Llm2V4EchoMismatchError) as exc_info:
-        _run_service(client, case_id="c1")
+    with caplog.at_level(logging.WARNING, logger="apps.pipeline.llm2_service_v4"):
+        result = _run_service(client, case_id="c1")
 
-    message = str(exc_info.value)
-    expected_sha256_prefix = hashlib.sha256(raw_response.encode("utf-8")).hexdigest()[:12]
-    assert f"raw_len={len(raw_response)}" in message
-    match = RAW_SHA256_PATTERN.search(message)
-    assert match is not None
-    assert match.group(1) == expected_sha256_prefix
-    assert clinical_marker not in message
-    assert raw_response not in message
-    assert len(client.calls) == 2
-
-
-# ── R1/R2: 1º mismatch de IDs dispara um único retry com os IDs exatos ──────
-
-
-def test_echo_mismatch_triggers_single_retry_with_exact_ids() -> None:
-    first_raw = json.dumps(_llm2_v4_payload(case_id="id-errado", agency_record_number="12345"))
-    second_raw = json.dumps(_llm2_v4_payload(case_id="c1", agency_record_number="12345"))
-    client = RecordingLlmClient(responses=[first_raw, second_raw])
-
-    result = _run_service(client, case_id="c1", agency_record_number="12345")
-
-    assert len(client.calls) == 2
     assert [item["procedure_type"] for item in result.procedure_recommendations] == ["cpre"]
+    assert len(client.calls) == 1
+    warning_records = [record for record in caplog.records if record.levelno >= logging.WARNING]
+    assert warning_records, "esperava ao menos um warning de overwrite"
+    warning_text = "\n".join(record.getMessage() for record in warning_records)
+    assert clinical_marker not in warning_text
+    assert raw_response not in warning_text
+
+
+# ── R5: caminho feliz inalterado (1 chamada, sem warning de eco) ────────────
+
+
+def test_happy_path_single_call_without_echo_warning(caplog: Any) -> None:
+    raw_response = json.dumps(_llm2_v4_payload(case_id="c1", agency_record_number="12345"))
+    client = RecordingLlmClient(responses=[raw_response])
+
+    with caplog.at_level(logging.WARNING, logger="apps.pipeline.llm2_service_v4"):
+        result = _run_service(client, case_id="c1", agency_record_number="12345")
+
+    assert [item["procedure_type"] for item in result.procedure_recommendations] == ["cpre"]
+    assert len(client.calls) == 1
+    assert "mismatch" not in caplog.text
+
+
+# ── R5: coexistência — eco divergente + conjunto errado → retry de conjunto ──
+
+
+def test_echo_mismatch_with_wrong_procedure_set_still_retries_set(caplog: Any) -> None:
+    wrong_ids_and_set_raw = json.dumps(
+        _llm2_v4_payload(case_id="errado", agency_record_number="12345", procedure_types=("eda",))
+    )
+    correct_raw = json.dumps(_llm2_v4_payload(case_id="c1", agency_record_number="12345", procedure_types=("cpre",)))
+    client = RecordingLlmClient(responses=[wrong_ids_and_set_raw, correct_raw])
+
+    with caplog.at_level(logging.WARNING, logger="apps.pipeline.llm2_service_v4"):
+        result = _run_service(client, case_id="c1", agency_record_number="12345", detected_procedure_types=("cpre",))
+
+    assert [item["procedure_type"] for item in result.procedure_recommendations] == ["cpre"]
+    assert len(client.calls) == 2
     base_prompt = client.calls[0]["user_prompt"]
     retry_prompt = client.calls[1]["user_prompt"]
     assert retry_prompt.startswith(base_prompt)
-    retry_instruction = retry_prompt[len(base_prompt) :]
-    assert "c1" in retry_instruction
-    assert "12345" in retry_instruction
-    assert "id-errado" in retry_instruction
-    assert '"cpre"' in retry_instruction
-    assert "lista fechada" in retry_instruction
-
-
-# ── R3: 2º mismatch aborta sem 3ª chamada ───────────────────────────────────
-
-
-def test_second_echo_mismatch_aborts_without_third_call() -> None:
-    first_raw = json.dumps(_llm2_v4_payload(case_id="primeiro-errado", agency_record_number="12345"))
-    second_raw = json.dumps(_llm2_v4_payload(case_id="segundo-errado", agency_record_number="12345"))
-    client = RecordingLlmClient(responses=[first_raw, second_raw])
-
-    with pytest.raises(Llm2V4EchoMismatchError) as exc_info:
-        _run_service(client, case_id="c1", agency_record_number="12345")
-
-    assert exc_info.value.field == "case_id"
-    assert exc_info.value.expected == "c1"
-    assert exc_info.value.got == "segundo-errado"
-    assert len(client.calls) == 2
-
-
-def test_second_agency_record_mismatch_aborts_without_third_call() -> None:
-    first_raw = json.dumps(_llm2_v4_payload(case_id="c1", agency_record_number="11111"))
-    second_raw = json.dumps(_llm2_v4_payload(case_id="c1", agency_record_number="22222"))
-    client = RecordingLlmClient(responses=[first_raw, second_raw])
-
-    with pytest.raises(Llm2V4EchoMismatchError) as exc_info:
-        _run_service(client, case_id="c1", agency_record_number="12345")
-
-    assert exc_info.value.field == "agency_record_number"
-    assert exc_info.value.got == "22222"
-    assert len(client.calls) == 2
-
-
-# ── R4: retry de eco coexiste com o retry de procedure-set ──────────────────
-
-
-def test_echo_retry_then_procedure_set_retry_coexist() -> None:
-    wrong_ids_raw = json.dumps(_llm2_v4_payload(case_id="errado", agency_record_number="12345"))
-    wrong_set_raw = json.dumps(_llm2_v4_payload(case_id="c1", agency_record_number="12345", procedure_types=("eda",)))
-    correct_raw = json.dumps(_llm2_v4_payload(case_id="c1", agency_record_number="12345", procedure_types=("cpre",)))
-    client = RecordingLlmClient(responses=[wrong_ids_raw, wrong_set_raw, correct_raw])
-
-    result = _run_service(client, case_id="c1", agency_record_number="12345", detected_procedure_types=("cpre",))
-
-    assert len(client.calls) == 3
-    assert [item["procedure_type"] for item in result.procedure_recommendations] == ["cpre"]
-    assert "lista fechada" in client.calls[1]["user_prompt"][len(client.calls[0]["user_prompt"]) :]
-    assert "lista fechada" in client.calls[2]["user_prompt"][len(client.calls[0]["user_prompt"]) :]
+    assert "lista fechada" in retry_prompt[len(base_prompt) :]
+    assert "case_id mismatch" in caplog.text

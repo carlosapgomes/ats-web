@@ -2,10 +2,11 @@
 
 Schema 4.0 (design D5 / ADR-0010): recebe exatamente o conjunto reconciliado
 sobre as dez identidades atômicas, valida igualdade exata de conjuntos (sem
-omissão/duplicata/adição) e devolve itens normalizados. Preserva os orçamentos
-finitos de correção: um retry one-shot para echo mismatch de IDs
-(``case_id``/``agency_record_number``), um para mismatch schema-válido de conjunto
-(erro tipado) e um para idioma pt-BR, com máximo físico de quatro chamadas e
+omissão/duplicata/adição) e devolve itens normalizados. Divergência de eco de IDs
+(``case_id``/``agency_record_number``) é não-fatal: emite warning observável e
+sobrescreve os IDs com os valores esperados, sem retry. Preserva os orçamentos
+finitos de correção: um retry one-shot para mismatch schema-válido de conjunto
+(erro tipado) e um para idioma pt-BR, com máximo físico de três chamadas e
 revalidação integral a cada resposta.
 """
 
@@ -13,6 +14,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import logging
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -76,29 +78,7 @@ class Llm2V4ProcedureSetMismatchError(Llm2V4ValidationError):
     """Resposta schema-válida divergiu do conjunto reconciliado (omissão/adição)."""
 
 
-#: Rótulos legados por campo do echo mismatch (``grep`` operacional em tracebacks).
-_ECHO_MISMATCH_LABELS: dict[str, str] = {
-    "case_id": "LLM2 v4 case_id mismatch",
-    "agency_record_number": "LLM2 v4 agency_record_number mismatch",
-}
-
-
-class Llm2V4EchoMismatchError(Llm2V4ValidationError):
-    """Resposta schema-válida ecoou ``case_id``/``agency_record_number`` divergentes.
-
-    Carrega os valores integrais (``expected``/``got`` — IDs operacionais, sem PHI)
-    e metadados não-clínicos do raw (``raw_len`` e ``raw_sha256`` de 12 hex) para
-    diagnóstico; nunca inclui conteúdo clínico.
-    """
-
-    def __init__(self, *, field_name: str, expected: str, got: str, raw_response: str) -> None:
-        self.field: str = field_name
-        self.expected: str = expected
-        self.got: str = got
-        raw_len, raw_sha256 = _raw_metadata(raw_response)
-        # Rótulos literais preservados para grep operacional (mensagens legadas).
-        label = _ECHO_MISMATCH_LABELS[field_name]
-        super().__init__(f"{label}: expected {expected!r} got {got!r} (raw_len={raw_len} raw_sha256={raw_sha256})")
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -141,8 +121,10 @@ class Llm2ServiceV4:
     ) -> Llm2V4Result:
         """Executa a análise LLM2 conjunta com orçamentos finitos de correção.
 
-        Máximo físico de quatro chamadas: 1 retry de echo (IDs), 1 retry de
-        conjunto de procedimentos e 1 retry de idioma pt-BR.
+        Máximo físico de três chamadas: 1 retry de conjunto de procedimentos
+        e 1 retry de idioma pt-BR. Divergência de eco de IDs (``case_id`` /
+        ``agency_record_number``) não consome chamada extra: emite warning e
+        sobrescreve os IDs com os valores esperados.
         """
         user_prompt = _render_user_prompt(
             template=user_prompt_template,
@@ -154,7 +136,6 @@ class Llm2ServiceV4:
             detected_procedure_types=detected_procedure_types,
         )
         raw_response = self._client.complete(system_prompt=system_prompt, user_prompt=user_prompt)
-        echo_retry_used = False
         procedure_set_retry_used = False
         language_retry_used = False
         while True:
@@ -165,22 +146,6 @@ class Llm2ServiceV4:
                     agency_record_number=agency_record_number,
                     detected_procedure_types=detected_procedure_types,
                 )
-            except Llm2V4EchoMismatchError as error:
-                if echo_retry_used:
-                    raise
-                echo_retry_used = True
-                raw_response = self._client.complete(
-                    system_prompt=system_prompt,
-                    user_prompt=f"{user_prompt}\n\n"
-                    + _echo_retry_instruction(
-                        case_id=case_id,
-                        agency_record_number=agency_record_number,
-                        field=error.field,
-                        got=error.got,
-                        detected_procedure_types=detected_procedure_types,
-                    ),
-                )
-                continue
             except Llm2V4ProcedureSetMismatchError:
                 if procedure_set_retry_used:
                     raise
@@ -234,27 +199,6 @@ def _procedure_set_retry_instruction(detected_procedure_types: tuple[str, ...]) 
     )
 
 
-def _echo_retry_instruction(
-    *,
-    case_id: str,
-    agency_record_number: str,
-    field: str,
-    got: str,
-    detected_procedure_types: tuple[str, ...],
-) -> str:
-    """Correção one-shot para eco divergente: repete os IDs exatos esperados.
-
-    Ecoa apenas IDs operacionais (sem PHI clínica) além do que o prompt original
-    já carrega; ``got`` é repetido para orientar a correção.
-    """
-    return (
-        f"Correcao obrigatoria: o campo {field} da sua resposta anterior nao "
-        f"corresponde ao caso recebido. Reenvie o mesmo resultado com "
-        f"case_id={case_id!r} e agency_record_number={agency_record_number!r} "
-        f"exatamente como recebidos (voce enviou {got!r}).\n" + _closed_list_declaration(detected_procedure_types)
-    )
-
-
 def _render_user_prompt(
     *,
     template: str,
@@ -283,6 +227,23 @@ def _render_user_prompt(
     )
 
 
+def _warn_echo_mismatch(*, field_name: str, expected: str, got: str, raw_response: str) -> None:
+    """Emite warning de overwrite de eco (IDs operacionais + metadados do raw).
+
+    Rótulos literais ``case_id mismatch`` / ``agency_record_number mismatch``
+    preservados para grep operacional; nunca inclui conteúdo clínico.
+    """
+    raw_len, raw_sha256 = _raw_metadata(raw_response)
+    logger.warning(
+        "LLM2 v4 %s mismatch: expected %r got %r (raw_len=%s raw_sha256=%s)",
+        field_name,
+        expected,
+        got,
+        raw_len,
+        raw_sha256,
+    )
+
+
 def _decode_and_validate(
     *,
     raw_response: str,
@@ -299,20 +260,27 @@ def _decode_and_validate(
     except ValidationError as error:
         raise Llm2V4ValidationError(f"LLM2 v4 schema validation failed: {error}") from error
 
+    # Eco divergente é não-fatal: warning observável + overwrite com os valores
+    # esperados (a atribuição resposta→caso é garantida pelo request isolado).
+    overwrites: dict[str, str] = {}
     if validated.case_id != str(case_id):
-        raise Llm2V4EchoMismatchError(
+        _warn_echo_mismatch(
             field_name="case_id",
             expected=str(case_id),
             got=validated.case_id,
             raw_response=raw_response,
         )
+        overwrites["case_id"] = str(case_id)
     if validated.agency_record_number != str(agency_record_number):
-        raise Llm2V4EchoMismatchError(
+        _warn_echo_mismatch(
             field_name="agency_record_number",
             expected=str(agency_record_number),
             got=validated.agency_record_number,
             raw_response=raw_response,
         )
+        overwrites["agency_record_number"] = str(agency_record_number)
+    if overwrites:
+        validated = validated.model_copy(update=overwrites)
 
     returned = {item.procedure_type for item in validated.procedure_recommendations}
     expected = set(detected_procedure_types)
