@@ -21,7 +21,7 @@ from collections.abc import Container
 from dataclasses import dataclass
 
 from apps.cases.exam_profiles import require_exam_profile
-from apps.cases.models import Case, ProcedureType
+from apps.cases.models import Case, CaseStatus, ProcedureType
 from apps.cases.priority_signals import resolve_priority_signals
 from apps.cases.procedures import (
     ALLOWED_PROCEDURE_SETS,
@@ -49,6 +49,10 @@ from apps.pipeline.llm2_service_v4 import (
     LLM2_V4_DEFAULT_USER_PROMPT,
     Llm2ServiceV4,
     strictest_global_support,
+)
+from apps.pipeline.persistability import (
+    assert_llm1_persistable,
+    assert_llm2_persistable,
 )
 from apps.pipeline.policy import (
     EdaPolicyPrecheckInput,
@@ -248,16 +252,11 @@ def run_pipeline(
             llm2_user_template=llm2_user_template,
         )
     except Exception as exc:
-        logger.exception("Pipeline failed for case %s", case_id)
-        try:
-            case._record_event(
-                "PIPELINE_FAILED",
-                payload={"error": str(exc)},
-            )
-            case.save()  # persist PIPELINE_FAILED event before FSM transition
-            _try_fail_case(case)
-        except Exception:
-            logger.exception("Failed to record pipeline failure for case %s", case_id)
+        # S1/D7: desfecho auditavel com instancia LIMPA recarregada do banco
+        # (nunca regravar o objeto que falhou — pode conter artefato
+        # rejeitado). Se o registro tambem falhar, a excecao sai e o worker
+        # marca job failure: proibido sucesso falso.
+        _record_pipeline_failure(case_id=case_id, error=exc)
 
 
 # ── V4 pipeline (procedure-neutral — contract 4.0) ──────────────────────────
@@ -449,6 +448,13 @@ def _run_v4_pipeline(
         user_prompt_template=ut1,
         prompt_system_version=sp1_version,
         prompt_user_version=ut1_version,
+    )
+
+    # S1/D7 (R1/R2): rejeitar U+0000 ANTES de qualquer write/projecao.
+    # Fronteira obrigatoria tambem com clientes injetados; sem sanitizacao.
+    assert_llm1_persistable(
+        structured_data=result1.structured_data,
+        summary_text=result1.summary_text,
     )
 
     case.structured_data = result1.structured_data
@@ -664,6 +670,9 @@ def _run_v4_pipeline(
         system_prompt=sp2,
         user_prompt_template=ut2,
     )
+
+    # S1/D7 (R1/R2): rejeitar U+0000 antes de recomendacao/WAIT_DOCTOR.
+    assert_llm2_persistable(procedure_recommendations=result2.procedure_recommendations)
 
     # ── 10. Reconciliação por item + suporte global (D8) ──────────────
     # D6/R5: o local da dilatação é ancorado no relatório principal ANTES da
@@ -920,28 +929,123 @@ def _get_text_or_none(payload: dict[str, object], key: str) -> str | None:
     return None
 
 
-def _try_fail_case(case: Case) -> None:
-    """Attempt to transition case to FAILED, best-effort.
+# ── S1/D7: falha auditavel com estado limpo (R3/R4/R5/R6) ─────────────────
 
-    Tries llm1_complete(success=False) first (valid from LLM_STRUCT),
-    then llm2_complete(success=False) (valid from LLM_SUGGEST).
-    If neither applies, just saves to persist the PIPELINE_FAILED event.
+# Chave "error" preservada por compatibilidade com leitores/eventos
+# existentes; "error_code"/"stage" dao diagnostico tecnico limitado.
+_SAFE_MESSAGE_MAX_CHARS = 300
+
+
+def _chains_database_error(error: BaseException) -> bool:
+    """Detecta erro de banco na cadeia (CONTEXT pode conter texto clinico)."""
+    from django.db import DatabaseError
+
+    seen: set[int] = set()
+    current: BaseException | None = error
+    while current is not None and id(current) not in seen:
+        seen.add(id(current))
+        if isinstance(current, DatabaseError):
+            return True
+        current = current.__cause__ or current.__context__
+    return False
+
+
+def _chains_raw_input_error(error: BaseException) -> bool:
+    """Detecta validacao pydantic na cadeia (input_value com texto clinico)."""
+    from pydantic import ValidationError
+
+    seen: set[int] = set()
+    current: BaseException | None = error
+    while current is not None and id(current) not in seen:
+        seen.add(id(current))
+        if isinstance(current, ValidationError):
+            return True
+        current = current.__cause__ or current.__context__
+    return False
+
+
+def _safe_failure_message(error: Exception) -> str:
+    """Mensagem tecnica limitada; nunca stringifica erro de banco/validacao (R3/R6).
+
+    Erros de dominio do pipeline (regras, guard, mismatch de conjunto com
+    codigos canonicos) sao construidos pelo codigo e preservados
+    (truncados). Erros de banco usam mensagem generica porque o driver
+    inclui o texto recusado/clinico no CONTEXT; erros de validacao pydantic
+    porque o input_value integra a mensagem.
     """
+    if _chains_database_error(error) or _chains_raw_input_error(error):
+        return "Falha tecnica de persistencia no pipeline; detalhe suprimido por seguranca."
+    return str(error)[:_SAFE_MESSAGE_MAX_CHARS]
+
+
+def _record_pipeline_failure(*, case_id: uuid.UUID, error: Exception) -> None:
+    """Registra PIPELINE_FAILED com instancia limpa ou propaga (S1/D7).
+
+    Fronteira serializada curta (P1-A): recarrega o Case com row lock dentro
+    de UMA transacao e confirma evento + desfecho FSM juntos. Se o registro
+    do desfecho falhar, a transacao reverte o evento parcial e a excecao
+    secundaria sai para o worker (django-q2 marca job failure).
+
+    - Nunca regrava o objeto que falhou (pode conter artefato rejeitado) e
+      nunca usa refresh_from_db no FSM protegido.
+    - Usa a transicao FSM da etapa PERSISTIDA (LLM_STRUCT/LLM_SUGGEST).
+    - Estado avancado (WAIT_DOCTOR/CLEANED/terminais): registra conflito de
+      etapa sem regressao e propaga a excecao (sem sucesso falso).
+    - Sem retry LLM novo e sem atribuir status diretamente.
+    """
+    from django.db import transaction
     from django_fsm import TransitionNotAllowed
 
-    for method in [case.llm1_complete, case.llm2_complete]:
-        try:
-            method(success=False, user=None)
-            case.save()
+    error_code = getattr(error, "error_code", type(error).__name__)
+    stage = getattr(error, "stage", "unknown")
+    safe_message = _safe_failure_message(error)
+    # Sem exc_info: o traceback da excecao original pode carregar str() com
+    # CONTEXT clinico do driver; a mensagem aqui e sempre tecnica/segura.
+    logger.error(
+        "Pipeline failed for case %s: [%s stage=%s] %s",
+        case_id,
+        error_code,
+        stage,
+        safe_message,
+    )
+    with transaction.atomic():
+        fresh = Case.objects.select_for_update().get(case_id=case_id)
+        persisted_status = fresh.status
+        payload: dict[str, object] = {
+            "error": safe_message,
+            "error_code": error_code,
+            "stage": stage,
+        }
+        if persisted_status in (CaseStatus.LLM_STRUCT, CaseStatus.LLM_SUGGEST):
+            fresh._record_event("PIPELINE_FAILED", payload=payload)
+            fresh.save()
+            try:
+                if persisted_status == CaseStatus.LLM_STRUCT:
+                    fresh.llm1_complete(success=False, user=None)
+                else:
+                    fresh.llm2_complete(success=False, user=None)
+                fresh.save()
+                return
+            except TransitionNotAllowed:
+                # Defensivo: sob row lock ninguem avanca entre reload e
+                # transicao; se ocorrer, o evento ja auditado confirma e a
+                # propagacao acontece fora do bloco (sem sucesso falso).
+                pass
+        elif persisted_status == CaseStatus.FAILED:
+            fresh._record_event("PIPELINE_FAILED", payload=payload)
+            fresh.save()
             return
-        except TransitionNotAllowed:
-            # A instância já está no estado salvo atual (cada etapa persiste);
-            # refresh_from_db violaria a proteção do FSMField e a reatribuição
-            # quebraria os métodos bound desta instância.
-            continue
-
-    # Could not transition — still persist the event
-    case.save()
+        else:
+            # R5: estado avancado/terminal — conflito auditado, sem regressao
+            # e sem atribuir status diretamente.
+            fresh._record_event(
+                "PIPELINE_FAILED",
+                payload={**payload, "persisted_status": persisted_status, "stage_conflict": True},
+            )
+            fresh.save()
+    # Fora da transacao: o desfecho auditado confirmou; propagar o erro
+    # original (nunca sucesso falso). O raise aqui nao reverte a auditoria.
+    raise error
 
 
 def _is_pediatric(structured_data: dict[str, object]) -> bool:
