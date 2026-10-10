@@ -20,6 +20,7 @@ from __future__ import annotations
 import re
 import uuid
 from io import BytesIO
+from typing import Any
 
 import fitz  # type: ignore[import-untyped]  # PyMuPDF
 import pytest
@@ -44,7 +45,7 @@ from apps.cases.procedures import (
 )
 from apps.cases.services import claim_case_lock
 from apps.intake.services import (
-    correct_case_exam_type,
+    confirm_case_procedure_review,
     create_corrected_resubmission,
     intake_selection_options,
     is_exam_type_correction_eligible,
@@ -181,6 +182,34 @@ def _claim(case: Case, user) -> uuid.UUID:
     return result.token
 
 
+def _review_event(case: Case, reason_code: str = "exam_type_mismatch") -> CaseEvent:
+    """Revisao manual vista pelo NIR (origem da confirmacao, S2/D3)."""
+    return CaseEvent.objects.create(
+        case=case,
+        event_type="EDA_SCOPE_GATED_MANUAL_REVIEW",
+        actor=None,
+        actor_type="system",
+        payload={"reason_code": reason_code, "reason_text": "Conjunto declarado difere."},
+    )
+
+
+def _confirm_kwargs(case, user, token, *, exam_type, reason_code="exam_type_mismatch") -> Any:
+    """Kwargs da confirmacao S2 com consentimento explicito."""
+    from apps.cases.procedure_review import source_fingerprint_for_case
+
+    return {
+        "case_id": case.case_id,
+        "exam_type": exam_type,
+        "user": user,
+        "active_role": "nir",
+        "lock_token": token,
+        "review_acknowledged": "on",
+        "review_justification": "Revisei o relatorio e confirmo a selecao.",
+        "review_event_id": _review_event(case, reason_code).pk,
+        "source_fingerprint": source_fingerprint_for_case(case),
+    }
+
+
 def _select_block(html: str) -> str:
     match = re.search(r"<select[^>]*name=\"exam_type\"[^>]*>.*?</select>", html, re.DOTALL)
     assert match is not None, "select canônico de exam_type ausente"
@@ -284,13 +313,12 @@ class TestCorrectionCatalogSelection:
         assert ProcedureType.CPRE not in values
         for key in FLAGLESS_SELECTION_KEYS:
             assert key in values, key
-            if key == ProcedureType.EDA:  # seleção atual: marcada e desabilitada
-                continue
+            # S2: a seleção atual permanece CONFIRMÁVEL (sem `disabled`).
             assert "disabled" not in _option_tag(block, key), key
-        assert "disabled" in _option_tag(block, ProcedureType.EDA)
+        assert "(atual)" in block
 
     def test_correction_marks_the_declared_selection_as_current(self, client) -> None:
-        """A seleção atual aparece marcada (e não pode ser reescolhida)."""
+        """S2: a seleção atual aparece marcada e pode ser confirmada."""
         client, user = _nir_client(client, "nir-cor-current@test.com")
         case = _make_eligible_case(user)
 
@@ -298,7 +326,7 @@ class TestCorrectionCatalogSelection:
         block = _correction_select(content, case.case_id)
         declared_tag = _option_tag(block, ProcedureType.EDA)
         assert "selected" in declared_tag
-        assert "disabled" in declared_tag
+        assert "disabled" not in declared_tag
         assert f"{ProcedureType.EDA.label}(atual)" in block.replace(" ", "")
 
     def test_correction_error_rerender_preserves_the_attempted_selection(self, client, monkeypatch) -> None:
@@ -362,7 +390,7 @@ class TestCorrectionBackendValidation:
         assert reloaded.status == CaseStatus.WAIT_R1_CLEANUP_THUMBS
         assert get_declared_procedure_types(reloaded) == (ProcedureType.EDA,)
         assert reloaded.structured_data is not None
-        assert not CaseEvent.objects.filter(case=case, event_type="CASE_PROCEDURE_DECLARATION_CORRECTED").exists()
+        assert not CaseEvent.objects.filter(case=case, event_type="CASE_PROCEDURE_REVIEW_CONFIRMED").exists()
 
     @pytest.mark.parametrize(
         "duplicated",
@@ -419,14 +447,7 @@ class TestCorrectionJourneyPermittedSelection:
         token = _claim(case, user)
 
         with override_settings(**{flag_name: False}), pytest.raises(ValueError):
-            correct_case_exam_type(
-                case_id=case.case_id,
-                new_exam_type=selection,
-                user=user,
-                active_role="nir",
-                lock_token=token,
-                reason_code="nir_identified_exam",
-            )
+            confirm_case_procedure_review(**_confirm_kwargs(case, user, token, exam_type=selection))
 
         assert enqueue == []
         reloaded = Case.objects.get(pk=case.pk)
@@ -436,7 +457,7 @@ class TestCorrectionJourneyPermittedSelection:
         assert reloaded.structured_data is not None
         assert reloaded.summary_text == "Resumo do perfil anterior (derivado)."
         assert reloaded.pdf_file.name == "pdfs/2025/01/original.pdf"
-        assert not CaseEvent.objects.filter(case=case, event_type="CASE_PROCEDURE_DECLARATION_CORRECTED").exists()
+        assert not CaseEvent.objects.filter(case=case, event_type="CASE_PROCEDURE_REVIEW_CONFIRMED").exists()
 
     @pytest.mark.parametrize(
         "selection",
@@ -467,7 +488,7 @@ class TestCorrectionJourneyPermittedSelection:
         assert reloaded.status == CaseStatus.WAIT_R1_CLEANUP_THUMBS
         assert get_declared_procedure_types(reloaded) == (ProcedureType.EDA,)
         assert reloaded.structured_data is not None
-        assert not CaseEvent.objects.filter(case=case, event_type="CASE_PROCEDURE_DECLARATION_CORRECTED").exists()
+        assert not CaseEvent.objects.filter(case=case, event_type="CASE_PROCEDURE_REVIEW_CONFIRMED").exists()
 
     @pytest.mark.parametrize(("selection", "flag_name"), GATED_SELECTIONS)
     def test_gated_selection_accepted_with_flag_on(
@@ -481,14 +502,7 @@ class TestCorrectionJourneyPermittedSelection:
         token = _claim(case, user)
 
         with override_settings(**{flag_name: True}):
-            result = correct_case_exam_type(
-                case_id=case.case_id,
-                new_exam_type=selection,
-                user=user,
-                active_role="nir",
-                lock_token=token,
-                reason_code="nir_identified_exam",
-            )
+            result = confirm_case_procedure_review(**_confirm_kwargs(case, user, token, exam_type=selection))
 
         assert result.status == CaseStatus.LLM_STRUCT
         assert get_declared_procedure_types(Case.objects.get(pk=case.pk)) == procedure_types_for_selection(selection)
@@ -515,8 +529,12 @@ class TestCorrectionReprocessing:
         )
         user = _nir_user(django_user_model, "nir-cor-3to4@test.com")
         case = _make_eligible_case(user)
-        case.pdf_file = "pdfs/2025/01/original.pdf"
-        case.save()
+        # S2: fingerprint exige o PDF legivel — salva bytes reais (antes, path
+        # ficticio; a confirmacao agora recusa fonte nao verificavel).
+        from django.core.files.base import ContentFile
+
+        case.pdf_file.save("original.pdf", ContentFile(_create_test_pdf_bytes()), save=True)
+        pdf_name = case.pdf_file.name
         attachment = CaseAttachment.objects.create(
             case=case,
             file="attachments/keep.pdf",
@@ -531,13 +549,8 @@ class TestCorrectionReprocessing:
         extracted_text = case.extracted_text
         token = _claim(case, user)
 
-        result = correct_case_exam_type(
-            case_id=case.case_id,
-            new_exam_type=ProcedureType.EDA_CAPSULE,
-            user=user,
-            active_role="nir",
-            lock_token=token,
-            reason_code="nir_identified_exam",
+        result = confirm_case_procedure_review(
+            **_confirm_kwargs(case, user, token, exam_type=ProcedureType.EDA_CAPSULE)
         )
 
         assert result.case_id == original_id
@@ -548,7 +561,7 @@ class TestCorrectionReprocessing:
         assert get_declared_procedure_types(reloaded) == (ProcedureType.EDA_CAPSULE,)
         # R2: fontes preservadas.
         assert reloaded.extracted_text == extracted_text
-        assert reloaded.pdf_file.name == "pdfs/2025/01/original.pdf"
+        assert reloaded.pdf_file.name == pdf_name
         assert CaseAttachment.objects.filter(pk=attachment.pk, case=reloaded).exists()
         # R2: derivados 3.0 invalidados (o próximo write é o contrato atual).
         assert reloaded.structured_data is None
@@ -556,9 +569,9 @@ class TestCorrectionReprocessing:
         assert reloaded.suggested_action is None
         assert reloaded.priority_signals == []
         # R2: anterior/novo auditados.
-        corrected = CaseEvent.objects.get(case=case, event_type="CASE_PROCEDURE_DECLARATION_CORRECTED")
-        assert corrected.payload["old_procedures"] == [ProcedureType.EDA]
-        assert corrected.payload["new_procedures"] == [ProcedureType.EDA_CAPSULE]
+        corrected = CaseEvent.objects.get(case=case, event_type="CASE_PROCEDURE_REVIEW_CONFIRMED")
+        assert corrected.payload["previous_declared_procedures"] == [ProcedureType.EDA]
+        assert corrected.payload["confirmed_procedures"] == [ProcedureType.EDA_CAPSULE]
 
         # R2: o reprocessamento escreve o artefato 4.0 (pipeline do branch é 4.0).
         client = RecordingLlmClient(
@@ -593,14 +606,20 @@ class TestCorrectionReprocessing:
         case = _make_eligible_case(user, status=status)
         assert is_exam_type_correction_eligible(case) is False
 
+        review = _review_event(case)
+        from apps.cases.procedure_review import source_fingerprint_for_case
+
         with pytest.raises(ValueError):
-            correct_case_exam_type(
+            confirm_case_procedure_review(
                 case_id=case.case_id,
-                new_exam_type=ProcedureType.EDA_CAPSULE,
+                exam_type=ProcedureType.EDA_CAPSULE,
                 user=user,
                 active_role="nir",
                 lock_token=uuid.uuid4(),
-                reason_code="nir_identified_exam",
+                review_acknowledged="on",
+                review_justification="Revisei e confirmo.",
+                review_event_id=review.pk,
+                source_fingerprint=source_fingerprint_for_case(case),
             )
 
         assert enqueue == []

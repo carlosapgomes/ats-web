@@ -1,0 +1,11 @@
+{% comment %}
+  Detalhe compartilhado da Linha do Tempo para eventos da revisão NIR (S2/D6).
+  Recebe `item` com `detail_lines` (presenter puro em
+  `apps.cases.procedure_review`). Texto livre escapa por autoescape — nunca
+  |safe aqui. Sem vocabulário CSS novo: apenas utilitários do Bootstrap.
+{% endcomment %}
+{% if item.detail_lines %}
+<div class="small text-muted mt-1">
+  {% for line in item.detail_lines %}<div>{{ line }}</div>{% endfor %}
+</div>
+{% endif %}

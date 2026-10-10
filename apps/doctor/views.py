@@ -53,12 +53,11 @@ from apps.cases.services import (
     renew_case_lock as renew_lock_service,
 )
 from apps.intake.views import (
-    EVENT_DOT_CSS,
-    EVENT_LABELS,
     STATUS_CSS_CLASS,
     STATUS_LABELS,
     STEP_STATUS_INDEX,
     STEPS,
+    enrich_timeline_events,
 )
 
 from .forms import SELECTABLE_PROCEDURE_TYPES, DoctorDecisionForm
@@ -973,15 +972,7 @@ def doctor_decided_detail(request: HttpRequest, case_id: uuid.UUID) -> HttpRespo
         steps = [step for step in STEPS if step["label"] != "Agendamento"]
         current_step_idx = len(steps) - 1
 
-    enriched_events = []
-    for e in events:
-        enriched_events.append(
-            {
-                "event": e,
-                "label": EVENT_LABELS.get(e.event_type, e.event_type),
-                "dot_css": EVENT_DOT_CSS.get(e.event_type, "system"),
-            }
-        )
+    enriched_events = enrich_timeline_events(events)
 
     # Build result_info similar to dashboard
     result_info = None

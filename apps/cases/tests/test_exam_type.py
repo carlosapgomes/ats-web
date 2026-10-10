@@ -142,12 +142,13 @@ class TestCaseSchemaFinal:
 
 
 class TestCorrectionScreenOptionsUseProjection:
-    """Decisão 2 — opções da correção marcam (atual)/disabled pela PROJEÇÃO.
+    """Decisão 2 — opções da confirmação marcam (atual) pela PROJEÇÃO (S2).
 
     Um caso com histórico legado divergente (payload antigo de ``CASE_CREATED``
     com ``exam_type`` de outro tipo) continua marcando o conjunto declarado
     projetado das rows. Slice 007 migrou os radios para o combobox canônico
-    (``<select name="exam_type">``); a prova é a mesma.
+    (``<select name="exam_type">``); o S2 remove o ``disabled`` da seleção
+    vigente — ela permanece CONFIRMÁVEL com leitura + justificativa.
     """
 
     @staticmethod
@@ -159,18 +160,21 @@ class TestCorrectionScreenOptionsUseProjection:
         return match.group(0)
 
     def _assert_option_state(self, content: str, value: str, current: bool) -> None:
-        """Verifica o estado de uma opção do combobox (disabled) e o texto ((atual))."""
+        """Verifica o texto ((atual)) e a ausência de `disabled` (S2).
+
+        A seleção vigente é marcada e permanece selecionável (confirmável);
+        nenhuma option do combobox de confirmação usa `disabled`.
+        """
         import re
 
         select = self._correction_select(content)
         match = re.search(rf'<option value="{value}"([^>]*)>(.*?)</option>', select, re.DOTALL)
         assert match is not None, f"opção {value} ausente: {select}"
         attributes, label = match.group(1), match.group(2)
+        assert "disabled" not in attributes, f"opção {value} não deveria estar disabled (S2)"
         if current:
-            assert "disabled" in attributes, f"opção {value} deveria estar disabled"
             assert "(atual)" in label, f"opção {value} deveria marcar (atual)"
         else:
-            assert "disabled" not in attributes, f"opção {value} não deveria estar disabled"
             assert "(atual)" not in label, f"opção {value} não deveria marcar (atual)"
 
     def test_eda_projection_marks_eda_option_current(self, client) -> None:
@@ -184,13 +188,13 @@ class TestCorrectionScreenOptionsUseProjection:
         )
 
         content = client.get(reverse("intake:case_detail", args=[case.case_id])).content.decode()
-        assert "Correção de Tipo de Exame" in content
+        assert "Revisar e confirmar procedimento" in content
         self._assert_option_state(content, "eda", current=True)
         self._assert_option_state(content, "eda_gastrostomy", current=False)
         self._assert_option_state(content, "eda_capsule", current=False)
 
     def test_combined_projection_marks_combined_option_current(self, client) -> None:
-        """Projeção combinada → opção EDA + Colonoscopia disabled com (atual)."""
+        """Projeção combinada → opção EDA + Colonoscopia marcada (atual), sem disabled."""
         client, user = _nir_client(client, "nir-011c-comb@test.com")
         case = _eligible_case(user=user, declared="eda")
         set_declared_procedures(
@@ -201,7 +205,7 @@ class TestCorrectionScreenOptionsUseProjection:
 
         with override_settings(COLONOSCOPY_INTAKE_ENABLED=True):
             content = client.get(reverse("intake:case_detail", args=[case.case_id])).content.decode()
-        assert "Correção de Tipo de Exame" in content
+        assert "Revisar e confirmar procedimento" in content
         self._assert_option_state(content, "eda", current=False)
         self._assert_option_state(content, "colonoscopy", current=False)
         self._assert_option_state(content, "eda_colonoscopy", current=True)

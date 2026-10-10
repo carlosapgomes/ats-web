@@ -362,21 +362,23 @@
 {% endif %}
 
 {% if can_correct_exam_type and correction_form_context %}
-<!-- Correção de Tipo de Exame (Slice 006) -->
+<!-- Revisar e confirmar procedimento (S2/D6) -->
 <div class="card p-4 mb-4 border-warning">
-  <h5 class="mb-3">↻ Correção de Tipo de Exame</h5>
+  <h5 class="mb-3">↻ Revisar e confirmar procedimento</h5>
   <div class="alert alert-warning small mb-3">
-    <strong>⚠ Revisão Manual:</strong> o tipo declarado no envio difere do
-    detectado. Corrija o tipo no mesmo caso para reprocessar com o perfil
-    correto — PDF, anexos e texto extraído são preservados.
+    <strong>⚠ Revisão Manual:</strong> o conjunto declarado no envio difere do
+    identificado. Confira o relatório principal e confirme o procedimento — a
+    seleção atual pode ser mantida ou trocada por outra habilitada. PDF,
+    anexos e texto extraído são preservados. A confirmação não é aprovação
+    clínica: a decisão permanece com o médico.
   </div>
   <div class="row g-3 mb-3">
     <div class="col-md-4">
-      <p class="mb-1 text-muted small">Tipo declarado</p>
+      <p class="mb-1 text-muted small">Conjunto declarado</p>
       <p class="mb-0 fw-medium">{{ correction_form_context.declared_label }}</p>
     </div>
     <div class="col-md-4">
-      <p class="mb-1 text-muted small">Tipo detectado</p>
+      <p class="mb-1 text-muted small">Identificado automaticamente</p>
       <p class="mb-0 fw-medium">{{ correction_form_context.detected_exam_type_label }}</p>
     </div>
     <div class="col-md-4">
@@ -393,9 +395,12 @@
   <form method="post" action="{% url 'intake:exam_type_correction' case.case_id %}">
     {% csrf_token %}
     <input type="hidden" name="lock_token" value="{{ lock_token }}">
+    <input type="hidden" name="review_event_id" value="{{ correction_form_context.review_event_id }}">
+    <input type="hidden" name="source_fingerprint" value="{{ correction_form_context.source_fingerprint }}">
     <div class="mb-3">
-      <label class="form-label fw-semibold" id="correction-exam-type-label">Novo conjunto de procedimentos <span class="text-danger">*</span></label>
-      <!-- Controle canônico (Slice 007/R1): mesmo combobox/chaves do upload —
+      <label class="form-label fw-semibold" id="correction-exam-type-label">Conjunto de procedimentos confirmado <span class="text-danger">*</span></label>
+      <!-- Controle canônico (Slice 007/R1, S2/D6): mesmo combobox/chaves do
+           upload — a seleção atual permanece CONFIRMÁVEL (sem `disabled`);
            o select é o valor submetido em qualquer cenário; progressive
            enhancement em procedure_combobox.js. -->
       <div class="procedure-combobox">
@@ -404,26 +409,28 @@
                 data-combobox-placeholder="Buscar novo conjunto de procedimentos…"
                 aria-labelledby="correction-exam-type-label"
                 aria-describedby="correction-exam-type-search-hint" required>
-          <option value=""{% if not correction_form_context.selected_exam_type %} selected{% endif %}>Selecione o novo conjunto de procedimentos…</option>
+          <option value=""{% if not correction_form_context.selected_exam_type %} selected{% endif %}>Selecione o conjunto de procedimentos…</option>
           {% for option in correction_form_context.exam_type_options %}
-          <option value="{{ option.key }}"{% if option.aliases %} data-search-aliases="{{ option.aliases|join:', ' }}"{% endif %}{% if option.key == correction_form_context.declared_type_key %} disabled{% endif %}{% if option.key == correction_form_context.selected_exam_type %} selected{% endif %}>{{ option.label }}{% if option.key == correction_form_context.declared_type_key %} (atual){% endif %}</option>
+          <option value="{{ option.key }}"{% if option.aliases %} data-search-aliases="{{ option.aliases|join:', ' }}"{% endif %}{% if option.key == correction_form_context.selected_exam_type %} selected{% endif %}>{{ option.label }}{% if option.key == correction_form_context.declared_type_key %} (atual){% endif %}</option>
           {% endfor %}
         </select>
       </div>
       <p class="form-text procedure-combobox__hint" id="correction-exam-type-search-hint">Busca ignora acentos e aceita sinônimos aprovados. Navegue com ↑ ↓ e confirme com Enter.</p>
     </div>
     <div class="mb-3">
-      <label for="correction-reason-code" class="form-label fw-semibold">
-        Motivo da correção <span class="text-danger">*</span>
+      <label for="correction-justification" class="form-label fw-semibold">
+        Justificativa da confirmação <span class="text-danger">*</span>
       </label>
-      <select name="reason_code" id="correction-reason-code" class="form-select" required>
-        <option value="">Selecione...</option>
-        {% for code, label in correction_form_context.correction_reason_choices %}
-        <option value="{{ code }}">{{ label }}</option>
-        {% endfor %}
-      </select>
+      <textarea name="review_justification" id="correction-justification" class="form-control" rows="2" maxlength="500" required>{{ correction_form_context.attempted_justification }}</textarea>
+      <p class="form-text">Breve (até 500 caracteres). Não copie o relatório integral.</p>
     </div>
-    <button type="submit" class="btn btn-warning">↻ Corrigir tipo e reprocessar</button>
+    <div class="form-check mb-3">
+      <input class="form-check-input" type="checkbox" name="review_acknowledged" value="on" id="correction-ack" required>
+      <label class="form-check-label fw-semibold" for="correction-ack">
+        Li o relatório principal e confirmo o procedimento acima para análise. <span class="text-danger">*</span>
+      </label>
+    </div>
+    <button type="submit" class="btn btn-warning">↻ Confirmar procedimento e continuar análise</button>
   </form>
 </div>
 {% endif %}
@@ -875,6 +882,7 @@
         <div class="timeline-event__dot {{ item.dot_css }}"></div>
         <div class="timeline-event__content">
             <div class="timeline-event__title">{{ item.label }}</div>
+            {% include "cases/_event_detail.html" with item=item %}
             <div class="timeline-event__time">
             {{ item.event.timestamp|date:"d/m/Y H:i" }}
             ·

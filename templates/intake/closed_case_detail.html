@@ -427,6 +427,7 @@
         <div class="timeline-event__dot {{ item.dot_css }}"></div>
         <div class="timeline-event__content">
             <div class="timeline-event__title">{{ item.label }}</div>
+            {% include "cases/_event_detail.html" with item=item %}
             <div class="timeline-event__time">
             {{ item.event.timestamp|date:"d/m/Y H:i" }}
             ·

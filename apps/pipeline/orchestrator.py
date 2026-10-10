@@ -23,6 +23,7 @@ from dataclasses import dataclass
 from apps.cases.exam_profiles import require_exam_profile
 from apps.cases.models import Case, CaseStatus, ProcedureType
 from apps.cases.priority_signals import resolve_priority_signals
+from apps.cases.procedure_review import REVIEW_APPLIED_EVENT, consume_valid_confirmation
 from apps.cases.procedures import (
     ALLOWED_PROCEDURE_SETS,
     PROCEDURE_CATALOG,
@@ -483,6 +484,17 @@ def _run_v4_pipeline(
         conflicting=conflicting,
     )
 
+    # ── S2/D4: confirmação humana válida define o conjunto EFETIVO ──────
+    # Sem confirmação a reconciliação automática continua autoritativa
+    # (ADR-0011). Com confirmação válida o conjunto confirmado substitui o
+    # gate de procedimento — sem reemitir revisão pela mesma divergência.
+    # União bruta e artefato LLM1 permanecem intactos; o evento APPLIED
+    # registra automático × efetivo com proveniência explícita. Evento
+    # legado de correção nunca tem autoridade (D8).
+    effective_procedures, confirmation_event = consume_valid_confirmation(case)
+    human_confirmation = effective_procedures is not None
+    detected_types = effective_procedures or reconciliation.detected_procedure_types
+
     # ── 3. Projeção de detecção atômica (R4) ───────────────────────────
     # Slice 007/R3: a projeção só é escrita quando o conjunto detectado é
     # projetável — vazio ou pertencente a ``ALLOWED_PROCEDURE_SETS``. A
@@ -491,8 +503,8 @@ def _run_v4_pipeline(
     # projetar esse conjunto levantaria ValueError e derrubaria o caso em
     # PIPELINE_FAILED em vez do estado de revisão NIR desenhado (D2).
     # Singletons válidos de mismatch (declarado EDA + detectado Ecoendoscopia)
-    # continuam projetados e chegam à revisão.
-    detected_types = reconciliation.detected_procedure_types
+    # continuam projetados e chegam à revisão. O conjunto efetivo confirmado
+    # é sempre projetável (matriz validada no helper de domínio).
     if not detected_types or frozenset(detected_types) in ALLOWED_PROCEDURE_SETS:
         set_detected_procedures(
             case=case,
@@ -503,7 +515,7 @@ def _run_v4_pipeline(
     # presente, senão o próprio tipo detectado restringe os códigos permitidos.
     # Em 4.0 a Ecoendoscopia e os códigos de sinal já cobertos por um pacote
     # atômico (GTT/dilatação) não são persistidos (D13/D14).
-    signals_type = _resolve_pipeline_signals_type(reconciliation.detected_procedure_types)
+    signals_type = _resolve_pipeline_signals_type(detected_types)
     signals_projection = project_v4_to_llm1_shape(
         v4_data=result1.structured_data,
         procedure_type=signals_type,
@@ -512,9 +524,7 @@ def _run_v4_pipeline(
         structured_data=signals_projection,
         source_text=case.extracted_text,
         exam_type=signals_type,
-        excluded_signal_codes=_excluded_signal_codes(
-            atomic_identity_types=set(declared) | set(reconciliation.detected_procedure_types)
-        ),
+        excluded_signal_codes=_excluded_signal_codes(atomic_identity_types=set(declared) | set(detected_types)),
     )
 
     # ── 4. Eventos de detecção (R8: versões de schema/prompt + conjuntos) ─
@@ -559,7 +569,21 @@ def _run_v4_pipeline(
         case.save()
 
     # ── 5. Gate de revisão NIR (sem LLM2) ──────────────────────────────
-    if reconciliation.action == "nir_review":
+    # S2/D4: com confirmação humana válida a divergência detector×NIR não
+    # reabre identificação — o conjunto efetivo segue à análise e a
+    # aplicação fica auditada (sistema) antes de continuar.
+    if human_confirmation:
+        assert confirmation_event is not None
+        case._record_event(
+            REVIEW_APPLIED_EVENT,
+            payload={
+                "confirmation_event_id": confirmation_event.pk,
+                "automatic_procedures": list(reconciliation.conflicting_evidence_types),
+                "effective_procedures": list(detected_types),
+            },
+        )
+        case.save()
+    if reconciliation.action == "nir_review" and not human_confirmation:
         review_payload = build_v2_review_payload(
             case_id=str(case.case_id),
             agency_record_number=case.agency_record_number,
@@ -602,7 +626,7 @@ def _run_v4_pipeline(
         main_report_text=case.extracted_text,
     )
     policy_results: dict[str, dict[str, object]] = {}
-    for procedure_type in reconciliation.detected_procedure_types:
+    for procedure_type in detected_types:
         projection = project_v4_to_llm1_shape(
             v4_data=result1.structured_data,
             procedure_type=procedure_type,
@@ -621,7 +645,7 @@ def _run_v4_pipeline(
 
     # ── 8. Prior case por componente (D10) ─────────────────────────────
     prior_contexts: dict[str, dict[str, object]] = {}
-    for procedure_type in reconciliation.detected_procedure_types:
+    for procedure_type in detected_types:
         context = lookup_prior_case_context(
             case_id=case.case_id,
             agency_record_number=case.agency_record_number,
@@ -658,13 +682,27 @@ def _run_v4_pipeline(
     service2 = Llm2ServiceV4(client_llm2)
     llm2_structured_data_view = _build_llm2_structured_data_view(
         llm1_structured_data=result1.structured_data,
-        detected_procedure_types=reconciliation.detected_procedure_types,
+        detected_procedure_types=detected_types,
     )
+    if human_confirmation:
+        # S2/D5: origem humana NO CONTEXTO DA CHAMADA (fora do JSON LLM1
+        # persistido); a justificativa livre do NIR nunca vira instrução de
+        # sistema. Item ausente = dado específico não extraído, sem
+        # autorização para adicionar procedimentos ou inventar evidence_spans.
+        assert confirmation_event is not None
+        confirmed_list = ", ".join(detected_types)
+        ut2 = (
+            f"{ut2}\n\nContexto de origem humana: o NIR confirmou o conjunto"
+            f" [{confirmed_list}] (evento {confirmation_event.pk}) após revisão"
+            " manual. Itens sem dados específicos não foram extraídos —"
+            " analise com dados comuns/unknown, sem adicionar procedimentos"
+            " nem inventar evidence_spans."
+        )
     result2 = service2.run(
         case_id=str(case.case_id),
         agency_record_number=case.agency_record_number,
         llm1_structured_data=llm2_structured_data_view,
-        detected_procedure_types=reconciliation.detected_procedure_types,
+        detected_procedure_types=detected_types,
         policy_results=policy_results,
         prior_contexts=prior_contexts,
         system_prompt=sp2,
@@ -680,7 +718,7 @@ def _run_v4_pipeline(
     # ``unknown`` com motivo técnico e nunca muda policy ou disposição.
     dilation_site_projection = _project_detected_dilation_site(
         structured_data=result1.structured_data,
-        detected_procedure_types=reconciliation.detected_procedure_types,
+        detected_procedure_types=detected_types,
         main_report_text=case.extracted_text,
     )
     recommendations: list[dict[str, object]] = []
@@ -741,7 +779,7 @@ def _run_v4_pipeline(
     # acompanha o artefato 4.0 de apresentação, nunca a policy/priority signals.
     infection_review = project_infection_review(
         structured_data=result1.structured_data,
-        detected_procedure_types=reconciliation.detected_procedure_types,
+        detected_procedure_types=detected_types,
         main_report_text=case.extracted_text,
     )
     case.suggested_action = {
@@ -751,6 +789,12 @@ def _run_v4_pipeline(
     }
     if infection_review is not None:
         case.suggested_action[INFECTION_EVIDENCE_ARTIFACT_KEY] = infection_review
+    if human_confirmation:
+        assert confirmation_event is not None
+        case.suggested_action["nir_procedure_review"] = {
+            "confirmation_event_id": confirmation_event.pk,
+            "effective_procedures": list(detected_types),
+        }
     if precedence_metadata is not None:
         case.suggested_action["procedure_precedence"] = precedence_metadata
     if precedence_rules:
@@ -769,7 +813,7 @@ def _run_v4_pipeline(
             case=case,
             prompt_system_version=sp2_version,
             prompt_user_version=ut2_version,
-            detected_procedure_types=reconciliation.detected_procedure_types,
+            detected_procedure_types=detected_types,
         ),
     )
     case.save()

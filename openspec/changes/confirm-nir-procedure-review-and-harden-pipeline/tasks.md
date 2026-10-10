@@ -18,8 +18,9 @@ Documentação e testes desta unidade fazem parte do próprio S1. A evidência d
 
 ## 2. S2 — Revisão humana define análise e fica visível
 
-- [ ] 2.1 Após S1 aceito e confirmação explícita do owner, implementar S2 end-to-end: mesmo/outro procedimento, consentimento/fonte/reserva, eventos/linha do tempo, conjunto fechado/policy e aviso médico; verificar R1–R10 com fixtures sintéticas, SSR/no-JS e regressões; entregar relatório READY_FOR_REVIEW.
+- [x] 2.1 Após S1 aceito e confirmação explícita do owner, implementar S2 end-to-end: mesmo/outro procedimento, consentimento/fonte/reserva, eventos/linha do tempo, conjunto fechado/policy e aviso médico; verificar R1–R10 com fixtures sintéticas, SSR/no-JS e regressões; entregar relatório READY_FOR_REVIEW.
   Contract: `slices/slice-002-human-confirmation-to-doctor-with-timeline.md`.
+  Aceite do controller: S2 ACCEPTED após 2 rodadas + exceção P2 autorizada pelo owner. Round-1 BLOCK (consentimento truthy + justificativa na URL); round-2 `OK with notes`, zero P0/P1, um P2 (lease/token sem preservação da tentativa). Exceção autorizada: reparo mínimo nos 2 ramos + 5 testes de regressão, revisão extra restrita `OK`, sem P0/P1. Parent reexecutou focados: 35 + 73 passed, ruff/check-format PASS, diff-check clean, sem mutação do reviewer. Relatórios: `/tmp/sirhosp-slice-002-report.md` e `/tmp/sirhosp-slice-002-p2-repair-report.md`; revisão final: `/tmp/ats-web-confirm-nir-execution/slice-002/review-round-2/final-independent-review.md`.
 
 Blast radius transversal >5 arquivos aprovado no design D9: nenhuma saída parcial “só botão”/“só backend” conta como conclusão. Testes e manual do usuário atualizados no S2, não adiados ao gate final.
 

@@ -672,41 +672,55 @@ Se a mensagem do CHD for apenas informativa e não exigir mudança no agendament
 
 ---
 
-## 3.10 Corrigir a seleção de procedimentos de um caso
+## 3.10 Revisar e confirmar o procedimento de um caso
 
 Quando o sistema identifica divergência entre a seleção declarada no upload e
 o conteúdo do relatório, o caso vai para **Revisão Manual** e o NIR pode
-corrigir o conjunto de procedimentos declarado (**EDA**, **Colonoscopia** ou
-**EDA + Colonoscopia** e, quando habilitados pela operação, **Ecoendoscopia** ou
-**CPRE**).
+**revisar e confirmar** o conjunto de procedimentos (**EDA**, **Colonoscopia**
+ou **EDA + Colonoscopia** e, quando habilitados pela operação, **Ecoendoscopia**,
+**CPRE** e demais identidades do catálogo).
 
-A correção está disponível **somente** quando o caso está exatamente nesta
+A confirmação está disponível **somente** quando o caso está exatamente nesta
 situação:
 
 - status `WAIT_R1_CLEANUP_THUMBS` (revisão manual do NIR);
 - resultado `manual_review_required` com motivo `exam_type_mismatch`
-  (divergência de tipo), `mixed_exam_request` (solicitação mista) ou
-  `unknown_exam_type` (tipo não identificado);
+  (divergência de tipo), `mixed_exam_request` (solicitação mista),
+  `unknown_exam_type` (tipo não identificado),
+  `conflicting_procedure_evidence` (item estruturado contraditado) ou
+  `unsupported_procedure_combination` (combinação incompatível);
 - **sem** decisão médica registrada.
 
-A correção **não** está disponível durante o processamento do worker, nem
+A confirmação **não** está disponível durante o processamento do worker, nem
 quando o caso já está na fila médica ou já foi decidido. Fora das condições
-acima, o formulário de correção não aparece.
+acima, o formulário de confirmação não aparece.
 
 Passo a passo:
 
 1. abrir o caso em **Meus Casos**;
-2. localizar a seção de **correção da seleção de procedimentos** (visível
+2. localizar a seção de **revisão e confirmação de procedimento** (visível
    apenas quando o caso está em revisão manual, conforme as condições acima);
-3. selecionar a seleção correta (**EDA**, **Colonoscopia**, **EDA +
-   Colonoscopia** e, quando habilitados, **Ecoendoscopia** ou **CPRE**);
-4. confirmar a correção.
+3. conferir o relatório principal e selecionar o conjunto confirmado — a
+   seleção atual pode ser **mantida** ou trocada por outra habilitada
+   (**EDA**, **Colonoscopia**, **EDA + Colonoscopia** e, quando habilitados,
+   **Ecoendoscopia**, **CPRE** e demais identidades do catálogo);
+4. escrever a **justificativa** breve (até 500 caracteres; não copiar o
+   relatório integral);
+5. marcar **“Li o relatório principal e confirmo o procedimento acima para
+   análise”** e clicar em **Confirmar procedimento e continuar análise**.
 
-O sistema reprocessa o caso com a seleção corrigida, sem novo upload e sem
+Sem a leitura marcada ou sem justificativa válida, nada é confirmado: o caso
+permanece em revisão e a tentativa (seleção + justificativa) é preservada na
+tela, sem marcar a leitura automaticamente.
+
+O sistema reprocessa o caso com a seleção confirmada, sem novo upload e sem
 perder o PDF, os anexos, o texto extraído ou o histórico de eventos. A
-correção fica registrada na linha do tempo do caso para auditoria. A seleção
-declarada corrigida não altera o que foi detectado na análise nem qualquer
-decisão médica (que não existe nesta etapa).
+confirmação — **quem confirmou qual procedimento, quando, com qual
+justificativa** — fica registrada na linha do tempo do caso para auditoria, e
+o médico recebe um aviso antes de decidir. A seleção confirmada não altera o
+que foi detectado automaticamente na análise (a divergência continua
+registrada) nem equivale a **aprovação clínica**: a decisão permanece com o
+médico, e as validações de policy continuam obrigatórias.
 
 ---
 

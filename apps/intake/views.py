@@ -2,6 +2,7 @@
 
 import logging
 import uuid
+from collections.abc import Iterable
 from urllib.parse import quote
 
 from django.conf import settings
@@ -26,6 +27,7 @@ from apps.cases.models import (
     EDA_COLONOSCOPY,
     Case,
     CaseAttachment,
+    CaseEvent,
     CaseProcedure,
     CaseStatus,
     DetectionStatus,
@@ -34,6 +36,12 @@ from apps.cases.models import (
 )
 from apps.cases.navigation import resolve_safe_next_url
 from apps.cases.priority_signals import build_priority_signal_badges
+from apps.cases.procedure_review import (
+    latest_review_event,
+    source_fingerprint_for_case,
+    timeline_detail_lines,
+    timeline_title_override,
+)
 from apps.cases.procedures import (
     PROCEDURE_ORDER,
     PROCEDURE_PACKAGE_BASES,
@@ -66,12 +74,11 @@ from apps.cases.services import (
 
 from .forms import CaseUploadForm
 from .services import (
-    EXAM_TYPE_CORRECTION_REASONS,
     INTAKE_EXPOSED_SELECTION_KEYS,
     EnqueueAfterCommitError,
     IntakeSelectionOption,
+    confirm_case_procedure_review,
     confirm_case_receipt,
-    correct_case_exam_type,
     ensure_exam_type_allowed,
     intake_selection_options,
     is_exam_type_correction_eligible,
@@ -83,6 +90,27 @@ from .services import (
 logger = logging.getLogger(__name__)
 
 SUPPORTED_IMAGE_TYPES = frozenset({"image/jpeg", "image/png"})
+
+
+def enrich_timeline_events(events: Iterable[CaseEvent]) -> list[dict[str, object]]:
+    """Enriquecimento compartilhado da Linha do Tempo (S2/D6).
+
+    Título dinâmico da confirmação humana (com a seleção confirmada) e
+    linhas de detalhe dos eventos novos via presenter puro de
+    ``apps.cases.procedure_review``; demais tipos mantêm label/dot
+    estáticos. Templates renderizam ``item.detail_lines`` escapado.
+    """
+    items: list[dict[str, object]] = []
+    for e in events:
+        items.append(
+            {
+                "event": e,
+                "label": timeline_title_override(e) or EVENT_LABELS.get(e.event_type, e.event_type),
+                "dot_css": EVENT_DOT_CSS.get(e.event_type, "system"),
+                "detail_lines": timeline_detail_lines(e),
+            }
+        )
+    return items
 
 
 def _declared_badge(case: Case) -> dict[str, str]:
@@ -177,11 +205,70 @@ def _correction_selected_key(declared_key: str, attempted_key: str) -> str:
     return declared_key
 
 
+# Justificativa livre tentada: limite D1 reaproveitado no estado transitório
+# de erro (P1-B) — sem model/migration/store de autoridade.
+_CORRECTION_JUSTIFICATION_MAX_CHARS = 500
+
+# Prefixo da chave de sessão do estado transitório de erro da confirmação
+# (P1-B/S2): a justificativa livre tentada é preservada server-side e nunca
+# viaja na URL (histórico/logs/Referer). Sem model/migration/store de
+# autoridade — apenas re-render de apresentação, consumido uma vez.
+_CORRECTION_ATTEMPT_SESSION_KEY_PREFIX = "s2_correction_attempt:"
+
+
+def _correction_attempt_session_key(case_id: uuid.UUID) -> str:
+    return f"{_CORRECTION_ATTEMPT_SESSION_KEY_PREFIX}{case_id}"
+
+
+def _stash_correction_attempt(
+    request: HttpRequest, case_id: uuid.UUID, attempted_key: str, attempted_justification: str
+) -> None:
+    """Guarda a tentativa válida na sessão para o re-render de erro (P1-B).
+
+    Somente chave habilitada e justificativa limitada (sem U+0000) são
+    guardadas; o consentimento (checkbox) NUNCA é guardado.
+    """
+    enabled_keys = {option.key for option in _correction_selection_options()}
+    payload: dict[str, str] = {}
+    if attempted_key in enabled_keys:
+        payload["exam_type"] = attempted_key
+    justification = (attempted_justification or "").strip()
+    if justification and len(justification) <= _CORRECTION_JUSTIFICATION_MAX_CHARS and "\x00" not in justification:
+        payload["justification"] = justification
+    if payload:
+        request.session[_correction_attempt_session_key(case_id)] = payload
+
+
+def _pop_correction_attempt(request: HttpRequest, case_id: uuid.UUID) -> dict[str, str]:
+    """Consome (transitório, uso único) a tentativa guardada (P1-B).
+
+    Revalida limites na leitura; qualquer conteúdo fora do contrato é
+    descartado em vez de renderizado.
+    """
+    raw = request.session.pop(_correction_attempt_session_key(case_id), None)
+    if not isinstance(raw, dict):
+        return {}
+    attempt: dict[str, str] = {}
+    enabled_keys = {option.key for option in _correction_selection_options()}
+    key = raw.get("exam_type")
+    if isinstance(key, str) and key in enabled_keys:
+        attempt["exam_type"] = key
+    justification = raw.get("justification")
+    if isinstance(justification, str):
+        text = justification.strip()
+        if text and len(text) <= _CORRECTION_JUSTIFICATION_MAX_CHARS and "\x00" not in text:
+            attempt["justification"] = text
+    return attempt
+
+
 def _correction_rerender_url(case_id: uuid.UUID, attempted_key: str) -> str:
-    """URL do detalhe que preserva a escolha válida tentada (R1).
+    """URL do detalhe que preserva a seleção válida tentada (R1/S2).
 
     Somente chave publicada e habilitada é carregada na query string; qualquer
-    outro valor (alias/texto livre) cai no detalhe sem parâmetro.
+    outro valor (alias/texto livre) cai no detalhe sem parâmetro. A
+    justificativa livre tentada é preservada via sessão transitória
+    server-side (nunca na URL — P1-B); o consentimento (checkbox) NUNCA é
+    preservado — erro exige confirmação explícita novamente (D1).
     """
     base = reverse("intake:case_detail", args=[case_id])
     if attempted_key in {option.key for option in _correction_selection_options()}:
@@ -438,6 +525,10 @@ EVENT_LABELS: dict[str, str] = {
     "EXAM_TYPE_CORRECTED": "Tipo de exame corrigido pelo NIR",
     "CASE_PROCEDURE_DECLARATION_CORRECTED": "Conjunto de procedimentos declarado corrigido pelo NIR",
     "CASE_REPROCESSING_REQUESTED": "Reprocessamento solicitado",
+    # ── Revisão humana de procedimento (S2/D6) ─────────────────
+    "CASE_PROCEDURE_REVIEW_CONFIRMED": "Procedimento confirmado pelo NIR",
+    "CASE_PROCEDURE_REVIEW_APPLIED": "Confirmação do NIR aplicada à análise",
+    "CASE_PROCEDURE_REVIEW_INVALIDATED": "Confirmação do NIR desconsiderada",
     # ── Comunicação operacional ───────────────────────────────
     "CASE_COMMUNICATION_MESSAGE_POSTED": "Mensagem operacional registrada",
     # ── Follow-up de desfecho do supervisor ────────────────────
@@ -508,6 +599,10 @@ EVENT_DOT_CSS: dict[str, str] = {
     "EXAM_TYPE_CORRECTED": "nir",
     "CASE_PROCEDURE_DECLARATION_CORRECTED": "nir",
     "CASE_REPROCESSING_REQUESTED": "system",
+    # ── Revisão humana de procedimento (S2/D6) ─────────────────
+    "CASE_PROCEDURE_REVIEW_CONFIRMED": "nir",
+    "CASE_PROCEDURE_REVIEW_APPLIED": "system",
+    "CASE_PROCEDURE_REVIEW_INVALIDATED": "system",
     # ── Comunicação operacional ───────────────────────────────
     "CASE_COMMUNICATION_MESSAGE_POSTED": "system",
 }
@@ -767,16 +862,8 @@ def case_detail(request: HttpRequest, case_id: uuid.UUID) -> HttpResponse:
         steps = [step for step in STEPS if step["label"] != "Agendamento"]
         current_step_idx = len(steps) - 1
 
-    # Enriquecer eventos com labels e cores
-    enriched_events = []
-    for e in events:
-        enriched_events.append(
-            {
-                "event": e,
-                "label": EVENT_LABELS.get(e.event_type, e.event_type),
-                "dot_css": EVENT_DOT_CSS.get(e.event_type, "system"),
-            }
-        )
+    # Enriquecer eventos com labels e cores (+ detalhe S2/D6)
+    enriched_events = enrich_timeline_events(events)
 
     # ── Lock acquisition for WAIT_R1_CLEANUP_THUMBS ──────────────
     user = request.user
@@ -927,15 +1014,21 @@ def case_detail(request: HttpRequest, case_id: uuid.UUID) -> HttpResponse:
         and case.status in ELIGIBLE_SUPPLEMENTAL_STATUSES
     )
 
-    # ── Correção de conjunto (Slice 005): card NIR apenas em manual review ──
+    # ── Revisão e confirmação de procedimento (S2): card NIR em review ──
     can_correct_exam_type = False
     correction_form_context = None
     if lock_held and is_exam_type_correction_eligible(case):
         can_correct_exam_type = True
         suggested = case.suggested_action or {}
-        # R1 (Slice 007): o reenvio re-renderiza o detalhe com a escolha válida
-        # tentada (outro campo rejeitado) — nunca descarta silenciosamente.
-        attempted_correction = request.GET.get("correction_exam_type", "")
+        # R1 (Slice 007/S2): o reenvio re-renderiza o detalhe com a escolha
+        # válida tentada — nunca descarta silenciosamente e nunca marca o
+        # consentimento automaticamente. P1-B: a justificativa livre tentada
+        # vem da sessão transitória server-side (nunca da URL); a seleção
+        # continua via query string limitada a chaves habilitadas.
+        stashed_attempt = _pop_correction_attempt(request, case.case_id)
+        attempted_correction = stashed_attempt.get("exam_type") or request.GET.get("correction_exam_type", "")
+        attempted_justification = stashed_attempt.get("justification", "")
+        review_event = latest_review_event(case)
         correction_form_context = {
             # Label declarado projetado da projeção (combinado → "EDA + Colonoscopia").
             "declared_label": declared_badge["declared_label"],
@@ -946,11 +1039,15 @@ def case_detail(request: HttpRequest, case_id: uuid.UUID) -> HttpResponse:
             # Item 1.0: a origem da detecção vive no motivo; as pistas seguem
             # apenas no payload de auditoria (`detected_body_clues`), sem render.
             "reason_text": suggested.get("reason_text", ""),
-            "correction_reason_choices": list(EXAM_TYPE_CORRECTION_REASONS.items()),
             # R1 (Slice 007): MESMO combobox/chaves do upload; só as identidades
             # habilitadas pelas flags preexistentes são oferecidas.
             "exam_type_options": _correction_selection_options(),
             "selected_exam_type": _correction_selected_key(declared_badge["declared_type_key"], attempted_correction),
+            # S2 (D1/D3): revisão vista + fingerprint da fonte para o POST;
+            # justificativa preservada no erro; checkbox sempre desmarcada.
+            "review_event_id": review_event.pk if review_event is not None else "",
+            "source_fingerprint": source_fingerprint_for_case(case) or "",
+            "attempted_justification": attempted_justification,
         }
 
     # ── Correction context (R1: corrects_case card) ──────────────
@@ -1449,13 +1546,18 @@ def confirm_receipt(request: HttpRequest, case_id: uuid.UUID) -> HttpResponse:
 @login_required
 @role_required("nir")
 def exam_type_correction(request: HttpRequest, case_id: uuid.UUID) -> HttpResponse:
-    """POST: corrige o tipo de exame de um caso em revisão manual (Slice 006).
+    """POST: confirma o procedimento revisado de um caso em revisão (S2/D1).
+
+    Mesmo endpoint interno da correção operacional (D1/D8): exige seleção
+    (vigente ou outra habilitada), leitura confirmada, justificativa breve,
+    revisão vista e fingerprint da fonte. POST antigo sem consentimento e
+    recusado sem mutação — nunca vira confirmação implícita.
 
     View fina: parseia token e papel ativo da sessão, delega ao serviço
-    transacional ``correct_case_exam_type`` (que serializa com a confirmação
-    pelo MESMO row lock e valida ator + reserva sob o lock) e traduz erros.
-    Em caso inelegível o controle não existe na UI e o POST retorna 404
-    seguro, sem qualquer mutação.
+    transacional ``confirm_case_procedure_review`` (que serializa com a
+    confirmação pelo MESMO row lock e valida ator + reserva sob o lock) e
+    traduz erros. Em caso inelegível o controle não existe na UI e o POST
+    retorna 404 seguro, sem qualquer mutação.
     """
     if request.method != "POST":
         raise Http404
@@ -1463,7 +1565,7 @@ def exam_type_correction(request: HttpRequest, case_id: uuid.UUID) -> HttpRespon
     case = get_object_or_404(Case, case_id=case_id)
 
     if not is_exam_type_correction_eligible(case):
-        raise Http404("Caso não está em revisão manual elegível para correção de tipo.")
+        raise Http404("Caso não está em revisão manual elegível para confirmação de procedimento.")
 
     user = request.user
     assert user.is_authenticated  # garantido por @login_required
@@ -1479,41 +1581,60 @@ def exam_type_correction(request: HttpRequest, case_id: uuid.UUID) -> HttpRespon
             request,
             "Token de reserva não encontrado. Volte para a lista e tente novamente.",
         )
-        return redirect("intake:case_detail", case_id=case.case_id)
+        # P2: preserva a tentativa valida como no ramo ValueError — selecao
+        # habilitada na URL limitada, justificativa limitada so na sessao
+        # server-side de uso unico; nunca o consentimento (D1).
+        attempted_exam_type = request.POST.get("exam_type", "")
+        attempted_justification = request.POST.get("review_justification", "")
+        _stash_correction_attempt(request, case.case_id, attempted_exam_type, attempted_justification)
+        return redirect(_correction_rerender_url(case.case_id, attempted_exam_type))
 
     new_exam_type = request.POST.get("exam_type", "")
-    reason_code = request.POST.get("reason_code", "")
+    review_acknowledged = request.POST.get("review_acknowledged")
+    review_justification = request.POST.get("review_justification", "")
+    review_event_id = request.POST.get("review_event_id", "")
+    source_fingerprint = request.POST.get("source_fingerprint", "")
     try:
-        case = correct_case_exam_type(
+        case = confirm_case_procedure_review(
             case_id=case.case_id,
-            new_exam_type=new_exam_type,
+            exam_type=new_exam_type,
             user=user,
             active_role=request.session.get("active_role", ""),
             lock_token=token,
-            reason_code=reason_code,
+            review_acknowledged=review_acknowledged,
+            review_justification=review_justification,
+            review_event_id=review_event_id,
+            source_fingerprint=source_fingerprint,
         )
     except PermissionError as exc:
         messages.warning(request, str(exc))
-        return redirect("intake:case_detail", case_id=case.case_id)
+        # P2: reserva obsoleta/divergente preserva a tentativa valida como
+        # no ramo ValueError (stash limitado + URL limitada, sem consentimento).
+        _stash_correction_attempt(request, case.case_id, new_exam_type, review_justification)
+        return redirect(_correction_rerender_url(case.case_id, new_exam_type))
     except ValueError as exc:
         messages.warning(request, str(exc))
-        # R1: re-renderiza o detalhe preservando a escolha válida tentada.
+        # R1/P1-B: re-renderiza o detalhe preservando a tentativa válida —
+        # seleção na URL limitada, justificativa livre só na sessão
+        # transitória server-side — e nunca o consentimento (D1).
+        _stash_correction_attempt(request, case.case_id, new_exam_type, review_justification)
         return redirect(_correction_rerender_url(case.case_id, new_exam_type))
     except EnqueueAfterCommitError as exc:
-        # Falha PÓS-commit: a correção foi aplicada (LLM_STRUCT). Mensagem
-        # verdadeira: retry automático programado ou erro operacional explícito
-        # — sem prometer retomada automática inexistente.
+        # Falha PÓS-commit: a confirmação foi aplicada (LLM_STRUCT) e
+        # permanece durável (R9). Mensagem verdadeira: retry automático
+        # programado ou erro operacional explícito — sem prometer retomada
+        # automática inexistente.
         if exc.recovery_scheduled:
             messages.error(
                 request,
-                "Tipo de exame corrigido, mas o reprocessamento automático não pôde ser "
+                "Procedimento confirmado, mas o reprocessamento automático não pôde ser "
                 "agendado imediatamente. Uma nova tentativa automática foi programada; "
                 "o caso permanece em análise automática (LLM_STRUCT).",
             )
         else:
             messages.error(
                 request,
-                "Tipo de exame corrigido, mas o reprocessamento automático não pôde ser "
+                "Procedimento confirmado, mas o reprocessamento automático não pôde ser "
                 "agendado. O caso permanece em análise automática (LLM_STRUCT); acione o "
                 "suporte para reenfileirar o pipeline manualmente.",
             )
@@ -1521,7 +1642,7 @@ def exam_type_correction(request: HttpRequest, case_id: uuid.UUID) -> HttpRespon
 
     messages.success(
         request,
-        f"Tipo de exame corrigido para {format_procedure_selection(get_declared_procedure_types(case))}. "
+        f"Procedimento confirmado: {format_procedure_selection(get_declared_procedure_types(case))}. "
         "Caso em reprocessamento.",
     )
     return redirect("intake:case_detail", case_id=case.case_id)
@@ -1803,16 +1924,8 @@ def closed_case_detail(request: HttpRequest, case_id: uuid.UUID) -> HttpResponse
         steps = [step for step in STEPS if step["label"] != "Agendamento"]
         current_step_idx = len(steps) - 1
 
-    # Enriquecer eventos
-    enriched_events = []
-    for e in events:
-        enriched_events.append(
-            {
-                "event": e,
-                "label": EVENT_LABELS.get(e.event_type, e.event_type),
-                "dot_css": EVENT_DOT_CSS.get(e.event_type, "system"),
-            }
-        )
+    # Enriquecer eventos (+ detalhe S2/D6)
+    enriched_events = enrich_timeline_events(events)
 
     # Elegibilidade para intercorrencia — ambos os contextos
     eligible = eligible_scheduled or eligible_operational

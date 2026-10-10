@@ -1,7 +1,7 @@
 """Slice 001 — correção legada single→single reroteada pela projeção (R3).
 
 Cobre:
-- R3: correct_case_exam_type atualiza atomicamente CaseProcedure.declared_by_nir
+- R3: confirm_case_procedure_review (S2) atualiza atomicamente CaseProcedure.declared_by_nir
       e a projeção declarada sob a transação/lock já existentes;
 - EDA→Colonoscopia e Colonoscopia→EDA mantêm ponte/projeção coerentes;
 - falha na projeção faz rollback TOTAL (ponte, derivados, eventos e FSM).
@@ -25,7 +25,7 @@ from apps.cases.models import (
 )
 from apps.cases.procedures import get_declared_procedure_types
 from apps.cases.services import claim_case_lock
-from apps.intake.services import correct_case_exam_type
+from apps.intake.services import confirm_case_procedure_review
 
 pytestmark = [pytest.mark.django_db, pytest.mark.usefixtures("colonoscopy_intake_enabled")]
 
@@ -81,6 +81,35 @@ def _claim_receipt_lease(case: Case, user) -> uuid.UUID:
     return result.token
 
 
+def _review_event(case: Case) -> CaseEvent:
+    """Revisao manual vista pelo NIR (origem da confirmacao, S2/D3)."""
+    return CaseEvent.objects.create(
+        case=case,
+        event_type="EDA_SCOPE_GATED_MANUAL_REVIEW",
+        actor=None,
+        actor_type="system",
+        payload={"reason_code": "exam_type_mismatch", "reason_text": "Tipo declarado difere."},
+    )
+
+
+def _confirm(*, case, user, new_exam_type, token=None) -> Case:
+    """Confirmacao S2 com consentimento: mesma ou outra selecao habilitada."""
+    from apps.cases.procedure_review import source_fingerprint_for_case
+
+    review = _review_event(case)
+    return confirm_case_procedure_review(
+        case_id=case.case_id,
+        exam_type=new_exam_type,
+        user=user,
+        active_role="nir",
+        lock_token=token if token is not None else _claim_receipt_lease(case, user),
+        review_acknowledged="on",
+        review_justification="Revisei o relatorio e confirmo a selecao.",
+        review_event_id=review.pk,
+        source_fingerprint=source_fingerprint_for_case(case),
+    )
+
+
 class TestCorrectionReroutedThroughProjection:
     """R3 — correção single→single atualiza a projeção declarada atomicamente."""
 
@@ -88,16 +117,7 @@ class TestCorrectionReroutedThroughProjection:
         user = _nir_user(django_user_model)
         case = _eligible_case(user=user, exam_type="eda")
         CaseProcedure.objects.create(case=case, procedure_type=ProcedureType.EDA, declared_by_nir=True)
-        token = _claim_receipt_lease(case, user)
-
-        correct_case_exam_type(
-            case_id=case.case_id,
-            new_exam_type=ProcedureType.COLONOSCOPY,
-            user=user,
-            active_role="nir",
-            lock_token=token,
-            reason_code="nir_identified_exam",
-        )
+        _confirm(case=case, user=user, new_exam_type=ProcedureType.COLONOSCOPY)
 
         reloaded = Case.objects.get(pk=case.pk)
         assert get_declared_procedure_types(reloaded) == (ProcedureType.COLONOSCOPY,)
@@ -110,16 +130,7 @@ class TestCorrectionReroutedThroughProjection:
         user = _nir_user(django_user_model, "nir-proj-col@test.com")
         case = _eligible_case(user=user, exam_type="colonoscopy")
         CaseProcedure.objects.create(case=case, procedure_type=ProcedureType.COLONOSCOPY, declared_by_nir=True)
-        token = _claim_receipt_lease(case, user)
-
-        correct_case_exam_type(
-            case_id=case.case_id,
-            new_exam_type=ProcedureType.EDA,
-            user=user,
-            active_role="nir",
-            lock_token=token,
-            reason_code="declared_type_incorrect",
-        )
+        _confirm(case=case, user=user, new_exam_type=ProcedureType.EDA)
 
         reloaded = Case.objects.get(pk=case.pk)
         assert get_declared_procedure_types(reloaded) == (ProcedureType.EDA,)
@@ -134,19 +145,10 @@ class TestCorrectionReroutedThroughProjection:
         case = _eligible_case(user=user, exam_type="eda")
         # Slice 008 (R5): row declarada explícita (sem fallback da coluna).
         CaseProcedure.objects.create(case=case, procedure_type=ProcedureType.EDA, declared_by_nir=True)
-        token = _claim_receipt_lease(case, user)
-
-        correct_case_exam_type(
-            case_id=case.case_id,
-            new_exam_type=ProcedureType.COLONOSCOPY,
-            user=user,
-            active_role="nir",
-            lock_token=token,
-            reason_code="nir_identified_exam",
-        )
+        _confirm(case=case, user=user, new_exam_type=ProcedureType.COLONOSCOPY)
 
         types = [e.event_type for e in CaseEvent.objects.filter(case=case).order_by("id")]
-        assert types.index("CASE_PROCEDURE_DECLARATION_CORRECTED") < types.index("CASE_REPROCESSING_REQUESTED")
+        assert types.index("CASE_PROCEDURE_REVIEW_CONFIRMED") < types.index("CASE_REPROCESSING_REQUESTED")
 
     def test_combined_correction_single_to_combined(self, django_user_model) -> None:
         """Slice 005: correção aceita combinado — single→combined cria duas rows."""
@@ -154,16 +156,7 @@ class TestCorrectionReroutedThroughProjection:
         case = _eligible_case(user=user, exam_type="eda")
         # Slice 008 (R5): row declarada explícita (sem fallback da coluna).
         CaseProcedure.objects.create(case=case, procedure_type=ProcedureType.EDA, declared_by_nir=True)
-        token = _claim_receipt_lease(case, user)
-
-        correct_case_exam_type(
-            case_id=case.case_id,
-            new_exam_type=EDA_COLONOSCOPY,
-            user=user,
-            active_role="nir",
-            lock_token=token,
-            reason_code="nir_identified_exam",
-        )
+        _confirm(case=case, user=user, new_exam_type=EDA_COLONOSCOPY)
 
         reloaded = Case.objects.get(pk=case.pk)
         assert get_declared_procedure_types(reloaded) == (
@@ -172,9 +165,10 @@ class TestCorrectionReroutedThroughProjection:
         )
         declared = {p.procedure_type for p in CaseProcedure.objects.filter(case=reloaded, declared_by_nir=True)}
         assert declared == {ProcedureType.EDA, ProcedureType.COLONOSCOPY}
-        # Auditoria: novo evento canônico registrado; legado singular não é emitido.
-        assert CaseEvent.objects.filter(case=case, event_type="CASE_PROCEDURE_DECLARATION_CORRECTED").exists()
+        # Auditoria: evento humano de confirmação registrado; legados não são emitidos.
+        assert CaseEvent.objects.filter(case=case, event_type="CASE_PROCEDURE_REVIEW_CONFIRMED").exists()
         assert not CaseEvent.objects.filter(case=case, event_type="EXAM_TYPE_CORRECTED").exists()
+        assert not CaseEvent.objects.filter(case=case, event_type="CASE_PROCEDURE_DECLARATION_CORRECTED").exists()
 
     def test_projection_failure_rolls_back_bridge_derived_events_and_fsm(self, django_user_model) -> None:
         """Falha na projeção reverte ponte, derivados, eventos e FSM (R3)."""
@@ -186,14 +180,7 @@ class TestCorrectionReroutedThroughProjection:
 
         with mock.patch("apps.intake.services.sync_declared_projection", side_effect=RuntimeError("boom")):
             with pytest.raises(RuntimeError):
-                correct_case_exam_type(
-                    case_id=case.case_id,
-                    new_exam_type=ProcedureType.COLONOSCOPY,
-                    user=user,
-                    active_role="nir",
-                    lock_token=token,
-                    reason_code="nir_identified_exam",
-                )
+                _confirm(case=case, user=user, new_exam_type=ProcedureType.COLONOSCOPY, token=token)
 
         reloaded = Case.objects.get(pk=case.pk)
         # projeção declarada intacta
@@ -206,7 +193,7 @@ class TestCorrectionReroutedThroughProjection:
         # nenhum evento de correção/reprocessamento
         assert not CaseEvent.objects.filter(
             case=case,
-            event_type__in=["CASE_PROCEDURE_DECLARATION_CORRECTED", "CASE_REPROCESSING_REQUESTED"],
+            event_type__in=["CASE_PROCEDURE_REVIEW_CONFIRMED", "CASE_REPROCESSING_REQUESTED"],
         ).exists()
         # projeção declarada inalterada (row pré-existente preservada; nada novo)
         assert CaseProcedure.objects.filter(case=reloaded).count() == 1

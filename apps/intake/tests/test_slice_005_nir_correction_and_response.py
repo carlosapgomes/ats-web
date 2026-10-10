@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import threading
 import uuid
+from typing import Any
 
 import pytest
 from django.contrib.auth import get_user_model
@@ -37,7 +38,7 @@ from apps.cases.models import (
 )
 from apps.cases.procedures import get_declared_procedure_types
 from apps.cases.services import claim_case_lock
-from apps.intake.services import correct_case_exam_type, is_exam_type_correction_eligible
+from apps.intake.services import confirm_case_procedure_review, is_exam_type_correction_eligible
 
 pytestmark = [pytest.mark.django_db, pytest.mark.usefixtures("colonoscopy_intake_enabled")]
 
@@ -122,6 +123,34 @@ def _claim_receipt_lease(case: Case, user) -> uuid.UUID:
     return result.token
 
 
+def _review_event(case: Case, reason_code: str = "exam_type_mismatch") -> CaseEvent:
+    """Revisao manual vista pelo NIR (origem da confirmacao, S2/D3)."""
+    return CaseEvent.objects.create(
+        case=case,
+        event_type="EDA_SCOPE_GATED_MANUAL_REVIEW",
+        actor=None,
+        actor_type="system",
+        payload={"reason_code": reason_code, "reason_text": "Conjunto declarado difere."},
+    )
+
+
+def _confirm_kwargs(case, user, token, *, exam_type, reason_code="exam_type_mismatch") -> Any:
+    """Kwargs da confirmacao S2 com consentimento explicito."""
+    from apps.cases.procedure_review import source_fingerprint_for_case
+
+    return {
+        "case_id": case.case_id,
+        "exam_type": exam_type,
+        "user": user,
+        "active_role": "nir",
+        "lock_token": token,
+        "review_acknowledged": "on",
+        "review_justification": "Revisei o relatorio e confirmo a selecao.",
+        "review_event_id": _review_event(case, reason_code).pk,
+        "source_fingerprint": source_fingerprint_for_case(case),
+    }
+
+
 def _set_detection(case: Case, detected: tuple[str, ...]) -> None:
     """Projeta detecção nas rows (simula CASE_PROCEDURES_DETECTED do pipeline)."""
     for procedure_type in detected:
@@ -170,14 +199,7 @@ class TestCorrectionSetEligibility:
         original_id = case.case_id
         token = _claim_receipt_lease(case, user)
 
-        result = correct_case_exam_type(
-            case_id=case.case_id,
-            new_exam_type=ProcedureType.EDA,
-            user=user,
-            active_role="nir",
-            lock_token=token,
-            reason_code="nir_identified_exam",
-        )
+        result = confirm_case_procedure_review(**_confirm_kwargs(case, user, token, exam_type=ProcedureType.EDA))
 
         assert result.case_id == original_id
         reloaded = Case.objects.get(pk=case.pk)
@@ -200,14 +222,7 @@ class TestCorrectionSetEligibility:
         case = _make_case(user=user, exam_type=ProcedureType.EDA)
         token = _claim_receipt_lease(case, user)
 
-        correct_case_exam_type(
-            case_id=case.case_id,
-            new_exam_type=EDA_COLONOSCOPY,
-            user=user,
-            active_role="nir",
-            lock_token=token,
-            reason_code="nir_identified_exam",
-        )
+        confirm_case_procedure_review(**_confirm_kwargs(case, user, token, exam_type=EDA_COLONOSCOPY))
 
         reloaded = Case.objects.get(pk=case.pk)
         assert reloaded.status == CaseStatus.LLM_STRUCT
@@ -247,14 +262,7 @@ class TestCorrectionSetEligibility:
         )
         token = _claim_receipt_lease(case, user)
 
-        correct_case_exam_type(
-            case_id=case.case_id,
-            new_exam_type=ProcedureType.COLONOSCOPY,
-            user=user,
-            active_role="nir",
-            lock_token=token,
-            reason_code="nir_identified_exam",
-        )
+        confirm_case_procedure_review(**_confirm_kwargs(case, user, token, exam_type=ProcedureType.COLONOSCOPY))
 
         reloaded = Case.objects.get(pk=case.pk)
         rows = CaseProcedure.objects.filter(case=reloaded)
@@ -278,25 +286,21 @@ class TestCorrectionSetEligibility:
         )
         user = _nir_user(django_user_model, "nir-derived5@test.com")
         case = _make_case(user=user, exam_type=ProcedureType.EDA)
-        case.pdf_file = "pdfs/2025/01/original.pdf"
-        case.save()
+        # S2: fingerprint exige PDF legivel — bytes reais de fixture.
+        from django.core.files.base import ContentFile
+
+        case.pdf_file.save("original.pdf", ContentFile(b"%PDF-1.4 fixture"), save=True)
+        pdf_name = case.pdf_file.name
         token = _claim_receipt_lease(case, user)
 
-        correct_case_exam_type(
-            case_id=case.case_id,
-            new_exam_type=ProcedureType.COLONOSCOPY,
-            user=user,
-            active_role="nir",
-            lock_token=token,
-            reason_code="nir_identified_exam",
-        )
+        confirm_case_procedure_review(**_confirm_kwargs(case, user, token, exam_type=ProcedureType.COLONOSCOPY))
 
         reloaded = Case.objects.get(pk=case.pk)
         assert reloaded.structured_data is None
         assert reloaded.summary_text == ""
         assert reloaded.suggested_action is None
         assert reloaded.priority_signals == []
-        assert reloaded.pdf_file.name == "pdfs/2025/01/original.pdf"
+        assert reloaded.pdf_file.name == pdf_name
         assert reloaded.extracted_text == case.extracted_text
         assert reloaded.agency_record_number == "REC-S5-001"
         assert pipeline_calls == [case.case_id]
@@ -309,22 +313,15 @@ class TestCorrectionSetEligibility:
         case = _make_case(user=user, exam_type=ProcedureType.EDA)
         token = _claim_receipt_lease(case, user)
 
-        correct_case_exam_type(
-            case_id=case.case_id,
-            new_exam_type=EDA_COLONOSCOPY,
-            user=user,
-            active_role="nir",
-            lock_token=token,
-            reason_code="nir_identified_exam",
-        )
+        confirm_case_procedure_review(**_confirm_kwargs(case, user, token, exam_type=EDA_COLONOSCOPY))
 
         events = CaseEvent.objects.filter(case=case).order_by("id")
-        corrected = events.get(event_type="CASE_PROCEDURE_DECLARATION_CORRECTED")
-        assert corrected.payload == {
-            "old_procedures": [ProcedureType.EDA],
-            "new_procedures": [ProcedureType.EDA, ProcedureType.COLONOSCOPY],
-            "reason_code": "nir_identified_exam",
-        }
+        corrected = events.get(event_type="CASE_PROCEDURE_REVIEW_CONFIRMED")
+        assert corrected.payload["previous_declared_procedures"] == [ProcedureType.EDA]
+        assert corrected.payload["confirmed_procedures"] == [ProcedureType.EDA, ProcedureType.COLONOSCOPY]
+        assert corrected.payload["selection_changed"] is True
+        assert corrected.payload["review_reason_code"] == "exam_type_mismatch"
+        assert corrected.payload["version"] == 1
         assert corrected.actor_id == user.pk
         assert "extracted_text" not in corrected.payload
         assert "structured_data" not in corrected.payload
@@ -340,14 +337,20 @@ class TestCorrectionSetEligibility:
         )
         _set_detection(case, (ProcedureType.EDA, ProcedureType.COLONOSCOPY))
 
+        review = _review_event(case)
+        from apps.cases.procedure_review import source_fingerprint_for_case
+
         with pytest.raises(ValueError):
-            correct_case_exam_type(
+            confirm_case_procedure_review(
                 case_id=case.case_id,
-                new_exam_type=EDA_COLONOSCOPY,
+                exam_type=EDA_COLONOSCOPY,
                 user=user,
                 active_role="nir",
                 lock_token=uuid.uuid4(),
-                reason_code="nir_identified_exam",
+                review_acknowledged="on",
+                review_justification="Revisei e confirmo.",
+                review_event_id=review.pk,
+                source_fingerprint=source_fingerprint_for_case(case),
             )
 
         reloaded = Case.objects.get(pk=case.pk)
@@ -361,7 +364,7 @@ class TestCorrectionSetEligibility:
         assert "Solicitado pelo NIR" in content
         assert "Detectado na análise" in content
         assert "EDA + Colonoscopia" in content
-        assert "Correção de Tipo de Exame" not in content
+        assert "Revisar e confirmar procedimento" not in content
 
     def test_invalid_actor_role_lease_block(self, django_user_model, monkeypatch) -> None:
         """R2: ator/role/lease inválidos bloqueiam sem mutação nem enqueue."""
@@ -378,14 +381,7 @@ class TestCorrectionSetEligibility:
         token = _claim_receipt_lease(case, user)
 
         with pytest.raises(PermissionError):
-            correct_case_exam_type(
-                case_id=case.case_id,
-                new_exam_type=ProcedureType.COLONOSCOPY,
-                user=plain,
-                active_role="nir",
-                lock_token=token,
-                reason_code="nir_identified_exam",
-            )
+            confirm_case_procedure_review(**_confirm_kwargs(case, plain, token, exam_type=ProcedureType.COLONOSCOPY))
 
         reloaded = Case.objects.get(pk=case.pk)
         assert reloaded.status == CaseStatus.WAIT_R1_CLEANUP_THUMBS
@@ -403,21 +399,30 @@ class TestCorrectionConcurrency:
             "apps.pipeline.tasks.enqueue_pipeline",
             lambda case_id: pipeline_calls.append(case_id),
         )
+        from apps.cases.procedure_review import source_fingerprint_for_case
+
         user = _nir_user(django_user_model, "nir-race5@test.com")
         case = _make_case(user=user, exam_type=EDA_COLONOSCOPY)
         token = _claim_receipt_lease(case, user)
+        # Uma única revisão vista e um fingerprint compartilhados: a
+        # serialização decide exatamente um vencedor (S2/R3).
+        shared_review = _review_event(case)
+        shared_fingerprint = source_fingerprint_for_case(case)
 
         results: dict[str, object] = {}
 
         def run(target: str, key: str) -> None:
             try:
-                correct_case_exam_type(
+                confirm_case_procedure_review(
                     case_id=case.case_id,
-                    new_exam_type=target,
+                    exam_type=target,
                     user=user,
                     active_role="nir",
                     lock_token=token,
-                    reason_code="nir_identified_exam",
+                    review_acknowledged="on",
+                    review_justification="Revisei e confirmo.",
+                    review_event_id=shared_review.pk,
+                    source_fingerprint=shared_fingerprint,
                 )
                 results[key] = "ok"
             except Exception as exc:  # noqa: BLE001
@@ -470,7 +475,7 @@ class TestComparativeResponse:
             assert "EDA + Colonoscopia" in content
             assert "Aguardando decisão médica" in content
             # Sem CTA obrigatório de correção nem ACK bloqueante.
-            assert "Correção de Tipo de Exame" not in content
+            assert "Revisar e confirmar procedimento" not in content
             assert "Confirmar Recebimento" not in content
 
     def test_detail_shows_partial_decision_with_reasons(self, client) -> None:

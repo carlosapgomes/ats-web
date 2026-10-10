@@ -25,7 +25,7 @@ from apps.cases.models import (
     ProcedureType,
 )
 from apps.cases.services import claim_case_lock
-from apps.intake.services import correct_case_exam_type
+from apps.intake.services import confirm_case_procedure_review
 from apps.pipeline.llm import RecordingLlmClient
 from apps.pipeline.orchestrator import run_pipeline
 from apps.pipeline.tests.test_eda_package_pipeline_v4 import (
@@ -93,6 +93,11 @@ def _detection_event(case: Case) -> CaseEvent:
     return CaseEvent.objects.filter(case=case, event_type="CASE_PROCEDURES_DETECTED").latest("timestamp")
 
 
+def _review_event(case: Case) -> CaseEvent:
+    """Revisao manual vista pelo NIR (origem da confirmacao, S2/D3)."""
+    return CaseEvent.objects.filter(case=case, event_type="EDA_SCOPE_GATED_MANUAL_REVIEW").latest("timestamp")
+
+
 def _claim(case: Case, user) -> uuid.UUID:
     result = claim_case_lock(
         case_id=case.case_id,
@@ -125,15 +130,21 @@ class TestDeclaredAwareResolutionProceeds:
         # R5: o evento registra a união BRUTA, não o payload normalizado.
         assert set(_detection_event(case).payload["detected_procedures"]) == RAW_UNION
 
-        # ── correção NIR para o pacote mais completo sustentado ────────────
+        # ── confirmação NIR do pacote mais completo sustentado (S2) ───────
+        from apps.cases.procedure_review import source_fingerprint_for_case
+
         token = _claim(case, user)
-        correct_case_exam_type(
+        review = _review_event(case)
+        confirm_case_procedure_review(
             case_id=case.case_id,
-            new_exam_type=ProcedureType.EDA_DILATION,
+            exam_type=ProcedureType.EDA_DILATION,
             user=user,
             active_role="nir",
             lock_token=token,
-            reason_code="nir_identified_exam",
+            review_acknowledged="on",
+            review_justification="Revisei o relatorio e confirmo o pacote.",
+            review_event_id=review.pk,
+            source_fingerprint=source_fingerprint_for_case(case),
         )
 
         # ── 2ª passada: a resolução declarado-aware prossegue até o médico ─

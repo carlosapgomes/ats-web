@@ -2,10 +2,10 @@
 
 Cobre R2/R3 do Slice 008 (specs exam-type-correction, exam-type-work-queues):
 
-- R2: a correção compara CONJUNTOS de ``CaseProcedure`` (nunca a coluna
-      legada) para decidir igualdade e gravar old/new; o evento
-      ``CASE_PROCEDURE_DECLARATION_CORRECTED`` traz apenas ``old_procedures``/
-      ``new_procedures`` — sem chaves singulares ``old_exam_type``/
+- R2: a confirmação (S2) grava anterior/confirmado como CONJUNTOS de
+      ``CaseProcedure`` (nunca a coluna legada); o evento
+      ``CASE_PROCEDURE_REVIEW_CONFIRMED`` traz ``previous_declared_procedures``/
+      ``confirmed_procedures`` — sem chaves singulares ``old_exam_type``/
       ``new_exam_type``.
 - R3: os filtros NIR (operacional e encerrados) são exclusivos por rows
       declaradas, SEM fallback da coluna: um caso sem rows (legado/inválido)
@@ -33,7 +33,7 @@ from apps.cases.models import (
     ProcedureType,
 )
 from apps.cases.services import claim_case_lock
-from apps.intake.services import correct_case_exam_type
+from apps.intake.services import confirm_case_procedure_review
 
 pytestmark = [pytest.mark.django_db, pytest.mark.usefixtures("colonoscopy_intake_enabled")]
 
@@ -111,15 +111,38 @@ def _claim_receipt_lease(case: Case, user) -> uuid.UUID:
     return result.token
 
 
-def _correct(*, case, user, new_exam_type, reason_code="nir_identified_exam") -> Case:
-    return correct_case_exam_type(
+def _review_event(case: Case) -> CaseEvent:
+    """Revisao manual vista pelo NIR (origem da confirmacao, S2/D3)."""
+    return CaseEvent.objects.create(
+        case=case,
+        event_type="EDA_SCOPE_GATED_MANUAL_REVIEW",
+        actor=None,
+        actor_type="system",
+        payload={"reason_code": "exam_type_mismatch", "reason_text": "Conjunto declarado difere."},
+    )
+
+
+def _confirm(*, case, user, new_exam_type) -> Case:
+    """Confirmacao S2 (consentimento explicito): mesma ou outra selecao."""
+    from apps.cases.procedure_review import source_fingerprint_for_case
+
+    review = _review_event(case)
+    return confirm_case_procedure_review(
         case_id=case.case_id,
-        new_exam_type=new_exam_type,
+        exam_type=new_exam_type,
         user=user,
         active_role="nir",
         lock_token=_claim_receipt_lease(case, user),
-        reason_code=reason_code,
+        review_acknowledged="on",
+        review_justification="Revisei o relatorio e confirmo a selecao.",
+        review_event_id=review.pk,
+        source_fingerprint=source_fingerprint_for_case(case),
     )
+
+
+def _correct(*, case, user, new_exam_type) -> Case:
+    """Compat: a correcao operacional agora e confirmacao com consentimento (S2)."""
+    return _confirm(case=case, user=user, new_exam_type=new_exam_type)
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -130,33 +153,46 @@ def _correct(*, case, user, new_exam_type, reason_code="nir_identified_exam") ->
 class TestCorrectionComparesSets:
     """R2: igualdade, old/new e reroteamento usam conjuntos de CaseProcedure."""
 
-    def test_rejects_correction_to_already_declared_set(self, django_user_model) -> None:
-        """Igualdade pelo CONJUNTO declarado, não por qualquer estado singular.
+    def test_same_set_without_consent_stays_in_review(self, django_user_model) -> None:
+        """S2: mesma seleção SEM consentimento continua recusada (sem mutação).
 
-        Caso com rows declarando o conjunto combinado {EDA, Colonoscopia}.
-        Corrigir para a seleção combinada (``eda_colonoscopy``) significa o
-        MESMO conjunto já declarado — deve ser rejeitado como "igual". Prova
-        que a decisão de igualdade vem das rows declaradas.
+        A igualdade sozinha não confere autoridade (classificação S2 do antigo
+        "igual rejeita"); com consentimento explícito a mesma seleção é
+        confirmação válida (coberto em test_procedure_review_confirmation).
         """
+        from apps.cases.procedure_review import source_fingerprint_for_case
+
         user = _nir_user(django_user_model, "nir-cmp-set@test.com")
         case = _make_eligible_case(user=user, exam_type=EDA_COLONOSCOPY)
         _declare(case, (ProcedureType.EDA, ProcedureType.COLONOSCOPY))
+        review = _review_event(case)
 
         with pytest.raises(ValueError):
-            _correct(case=case, user=user, new_exam_type=EDA_COLONOSCOPY)
+            confirm_case_procedure_review(
+                case_id=case.case_id,
+                exam_type=EDA_COLONOSCOPY,
+                user=user,
+                active_role="nir",
+                lock_token=_claim_receipt_lease(case, user),
+                review_acknowledged=None,
+                review_justification="Revisei e confirmo.",
+                review_event_id=review.pk,
+                source_fingerprint=source_fingerprint_for_case(case),
+            )
 
         # Nenhuma mutação: FSM, derivados e reserva intactos.
         reloaded = Case.objects.get(pk=case.pk)
         assert reloaded.status == CaseStatus.WAIT_R1_CLEANUP_THUMBS
         assert reloaded.summary_text == "Resumo antigo do perfil anterior."
-        assert not CaseEvent.objects.filter(case=case, event_type="CASE_PROCEDURE_DECLARATION_CORRECTED").exists()
+        assert not CaseEvent.objects.filter(case=case, event_type="CASE_PROCEDURE_REVIEW_CONFIRMED").exists()
 
     def test_payload_records_sets_without_singular_keys(self, django_user_model) -> None:
-        """Evento canônico traz apenas old_procedures/new_procedures.
+        """Evento de confirmação traz conjuntos das rows, sem chaves singulares.
 
-        Não grava as chaves singulares ``old_exam_type``/``new_exam_type``
-        (essas pertenciam à coluna legada e não são fonte NIR). old/new
-        refletem os conjuntos lidos das rows declaradas.
+        Não grava ``old_exam_type``/``new_exam_type`` (coluna legada) nem
+        ``old_procedures``/``new_procedures`` da correção operacional:
+        anterior/confirmado vivem em ``previous_declared_procedures``/
+        ``confirmed_procedures`` com o motivo da revisão de origem.
         """
         user = _nir_user(django_user_model, "nir-payload-set@test.com")
         case = _make_eligible_case(user=user, exam_type=ProcedureType.EDA)
@@ -164,12 +200,13 @@ class TestCorrectionComparesSets:
 
         _correct(case=case, user=user, new_exam_type=EDA_COLONOSCOPY)
 
-        event = CaseEvent.objects.get(case=case, event_type="CASE_PROCEDURE_DECLARATION_CORRECTED")
-        assert set(event.payload.keys()) == {"old_procedures", "new_procedures", "reason_code"}
+        event = CaseEvent.objects.get(case=case, event_type="CASE_PROCEDURE_REVIEW_CONFIRMED")
         assert "old_exam_type" not in event.payload
         assert "new_exam_type" not in event.payload
-        assert event.payload["old_procedures"] == [ProcedureType.EDA]
-        assert event.payload["new_procedures"] == [ProcedureType.EDA, ProcedureType.COLONOSCOPY]
+        assert event.payload["previous_declared_procedures"] == [ProcedureType.EDA]
+        assert event.payload["confirmed_procedures"] == [ProcedureType.EDA, ProcedureType.COLONOSCOPY]
+        assert event.payload["selection_changed"] is True
+        assert event.payload["review_reason_code"] == "exam_type_mismatch"
         assert event.actor_id == user.pk
 
     def test_old_procedures_read_from_declared_rows(self, django_user_model) -> None:
@@ -184,9 +221,9 @@ class TestCorrectionComparesSets:
 
         _correct(case=case, user=user, new_exam_type=ProcedureType.EDA)
 
-        event = CaseEvent.objects.get(case=case, event_type="CASE_PROCEDURE_DECLARATION_CORRECTED")
-        assert event.payload["old_procedures"] == [ProcedureType.EDA, ProcedureType.COLONOSCOPY]
-        assert event.payload["new_procedures"] == [ProcedureType.EDA]
+        event = CaseEvent.objects.get(case=case, event_type="CASE_PROCEDURE_REVIEW_CONFIRMED")
+        assert event.payload["previous_declared_procedures"] == [ProcedureType.EDA, ProcedureType.COLONOSCOPY]
+        assert event.payload["confirmed_procedures"] == [ProcedureType.EDA]
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -293,9 +330,10 @@ class TestStrictModeNoTransitiveBridge:
         assert CaseProcedure.objects.filter(
             case=result, procedure_type=ProcedureType.EDA, declared_by_nir=True
         ).exists()
-        event = CaseEvent.objects.get(case=case, event_type="CASE_PROCEDURE_DECLARATION_CORRECTED")
-        assert event.payload["old_procedures"] == []
-        assert event.payload["new_procedures"] == [ProcedureType.EDA]
+        event = CaseEvent.objects.get(case=case, event_type="CASE_PROCEDURE_REVIEW_CONFIRMED")
+        assert event.payload["previous_declared_procedures"] == []
+        assert event.payload["confirmed_procedures"] == [ProcedureType.EDA]
+        assert event.payload["selection_changed"] is True
         assert "old_exam_type" not in event.payload
         assert "new_exam_type" not in event.payload
         assert pipeline_calls == [case.case_id]

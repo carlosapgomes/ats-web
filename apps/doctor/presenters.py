@@ -273,6 +273,9 @@ class DoctorReportPresenter:
     # Slice 003 (R6/D10): seções de histórico anterior por procedimento,
     # preparadas por ``reporting.prepare_doctor_case_report`` (modo 2.0).
     prior_sections: list[dict[str, Any]] = field(default_factory=list)
+    # S2 (R8/D6): aviso não bloqueante da confirmação NIR, preparado por
+    # ``reporting`` a partir dos eventos (None para legados/automáticos).
+    procedure_review_notice: str | None = None
 
     # ── Public API ───────────────────────────────────────────────────────
 
@@ -329,6 +332,8 @@ class DoctorReportPresenter:
         precedence_notice = self._build_precedence_notice()
         if precedence_notice is not None:
             notices.append(precedence_notice)
+        if self.procedure_review_notice:
+            notices.append(self.procedure_review_notice)
         return notices
 
     def _build_precedence_notice(self) -> str | None:

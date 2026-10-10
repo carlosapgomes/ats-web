@@ -671,12 +671,11 @@ def _build_scheduler_detail_context(
     historical/contextual access without PDF).
     """
     from apps.intake.views import (
-        EVENT_DOT_CSS,
-        EVENT_LABELS,
         STATUS_CSS_CLASS,
         STATUS_LABELS,
         STEP_STATUS_INDEX,
         STEPS,
+        enrich_timeline_events,
     )
 
     events = case.events.all()
@@ -684,15 +683,7 @@ def _build_scheduler_detail_context(
     current_step_idx = STEP_STATUS_INDEX.get(case.status, 0)
     steps = STEPS
 
-    enriched_events: list[dict[str, Any]] = []
-    for e in events:
-        enriched_events.append(
-            {
-                "event": e,
-                "label": EVENT_LABELS.get(e.event_type, e.event_type),
-                "dot_css": EVENT_DOT_CSS.get(e.event_type, "system"),
-            }
-        )
+    enriched_events: list[dict[str, Any]] = enrich_timeline_events(events)
 
     # Extract patient info
     patient_name = ""

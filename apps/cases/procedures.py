@@ -236,7 +236,7 @@ def sync_declared_projection(case: Case, procedure_types: Any) -> None:
     """Escreve a projeção declarada numa transação/lock já existentes (correção).
 
     Usado por fluxos que já possuem ``transaction.atomic`` + ``select_for_update``
-    (ex.: ``correct_case_exam_type``). NÃO salva o ``Case`` nem registra evento:
+    (ex.: ``confirm_case_procedure_review``). NÃO salva o ``Case`` nem registra evento:
     o caller decide o save e o evento de auditoria do fluxo.
     """
     types = normalize_procedure_selection(procedure_types)

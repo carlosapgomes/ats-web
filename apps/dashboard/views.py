@@ -79,12 +79,11 @@ from apps.dashboard.procedure_analytics import (
 # Reaproveita mapeamentos definidos no intake para consistência visual
 from apps.doctor.reporting import prepare_doctor_case_report
 from apps.intake.views import (
-    EVENT_DOT_CSS,
-    EVENT_LABELS,
     STATUS_CSS_CLASS,
     STATUS_LABELS,
     STEP_STATUS_INDEX,
     STEPS,
+    enrich_timeline_events,
 )
 
 # ── Badge compacto para fluxos operacionais (Slice 001) ──────────────
@@ -1142,18 +1141,8 @@ def dashboard_case_detail(request: HttpRequest, case_id: uuid.UUID) -> HttpRespo
         steps = [step for step in STEPS if step["label"] != "Agendamento"]
         current_step_idx = len(steps) - 1
 
-    enriched_events = []
-    was_ready_for_doctor = False
-    for e in events:
-        if e.event_type == "CASE_READY_FOR_DOCTOR":
-            was_ready_for_doctor = True
-        enriched_events.append(
-            {
-                "event": e,
-                "label": EVENT_LABELS.get(e.event_type, e.event_type),
-                "dot_css": EVENT_DOT_CSS.get(e.event_type, "system"),
-            }
-        )
+    was_ready_for_doctor = any(e.event_type == "CASE_READY_FOR_DOCTOR" for e in events)
+    enriched_events = enrich_timeline_events(events)
 
     result_info: dict[str, object] | None = None
 

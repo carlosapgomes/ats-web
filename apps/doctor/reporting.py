@@ -17,6 +17,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from apps.cases.models import Case, ProcedureType
+from apps.cases.procedure_review import build_doctor_confirmation_notice
 from apps.cases.procedures import PROCEDURE_ORDER as _PROCEDURE_ORDER
 from apps.cases.procedures import is_procedure_neutral_structured_data
 from apps.pipeline.prior_case import lookup_prior_case_context
@@ -166,6 +167,8 @@ def prepare_doctor_case_report(case: Case) -> PreparedDoctorReport:
                     "prior_denial_count_7d": pc.prior_denial_count_7d,
                 }
 
+    # S2 (R8/D6): aviso não bloqueante da confirmação NIR — lido dos
+    # eventos (autor/justificativa nunca inventados); None p/ legados.
     presenter = DoctorReportPresenter(
         structured_data=case.structured_data or {},
         summary_text=case.summary_text or "",
@@ -175,6 +178,7 @@ def prepare_doctor_case_report(case: Case) -> PreparedDoctorReport:
         priority_signals=case.priority_signals or [],
         exam_type=presenter_exam_type,
         prior_sections=prior_sections,
+        procedure_review_notice=build_doctor_confirmation_notice(case),
     )
 
     return PreparedDoctorReport(

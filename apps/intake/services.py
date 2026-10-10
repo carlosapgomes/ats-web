@@ -25,11 +25,18 @@ from apps.cases.models import (
     EDA_COLONOSCOPY,
     Case,
     CaseAttachment,
+    CaseEvent,
     CaseStatus,
     ProcedureType,
 )
+from apps.cases.procedure_review import (
+    REVIEW_CONFIRMED_EVENT,
+    latest_review_event,
+    source_fingerprint_for_case,
+)
 from apps.cases.procedures import (
     PROCEDURE_LABELS,
+    PROCEDURE_ORDER,
     SELECTION_KEYS,
     get_declared_procedure_types,
     procedure_types_for_selection,
@@ -292,14 +299,7 @@ EXAM_TYPE_CORRECTION_ELIGIBLE_REASON_CODES: frozenset[str] = frozenset(
     }
 )
 
-# Motivos de correção selecionáveis pelo NIR (payload de CASE_PROCEDURE_DECLARATION_CORRECTED).
-EXAM_TYPE_CORRECTION_REASONS: dict[str, str] = {
-    "nir_identified_exam": "Tipo identificado na revisão manual do NIR",
-    "declared_type_incorrect": "Tipo declarado incorreto no envio original",
-    "other": "Outro motivo",
-}
-
-# Reserva NIR exigida por correção e confirmação (mesmo protocolo, C1/C3).
+# Reserva NIR exigida por confirmação e recebimento (mesmo protocolo, C1/C3).
 NIR_RECEIPT_CONTEXT: str = "nir_receipt"
 NIR_RECEIPT_ROLE: str = "nir"
 
@@ -406,86 +406,157 @@ def is_exam_type_correction_eligible(case: Case) -> bool:
     return suggested.get("reason_code") in EXAM_TYPE_CORRECTION_ELIGIBLE_REASON_CODES
 
 
-def correct_case_exam_type(
+# Justificativa breve da confirmação humana (D1): trim, 1–500 caracteres.
+REVIEW_JUSTIFICATION_MAX_CHARS: int = 500
+
+
+def _validate_review_acknowledgment(review_acknowledged: str | bool | None) -> None:
+    """Valida o consentimento explícito de leitura da confirmação (D1/P1-A).
+
+    Somente o valor documentado do checkbox (``"on"``) ou o booleano ``True``
+    conferem autoridade — qualquer outro valor, inclusive strings não-vazias
+    como ``"false"``/``"0"``/``"off"`` ou números, é recusado sem efeitos.
+    Sem aliases, sem defaults verdadeiros e sem consentimento por truthiness.
+    """
+    if review_acknowledged is True or review_acknowledged == "on":
+        return
+    raise ValueError("Confirme que leu o relatório principal para validar o procedimento.")
+
+
+def _validate_review_justification(review_justification: str | None) -> str:
+    """Valida a justificativa livre da confirmação (D1).
+
+    Devolve o texto com trim. Vazia, longa demais ou com U+0000 e recusada
+    ANTES de qualquer efeito — sem sanitizacao silenciosa de conteudo.
+    """
+    text = (review_justification or "").strip()
+    if not text:
+        raise ValueError("Informe a justificativa da confirmação (1–500 caracteres).")
+    if len(text) > REVIEW_JUSTIFICATION_MAX_CHARS:
+        raise ValueError("Justificativa excede 500 caracteres.")
+    if "\x00" in text:
+        raise ValueError("Justificativa contém caractere inválido.")
+    return text
+
+
+def confirm_case_procedure_review(
     *,
     case_id: uuid.UUID,
-    new_exam_type: str,
+    exam_type: str,
     user: AccountsUser,
     active_role: str,
     lock_token: uuid.UUID,
-    reason_code: str,
+    review_acknowledged: str | bool | None,
+    review_justification: str | None,
+    review_event_id: int | str | None,
+    source_fingerprint: str | None,
 ) -> Case:
-    """Corrige o tipo de exame no mesmo caso e reprocessa (Slice 006).
+    """Confirma o procedimento revisado no mesmo caso e reprocessa (S2/D1–D3).
 
-    Transacional com ``select_for_update`` (R1): nenhuma atualização parcial.
-    Ator NIR e reserva completa validados sob o row lock (C2/C3). Preserva
-    fontes e limpa derivados (R3). Transição FSM nomeada de volta a
-    LLM_STRUCT (R2) com eventos append-only (R5). Após commit, enfileira o
-    pipeline LLM exatamente uma vez — nunca reextrai PDF (R4); em falha de
-    enqueue, agenda retry automático e levanta ``EnqueueAfterCommitError`` (C5).
-    A seleção passa por ``ensure_intake_selection_permitted`` (D10): identidade
-    fora das opções habilitadas da jornada é rejeitada antes de qualquer efeito.
+    Substitui a correção operacional: aceita a seleção vigente OU outra
+    seleção habilitada, com leitura confirmada e justificativa breve
+    obrigatórias. POST antigo sem consentimento/justificativa e recusado
+    sem mutação — nunca convertido em confirmação implícita (D8).
+
+    Transacional com ``select_for_update``: nenhuma atualização parcial.
+    Ator NIR e reserva completa validados sob o row lock. A revisão vista
+    (``review_event_id``) deve ser a mais recente e o fingerprint da fonte
+    deve coincidir com o atual; fonte/revisão que mudou desde o GET recusa
+    sem efeitos. Preserva fontes e limpa derivados. Evento humano
+    ``CASE_PROCEDURE_REVIEW_CONFIRMED`` (autoridade, D3) ANTES da transição
+    FSM nomeada de volta a LLM_STRUCT. Após commit, enfileira o pipeline
+    exatamente uma vez — nunca reextrai PDF; em falha de enqueue, agenda
+    retry automático e levanta ``EnqueueAfterCommitError`` (confirmação
+    commitada permanece durável, R9).
 
     Raises:
-        ValueError: caso inelegível, tipo inválido/indisponível na jornada,
-            tipo igual ao declarado ou reason_code inválido.
+        ValueError: caso inelegível, seleção inválida/indisponível na
+            jornada, consentimento/justificativa ausentes ou inválidos,
+            revisão/fonte desatualizadas.
         PermissionError: ator sem papel NIR, papel ativo incorreto ou reserva
             incompatível/ausente/expirada.
-        EnqueueAfterCommitError: enqueue pós-commit falhou (correção commitada).
+        EnqueueAfterCommitError: enqueue pós-commit falhou (confirmação commitada).
     """
-    validated_exam_type = ensure_intake_selection_permitted(new_exam_type)
-    if reason_code not in EXAM_TYPE_CORRECTION_REASONS:
-        raise ValueError("Motivo da correção inválido.")
+    validated_exam_type = ensure_intake_selection_permitted(exam_type)
+    _validate_review_acknowledgment(review_acknowledged)
+    justification = _validate_review_justification(review_justification)
+    try:
+        review_pk = int(review_event_id)  # type: ignore[arg-type]
+    except (TypeError, ValueError):
+        raise ValueError("Revisão de origem inválida; reabra o caso e confirme novamente.") from None
+    if not source_fingerprint:
+        raise ValueError("Identificação da fonte ausente; reabra o caso e confirme novamente.")
     if lock_token is None:
         raise PermissionError("Token de reserva não fornecido.")
 
     with transaction.atomic():
         case = _acquire_locked_case(case_id=case_id, user=user, active_role=active_role)
         if not is_exam_type_correction_eligible(case):
-            raise ValueError("Caso não está em revisão manual elegível para correção de tipo.")
-        # Slice 008 (R2): igualdade/old/new usam CONJUNTOS de CaseProcedure —
-        # o conjunto declarado vem das rows (coluna ponte removida no 011-C).
+            raise ValueError("Caso não está em revisão manual elegível para confirmação de procedimento.")
+        # D3 — a revisão vista deve ser a mais recente; motivo codificado vem
+        # do evento de revisão, nunca de input livre do cliente (D1).
+        review = latest_review_event(case)
+        if review is None or review.pk != review_pk:
+            raise ValueError("A revisão mudou desde a abertura; reabra o caso e confirme novamente.")
+        review_payload = review.payload if isinstance(review.payload, dict) else {}
+        review_reason = str(review_payload.get("reason_code") or "")
+        if review_reason not in EXAM_TYPE_CORRECTION_ELIGIBLE_REASON_CODES:
+            raise ValueError("Revisão de origem inelegível para confirmação de procedimento.")
+        # D3 — fingerprint revalidado sob o lock: fonte que mudou recusa.
+        current_fingerprint = source_fingerprint_for_case(case)
+        if current_fingerprint is None or current_fingerprint != source_fingerprint:
+            raise ValueError("A fonte principal mudou desde a abertura; revise a fonte atual.")
+        # S2 (D1): mesma seleção e confirmação válida — sem exigência de
+        # diferença e sem reescrita do relatório. Conjuntos vêm das rows.
         new_procedures = list(procedure_types_for_selection(validated_exam_type))
         old_procedures = list(get_declared_procedure_types(case))
-        if set(new_procedures) == set(old_procedures):
-            raise ValueError("O novo conjunto de procedimentos deve ser diferente do declarado.")
         _assert_receipt_lease(case=case, user=user, token=lock_token)
 
-        # R3 — invalida artefatos derivados do perfil anterior; fontes ficam.
+        # Invalida artefatos derivados do perfil anterior; fontes ficam.
         case.structured_data = None
         case.summary_text = ""
         case.suggested_action = None
         case.priority_signals = []
 
-        # R2 — detecção e disposições médicas voltam a pending (correção só é
+        # Detecção e disposições médicas voltam a pending (confirmação só é
         # permitida antes de qualquer decisão; nunca deixa projeção residual).
         reset_detection_and_doctor_statuses(case)
 
-        # Slice 008 (R2/R7): evento enxuto com conjuntos anterior/novo e
-        # motivo codificado (sem texto/PDF). SEM chaves singulares
-        # old_exam_type/new_exam_type — a coluna deixou de ser fonte NIR.
-        # Slice 005: substitui EXAM_TYPE_CORRECTED (valor singular).
+        # D3 — evento humano de autoridade com payload versionado (actor
+        # obrigatório); a confirmação permanece durável na invalidação de
+        # derivados para definir o conjunto efetivo no reprocessamento.
         case._record_event(
-            "CASE_PROCEDURE_DECLARATION_CORRECTED",
+            REVIEW_CONFIRMED_EVENT,
             user=user,
             payload={
-                "old_procedures": old_procedures,
-                "new_procedures": new_procedures,
-                "reason_code": reason_code,
+                "version": 1,
+                "actor_role": "nir",
+                "review_event_id": review.pk,
+                "review_reason_code": review_reason,
+                "previous_declared_procedures": old_procedures,
+                "confirmed_procedures": sorted(new_procedures, key=lambda code: PROCEDURE_ORDER[code]),
+                "selection_changed": set(new_procedures) != set(old_procedures),
+                "justification": justification,
+                "source_fingerprint": current_fingerprint,
             },
         )
-        # R3 (Slice 001) — reroteamento pelo serviço único de declaração:
-        # projeção CaseProcedure.declared_by_nir sob a MESMA transação/lock;
-        # falha reverte tudo (incl. derivados/eventos/FSM).
+        # Reroteamento pelo serviço único de declaração sob a MESMA
+        # transação/lock; falha reverte tudo (incl. derivados/eventos/FSM).
         sync_declared_projection(case, new_procedures)
         case.save()
 
-        # R2 — transição FSM nomeada; CASE_REPROCESSING_REQUESTED é persistido
-        # no save() seguinte, após CASE_PROCEDURE_DECLARATION_CORRECTED (ordem
-        # append-only, sem sobrescrever _pending_event).
+        # Transição FSM nomeada; CASE_REPROCESSING_REQUESTED é persistido no
+        # save() seguinte, após o evento humano (ordem append-only, sem
+        # sobrescrever _pending_event). Referencia a confirmação.
+        confirmation_id = (
+            CaseEvent.objects.filter(case=case, event_type=REVIEW_CONFIRMED_EVENT).order_by("-timestamp", "-id").first()
+        )
         case.reprocess_after_exam_type_correction(
             user=user,
-            payload={"reason_code": reason_code},
+            payload={
+                "reason_code": review_reason,
+                "confirmation_event_id": confirmation_id.pk if confirmation_id else None,
+            },
         )
         case.save()
 
@@ -493,8 +564,8 @@ def correct_case_exam_type(
         # WAIT_R1_CLEANUP_THUMBS): limpa para não vazar lock em LLM_STRUCT.
         _clear_receipt_lease(case)
 
-    # R4/C5 — fora da transação: um único enqueue LLM pós-commit. Em falha,
-    # agenda retry automático (Schedule ONCE) e levanta erro explícito.
+    # Fora da transação: um único enqueue LLM pós-commit. Em falha, agenda
+    # retry automático (Schedule ONCE) e levanta erro explícito.
     _enqueue_pipeline_or_schedule_recovery(case.case_id)
     return case
 
