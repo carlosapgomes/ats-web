@@ -16,6 +16,7 @@ Registros de decisoes arquiteturais importantes do projeto.
 | [ADR-0009](ADR-0009-taxonomia-oficial-causas-nao-realizacao.md) | Taxonomia oficial e compatibilidade histórica das causas de não realização | Accepted | 2026-09-18 |
 | [ADR-0010](ADR-0010-catalogo-ampliado-e-pacotes-atomicos-de-procedimentos-endoscopicos.md) | Catálogo ampliado e pacotes atômicos de procedimentos endoscópicos | Accepted | 2026-09-25 |
 | [ADR-0011](ADR-0011-conjunto-detectado-normalizado-para-selecao-valida.md) | Conjunto detectado normalizado para seleção válida na decisão e na exibição | Accepted | 2026-09-26 |
+| [ADR-0012](ADR-0012-confirmacao-nir-autoridade-procedimento-apos-revisao.md) | Confirmação NIR como autoridade do procedimento após revisão manual | Accepted — aceite técnico explícito do owner; implementação/implantação não afirmadas | 2026-10-09 |
 
 ## ADRs Deprecated/Superseded
 | Numero | Titulo | Status | Data |
