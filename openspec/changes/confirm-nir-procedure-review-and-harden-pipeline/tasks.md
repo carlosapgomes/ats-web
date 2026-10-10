@@ -26,7 +26,8 @@ Blast radius transversal >5 arquivos aprovado no design D9: nenhuma saída parci
 
 ## 3. Gate integrado do change — owner/controller
 
-- [ ] 3.1 Revisar evidências S1+S2 e rodar gates globais AGENTS.md + `openspec validate confirm-nir-procedure-review-and-harden-pipeline --strict --no-interactive`; verificar autoridade humana não dispensa guard/erro do S1 e que legados sem consentimento permanecem automáticos; registrar resultado em relatório de fechamento.
+- [x] 3.1 Revisar evidências S1+S2 e rodar gates globais AGENTS.md + `openspec validate confirm-nir-procedure-review-and-harden-pipeline --strict --no-interactive`; verificar autoridade humana não dispensa guard/erro do S1 e que legados sem consentimento permanecem automáticos; registrar resultado em relatório de fechamento.
+  Gate do controller em dc42cb8: `uv run pytest` **4708 passed** (177.53s); ruff check/format PASS (303 arquivos); mypy PASS (333 arquivos); openspec strict valid; diff-check clean. Confirmação humana não dispensa policy S1 (CPRE negada sem imagem, NUL falha segura) e legados sem consentimento seguem automáticos (R10 verde, sem backfill). Relatório: `/tmp/ats-web-confirm-nir-execution/change-closure-report.md`. Status: READY_FOR_HUMAN_FINAL_REVIEW; sem push/deploy/recuperação de produção.
 
 Este gate não cria terceiro slice de implementação nem substitui testes próprios de S1/S2. Publicação/deploy e recuperação dos UUIDs reais NÃO fazem parte da autorização desta etapa. Atualizar PROJECT_CONTEXT/specs canônicas apenas no momento apropriado de execução/archive, sem afirmar implantação antes dela.
 
