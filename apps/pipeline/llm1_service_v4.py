@@ -62,6 +62,9 @@ origin_context, transfusion, tracked_exams.
 Valores fixos e enums obrigatorios:
 - schema_version: exatamente "4.0".
 - language: exatamente "pt-BR".
+- patient.name: sempre null; patient.document_id: sempre null (a identidade
+  foi removida programaticamente antes do envio; nao tente identificar o
+  paciente nem copie nomes de trechos).
 - patient.sex: apenas "M", "F" ou "Outro".
 - requested_procedures[]: 1 a 10 itens, um por identidade, sem duplicatas;
   procedure_type apenas "eda", "eda_gastrostomy", "eda_capsule", "eda_dilation",
@@ -219,6 +222,12 @@ class Llm1ServiceV4:
                 raise Llm1V4ValidationError(f"LLM1 v4 output contains non-ptbr narrative terms after retry: {joined}")
 
         structured = validated.model_dump(mode="json")
+        # PI-07: identidade nunca vem do modelo, mesmo que ele a infira de
+        # um trecho — a proveniência local é injetada pelo orchestrator.
+        patient = structured.get("patient")
+        if isinstance(patient, dict):
+            patient["name"] = None
+            patient["document_id"] = None
         return Llm1V4Result(
             structured_data=structured,
             summary_text=validated.summary.one_liner,
@@ -244,6 +253,8 @@ def _render_user_prompt(
         f"agency_record_number: {agency_record_number}\n\n"
         f"Procedimentos declarados pelo NIR (contexto; extraia apenas o que o documento sustenta): {declared_label}\n\n"
         "Retorne JSON schema_version 4.0 e preserve agency_record_number exatamente.\n"
+        "patient.name e patient.document_id devem ser null: a identidade foi "
+        "removida antes do envio e nao deve ser inferida.\n"
         "Todos os campos narrativos devem estar em portugues brasileiro (pt-BR).\n"
         "Nao use palavras em ingles nos campos narrativos.\n"
         "Cada procedimento de requested_procedures exige evidence_spans com "

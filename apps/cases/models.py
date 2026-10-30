@@ -150,6 +150,21 @@ class Case(models.Model):
     )
     pdf_file = models.FileField(upload_to="pdfs/%Y/%m/", blank=True, null=True)
     extracted_text = models.TextField(blank=True)
+    # Identidade local do paciente (PI-01/PI-02): extraída programaticamente
+    # do cabeçalho, nunca da resposta do LLM. Fonte de exibição/busca.
+    patient_identity_name = models.CharField(max_length=255, blank=True)
+    patient_identity_social_name = models.CharField(max_length=255, blank=True)
+    patient_identity_cns = models.CharField(max_length=15, blank=True)
+    patient_identity_status = models.CharField(
+        max_length=20,
+        blank=True,
+        choices=[
+            ("extracted", "Extracted"),
+            ("absent", "Absent"),
+            ("ambiguous", "Ambiguous"),
+            ("failed", "Failed"),
+        ],
+    )
     agency_record_number = models.CharField(max_length=20, blank=True)
     agency_record_extracted_at = models.DateTimeField(null=True, blank=True)
     regulation_days_on_screen = models.PositiveIntegerField(null=True, blank=True, db_index=True)
@@ -273,6 +288,8 @@ class Case(models.Model):
 
     @property
     def patient_name(self) -> str:
+        if self.patient_identity_name:
+            return self.patient_identity_name
         sd = self.structured_data
         if isinstance(sd, dict):
             patient = sd.get("patient", {})

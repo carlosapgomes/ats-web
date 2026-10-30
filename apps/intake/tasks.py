@@ -170,6 +170,7 @@ def _do_extraction(case: Case) -> None:
 
     # Persist extracted data
     case.extracted_text = cleaned_text
+    _persist_patient_identity(case, cleaned_text)
     case.agency_record_number = record_number  # may be fallback; caller can clear
     case.agency_record_extracted_at = timezone.now()
     case.regulation_days_on_screen = extract_regulation_days_on_screen(cleaned_text)
@@ -178,6 +179,25 @@ def _do_extraction(case: Case) -> None:
     # Transition: EXTRACTING → LLM_STRUCT
     case.extraction_complete(success=True, user=None)
     case.save()
+
+
+def _persist_patient_identity(case: Case, cleaned_text: str) -> None:
+    """Extrai e persiste a identidade local (PI-01); nunca levanta.
+
+    Falha inesperada do parser vira ``status="failed"`` para a fronteira
+    LLM falhar fechado (PI-09), sem derrubar a extração do relatório.
+    """
+    from apps.intake.patient_identity import PatientIdentity, extract_patient_identity
+
+    try:
+        identity = extract_patient_identity(cleaned_text)
+    except Exception:
+        logger.exception("Patient identity extraction failed for case %s", case.case_id)
+        identity = PatientIdentity(name=None, social_name=None, cns=None, status="failed")
+    case.patient_identity_name = identity.name or ""
+    case.patient_identity_social_name = identity.social_name or ""
+    case.patient_identity_cns = identity.cns or ""
+    case.patient_identity_status = identity.status
 
 
 def _handle_regulation_gate_failure(case: Case, gate_result: object) -> None:

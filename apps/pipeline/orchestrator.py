@@ -15,6 +15,7 @@ singular/EDA.
 from __future__ import annotations
 
 import copy
+import json
 import logging
 import uuid
 from collections.abc import Container
@@ -29,6 +30,16 @@ from apps.cases.procedures import (
     PROCEDURE_CATALOG,
     PROCEDURE_ORDER,
     set_detected_procedures,
+)
+from apps.intake.patient_identity import (
+    PatientIdentity,
+    assert_no_identity_leaks,
+    count_identity_occurrences,
+    extract_patient_identity,
+    identity_from_stored_fields,
+    mask_identity_in_value,
+    mask_patient_identity,
+    require_maskable,
 )
 from apps.llm.models import PromptTemplate
 from apps.pipeline.imaging_evidence import normalize_evidence_text, verify_abdominal_imaging_evidence
@@ -276,6 +287,32 @@ class UnsupportedDeclaredProcedureError(Exception):
     """
 
 
+def _resolve_patient_identity(case: Case) -> PatientIdentity:
+    """Identidade local do caso (PI-01): persistida ou derivada sob demanda.
+
+    Casos históricos sem os campos preenchidos derivam do ``extracted_text``
+    na hora (sem backfill); os valores derivados ficam na instância e são
+    persistidos pelos saves subsequentes do pipeline.
+    """
+    stored = identity_from_stored_fields(
+        name=case.patient_identity_name,
+        social_name=case.patient_identity_social_name,
+        cns=case.patient_identity_cns,
+        status=case.patient_identity_status,
+    )
+    if stored is not None:
+        return stored
+    try:
+        identity = extract_patient_identity(case.extracted_text or "")
+    except Exception:
+        identity = PatientIdentity(name=None, social_name=None, cns=None, status="failed")
+    case.patient_identity_name = identity.name or ""
+    case.patient_identity_social_name = identity.social_name or ""
+    case.patient_identity_cns = identity.cns or ""
+    case.patient_identity_status = identity.status
+    return identity
+
+
 def _require_declared_procedures(case: Case) -> tuple[str, ...]:
     """Declaração autoritativa de ``CaseProcedure`` (sem fallback da ponte).
 
@@ -429,6 +466,16 @@ def _run_v4_pipeline(
     """
     declared = _require_declared_procedures(case)
 
+    # ── 0. Identidade local + cópia mascarada (PI-01/PI-03/PI-09) ───────
+    # Fronteira única: nenhum texto derivado de ``extracted_text`` chega ao
+    # LLM sem máscara. Ambiguidade/falha falha fechado antes de qualquer
+    # chamada; o original permanece intacto em ``Case.extracted_text``.
+    identity = _resolve_patient_identity(case)
+    require_maskable(identity)
+    llm_text = mask_patient_identity(case.extracted_text or "", identity)
+    assert_no_identity_leaks(llm_text, identity)
+    masked_counts = count_identity_occurrences(case.extracted_text or "", identity)
+
     # ── 1. LLM1 4.0 — uma chamada ────────────────────────────────────────
     if llm1_system_prompt is not None:
         sp1, sp1_version = llm1_system_prompt, 0
@@ -443,13 +490,23 @@ def _run_v4_pipeline(
     result1 = service1.run(
         case_id=str(case.case_id),
         agency_record_number=case.agency_record_number,
-        extracted_text=case.extracted_text,
+        extracted_text=llm_text,
         declared_procedure_types=declared,
         system_prompt=sp1,
         user_prompt_template=ut1,
         prompt_system_version=sp1_version,
         prompt_user_version=ut1_version,
     )
+
+    # PI-06: scrub da saída do LLM1 — o modelo não é fonte de identidade.
+    # O nome persistido vem da extração local (PI-02), nunca da resposta.
+    scrubbed_structured = mask_identity_in_value(result1.structured_data, identity)
+    if isinstance(scrubbed_structured, dict):
+        result1.structured_data = scrubbed_structured
+        patient = result1.structured_data.get("patient")
+        if isinstance(patient, dict) and identity.name:
+            patient["name"] = identity.name
+    result1.summary_text = mask_patient_identity(result1.summary_text, identity)
 
     # S1/D7 (R1/R2): rejeitar U+0000 ANTES de qualquer write/projecao.
     # Fronteira obrigatoria tambem com clientes injetados; sem sanitizacao.
@@ -464,11 +521,11 @@ def _run_v4_pipeline(
     # ── 2. Detecção + reconciliação (D7) ───────────────────────────────
     detection = detect_requested_procedures_v4(
         llm1_structured_data=result1.structured_data,
-        cleaned_text=case.extracted_text,
+        cleaned_text=llm_text,
     )
     occurrences = detect_procedure_occurrences(
         llm1_structured_data=result1.structured_data,
-        cleaned_text=case.extracted_text,
+        cleaned_text=llm_text,
     )
     strong = tuple(t for t in _DETECTABLE_PROCEDURE_TYPES if detection[t]["strong"])
     any_evidence = tuple(t for t in _DETECTABLE_PROCEDURE_TYPES if detection[t]["any"])
@@ -522,7 +579,7 @@ def _run_v4_pipeline(
     )
     case.priority_signals = resolve_priority_signals(
         structured_data=signals_projection,
-        source_text=case.extracted_text,
+        source_text=llm_text,
         exam_type=signals_type,
         excluded_signal_codes=_excluded_signal_codes(atomic_identity_types=set(declared) | set(detected_types)),
     )
@@ -613,7 +670,11 @@ def _run_v4_pipeline(
         return
 
     # ── 6. LLM1 concluído (LLM_STRUCT → LLM_SUGGEST) ──────────────────
-    case.llm1_complete(success=True, user=None, payload=_build_v4_llm1_ok_payload(case, result1))
+    case.llm1_complete(
+        success=True,
+        user=None,
+        payload=_build_v4_llm1_ok_payload(case, result1, identity_status=identity.status, masked_counts=masked_counts),
+    )
     case.save()
 
     # ── 7. Policy determinística por componente (R5/D8) ────────────────
@@ -623,7 +684,7 @@ def _run_v4_pipeline(
     raw_imaging = common_preop.get("abdominal_imaging") if isinstance(common_preop, dict) else None
     verified_imaging = verify_abdominal_imaging_evidence(
         entries=raw_imaging,
-        main_report_text=case.extracted_text,
+        main_report_text=llm_text,
     )
     policy_results: dict[str, dict[str, object]] = {}
     for procedure_type in detected_types:
@@ -651,7 +712,10 @@ def _run_v4_pipeline(
             agency_record_number=case.agency_record_number,
             procedure_type=procedure_type,
         )
-        prior_contexts[procedure_type] = _serialize_prior_context(context)
+        # PI-06/PI-08: reason de caso anterior é texto livre e pode citar o
+        # paciente; decided_by (autoria profissional) é preservado.
+        scrubbed_prior = mask_identity_in_value(_serialize_prior_context(context), identity)
+        prior_contexts[procedure_type] = scrubbed_prior if isinstance(scrubbed_prior, dict) else {}
         if context.prior_case is not None:
             case._record_event(
                 "PRIOR_CASE_LOOKUP",
@@ -684,6 +748,13 @@ def _run_v4_pipeline(
         llm1_structured_data=result1.structured_data,
         detected_procedure_types=detected_types,
     )
+    # PI-06: a view do LLM2 nunca carrega a identidade injetada localmente
+    # no artefato persistido; guarda falha fechado antes da chamada.
+    scrubbed_view = mask_identity_in_value(llm2_structured_data_view, identity)
+    if isinstance(scrubbed_view, dict):
+        llm2_structured_data_view = scrubbed_view
+    assert_no_identity_leaks(json.dumps(llm2_structured_data_view, ensure_ascii=False), identity)
+    assert_no_identity_leaks(json.dumps(prior_contexts, ensure_ascii=False), identity)
     if human_confirmation:
         # S2/D5: origem humana NO CONTEXTO DA CHAMADA (fora do JSON LLM1
         # persistido); a justificativa livre do NIR nunca vira instrução de
@@ -719,7 +790,7 @@ def _run_v4_pipeline(
     dilation_site_projection = _project_detected_dilation_site(
         structured_data=result1.structured_data,
         detected_procedure_types=detected_types,
-        main_report_text=case.extracted_text,
+        main_report_text=llm_text,
     )
     recommendations: list[dict[str, object]] = []
     for item in result2.procedure_recommendations:
@@ -780,7 +851,7 @@ def _run_v4_pipeline(
     infection_review = project_infection_review(
         structured_data=result1.structured_data,
         detected_procedure_types=detected_types,
-        main_report_text=case.extracted_text,
+        main_report_text=llm_text,
     )
     case.suggested_action = {
         "schema_version": _SCHEMA_VERSION,
@@ -821,10 +892,18 @@ def _run_v4_pipeline(
     case.save()
 
 
-def _build_v4_llm1_ok_payload(case: Case, result1: Llm1V4Result) -> dict[str, object]:
+def _build_v4_llm1_ok_payload(
+    case: Case,
+    result1: Llm1V4Result,
+    *,
+    identity_status: str = "",
+    masked_counts: dict[str, int] | None = None,
+) -> dict[str, object]:
     """Payload enxuto de LLM1_OK para contrato 4.0 (sem texto clínico integral)."""
     return {
         "schema_version": _SCHEMA_VERSION,
+        "patient_identity_status": identity_status,
+        "patient_identity_masked_counts": masked_counts or {},
         "summary_text": case.summary_text,
         "priority_signal_codes": [signal["code"] for signal in case.priority_signals],
         "prompt_system_name": result1.prompt_system_name,
