@@ -29,6 +29,12 @@
   (zero no escopo do slice).
 - [ ] Slice 003 — Agendamento diário 06:00 America/Bahia
   (`slices/slice-003-daily-schedule.md`) — depende dos slices 001+002
+  IMPLEMENTADO; revisão apontou 1 BLOCKER (migration 0023 sem dependência
+  `django_q` → quebra migrate em banco novo, reproduzido pelo reviewer).
+  FIX aplicado: `("django_q", "0016_schedule_intended_date_kwarg")` nas
+  dependencies; prova em banco scratch virgem (plan: django_q.0001 #93 →
+  cases.0023 #195; migrate OK; seed row=1) + 5 testes verdes.
+  AGUARDANDO confirmação de re-revisão ou aceite.
 
 ## 2. Gate final (uma vez após o slice 003)
 
