@@ -20,8 +20,13 @@
   bloqueantes). Gates full-repo: ruff 307 files OK, mypy 338 files OK,
   pytest 4721 passed + 19 failed pré-existentes (comprovado via stash que
   falham sem a mudança — flags de intake/catálogo).
-- [ ] Slice 002 — Batch de encerramento + management command, ator sistema
-  (`slices/slice-002-batch-close-command.md`) — depende do slice 001
+- [x] Slice 002 — Batch de encerramento + management command, ator sistema
+  (`slices/slice-002-batch-close-command.md`) — implementado e revisado OK
+  (reviewer pi/zai-glm-5.3/max, `task_9cc3a9888cfd`/`ctx_cd7ccb7f5d35`,
+  veredito OK 2026-10-31: R1–R6 verdes, diff em 3 arquivos, 10 testes novos
+  + 472 regressão verdes, ruff/mypy limpos; 3 MINOR + 1 INFO não
+  bloqueantes). Full `pytest`: 4731 passed + 19 failed pré-existentes
+  (zero no escopo do slice).
 - [ ] Slice 003 — Agendamento diário 06:00 America/Bahia
   (`slices/slice-003-daily-schedule.md`) — depende dos slices 001+002
 

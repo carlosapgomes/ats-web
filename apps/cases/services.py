@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import uuid
 from collections.abc import Callable, Iterable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import date, datetime, time, timedelta
 from typing import Any, cast
 
@@ -1119,23 +1119,25 @@ ADMINISTRATIVE_CLOSURE_REASON_CHOICES: list[tuple[str, str]] = [
 def administratively_close_case(
     *,
     case: Case,
-    user: Any,
+    user: Any = None,
     reason_code: str,
     reason_text: str,
     active_role: str,
 ) -> Case:
     """Encerra um caso administrativamente.
 
-    Transição excepcional para CLEANED, disponível apenas para manager/admin.
-    Registra evento CASE_ADMINISTRATIVELY_CLOSED com payload auditável.
-    Limpa lock operacional e intercorrência pós-agendamento, se houver.
+    Transição excepcional para CLEANED, disponível apenas para manager/admin
+    (caminho manual) ou para a rotina sistema (rotina 06h de casos não
+    avaliados). Registra evento CASE_ADMINISTRATIVELY_CLOSED com payload
+    auditável. Limpa lock operacional e intercorrência pós-agendamento, se houver.
 
     Args:
         case: O caso a ser encerrado (não pode ser CLEANED).
-        user: Usuário que está encerrando.
+        user: Usuário que está encerrando, ou None para a rotina sistema
+            (gera evento com actor None e actor_type "system").
         reason_code: Código do motivo (chave em ADMINISTRATIVE_CLOSURE_REASONS).
         reason_text: Texto descritivo do motivo (obrigatório, não vazio).
-        active_role: Papel ativo do usuário no momento.
+        active_role: Papel ativo no momento ("system" quando user é None).
 
     Returns:
         O caso recarregado, agora em CLEANED.
@@ -1143,6 +1145,8 @@ def administratively_close_case(
     Raises:
         ValueError: Se validações falharem.
     """
+    if user is None and active_role != "system":
+        raise ValueError("Encerramento sem usuário exige active_role='system'.")
     if not reason_text.strip():
         raise ValueError("Motivo obrigatório: forneça uma descrição do encerramento.")
 
@@ -1228,6 +1232,95 @@ def administratively_close_case(
         case.save()
 
     return Case.objects.get(pk=case.pk)
+
+
+# ── Rotina 06h: casos não avaliados pelo médico (Slice 002) ───────────────
+
+
+UNEVALUATED_ROUTINE_REASON_CODE = "not_evaluated_by_doctor"
+UNEVALUATED_ROUTINE_REASON_TEXT = "Encerrado pela rotina diária 06:00 — sem decisão médica registrada."
+UNEVALUATED_ROUTINE_ACTIVE_ROLE = "system"
+
+
+@dataclass
+class UnevaluatedCloseResult:
+    """Resultado agregado da rotina de encerramento (dry-run ou execução)."""
+
+    closed: int = 0
+    skipped_locked: int = 0
+    skipped_changed: int = 0
+    closed_ids: list[str] = field(default_factory=list)
+    skipped_locked_entries: list[str] = field(default_factory=list)
+
+
+def _has_valid_lock(case: Case, now: Any) -> bool:
+    """True quando há reserva operacional válida (de outro fluxo) no caso."""
+    return case.locked_by is not None and case.locked_until is not None and case.locked_until > now
+
+
+def _lock_entry(case: Case) -> str:
+    """Identificação auditável (equipe, nunca clínica) de um lock válido."""
+    display = case.locked_by.display_name if case.locked_by else "desconhecido"
+    return f"{display} ({case.pk})"
+
+
+def close_unevaluated_wait_doctor_cases(*, dry_run: bool = False) -> UnevaluatedCloseResult:
+    """Encerra casos parados em WAIT_DOCTOR sem lock válido (rotina 06h).
+
+        Escopo estrito: só `status=WAIT_DOCTOR`. Por caso, UMA única transação
+    externa envolve `select_for_update()` → recheck de status → check de lock →
+    chamada ao serviço (o `atomic` interno vira savepoint), eliminando o TOCTOU
+    entre o recheck e o fechamento. Lock válido é pulado (nunca limpo) e
+    reportado; lock expirado segue o comportamento padrão (limpeza + fechamento).
+    `ValueError` do serviço (ex.: corrida para CLEANED) vira `skipped_changed`.
+
+        Em `dry_run`, nenhuma linha é travada e nada é escrito: os mesmos
+    contadores classificam o que seria feito.
+
+        Args:
+            dry_run: Quando True, só classifica e reporta, sem escrever.
+
+        Returns:
+            Agregado `{closed, skipped_locked, skipped_changed}` com ids.
+    """
+    result = UnevaluatedCloseResult()
+    candidate_ids: list[Any] = list(Case.objects.filter(status=CaseStatus.WAIT_DOCTOR).values_list("pk", flat=True))
+    for pk in candidate_ids:
+        if dry_run:
+            case = Case.objects.get(pk=pk)
+            if case.status != CaseStatus.WAIT_DOCTOR:
+                result.skipped_changed += 1
+                continue
+            if _has_valid_lock(case, timezone.now()):
+                result.skipped_locked += 1
+                result.skipped_locked_entries.append(_lock_entry(case))
+                continue
+            result.closed += 1
+            result.closed_ids.append(str(pk))
+            continue
+        with transaction.atomic():
+            case = Case.objects.select_for_update().get(pk=pk)
+            if case.status != CaseStatus.WAIT_DOCTOR:
+                result.skipped_changed += 1
+                continue
+            if _has_valid_lock(case, timezone.now()):
+                result.skipped_locked += 1
+                result.skipped_locked_entries.append(_lock_entry(case))
+                continue
+            try:
+                administratively_close_case(
+                    case=case,
+                    user=None,
+                    reason_code=UNEVALUATED_ROUTINE_REASON_CODE,
+                    reason_text=UNEVALUATED_ROUTINE_REASON_TEXT,
+                    active_role=UNEVALUATED_ROUTINE_ACTIVE_ROLE,
+                )
+            except ValueError:
+                result.skipped_changed += 1
+                continue
+            result.closed += 1
+            result.closed_ids.append(str(pk))
+    return result
 
 
 # ── Supplemental attachment ────────────────────────────────────────────────
