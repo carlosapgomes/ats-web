@@ -1323,6 +1323,66 @@ def close_unevaluated_wait_doctor_cases(*, dry_run: bool = False) -> Unevaluated
     return result
 
 
+# ── Agendamento diário 06:00 America/Bahia (Slice 003) ────────────────────
+
+
+AUTO_CLOSE_SCHEDULE_NAME = "auto-close-unevaluated-06h"
+AUTO_CLOSE_SCHEDULE_FUNC = "apps.cases.services.close_unevaluated_wait_doctor_cases"
+AUTO_CLOSE_SCHEDULE_CLUSTER = "llm"
+AUTO_CLOSE_ROUTINE_HOUR = 6
+AUTO_CLOSE_ROUTINE_MINUTE = 0
+
+
+def next_daily_0600(now: datetime) -> datetime:
+    """Próximo 06:00 local (America/Bahia) estritamente após `now`.
+
+        Projeção pura (sem I/O): troca o relógio para 06:00 no fuso corrente e
+    avança um dia se já passou. Bahia é UTC-3 fixo (sem DST), então `replace`
+    é seguro.
+    """
+    local = timezone.localtime(now)
+    candidate = local.replace(
+        hour=AUTO_CLOSE_ROUTINE_HOUR,
+        minute=AUTO_CLOSE_ROUTINE_MINUTE,
+        second=0,
+        microsecond=0,
+    )
+    if candidate <= local:
+        candidate += timedelta(days=1)
+    return candidate
+
+
+def ensure_auto_close_schedule(now: datetime | None = None) -> Any:
+    """Seed idempotente do agendamento diário da rotina 06h (Slice 003).
+
+        `get_or_create` por `name`: reaplicar nunca duplica. Linhas existentes
+    são preservadas (inclusive o cursor `next_run` do scheduler). DAILY com
+    `repeats=-1` (para sempre); `cluster` explícito e implantado (`llm` —
+    `cluster=NULL` cairia no cluster default `ats`, não implantado). Aponta
+    direto para o serviço (sem wrapper em outro app).
+
+        Args:
+            now: Instante de referência (default: agora). Exposto para testes
+                determinísticos do cálculo do próximo 06:00.
+
+        Returns:
+            O `Schedule` (existente ou recém-criado).
+    """
+    from django_q.models import Schedule
+
+    schedule, _created = Schedule.objects.get_or_create(
+        name=AUTO_CLOSE_SCHEDULE_NAME,
+        defaults={
+            "func": AUTO_CLOSE_SCHEDULE_FUNC,
+            "schedule_type": Schedule.DAILY,
+            "cluster": AUTO_CLOSE_SCHEDULE_CLUSTER,
+            "repeats": -1,
+            "next_run": next_daily_0600(now or timezone.now()),
+        },
+    )
+    return schedule
+
+
 # ── Supplemental attachment ────────────────────────────────────────────────
 
 

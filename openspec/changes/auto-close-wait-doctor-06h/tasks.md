@@ -27,14 +27,13 @@
   + 472 regressão verdes, ruff/mypy limpos; 3 MINOR + 1 INFO não
   bloqueantes). Full `pytest`: 4731 passed + 19 failed pré-existentes
   (zero no escopo do slice).
-- [ ] Slice 003 — Agendamento diário 06:00 America/Bahia
-  (`slices/slice-003-daily-schedule.md`) — depende dos slices 001+002
-  IMPLEMENTADO; revisão apontou 1 BLOCKER (migration 0023 sem dependência
-  `django_q` → quebra migrate em banco novo, reproduzido pelo reviewer).
-  FIX aplicado: `("django_q", "0016_schedule_intended_date_kwarg")` nas
-  dependencies; prova em banco scratch virgem (plan: django_q.0001 #93 →
-  cases.0023 #195; migrate OK; seed row=1) + 5 testes verdes.
-  AGUARDANDO confirmação de re-revisão ou aceite.
+- [x] Slice 003 — Agendamento diário 06:00 America/Bahia
+  (`slices/slice-003-daily-schedule.md`) — implementado; revisão 1 apontou
+  BLOCKER (migration sem dep `django_q`, fix `59bb8db`); re-revisão
+  (`task_c2aa76b2fc4f`/`ctx_baa2caf64395`) LIFTED o BLOCKER original mas
+  apontou DoD: implementação do slice 003 estava uncommitted (só a migration
+  tinha subido). Corrigido neste commit: helper + command + testes + migration
+  committed e pushed; veredito final do revisor pendente.
 
 ## 2. Gate final (uma vez após o slice 003)
 

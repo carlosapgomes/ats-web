@@ -7,6 +7,14 @@ linhas nem escrever.
 O relatório é operacional (contagens + ids + responsável pelo lock, nunca
 texto clínico). Exit 0 sempre: pulados não são erro.
 
+Verificação da execução diária (R5 do slice 003):
+- admin do django-q2 → Schedules → `auto-close-unevaluated-06h` (última task,
+  próximo `next_run` em 06:00 America/Bahia);
+- log do worker `llm` (`... created a task from schedule [auto-...]`);
+- este command com `--dry-run` a qualquer hora (só leitura).
+Semântica de falta: clusters com `catch_up: False` — worker fora do ar às
+06:00 = execução pulada sem back-fill (tolerado pelo desenho idempotente).
+
 Usage:
     uv run python manage.py auto_close_unevaluated_cases --settings=config.settings.dev
     uv run python manage.py auto_close_unevaluated_cases --dry-run --settings=config.settings.dev
