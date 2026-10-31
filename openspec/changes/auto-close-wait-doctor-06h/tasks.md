@@ -28,16 +28,18 @@
   bloqueantes). Full `pytest`: 4731 passed + 19 failed pré-existentes
   (zero no escopo do slice).
 - [x] Slice 003 — Agendamento diário 06:00 America/Bahia
-  (`slices/slice-003-daily-schedule.md`) — implementado; revisão 1 apontou
-  BLOCKER (migration sem dep `django_q`, fix `59bb8db`); re-revisão
-  (`task_c2aa76b2fc4f`/`ctx_baa2caf64395`) LIFTED o BLOCKER original mas
-  apontou DoD: implementação do slice 003 estava uncommitted (só a migration
-  tinha subido). Corrigido neste commit: helper + command + testes + migration
-  committed e pushed; veredito final do revisor pendente.
+  (`slices/slice-003-daily-schedule.md`) — implementado; revisão 1 BLOCK
+  (migration sem dep `django_q`, fix `59bb8db`); re-revisão
+  (`task_c2aa76b2fc4f`/`ctx_baa2caf64395`) LIFTED o original mas apontou DoD
+  (implementação uncommitted); corrigido em `d10696f`; confirmação final
+  (`task_dcc2895c0408`/`ctx_622c7d51e269`, OK 2026-10-31): NEW BLOCK LIFTED,
+  sem novos achados — change pronto p/ gate final.
 
 ## 2. Gate final (uma vez após o slice 003)
 
-- [ ] 2.1 Quality gate do `AGENTS.md`: ruff + mypy + pytest verdes.
-- [ ] 2.2 Validar o change (`openspec change validate auto-close-wait-doctor-06h --strict`, se a CLI estiver disponível).
+- [x] 2.1 Quality gate do `AGENTS.md`: ruff check OK, ruff format OK
+  (310 files), mypy OK (342 files), pytest **4736 passed** + 19 failed
+  pré-existentes idênticos ao baseline (flags de intake, zero no escopo).
+- [x] 2.2 `openspec change validate auto-close-wait-doctor-06h --strict` → `valid`.
 - [ ] 2.3 Push/merge/release/deploy: AGUARDANDO instrução explícita.
   (Stop rule: PARAR após cada slice e pedir confirmação explícita do próximo.)
