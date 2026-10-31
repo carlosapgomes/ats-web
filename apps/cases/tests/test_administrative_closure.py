@@ -512,3 +512,47 @@ class TestAdministrativeClosureFSMIntegration:
         )
         case = Case.objects.get(pk=case.pk)
         assert case.status == CaseStatus.CLEANED
+
+
+# ── Slice auto-close-wait-doctor-06h / 001 ───────────────────────────────
+
+
+class TestUnevaluatedRoutineReasonAndTimeline:
+    """Motivo da rotina 06h no catálogo + razão visível na Linha do Tempo."""
+
+    def test_reason_catalog_contains_not_evaluated_by_doctor(self) -> None:
+        from apps.cases.services import ADMINISTRATIVE_CLOSURE_REASONS
+
+        assert "not_evaluated_by_doctor" in ADMINISTRATIVE_CLOSURE_REASONS
+        label = ADMINISTRATIVE_CLOSURE_REASONS["not_evaluated_by_doctor"]
+        assert "Não avaliado pelo médico" in label
+
+    def test_timeline_shows_reason_and_previous_status(self, user, case_factory) -> None:
+        from apps.cases.procedure_review import timeline_detail_lines
+
+        case = case_factory(user)
+        event = CaseEvent(
+            case=case,
+            event_type="CASE_ADMINISTRATIVELY_CLOSED",
+            payload={
+                "reason_code": "not_evaluated_by_doctor",
+                "reason_text": "Encerrado pela rotina diária 06:00 — sem decisão médica registrada.",
+                "previous_status": "WAIT_DOCTOR",
+            },
+        )
+        lines = timeline_detail_lines(event)
+        assert lines, "timeline deve exibir detalhe do encerramento administrativo"
+        assert any("Não avaliado pelo médico" in line for line in lines)
+        assert any("WAIT_DOCTOR" in line for line in lines)
+
+    def test_timeline_legacy_empty_payload_does_not_raise(self, user, case_factory) -> None:
+        from apps.cases.procedure_review import timeline_detail_lines
+
+        case = case_factory(user)
+        event = CaseEvent(
+            case=case,
+            event_type="CASE_ADMINISTRATIVELY_CLOSED",
+            payload={},
+        )
+        lines = timeline_detail_lines(event)
+        assert isinstance(lines, list)

@@ -272,6 +272,34 @@ def format_invalidated_lines(event: CaseEvent) -> list[str]:
     return [f"Confirmação desconsiderada: {label}. A análise segue as regras automáticas."]
 
 
+def format_admin_closed_lines(event: CaseEvent) -> list[str]:
+    """Linhas do evento de encerramento administrativo na Linha do Tempo.
+
+    Projetadas exclusivamente do `payload` (sem consultar o Case mutável),
+    cobrindo a rotina 06h (`not_evaluated_by_doctor`) e o caminho manual.
+    Payloads históricos vazios retornam `[]`. O import é tardio de propósito:
+    `apps.cases.services` importa `apps.intake.services`, que importa este
+    módulo — importar o catálogo no topo fecharia o ciclo e quebraria o load.
+    """
+    from apps.cases.services import ADMINISTRATIVE_CLOSURE_REASONS
+
+    payload = event.payload if isinstance(event.payload, dict) else {}
+    reason_code = str(payload.get("reason_code") or "").strip()
+    reason_text = str(payload.get("reason_text") or "").strip()
+    previous_status = str(payload.get("previous_status") or "").strip()
+    if not reason_code and not reason_text and not previous_status:
+        return []
+    reason_label = ADMINISTRATIVE_CLOSURE_REASONS.get(reason_code, reason_code)
+    lines: list[str] = []
+    if reason_label:
+        lines.append(f"Motivo: {reason_label}.")
+    if reason_text and reason_text != reason_label:
+        lines.append(f"Detalhe: {reason_text}")
+    if previous_status:
+        lines.append(f"Status anterior: {previous_status}.")
+    return lines
+
+
 def timeline_detail_lines(event: CaseEvent) -> list[str]:
     """Despacho unico para as timelines: detalhe dos 3 eventos novos (D6).
 
@@ -285,6 +313,8 @@ def timeline_detail_lines(event: CaseEvent) -> list[str]:
         return format_applied_lines(event)
     if event_type == REVIEW_INVALIDATED_EVENT:
         return format_invalidated_lines(event)
+    if event_type == "CASE_ADMINISTRATIVELY_CLOSED":
+        return format_admin_closed_lines(event)
     return []
 
 

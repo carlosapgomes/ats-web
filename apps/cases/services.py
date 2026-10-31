@@ -1107,6 +1107,7 @@ ADMINISTRATIVE_CLOSURE_REASONS: dict[str, str] = {
     "system_bug": "Bug do sistema",
     "stuck_lock": "Reserva/lock travado",
     "duplicate_reprocess": "Duplicado/reapresentação manual",
+    "not_evaluated_by_doctor": "Não avaliado pelo médico — rotina 06:00",
     "other": "Outro",
 }
 
