@@ -183,12 +183,21 @@ class TestFollowUpFormAccess:
         response = client.get(_form_url(case))
         assert response.status_code == 200
 
-    @pytest.mark.parametrize("role_name", ["nir", "doctor", "scheduler"])
+    @pytest.mark.parametrize("role_name", ["nir", "doctor"])
     def test_get_other_roles_redirected(self, client, role_name: str) -> None:
         user = _login_as(client, role_name)
         case = _create_case(user, arn=f"{role_name}-NO-001", name="Bloqueado")
         response = client.get(_form_url(case))
         assert response.status_code == 302
+
+    def test_get_scheduler_only_allowed(self, client) -> None:
+        """scheduler-only ativo (S1) → form 200."""
+        user = _login_as(client, "scheduler")
+        assert set(user.roles.values_list("name", flat=True)) == {"scheduler"}
+        case = _create_case(user, arn="SCHED-OK-001", name="Agendador")
+        _add_procedure(case)
+        response = client.get(_form_url(case))
+        assert response.status_code == 200
 
     def test_get_inexistent_case_returns_404(self, client) -> None:
         _login_as(client, "manager")

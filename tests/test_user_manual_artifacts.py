@@ -279,3 +279,47 @@ class TestUserManualSection61CauseCatalog:
         section = self._section61().lower()
         for legacy_term in ("absenteísmo", "cancelamento por falta de recursos", "submotivo"):
             assert legacy_term not in section, f"§6.1 ainda orienta {legacy_term!r}"
+
+
+# ── S1 (grant-scheduler-post-procedure-access): Agendador no Pós-Procedimento ──
+
+
+class TestUserManualSchedulerPostProcedureS1:
+    """S1.R6: manual/contexto descrevem só a entrega real de S1 (parcial)."""
+
+    @staticmethod
+    def _section(number: str, next_number: str) -> str:
+        content = MANUAL_PATH.read_text(encoding="utf-8")
+        start = content.index(f"# {number} ")
+        end = content.index(f"# {next_number} ", start)
+        # Normaliza quebras de linha para frases que envolvem linhas do Markdown.
+        return " ".join(content[start:end].split())
+
+    def test_section5_documents_scheduler_entry_to_post_procedure(self) -> None:
+        """§5 (CHD/Agendador) documenta a entrada operacional ao Pós-Procedimento."""
+        section5 = self._section("5.", "6.")
+        assert "Pós-Procedimento" in section5
+        assert "todos os casos elegíveis" in section5
+
+    def test_section6_documents_scheduler_partial_availability(self) -> None:
+        """§6 documenta busca/registro globais e o histórico de versões do formulário."""
+        section6 = self._section("6.", "7.")
+        assert "Agendador" in section6
+        assert "todos os casos elegíveis" in section6
+        assert "outros agendadores" in section6
+        assert "vinda imediata" in section6
+        assert "Histórico de versões" in section6
+
+    def test_section6_states_analytical_history_and_csv_unavailable_to_scheduler(self) -> None:
+        """§6 declara que Histórico & Exportação/CSV ainda não está disponível ao Agendador."""
+        section6 = self._section("6.", "7.")
+        assert "ainda não" in section6
+        assert "disponíveis ao Agendador" in section6 or "disponível ao Agendador" in section6
+        assert "Histórico & Exportação" in section6
+
+    def test_project_context_documents_scheduler_partial_availability(self) -> None:
+        """PROJECT_CONTEXT.md reflete a entrega parcial de S1, sem prometer S2."""
+        context = (PROJECT_ROOT / "PROJECT_CONTEXT.md").read_text(encoding="utf-8")
+        assert "Pós-Procedimento" in context
+        assert "Histórico & Exportação" in context
+        assert "ainda não" in context

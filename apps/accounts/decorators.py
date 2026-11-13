@@ -43,8 +43,10 @@ def role_required(*allowed_roles: str):
 def followup_access_required[**P, R](
     view_func: Callable[Concatenate[HttpRequest, P], R],
 ) -> Callable[Concatenate[HttpRequest, P], R]:
-    """Exige a política CHD (D1). Empilhar após @login_required +
-    @role_required("manager", "admin"). Sem acesso: flash + redirect("/").
+    """Exige a política CHD (D1/D6). Empilhar após @login_required +
+    @role_required("manager", "admin", "scheduler") em lista/formulário
+    (histórico/CSV mantêm @role_required("manager", "admin") até S2).
+    Sem acesso: flash + redirect("/").
 
     Consome ``can_access_followup`` (apps.accounts.services) — não há segunda
     implementação da composição (papel ativo + posse do papel scheduler).

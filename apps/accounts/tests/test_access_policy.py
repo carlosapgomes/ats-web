@@ -69,10 +69,33 @@ class TestCanAccessFollowup:
         user = _user_with_roles("admin", "scheduler")
         assert can_access_followup(user, "manager") is True
 
+    def test_can_access_followup_scheduler_only_allowed(self) -> None:
+        """scheduler-only ativo/autenticado/ativo → True (S1)."""
+        user = _user_with_roles("scheduler")
+        assert can_access_followup(user, "scheduler") is True
+
     def test_can_access_followup_scheduler_active_blocked(self) -> None:
-        """scheduler ativo (mesmo possuindo manager) → False."""
+        """multi-role scheduler ativo (mesmo possuindo manager) → True (S1)."""
         user = _user_with_roles("manager", "scheduler")
+        assert can_access_followup(user, "scheduler") is True
+
+    @pytest.mark.parametrize("active_role", ["doctor", "nir"])
+    def test_can_access_followup_doctor_nir_with_scheduler_assigned_blocked(self, active_role: str) -> None:
+        """doctor/nir ativos, mesmo com scheduler atribuído → False."""
+        user = _user_with_roles(active_role, "scheduler")
+        assert can_access_followup(user, active_role) is False
+
+    def test_can_access_followup_inactive_scheduler_blocked(self) -> None:
+        """Usuário inativo com scheduler ativo → False."""
+        user = _user_with_roles("scheduler")
+        user.is_active = False
+        user.save(update_fields=["is_active"])
         assert can_access_followup(user, "scheduler") is False
+
+    def test_can_access_followup_unknown_role_blocked(self) -> None:
+        """Papel ativo desconhecido → False."""
+        user = _user_with_roles("scheduler")
+        assert can_access_followup(user, "unknown-role") is False
 
     @pytest.mark.parametrize("active_role", ["doctor", "nir"])
     def test_can_access_followup_doctor_and_nir_blocked(self, active_role: str) -> None:
@@ -150,14 +173,15 @@ class TestFollowupAccessRequired:
         assert response.status_code == 200
         assert response.content == b"followup ok"
 
-    def test_blocks_scheduler_active(self, rf: RequestFactory) -> None:
-        """scheduler ativo → 302 `/` com flash (papel fora da política)."""
+    def test_allows_scheduler_active(self, rf: RequestFactory) -> None:
+        """scheduler ativo (S1) → executa a view."""
         user = _user_with_roles("manager", "scheduler")
         request = self._build_request(rf, user, active_role="scheduler")
 
         response = _dummy_followup_view(request)
 
-        self._assert_blocked(request, response)
+        assert response.status_code == 200
+        assert response.content == b"followup ok"
 
 
 @pytest.mark.django_db
@@ -198,12 +222,12 @@ class TestRoleContextCanAccessFollowup:
         context = role_context(request)
         assert context["can_access_followup"] is True
 
-    def test_can_access_followup_context_scheduler_active_is_false(self, rf: RequestFactory) -> None:
-        """scheduler ativo → False no contexto."""
+    def test_can_access_followup_context_scheduler_active_is_true(self, rf: RequestFactory) -> None:
+        """scheduler ativo → True no contexto (S1)."""
         user = _user_with_roles("manager", "scheduler")
         request = self._build_request(rf, user, active_role="scheduler")
         context = role_context(request)
-        assert context["can_access_followup"] is False
+        assert context["can_access_followup"] is True
 
     def test_role_context_still_exposes_active_role_keys(self, rf: RequestFactory) -> None:
         """role_context preserva as chaves ativas (active_role/display)."""

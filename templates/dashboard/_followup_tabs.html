@@ -9,7 +9,15 @@ sem contexto extra. Inclua no topo do conteúdo das duas páginas:
   <li class="nav-item" role="presentation">
     <a class="nav-link {% if request.resolver_match.url_name == 'followup_list' %}active{% endif %}" href="{% url 'dashboard:followup_list' %}">Registrar</a>
   </li>
+  {% comment %}
+  Transitório S1 (D6): o Agendador (scheduler) ainda não acessa o Histórico &
+  Exportação — a sub-aba fica oculta para ele até S2 liberar os endpoints.
+  Condição apenas de apresentação: a proteção real permanece nos guards das
+  views de histórico/CSV. Supervisor/admin mantêm as duas sub-abas.
+  {% endcomment %}
+  {% if active_role != "scheduler" %}
   <li class="nav-item" role="presentation">
     <a class="nav-link {% if request.resolver_match.url_name == 'followup_history' %}active{% endif %}" href="{% url 'dashboard:followup_history' %}">Histórico &amp; Exportação</a>
   </li>
+  {% endif %}
 </ul>

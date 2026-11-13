@@ -2,7 +2,7 @@
 Partial de navegação do agendador com três abas.
 
 Contexto:
-  active_tab: "pending" | "processed" | "historical"
+  active_tab: "pending" | "processed" | "historical" | "followup"
   total_notice_count: int (opcional, para badge de Pendentes)
   processed_today_count: int (opcional, para badge de Processados Hoje)
 
@@ -28,5 +28,12 @@ Uso:
          style="position:relative;"
          href="{% url 'scheduler:historical_search' %}">Buscar caso antigo</a>
     </li>
+    {% if can_access_followup %}
+    <li class="nav-item">
+      <a class="nav-link {% if active_tab == 'followup' %}active{% endif %}"
+         style="position:relative;"
+         href="{% url 'dashboard:followup_list' %}">Pós-Procedimento</a>
+    </li>
+    {% endif %}
   </ul>
 </nav>

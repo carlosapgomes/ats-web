@@ -334,24 +334,26 @@ def send_user_invitation_email(user: User) -> None:
 
 
 def can_access_followup(user: User | AnonymousUser, active_role: str) -> bool:
-    """Aba Follow-up é operação do supervisor do CHD.
+    """Aba Follow-up é operação do supervisor do CHD e do Agendador (S1).
 
-    Papel ativo manager exige posse do papel scheduler (CHD);
+    Papel ativo scheduler (Agendador) acessa lista/formulário;
+    papel ativo manager exige posse do papel scheduler (CHD);
     papel ativo admin é isento (emergência/suporte); anônimo e usuário
     inativo nunca acessam — a isenção do admin vale apenas para usuário
     autenticado e ativo.
     Fonte única consumida pelo decorator ``followup_access_required`` e pelo
-    context processor ``role_context`` (design D1/D3).
+    context processor ``role_context`` (design D1/D3/D6).
     """
     # Guarda de identidade antes de qualquer verificação de papel: anônimo e
     # usuário inativo → False (sem query de roles para anônimo).
     if not user.is_authenticated or not user.is_active:
         return False
-    if active_role not in {"manager", "admin"}:
+    if active_role not in {"manager", "admin", "scheduler"}:
         return False
     if active_role == "admin":
         return True
-    # active_role == "manager" → exige vínculo CHD (posse do papel scheduler).
+    # active_role manager/scheduler → exige posse do papel scheduler
+    # (vínculo CHD para o supervisor; papel do Agendador para o scheduler).
     from apps.accounts.models import User as UserModel
 
     if not isinstance(user, UserModel):

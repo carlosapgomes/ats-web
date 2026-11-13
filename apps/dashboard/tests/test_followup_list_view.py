@@ -154,12 +154,19 @@ class TestFollowUpListAccess:
         response = client.get(reverse("dashboard:followup_list"))
         assert response.status_code == 200
 
-    @pytest.mark.parametrize("role_name", ["nir", "doctor", "scheduler"])
+    @pytest.mark.parametrize("role_name", ["nir", "doctor"])
     def test_other_roles_redirected(self, client, role_name: str) -> None:
-        """scheduler/doctor/nir ativos → 302 (como hoje; sem conteúdo)."""
+        """doctor/nir ativos → 302 (como hoje; sem conteúdo)."""
         _login_as(client, role_name)
         response = client.get(reverse("dashboard:followup_list"))
         assert response.status_code == 302
+
+    def test_scheduler_only_allowed(self, client) -> None:
+        """scheduler-only ativo (S1) → 200."""
+        user = _login_as(client, "scheduler")
+        assert set(user.roles.values_list("name", flat=True)) == {"scheduler"}
+        response = client.get(reverse("dashboard:followup_list"))
+        assert response.status_code == 200
 
 
 # ── R2: default hoje + ontem e ordenação ────────────────────────────────

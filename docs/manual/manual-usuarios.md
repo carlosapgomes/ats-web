@@ -899,6 +899,20 @@ para a resposta final.
 
 # 5. Ações do usuário CHD/Agendador
 
+## 5.0 Pós-Procedimento do Agendador (pesquisar, registrar e atualizar)
+
+O Agendador (papel ativo **Agendador**, dentro da intranet) também acessa o
+**Pós-Procedimento** pela própria navegação operacional: na entrada
+**Pós-Procedimento** do menu do Agendador, a busca lista **todos os casos
+elegíveis** — inclusive casos agendados por outros agendadores e casos de
+**vinda imediata** — por nome, ocorrência ou data, sem filtro por quem
+agendou. O formulário é o mesmo do Supervisor: registrar cria a versão 1 e
+salvar novamente cria a versão seguinte, preservando autor e data/hora de
+cada versão no **Histórico de versões** do formulário. O Agendador **não**
+acessa o Dashboard nem as demais áreas gerenciais por meio desse recurso.
+A consulta analítica **Histórico & Exportação** e a exportação em CSV
+**ainda não estão disponíveis ao Agendador** (ver seção 6.2).
+
 ## 5.1 Abrir a fila de agendamento
 
 Na página do CHD/agendador, acesse a **Fila de Agendamento**.
@@ -1154,6 +1168,16 @@ A aba **Pós-Procedimento** tem duas sub-abas:
 - **Histórico & Exportação** — a consulta e a exportação dos desfechos
   registrados (seção 6.2).
 
+O **Agendador** (papel ativo **Agendador**, dentro da intranet) também usa o
+Pós-Procedimento, pela navegação operacional do Agendador (seção 5.0):
+pesquisa **todos os casos elegíveis** — inclusive casos de outros agendadores
+e de **vinda imediata** — e registra/atualiza desfechos com as mesmas
+versões e o mesmo **Histórico de versões** do formulário. Para o Agendador,
+o **Histórico & Exportação** (seção 6.2) e a exportação em CSV **ainda não
+estão disponíveis ao Agendador**; a sub-aba não é exibida e o acesso direto
+é negado. O Agendador não acessa o Dashboard nem as demais áreas
+gerenciais.
+
 ## 6.1 Registrar o pós-procedimento
 
 ### Quando usar
@@ -1173,11 +1197,19 @@ pós-procedimento apenas registra o desfecho.
 
 ### Como abrir a sub-aba Registrar
 
+Supervisor do CHD ou Administrador:
+
 1. entrar no sistema com o papel ativo **Supervisor** (supervisor do CHD) ou
    **Administrador**;
 2. acessar o **Dashboard**;
 3. clicar na aba **Pós-Procedimento** no menu do dashboard — a sub-aba
    **Registrar** abre por padrão.
+
+Agendador:
+
+1. entrar no sistema com o papel ativo **Agendador**, dentro da intranet;
+2. clicar na entrada **Pós-Procedimento** do menu do Agendador — a lista de
+   casos elegíveis abre com a navegação operacional e a entrada ativa.
 
 ### O que a lista mostra
 
@@ -1266,9 +1298,18 @@ Cada gravação cria uma **nova versão** do pós-procedimento do caso:
 Na tela do formulário, o painel **Versões do pós-procedimento** mostra a
 versão atual e o histórico completo das versões preservadas. Para corrigir um
 registro já feito, basta salvar novamente: o sistema cria uma versão nova e
-mantém a anterior no histórico com autor e data originais.
+mantém a anterior no histórico com autor e data originais. O **Histórico de
+versões** do formulário está disponível também ao Agendador, que compartilha
+as mesmas versões com o Supervisor (cada gravação registra quem salvou).
 
 ## 6.2 Histórico & Exportação
+
+> **Agendador:** a consulta analítica **Histórico & Exportação** e a
+exportação em CSV **ainda não estão disponíveis ao Agendador** nesta etapa.
+> A sub-aba não é exibida na navegação do Agendador e o acesso direto é
+> negado; o Agendador utiliza a busca, o registro/atualização e o
+> **Histórico de versões** do formulário (seções 5.0 e 6.1). A descrição
+> abaixo vale para Supervisor do CHD e Administrador.
 
 A sub-aba **Histórico & Exportação** permite consultar e exportar os
 desfechos já registrados. Cada caso aparece **uma única vez**, com os dados

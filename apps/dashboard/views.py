@@ -1451,7 +1451,7 @@ def _followup_item_sort_key(item: dict[str, Any]) -> tuple[str, datetime | None]
 
 
 @login_required
-@role_required("manager", "admin")
+@role_required("manager", "admin", "scheduler")
 @followup_access_required
 def followup_list(request: HttpRequest) -> HttpResponse:
     """Aba Follow-up do supervisor: desfechos elegíveis de hoje+ontem ou ?date=/busca.
@@ -1981,7 +1981,7 @@ def _followup_form_context(
 
 
 @login_required
-@role_required("manager", "admin")
+@role_required("manager", "admin", "scheduler")
 @followup_access_required
 def followup_form(request: HttpRequest, case_id: uuid.UUID) -> HttpResponse:
     """Formulário de follow-up: desfecho por procedimento + internação (D6).

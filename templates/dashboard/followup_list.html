@@ -5,7 +5,11 @@
 {% block page_title %}<h1 class="page-title">Pós-Procedimento de desfecho de agendamentos</h1>{% endblock %}
 
 {% block nav %}
+{% if active_role == "scheduler" %}
+{% include "scheduler/_nav.html" with active_tab="followup" %}
+{% else %}
 {% include "dashboard/_nav.html" %}
+{% endif %}
 {% endblock %}
 
 {% block content %}
