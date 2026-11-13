@@ -899,7 +899,7 @@ para a resposta final.
 
 # 5. Ações do usuário CHD/Agendador
 
-## 5.0 Pós-Procedimento do Agendador (pesquisar, registrar e atualizar)
+## 5.0 Pós-Procedimento do Agendador (pesquisar, registrar, atualizar e consultar/exportar)
 
 O Agendador (papel ativo **Agendador**, dentro da intranet) também acessa o
 **Pós-Procedimento** pela própria navegação operacional: na entrada
@@ -910,8 +910,11 @@ agendou. O formulário é o mesmo do Supervisor: registrar cria a versão 1 e
 salvar novamente cria a versão seguinte, preservando autor e data/hora de
 cada versão no **Histórico de versões** do formulário. O Agendador **não**
 acessa o Dashboard nem as demais áreas gerenciais por meio desse recurso.
-A consulta analítica **Histórico & Exportação** e a exportação em CSV
-**ainda não estão disponíveis ao Agendador** (ver seção 6.2).
+Na sub-aba **Histórico & Exportação** (seção 6.2), o Agendador consulta os
+mesmos resumos, filtros e linhas correntes do Supervisor — sobre **todos**
+os casos elegíveis, inclusive de outros agendadores e de vinda imediata —
+e baixa o CSV completo com a mesma população; a consulta e a exportação
+não alteram registros nem criam eventos.
 
 ## 5.1 Abrir a fila de agendamento
 
@@ -1172,10 +1175,12 @@ O **Agendador** (papel ativo **Agendador**, dentro da intranet) também usa o
 Pós-Procedimento, pela navegação operacional do Agendador (seção 5.0):
 pesquisa **todos os casos elegíveis** — inclusive casos de outros agendadores
 e de **vinda imediata** — e registra/atualiza desfechos com as mesmas
-versões e o mesmo **Histórico de versões** do formulário. Para o Agendador,
-o **Histórico & Exportação** (seção 6.2) e a exportação em CSV **ainda não
-estão disponíveis ao Agendador**; a sub-aba não é exibida e o acesso direto
-é negado. O Agendador não acessa o Dashboard nem as demais áreas
+versões e o mesmo **Histórico de versões** do formulário. Na sub-aba
+**Histórico & Exportação** (seção 6.2), o Agendador tem acesso à mesma
+consulta e à mesma exportação em CSV **disponíveis ao Agendador**: os
+mesmos resumos, filtros, linhas correntes e CSV completo do Supervisor,
+sobre a população global de elegíveis, sem filtro por quem agendou ou
+registrou. O Agendador não acessa o Dashboard nem as demais áreas
 gerenciais.
 
 ## 6.1 Registrar o pós-procedimento
@@ -1305,11 +1310,11 @@ as mesmas versões com o Supervisor (cada gravação registra quem salvou).
 ## 6.2 Histórico & Exportação
 
 > **Agendador:** a consulta analítica **Histórico & Exportação** e a
-exportação em CSV **ainda não estão disponíveis ao Agendador** nesta etapa.
-> A sub-aba não é exibida na navegação do Agendador e o acesso direto é
-> negado; o Agendador utiliza a busca, o registro/atualização e o
-> **Histórico de versões** do formulário (seções 5.0 e 6.1). A descrição
-> abaixo vale para Supervisor do CHD e Administrador.
+exportação em CSV **estão disponíveis ao Agendador** pela navegação
+operacional, com os mesmos resumos, filtros, linhas correntes e CSV do
+Supervisor sobre a população global de elegíveis (outros agendadores e
+vinda imediata incluídos), sem acesso ao Dashboard. A descrição abaixo
+vale para Supervisor do CHD, Administrador e Agendador.
 
 A sub-aba **Histórico & Exportação** permite consultar e exportar os
 desfechos já registrados. Cada caso aparece **uma única vez**, com os dados

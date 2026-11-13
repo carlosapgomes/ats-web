@@ -334,9 +334,9 @@ def send_user_invitation_email(user: User) -> None:
 
 
 def can_access_followup(user: User | AnonymousUser, active_role: str) -> bool:
-    """Aba Follow-up é operação do supervisor do CHD e do Agendador (S1).
+    """Aba Follow-up é operação do supervisor do CHD e do Agendador (S1/S2).
 
-    Papel ativo scheduler (Agendador) acessa lista/formulário;
+    Papel ativo scheduler (Agendador) acessa lista/formulário/histórico/CSV;
     papel ativo manager exige posse do papel scheduler (CHD);
     papel ativo admin é isento (emergência/suporte); anônimo e usuário
     inativo nunca acessam — a isenção do admin vale apenas para usuário

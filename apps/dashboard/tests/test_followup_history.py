@@ -293,7 +293,7 @@ def _filter_scenario(client) -> dict[str, Case]:
 
 
 class TestHistoryAccess:
-    """GET /dashboard/follow-ups/history/ exige login + manager/admin com CHD (D6)."""
+    """GET /dashboard/follow-ups/history/: manager/admin com CHD e scheduler (D6/S2)."""
 
     def test_anonymous_redirected_to_login(self, client) -> None:
         response = client.get(HISTORY_URL)
@@ -344,12 +344,19 @@ class TestHistoryAccess:
         response = client.get(HISTORY_URL)
         assert response.status_code == 200
 
-    @pytest.mark.parametrize("role_name", ["nir", "doctor", "scheduler"])
+    @pytest.mark.parametrize("role_name", ["nir", "doctor"])
     def test_other_roles_redirected(self, client, role_name: str) -> None:
-        """scheduler/doctor/nir ativos → 302 (como hoje; sem conteúdo)."""
+        """doctor/nir ativos → 302 (sem conteúdo)."""
         _login_as(client, role_name)
         response = client.get(HISTORY_URL)
         assert response.status_code == 302
+
+    def test_scheduler_allowed(self, client) -> None:
+        """S2.R1: scheduler-only ativo → 200 (sem papel manager)."""
+        user = _login_as(client, "scheduler")
+        assert set(user.roles.values_list("name", flat=True)) == {"scheduler"}
+        response = client.get(HISTORY_URL)
+        assert response.status_code == 200
 
 
 # ── R2: sub-abas Registrar | Histórico & Exportação ─────────────────────
@@ -758,7 +765,7 @@ class TestHistoryExportAccess:
         assert response.status_code == 302
         assert "/login/" in response.url
 
-    @pytest.mark.parametrize("role_name", ["nir", "scheduler", "doctor"])
+    @pytest.mark.parametrize("role_name", ["nir", "doctor"])
     def test_export_papeis_sem_acesso_bloqueados_sem_conteudo(self, client, role_name: str) -> None:
         # Dados existem, mas não podem vazar para papéis sem acesso.
         data_user = User.objects.create_user(username=f"export-data-{role_name}@test", password="testpass123")
@@ -772,6 +779,15 @@ class TestHistoryExportAccess:
         assert response.status_code == 302
         assert "CSV-SECRET" not in response.content.decode()
         assert "Paciente Secreto" not in response.content.decode()
+
+    def test_export_scheduler_allowed(self, client) -> None:
+        """S2.R1: scheduler-only ativo → 200 com CSV completo."""
+        user = _login_as(client, "scheduler")
+        case = _create_scheduled_case(user, arn="CSV-SCHED", name="Export Scheduler", when=_local_dt(day_offset=0))
+        _record(case, user)
+        response = client.get(EXPORT_URL)
+        assert response.status_code == 200
+        assert response["Content-Type"] == "text/csv; charset=utf-8"
 
 
 # ── R2: header fixo PT-BR de 13 colunas ────────────────────────────────

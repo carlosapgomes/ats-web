@@ -1,12 +1,16 @@
-"""Integração S1: Agendador pesquisa/registra/atualiza o Pós-Procedimento (S1.R1–R5).
+"""Integração S2: Agendador pesquisa/registra/atualiza e consulta/exporta Pós-Procedimento (S2.R1–R5).
 
 Scheduler-only na intranet: menu operacional → busca global de elegíveis →
-formulário → versões auditáveis entre autores. Histórico analítico/CSV e
-demais superfícies gerenciais permanecem negados (fronteira S1/S2).
+formulário → versões auditáveis entre autores, e sub-aba Histórico &
+Exportação com a mesma população/resumos/filtros/CSV do supervisor.
+Demais superfícies gerenciais permanecem negadas.
 """
 
+import csv
+import io
 import uuid
 from datetime import datetime, time, timedelta
+from typing import cast
 
 import pytest
 from django.contrib.auth import get_user_model
@@ -23,6 +27,7 @@ from apps.cases.models import (
     CaseFollowUp,
     CaseProcedure,
     CaseStatus,
+    ProcedureFollowUp,
 )
 
 pytestmark = pytest.mark.django_db
@@ -139,7 +144,7 @@ def _assert_no_followup_writes(case: Case, *, count: int = 0) -> None:
 
 
 class TestSchedulerFollowupPolicyHttp:
-    """S1.R1 — scheduler acessa lista/form; histórico/CSV seguem negados."""
+    """S2.R1 — scheduler acessa lista/form/histórico/CSV; demais papéis seguem negados."""
 
     def test_scheduler_only_list_and_form_200(self, client) -> None:
         sched_client, user = _scheduler_client()
@@ -162,16 +167,39 @@ class TestSchedulerFollowupPolicyHttp:
         assert event.payload  # snapshot do desfecho presente
 
     @pytest.mark.parametrize("url", [HISTORY_URL, EXPORT_URL])
-    def test_scheduler_only_history_and_csv_denied(self, client, url: str) -> None:
-        sched_client, _ = _scheduler_client()
-        _assert_blocked_by_guard(sched_client.get(url))
+    def test_scheduler_only_history_and_csv_allowed(self, client, url: str) -> None:
+        """S2.R1: scheduler-only interno acessa histórico e CSV por URL direta."""
+        sched_client, user = _scheduler_client()
+        case = _scheduled_case(user, arn="S2-HIST-001", name="Paciente Histórico")
+        procedure = _add_procedure(case)
+        from apps.cases.followup import ProcedureOutcomeInput, record_case_follow_up
+
+        record_case_follow_up(
+            case=case,
+            performed_by=user,
+            patient_admitted=True,
+            procedure_outcomes=[ProcedureOutcomeInput(procedure_id=procedure.id, performed=True)],
+        )
+        response = sched_client.get(url)
+        assert response.status_code == 200
+        if url == EXPORT_URL:
+            assert response["Content-Type"] == "text/csv; charset=utf-8"
 
     @pytest.mark.parametrize("url", [HISTORY_URL, EXPORT_URL])
-    def test_multi_role_scheduler_active_history_and_csv_denied(self, client, url: str) -> None:
-        """Conta multi-role com scheduler ativo: histórico/CSV negados (S1)."""
+    def test_multi_role_scheduler_active_history_and_csv_allowed(self, client, url: str) -> None:
+        """S2.R1: conta multi-role com scheduler ativo acessa histórico/CSV."""
         multi_client = Client()
-        _login_as(multi_client, "multi-s1@test", ["scheduler", "manager"], active_role="scheduler")
-        _assert_blocked_by_guard(multi_client.get(url))
+        _login_as(multi_client, "multi-s2@test", ["scheduler", "manager"], active_role="scheduler")
+        response = multi_client.get(url)
+        assert response.status_code == 200
+
+    @pytest.mark.parametrize("role_name", ["doctor", "nir"])
+    def test_doctor_nir_history_and_csv_denied(self, client, role_name: str) -> None:
+        """S2.R1: doctor/nir ativos (mesmo com scheduler atribuído) seguem negados."""
+        other_client = Client()
+        _login_as(other_client, f"{role_name}-s2-history@test", [role_name, "scheduler"], active_role=role_name)
+        _assert_blocked_by_guard(other_client.get(HISTORY_URL))
+        _assert_blocked_by_guard(other_client.get(EXPORT_URL))
 
     @pytest.mark.parametrize("role_name", ["doctor", "nir"])
     def test_doctor_nir_active_with_scheduler_assigned_denied(self, client, role_name: str) -> None:
@@ -252,13 +280,22 @@ class TestSchedulerFollowupJourney:
             content = response.content.decode()
             assert reverse("scheduler:queue") in content
             assert LIST_URL in content
-            # Nav operacional: sem links administrativos nem histórico anunciado.
+            # Nav operacional: sem links administrativos.
             # (href exato: "/dashboard/" é prefixo de "/dashboard/follow-ups/".
             assert 'href="/dashboard/"' not in content
             assert reverse("admin_ui:prompt_list") not in content
             assert reverse("admin_ui:user_list") not in content
-            assert HISTORY_URL not in content
-            assert EXPORT_URL not in content
+
+        # S2.R2: ambas as sub-abas visíveis na jornada do Agendador.
+        for response in (sched_client.get(LIST_URL), sched_client.get(HISTORY_URL)):
+            content = response.content.decode()
+            assert HISTORY_URL in content
+            assert "Histórico &amp; Exportação" in content
+            assert LIST_URL in content
+            assert reverse("scheduler:queue") in content
+            assert 'href="/dashboard/"' not in content
+            assert reverse("admin_ui:prompt_list") not in content
+            assert reverse("admin_ui:user_list") not in content
 
         # Entrada Pós-Procedimento ativa na lista (sem ativar as abas operacionais).
         list_content = sched_client.get(LIST_URL).content.decode()
@@ -449,7 +486,7 @@ class TestSchedulerManagerialIsolation:
 
 
 class TestSchedulerNetworkPolicy:
-    """S1.R5 — intranet preservada; bypass multi-role não vira liberação gerencial."""
+    """S2.R4 — intranet/bypass preservados; bypass libera Pós-Procedimento, não gerencial."""
 
     def test_scheduler_only_external_403_on_list_form_and_post(self, client) -> None:
         sched_client, user = _scheduler_client()
@@ -478,6 +515,263 @@ class TestSchedulerNetworkPolicy:
         case = _scheduled_case(multi_user, arn="S1-MULTI-EXT-001", name="Paciente Multi")
         assert multi_client.get(LIST_URL, REMOTE_ADDR=EXTERNAL_IP).status_code == 200
         assert multi_client.get(_form_url(case), REMOTE_ADDR=EXTERNAL_IP).status_code == 200
-        _assert_blocked_by_guard(multi_client.get(HISTORY_URL, REMOTE_ADDR=EXTERNAL_IP))
-        _assert_blocked_by_guard(multi_client.get(EXPORT_URL, REMOTE_ADDR=EXTERNAL_IP))
+        # S2.R4: bypass libera histórico/CSV (Pós-Procedimento), nunca o dashboard.
+        assert multi_client.get(HISTORY_URL, REMOTE_ADDR=EXTERNAL_IP).status_code == 200
+        assert multi_client.get(EXPORT_URL, REMOTE_ADDR=EXTERNAL_IP).status_code == 200
         _assert_blocked_by_guard(multi_client.get(reverse("dashboard:index"), REMOTE_ADDR=EXTERNAL_IP))
+
+
+# ── S2.R2: navegação contextual e sub-abas operacionais ───────────────────
+
+
+class TestSchedulerHistoryNavigation:
+    """S2.R2 — duas sub-abas acessíveis/ativas; histórico usa nav operacional."""
+
+    def test_scheduler_subtabs_active_states_and_navigation(self, client) -> None:
+        sched_client, user = _scheduler_client()
+        case = _scheduled_case(user, arn="S2-NAV-001", name="Paciente Subabas")
+        _add_procedure(case)
+
+        lista = sched_client.get(LIST_URL)
+        assert lista.status_code == 200
+        content = lista.content.decode()
+        assert f'class="nav-link active" href="{LIST_URL}"' in content
+        assert f'class="nav-link " href="{HISTORY_URL}"' in content
+        assert reverse("scheduler:queue") in content
+        assert 'href="/dashboard/"' not in content
+        assert reverse("admin_ui:prompt_list") not in content
+
+        history = sched_client.get(HISTORY_URL)
+        assert history.status_code == 200
+        content = history.content.decode()
+        assert f'class="nav-link active" href="{HISTORY_URL}"' in content
+        assert f'class="nav-link " href="{LIST_URL}"' in content
+        assert reverse("scheduler:queue") in content
+        assert 'href="/dashboard/"' not in content
+        assert reverse("admin_ui:prompt_list") not in content
+        assert reverse("admin_ui:user_list") not in content
+        assert LIST_URL in content
+        assert "tab=pending" in content
+        assert "Histórico &amp; Exportação" in content
+        assert "nav-link active" in content
+
+        back = sched_client.get(LIST_URL)
+        assert back.status_code == 200
+        assert sched_client.get(_form_url(case)).status_code == 200
+
+    def test_supervisor_and_admin_keep_dashboard_nav_and_subtab_states(self, client) -> None:
+        mgr_client, _ = _manager_client()
+        for url, active_url, inactive_url in (
+            (LIST_URL, LIST_URL, HISTORY_URL),
+            (HISTORY_URL, HISTORY_URL, LIST_URL),
+        ):
+            content = mgr_client.get(url).content.decode()
+            assert reverse("dashboard:index") in content
+            assert reverse("admin_ui:prompt_list") in content
+            assert f'class="nav-link active" href="{active_url}"' in content
+            assert f'class="nav-link " href="{inactive_url}"' in content
+
+        admin_client = Client()
+        _login_as(admin_client, "admin-s2@test", ["admin"], active_role="admin")
+        for url in (LIST_URL, HISTORY_URL):
+            assert admin_client.get(url).status_code == 200
+        history_content = admin_client.get(HISTORY_URL).content.decode()
+        assert HISTORY_URL in history_content
+
+    def test_scheduler_history_access_preserves_registration_flow(self, client) -> None:
+        sched_client, user = _scheduler_client()
+        case = _scheduled_case(user, arn="S2-FLOW-001", name="Paciente Fluxo")
+        procedure = _add_procedure(case)
+        assert sched_client.get(HISTORY_URL).status_code == 200
+        assert sched_client.get(EXPORT_URL).status_code == 200
+        response = sched_client.post(_form_url(case), data=_payload(procedure))
+        assert response.status_code == 302
+        assert response.url == LIST_URL
+        follow_up = CaseFollowUp.objects.get(case=case)
+        assert follow_up.version == 1
+        history = sched_client.get(HISTORY_URL)
+        assert history.status_code == 200
+        assert "S2-FLOW-001" in history.content.decode()
+
+
+# ── S2.R3: paridade de população/versões/filtros/CSV com o supervisor ─────
+
+
+class TestSchedulerHistoryParity:
+    """S2.R3 — mesma população global, versão corrente, autor, filtros e CSV."""
+
+    def _csv_records(self, client, **params):
+        response = client.get(EXPORT_URL, params or None)
+        assert response.status_code == 200
+        assert response.content.startswith(b"\xef\xbb\xbf")
+        body = response.content.decode("utf-8-sig")
+        return list(csv.reader(io.StringIO(body), delimiter=";"))
+
+    def _row_keys(self, response):
+        return [
+            (
+                row["case"].agency_record_number,
+                row["procedure_label"],
+                row["performed"],
+                row["reason"],
+                row["admitted"],
+                row["version"],
+                row["author_label"],
+            )
+            for row in response.context["page_obj"].object_list
+        ]
+
+    def _recorded_population(self, client) -> Client:
+        from apps.accounts.models import Role
+
+        sched_client, scheduler = _scheduler_client("sched-parity@test")
+        other = User.objects.create_user(username="other-sched-parity@test", password="testpass123")
+        scheduler_role, _ = Role.objects.get_or_create(name="scheduler")
+        other.roles.add(scheduler_role)
+        _, supervisor = _manager_client("mgr-parity@test")
+
+        third = _scheduled_case(other, arn="S2-THIRD-001", name="Terceiro Agendado")
+        third_proc = _add_procedure(third)
+        record_case_follow_up(
+            case=third,
+            performed_by=supervisor,
+            patient_admitted=False,
+            procedure_outcomes=[ProcedureOutcomeInput(procedure_id=third_proc.id, performed=True)],
+        )
+        record_case_follow_up(
+            case=third,
+            performed_by=scheduler,
+            patient_admitted=True,
+            procedure_outcomes=[
+                ProcedureOutcomeInput(
+                    procedure_id=third_proc.id, performed=False, non_performance_reason="patient_no_show"
+                )
+            ],
+        )
+
+        immediate = _immediate_case(other, arn="S2-IMMED-001", name="Vinda Imediata")
+        imm_proc = _add_procedure(immediate)
+        record_case_follow_up(
+            case=immediate,
+            performed_by=supervisor,
+            patient_admitted=False,
+            procedure_outcomes=[ProcedureOutcomeInput(procedure_id=imm_proc.id, performed=True)],
+        )
+
+        _add_procedure(_scheduled_case(other, arn="S2-NOFU-001", name="Sem Registro"))
+        return cast(Client, sched_client)
+
+    def test_parity_history_summary_rows_and_filters(self, client) -> None:
+        sched_client = self._recorded_population(client)
+        mgr_client, _ = _manager_client("mgr-parity-check@test")
+
+        sched_history = sched_client.get(HISTORY_URL)
+        mgr_history = mgr_client.get(HISTORY_URL)
+        assert sched_history.status_code == 200 == mgr_history.status_code
+        assert sched_history.context["summary"] == mgr_history.context["summary"]
+        assert self._row_keys(sched_history) == self._row_keys(mgr_history)
+        assert sched_history.context["rows_total"] == mgr_history.context["rows_total"] == 2
+        by_arn = {row["case"].agency_record_number: row for row in sched_history.context["page_obj"].object_list}
+        third_row = by_arn["S2-THIRD-001"]
+        assert third_row["version"] == 2
+        assert third_row["performed"] is False
+        assert third_row["reason"] == "patient_no_show"
+        assert third_row["admitted"] is True
+        assert "sched-parity" in third_row["author_label"]
+        assert by_arn["S2-IMMED-001"]["version"] == 1
+        assert "S2-NOFU-001" not in sched_history.content.decode()
+
+        for params in (
+            {"q": "Terceiro"},
+            {"q": "s2-immed"},
+            {"performed": "yes"},
+            {"performed": "no"},
+            {"reason": "patient_no_show"},
+            {"admitted": "yes"},
+            {"admitted": "no"},
+        ):
+            sched_page = sched_client.get(HISTORY_URL, params)
+            mgr_page = mgr_client.get(HISTORY_URL, params)
+            assert self._row_keys(sched_page) == self._row_keys(mgr_page), params
+            assert sched_page.context["summary"] == mgr_page.context["summary"], params
+
+    def test_parity_csv_complete_with_filters_and_escaping(self, client) -> None:
+        sched_client = self._recorded_population(client)
+        mgr_client, _ = _manager_client("mgr-parity-csv@test")
+
+        sched_csv = self._csv_records(sched_client)
+        mgr_csv = self._csv_records(mgr_client)
+        assert sched_csv == mgr_csv
+        assert len(sched_csv) == 3
+        assert sched_csv[0][1] == "Ocorrência"
+        assert any("sched-parity" in row[11] for row in sched_csv[1:])
+
+        for params in (
+            {"q": "Terceiro"},
+            {"performed": "no"},
+            {"reason": "patient_no_show"},
+            {"admitted": "yes"},
+            {"performed": "no", "reason": "patient_no_show"},
+        ):
+            assert self._csv_records(sched_client, **params) == self._csv_records(mgr_client, **params), params
+
+    def test_pagination_over_25_and_csv_not_truncated(self, client) -> None:
+        sched_client, scheduler = _scheduler_client("sched-page@test")
+        mgr_client, _ = _manager_client("mgr-page@test")
+        for i in range(26):
+            case = _scheduled_case(scheduler, arn=f"S2-PAGE-{i:02d}", name=f"Paciente Página {i:02d}")
+            procedure = _add_procedure(case)
+            record_case_follow_up(
+                case=case,
+                performed_by=scheduler,
+                patient_admitted=False,
+                procedure_outcomes=[ProcedureOutcomeInput(procedure_id=procedure.id, performed=True)],
+            )
+        first = sched_client.get(HISTORY_URL)
+        assert first.context["page_obj"].paginator.per_page == 25
+        assert len(first.context["page_obj"].object_list) == 25
+        second = sched_client.get(HISTORY_URL, {"page": 2})
+        assert len(second.context["page_obj"].object_list) == 1
+        assert self._row_keys(first) == self._row_keys(mgr_client.get(HISTORY_URL))
+        assert len(self._csv_records(sched_client)) == 27
+        assert self._csv_records(sched_client) == self._csv_records(mgr_client)
+
+    def test_history_and_export_write_nothing(self, client) -> None:
+        sched_client = self._recorded_population(client)
+        before = (
+            CaseFollowUp.objects.count(),
+            ProcedureFollowUp.objects.count(),
+            CaseEvent.objects.count(),
+        )
+        assert sched_client.get(HISTORY_URL).status_code == 200
+        assert sched_client.get(HISTORY_URL, {"performed": "no"}).status_code == 200
+        assert sched_client.get(EXPORT_URL).status_code == 200
+        assert sched_client.get(EXPORT_URL, {"reason": "patient_no_show"}).status_code == 200
+        after = (
+            CaseFollowUp.objects.count(),
+            ProcedureFollowUp.objects.count(),
+            CaseEvent.objects.count(),
+        )
+        assert after == before
+
+    def test_scheduler_external_403_includes_new_routes(self, client) -> None:
+        sched_client, _ = _scheduler_client("sched-ext-s2@test")
+        assert sched_client.get(HISTORY_URL, REMOTE_ADDR=EXTERNAL_IP).status_code == 403
+        assert sched_client.get(EXPORT_URL, REMOTE_ADDR=EXTERNAL_IP).status_code == 403
+
+    def test_managerial_post_blocked_after_history_csv_access(self, client) -> None:
+        creator = User.objects.create_user(username="close-s2-creator@test", password="testpass123")
+        case = Case.objects.create(
+            created_by=creator, status=CaseStatus.WAIT_DOCTOR, agency_record_number="S2-CLOSE-001"
+        )
+        target_client = Client()
+        _login_as(target_client, "close-s2-target@test", ["scheduler", "manager"], active_role="scheduler")
+        assert target_client.get(HISTORY_URL).status_code == 200
+        assert target_client.get(EXPORT_URL).status_code == 200
+        response = target_client.post(
+            reverse("dashboard:administrative_close", args=[case.case_id]),
+            {"reason_code": "system_bug", "reason_text": "Bug corrigido manualmente"},
+        )
+        _assert_blocked_by_guard(response)
+        assert Case.objects.get(pk=case.pk).status == CaseStatus.WAIT_DOCTOR
+        assert not CaseEvent.objects.filter(case=case, event_type="CASE_ADMINISTRATIVELY_CLOSED").exists()

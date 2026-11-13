@@ -1746,7 +1746,7 @@ def _followup_history_summary(rows: list[dict[str, Any]]) -> dict[str, Any]:
 
 
 @login_required
-@role_required("manager", "admin")
+@role_required("manager", "admin", "scheduler")
 @followup_access_required
 def followup_history(request: HttpRequest) -> HttpResponse:
     """Histórico de desfechos: janela por data de grupo, cards e tabela paginada.
@@ -1833,7 +1833,7 @@ _FOLLOWUP_CSV_HEADER = [
 
 
 @login_required
-@role_required("manager", "admin")
+@role_required("manager", "admin", "scheduler")
 @followup_access_required
 def followup_history_export(request: HttpRequest) -> HttpResponse:
     """Exporta o histórico em CSV pt-BR (mesma população/filtros da página).

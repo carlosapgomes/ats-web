@@ -1,7 +1,7 @@
 # Tasks — Pós-Procedimento para o Agendador
 
 **Change:** `grant-scheduler-post-procedure-access`
-**Estado:** S1 aceito; S2 ainda não iniciado.
+**Estado:** S1 e S2 aceitos; gate final do change pendente.
 **BASE_REF de investigação:** `befc5c50c0499acd86ed0e3d29a97380ab95f70c`.
 
 As decisões do solicitante permanecem em `proposal.md`. Aplicação de `openspec-vertical-change-writer`: **dois slices verticais**, cada um com autorização, interface, testes e documentação do próprio fluxo. A justificativa e o estado intermediário estão em `design.md`, D6. As deltas descrevem o alvo após S2; não promover nem declarar o change concluído em S1.
@@ -13,7 +13,7 @@ As decisões do solicitante permanecem em `proposal.md`. Aplicação de `openspe
 ## 1. Slices verticais — executar em sequência
 
 - [x] 1.1 **S1 — Pesquisar, registrar e atualizar desfechos, sem acesso gerencial.** Contrato: [`slices/slice-001-scheduler-post-procedure.md`](slices/slice-001-scheduler-post-procedure.md). Verificar S1.R1–R6: RED/GREEN da política/menu/lista/formulário; elegíveis globais e versões entre autores; navegação operacional; negativas gerenciais/rede; histórico analítico/CSV ainda bloqueados e sem link para scheduler; manual/contexto/testes do comportamento parcial. Relatório: `/tmp/sirhosp-slice-001-report.md`.
-- [ ] 1.2 **S2 — Consultar histórico, resumos e filtros e exportar CSV.** Depende de S1 aceito e confirmação para continuar. Contrato: [`slices/slice-002-scheduler-followup-history-export.md`](slices/slice-002-scheduler-followup-history-export.md). Verificar S2.R1–R5: RED no estado aceito de S1; liberação dos dois endpoints e sub-aba operacional; paridade de dados/filtros/CSV; corrente apenas e zero writes; remoção do comportamento transitório e documentação completa; regressão do registro e do isolamento. Relatório: `/tmp/sirhosp-slice-002-report.md`.
+- [x] 1.2 **S2 — Consultar histórico, resumos e filtros e exportar CSV.** Depende de S1 aceito e confirmação para continuar. Contrato: [`slices/slice-002-scheduler-followup-history-export.md`](slices/slice-002-scheduler-followup-history-export.md). Verificar S2.R1–R5: RED no estado aceito de S1; liberação dos dois endpoints e sub-aba operacional; paridade de dados/filtros/CSV; corrente apenas e zero writes; remoção do comportamento transitório e documentação completa; regressão do registro e do isolamento. Relatório: `/tmp/sirhosp-slice-002-report.md`.
 
 ## 2. Integração final do change
 
@@ -24,6 +24,8 @@ As decisões do solicitante permanecem em `proposal.md`. Aplicação de `openspe
 
 - Preflight: duas falhas de testes preexistentes corrigidas com autorização explícita; commit `9f7e332`, revisão independente válida e baseline completo de 4.755 testes passando.
 - S1: aceito pelo controlador em 2026-11-13, revisão independente `OK with notes` (1/2 rodadas, zero P0/P1); focused 1.013 e suite global 4.793 passando, lint/format/mypy/OpenSpec verdes. Dois P2 de profundidade dos testes registrados sem reabrir implementação. Receipt: `/tmp/pi-openspec-ats-web-grant-scheduler-post-procedure-access-78x58z1s/slices/001/acceptance.json`; relatórios de implementação/revisão e logs no mesmo subtree externo. Smoke visual não executado; runtime via Django client verificado conforme contrato.
+
+- S2: aceito pelo controlador em 2026-11-13, revisão independente `OK with notes` (1/2 rodadas, zero P0/P1); focused 1.024 e suite global 4.804 passando, lint/format/mypy/OpenSpec verdes. P2 de comentário transitório em teste, profundidade de paridade/imutabilidade e realismo do ator de agendamento registrados sem reabrir implementação. Receipt: `/tmp/pi-openspec-ats-web-grant-scheduler-post-procedure-access-78x58z1s/slices/002/acceptance.json`; logs/relatórios no mesmo subtree. Runtime via Django client verificado; smoke visual não executado.
 
 ## Rastreabilidade das specs para as entregas
 
