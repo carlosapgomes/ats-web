@@ -659,10 +659,53 @@ class TestSecondaryFailurePropagates:
 
         from apps.pipeline.tasks import execute_pipeline
 
-        with pytest.raises(DatabaseError):
+        with pytest.raises(DatabaseError, match="banco indisponivel"):
             run_pipeline(case.case_id, llm_client=client, llm1_system_prompt="sp1", llm1_user_template="ut1")
-        with pytest.raises(DatabaseError):
+        assert len(client.calls) == 1
+
+        # Fronteira do worker: execute_pipeline chama run_pipeline sem injecao,
+        # que cria ansiosamente os dois clientes de estagio a partir das
+        # factories em llm1_service_v4/llm2_service_v4. Substitua essas
+        # factories (ponto importado por run_pipeline) por fakes frescos —
+        # nunca reutilize a fila ja exaurida do client acima. O sentinela no
+        # construtor OpenAI real (apps.pipeline.llm faz `from openai import
+        # OpenAI`) falha imediatamente se a construcao real for tentada: sem
+        # credencial, sem rede, sem sucesso vacuo.
+        task_client_llm1 = RecordingLlmClient(responses=["nao json"])
+        task_client_llm2 = RecordingLlmClient(responses=[])
+        factory_calls: list[str] = []
+
+        def _fake_llm1_factory() -> RecordingLlmClient:
+            factory_calls.append("llm1")
+            return task_client_llm1
+
+        def _fake_llm2_factory() -> RecordingLlmClient:
+            factory_calls.append("llm2")
+            return task_client_llm2
+
+        openai_constructions: list[tuple[tuple[Any, ...], dict[str, Any]]] = []
+
+        def _sentinel_openai(*args: Any, **kwargs: Any) -> Any:
+            openai_constructions.append((args, kwargs))
+            raise AssertionError("construcao real do cliente OpenAI tentada no teste isolado")
+
+        monkeypatch.setattr("apps.pipeline.llm1_service_v4.create_openai_llm1_v4_client", _fake_llm1_factory)
+        monkeypatch.setattr("apps.pipeline.llm2_service_v4.create_openai_llm2_v4_client", _fake_llm2_factory)
+        monkeypatch.setattr("openai.OpenAI", _sentinel_openai)
+
+        # execute_pipeline e run_pipeline permanecem reais: o erro de
+        # persistencia do desfecho (DatabaseError do save) deve propagar.
+        with pytest.raises(DatabaseError, match="banco indisponivel"):
             execute_pipeline(str(case.case_id))
+
+        # Prova nao-vacua: ambas as factories foram usadas, o fake fresco do
+        # estagio 1 foi chamado uma vez (JSON malformado dispara o registro
+        # de falha), o fake do estagio 2 nunca foi chamado e o sentinela
+        # OpenAI nunca foi acionado.
+        assert factory_calls == ["llm1", "llm2"]
+        assert len(task_client_llm1.calls) == 1
+        assert task_client_llm2.calls == []
+        assert openai_constructions == []
 
 
 @pytest.mark.django_db

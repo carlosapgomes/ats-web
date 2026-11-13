@@ -315,7 +315,14 @@ class TestBackfillD3Table:
         # duplicação), provando que o reverse removeu as rows anteriores.
         self._backfill()
         assert CaseProcedure.objects.filter(case_id=case.pk).count() == 1
-        assert Case.objects.get(pk=case.pk).status == CaseStatus.NEW
+        # Leitura pelo registry historico 0014 (self._apps), nao pelo modelo
+        # leaf: apos o re-forward o schema esta em 0015 — a 0015 so cria a
+        # tabela CaseProcedure, sem alterar as colunas de Case — logo os
+        # campos do Case historico 0014 sao compativeis com esse estado. O
+        # modelo leaf pede patient_identity_name (0016+ / 0022), coluna que
+        # nao existe no schema sob teste.
+        historical_case: Any = self._apps.get_model("cases", "Case")
+        assert historical_case.objects.get(pk=case.pk).status == CaseStatus.NEW
 
 
 class TestDeclaredProjectionService:
