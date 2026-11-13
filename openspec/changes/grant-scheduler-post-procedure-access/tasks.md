@@ -1,7 +1,7 @@
 # Tasks — Pós-Procedimento para o Agendador
 
 **Change:** `grant-scheduler-post-procedure-access`
-**Estado:** S1 e S2 aceitos; gate final do change pendente.
+**Estado:** S1 e S2 aceitos; gate final verde; pronto para revisão humana final. Sem push, merge, archive ou deploy.
 **BASE_REF de investigação:** `befc5c50c0499acd86ed0e3d29a97380ab95f70c`.
 
 As decisões do solicitante permanecem em `proposal.md`. Aplicação de `openspec-vertical-change-writer`: **dois slices verticais**, cada um com autorização, interface, testes e documentação do próprio fluxo. A justificativa e o estado intermediário estão em `design.md`, D6. As deltas descrevem o alvo após S2; não promover nem declarar o change concluído em S1.
@@ -17,8 +17,8 @@ As decisões do solicitante permanecem em `proposal.md`. Aplicação de `openspe
 
 ## 2. Integração final do change
 
-- [ ] 2.1 Após S2, conferir focused cumulativo e gates globais de `AGENTS.md`, `openspec validate grant-scheduler-post-procedure-access --strict --no-interactive` e percurso completo menu → busca → registro/atualização → histórico → CSV → negativa gerencial; registrar comandos/exit codes e evidências, sem adiar testes dos slices para este gate.
-- [ ] 2.2 Revisar cobertura das duas deltas, relatórios e ausência de condição/texto/teste transitório de S1. Antes do arquivamento, decidir/registrar necessidade de ADR para a ampliação da política de acesso e atualizar o Purpose das duas specs canônicas ao promover as deltas. Manter aberto enquanto houver bloqueios; este plano não autoriza merge, archive, release ou deploy.
+- [x] 2.1 Após S2, conferir focused cumulativo e gates globais de `AGENTS.md`, `openspec validate grant-scheduler-post-procedure-access --strict --no-interactive` e percurso completo menu → busca → registro/atualização → histórico → CSV → negativa gerencial; registrar comandos/exit codes e evidências, sem adiar testes dos slices para este gate.
+- [x] 2.2 Revisar cobertura das duas deltas, relatórios e ausência de condição/texto/teste transitório de S1. Antes do arquivamento, decidir/registrar necessidade de ADR para a ampliação da política de acesso e atualizar o Purpose das duas specs canônicas ao promover as deltas. Manter aberto enquanto houver bloqueios; este plano não autoriza merge, archive, release ou deploy.
 
 ## Evidências de execução
 
@@ -26,6 +26,9 @@ As decisões do solicitante permanecem em `proposal.md`. Aplicação de `openspe
 - S1: aceito pelo controlador em 2026-11-13, revisão independente `OK with notes` (1/2 rodadas, zero P0/P1); focused 1.013 e suite global 4.793 passando, lint/format/mypy/OpenSpec verdes. Dois P2 de profundidade dos testes registrados sem reabrir implementação. Receipt: `/tmp/pi-openspec-ats-web-grant-scheduler-post-procedure-access-78x58z1s/slices/001/acceptance.json`; relatórios de implementação/revisão e logs no mesmo subtree externo. Smoke visual não executado; runtime via Django client verificado conforme contrato.
 
 - S2: aceito pelo controlador em 2026-11-13, revisão independente `OK with notes` (1/2 rodadas, zero P0/P1); focused 1.024 e suite global 4.804 passando, lint/format/mypy/OpenSpec verdes. P2 de comentário transitório em teste, profundidade de paridade/imutabilidade e realismo do ator de agendamento registrados sem reabrir implementação. Receipt: `/tmp/pi-openspec-ats-web-grant-scheduler-post-procedure-access-78x58z1s/slices/002/acceptance.json`; logs/relatórios no mesmo subtree. Runtime via Django client verificado; smoke visual não executado.
+
+- Gate final adicional, executado pelo controlador após os commits dos slices: suite completa **4.804 passed**, focused cumulativo **1.024 passed**, ruff check/format, mypy, Django check e OpenSpec strict verdes, todos com exit 0 e sem mutação autoral. Logs/manifest/results: `/tmp/pi-openspec-ats-web-grant-scheduler-post-procedure-access-78x58z1s/final-gates/initial/`. Nenhum ciclo de reparo final necessário.
+- Revisão final de escopo: deltas/contratos preservados, isolamento gerencial e rede mantidos; notas P2 não bloqueantes permanecem no checkpoint. O registro de política de acesso em ADR é recomendado antes de um futuro arquivamento; criação/aceite dessa ADR e atualização de Purpose na promoção das specs são condições futuras, não executadas nem autorizadas aqui. O checkbox 2.2 registra a revisão/rastreabilidade da execução, não afirma archive ou promoção canônica.
 
 ## Rastreabilidade das specs para as entregas
 
@@ -45,4 +48,4 @@ Não foram executados gates Python ou smoke da aplicação neste redimensionamen
 
 ## Handoff
 
-Próximo trabalho implementável: **somente S1**, após preflight. Cada contrato é autocontido, com R numerados, evidência RED, critérios binários, condições de escalada e prompt para worker fresh. Aplicam-se os gates, entrega/relatório e a stop rule do repositório. O sucessor recebe S1 aceito e seu relatório, não o contexto desta conversa. Sem execução de S2 na mesma passagem, sem escopo novo de concorrência, URLs ou rede.
+**Nenhum slice de implementação restante nesta execução.** S1 e S2 foram aceitos em sequência pelo controlador, com revisões independentes e gates completos; evidências externas e commits estão no checkpoint `/tmp/pi-openspec-ats-web-grant-scheduler-post-procedure-access-78x58z1s/controller-state.json`. Próxima ação: revisão humana final. Não iniciar outro change ou executar push, merge, archive/promoção de specs, publicação ou deploy sem autorização separada.
