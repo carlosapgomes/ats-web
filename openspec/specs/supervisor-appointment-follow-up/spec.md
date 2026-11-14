@@ -1,13 +1,13 @@
 # supervisor-appointment-follow-up Specification
 
 ## Purpose
-Registro de desfecho pós-exame pelo Supervisor: permitir que `manager`/`admin` informem, por caso agendado (confirmado) ou de vinda imediata autorizada, se cada exame/procedimento foi realizado — e, quando não realizado, uma das 23 causas da ficha oficial de suspensão ou **Outras causas** com descrição — além da ocorrência de internação. Follow-up é registro puro e versionado append-only (autor e instante por versão, espelho em `CaseEvent`); não altera FSM nem dispara intercorrências/reagendamento. Códigos legados permanecem reconhecidos apenas para leitura histórica.
+Registro de desfecho pós-exame pelo Supervisor e pelo Agendador (ADR-0013): permitir que usuários autenticados e ativos com papel ativo `scheduler`, supervisores do CHD (`manager` ativo com papel `scheduler`) e `admin` informem, por caso agendado (confirmado) ou de vinda imediata autorizada — sobre a população global de elegíveis, sem filtro por agendador ou autoria —, se cada exame/procedimento foi realizado — e, quando não realizado, uma das 23 causas da ficha oficial de suspensão ou **Outras causas** com descrição — além da ocorrência de internação. Follow-up é registro puro e versionado append-only com versões compartilhadas entre os papéis autorizados (autor e instante por versão, espelho em `CaseEvent`); não altera FSM nem dispara intercorrências/reagendamento. Códigos legados permanecem reconhecidos apenas para leitura histórica.
 
 ## Requirements
 
 ### Requirement: O sistema SHALL registrar o desfecho por procedimento de casos agendados e de vinda imediata
 
-O sistema SHALL permitir que supervisores do CHD (`manager` com papel `scheduler`, papel ativo `manager`) e `admin` registrem, por caso, o desfecho de cada `CaseProcedure` com `doctor_disposition == "approved"` (realizado / não realizado) e a ocorrência de internação no nível do caso, sem alterar o estado FSM nem disparar fluxos operacionais. Para procedimento não realizado, a causa SHALL pertencer ao conjunto fechado, na ordem oficial: Ausência do preenchimento do TCLE para realização de exame; Ausência do preenchimento do TCLE anestésico; Condições clínicas desfavoráveis; Erro na programação do procedimento; Falta de médico gastroenterologista; Falta de anestesiologista; Falta de equipamentos; Falta de exames; Falta de hemoderivados; Falta de jejum; Falta de material/OPME; Falta de vaga na UTI; Preparo inadequado; Intubação difícil; Mudança de conduta médica; Não comparecimento do paciente; Paciente foi a óbito; Prioridade para urgência; Tempo excedido; Transferência para outro hospital; Atraso do paciente; Relatório divergente; Recusa do paciente; ou Outras causas. **Outras causas** SHALL exigir descrição textual; nenhuma outra causa SHALL aceitar texto livre ou submotivo. Rows `CaseProcedure` não autorizadas (negadas ou pendentes) SHALL ser isentas de desfecho, e desfecho informado para row não autorizada SHALL ser rejeitado.
+O sistema SHALL permitir que agendadores (papel ativo `scheduler`), supervisores do CHD (`manager` com papel `scheduler`, papel ativo `manager`) e `admin` registrem, por caso, o desfecho de cada `CaseProcedure` com `doctor_disposition == "approved"` (realizado / não realizado) e a ocorrência de internação no nível do caso, sem alterar o estado FSM nem disparar fluxos operacionais. Para procedimento não realizado, a causa SHALL pertencer ao conjunto fechado, na ordem oficial: Ausência do preenchimento do TCLE para realização de exame; Ausência do preenchimento do TCLE anestésico; Condições clínicas desfavoráveis; Erro na programação do procedimento; Falta de médico gastroenterologista; Falta de anestesiologista; Falta de equipamentos; Falta de exames; Falta de hemoderivados; Falta de jejum; Falta de material/OPME; Falta de vaga na UTI; Preparo inadequado; Intubação difícil; Mudança de conduta médica; Não comparecimento do paciente; Paciente foi a óbito; Prioridade para urgência; Tempo excedido; Transferência para outro hospital; Atraso do paciente; Relatório divergente; Recusa do paciente; ou Outras causas. **Outras causas** SHALL exigir descrição textual; nenhuma outra causa SHALL aceitar texto livre ou submotivo. Rows `CaseProcedure` não autorizadas (negadas ou pendentes) SHALL ser isentas de desfecho, e desfecho informado para row não autorizada SHALL ser rejeitado.
 
 #### Scenario: Registro inicial de desfecho
 
@@ -85,6 +85,24 @@ O sistema SHALL permitir que supervisores do CHD (`manager` com papel `scheduler
 - **THEN** a página exibe aviso orientando a correção do caso, sem campos de gravação
 - **AND** qualquer tentativa de POST é rejeitada sem criar rows nem eventos
 
+#### Scenario: Agendador registra caso de outro usuário ou de vinda imediata
+
+- **GIVEN** um usuário autenticado e ativo apenas com papel `scheduler`, ativo na sessão e dentro da intranet
+- **AND** um caso confirmado por outro agendador e um caso de vinda imediata elegível, com procedimentos autorizados
+- **WHEN** pesquisa cada caso por ocorrência ou nome e registra seu desfecho
+- **THEN** ambos podem receber versão 1, sem filtro por autoria ou agendador responsável
+- **AND** cada versão e evento registram o usuário que submeteu como autor
+- **AND** estado do caso, decisão médica e campos de agendamento permanecem inalterados
+
+#### Scenario: Agendador e supervisor compartilham as versões
+
+- **GIVEN** um caso elegível com versão 1 registrada por supervisor do CHD
+- **WHEN** um agendador autorizado atualiza o pós-procedimento
+- **THEN** cria versão 2 e evento `FOLLOWUP_UPDATED` com o Agendador como autor, sem editar a versão 1
+- **AND** o supervisor visualiza a mesma versão 2 no recurso existente
+- **WHEN** o supervisor atualiza novamente
+- **THEN** cria versão 3 com seu próprio autor, preservando as versões anteriores
+
 ### Requirement: O follow-up SHALL preservar histórico versionado append-only
 
 Cada atualização de follow-up SHALL criar nova versão (nova row) preservando as anteriores com autor e timestamp, e SHALL registrar `CaseEvent` `FOLLOWUP_UPDATED` com snapshot. A versão corrente SHALL ser a de maior número.
@@ -134,20 +152,15 @@ A aba SHALL listar, para o dia local corrente e o dia anterior (default), os cas
 - **THEN** os elegíveis correspondentes são listados independentemente da data
 - **AND** o resultado é limitado a 50 casos
 
-### Requirement: A aba e o formulário de follow-up SHALL ser acessíveis apenas a supervisores do CHD e admin
+### Requirement: A aba e o formulário de follow-up SHALL ser acessíveis a agendadores, supervisores do CHD e admin
 
-As rotas de follow-up SHALL exigir autenticação e papel ativo `manager` ou
-`admin`. Um usuário com papel ativo `manager` adicionalmente SHALL possuir o
-papel `scheduler` (CHD); usuários com papel ativo `admin` são isentos dessa
-exigência. Quem não satisfizer SHALL ser redirecionado com mensagem de erro,
-sem alterar o guard de intranet existente, e a aba SHALL ficar oculta na
-navegação para esses usuários.
+As rotas SHALL exigir usuário autenticado e ativo, com papel ativo `scheduler`, `manager` com vínculo `scheduler`, ou `admin` isento desse vínculo. Demais usuários SHALL ser redirecionados com erro, sem dados de pós-procedimento, e não SHALL ver a aba. A política de intranet existente SHALL permanecer inalterada.
 
 #### Scenario: Manager sem vínculo CHD é bloqueado
 
 - **GIVEN** um usuário autenticado que possui apenas o papel `manager`, com papel ativo `manager`
 - **WHEN** navega pelo dashboard e acessa diretamente qualquer rota de follow-up
-- **THEN** o pill Follow-up não aparece na navegação
+- **THEN** o pill Pós-Procedimento não aparece na navegação
 - **AND** a rota o redireciona para `/` com mensagem de erro, sem renderizar conteúdo
 
 #### Scenario: Manager com vínculo CHD acessa
@@ -162,22 +175,85 @@ navegação para esses usuários.
 - **WHEN** acessa as rotas de follow-up
 - **THEN** o acesso é permitido (isenção de papel de emergência/suporte)
 
+#### Scenario: Agendador acessa sem papel Supervisor
+
+- **GIVEN** um usuário autenticado e ativo com apenas o papel `scheduler`, ativo na sessão, na intranet
+- **WHEN** acessa listagem, formulário elegível, histórico e exportação, inclusive por URL direta
+- **THEN** tem acesso ao recurso sem possuir ou ativar `manager`
+
 #### Scenario: Papel sem permissão
 
-- **GIVEN** um usuário autenticado com papel ativo `scheduler`
-- **WHEN** ele acessa `/dashboard/follow-ups/`
+- **GIVEN** um usuário autenticado com papel ativo `doctor` ou `nir`, mesmo que possua também `scheduler`
+- **WHEN** acessa diretamente qualquer rota de pós-procedimento, incluindo POST de registro
 - **THEN** é redirecionado com mensagem de erro e nenhum dado de follow-up é exposto
+- **AND** nenhuma versão, desfecho ou evento é criado
+
+#### Scenario: Anônimo ou usuário inativo não recebe acesso
+
+- **GIVEN** uma requisição anônima ou de usuário inativo
+- **WHEN** solicita listagem, formulário, histórico ou CSV, ou tenta registrar um desfecho
+- **THEN** os guards de autenticação/atividade negam o acesso sem expor dados ou gravar versões/eventos
 
 #### Scenario: Acesso direto por URL a caso inelegível
 
 - **GIVEN** um caso sem agendamento confirmado e sem fluxo de vinda imediata
-- **WHEN** um supervisor do CHD (`manager` com papel `scheduler`) ou `admin` abre o formulário de follow-up desse caso diretamente pela URL
+- **WHEN** um agendador, supervisor do CHD ou admin autorizado abre ou submete o formulário diretamente pela URL
 - **THEN** recebe resposta 404 com mensagem explicativa
 - **AND** nenhum formulário é renderizado e nenhuma gravação é aceita
 
 #### Scenario: Caso elegível sem procedimentos declarados
 
 - **GIVEN** um caso elegível sem rows `CaseProcedure` (situação defensiva; não deve ocorrer no fluxo atual)
-- **WHEN** um supervisor do CHD (`manager` com papel `scheduler`) abre o formulário de follow-up desse caso
+- **WHEN** um agendador, supervisor do CHD ou admin autorizado abre o formulário
 - **THEN** a página exibe aviso orientando a correção do caso, sem campos de gravação
 - **AND** qualquer tentativa de POST é rejeitada sem criar rows nem eventos
+
+#### Scenario: Restrição de intranet preservada para agendador sem bypass
+
+- **GIVEN** um usuário autenticado apenas com papel `scheduler` ativo e um IP externo à intranet configurada
+- **WHEN** acessa qualquer rota de pós-procedimento, inclusive POST e CSV
+- **THEN** recebe 403 sem dados ou mutação
+
+#### Scenario: Bypass multi-role preexistente permanece inalterado
+
+- **GIVEN** um usuário autenticado e ativo com papéis `scheduler` e um papel não restrito, com `scheduler` ativo
+- **WHEN** acessa o pós-procedimento fora da intranet
+- **THEN** mantém o bypass de rede já existente para contas multi-role
+- **AND** isso não altera a exigência de papel ativo das demais áreas
+
+### Requirement: O Agendador SHALL acessar o Pós-Procedimento pela navegação operacional
+
+A navegação do Agendador SHALL oferecer a aba Pós-Procedimento. Listagem, formulário e histórico SHALL manter a navegação do Agendador, sem links administrativos, com a aba ativa. Cancelar, salvar e alternar sub-abas SHALL manter essa jornada sem exigir troca de papel. Supervisor e admin SHALL manter sua navegação existente.
+
+#### Scenario: Jornada completa usa navegação operacional
+
+- **GIVEN** um Agendador autorizado na sua página de trabalho
+- **WHEN** abre Pós-Procedimento, pesquisa um caso, abre o formulário, cancela ou salva e acessa o histórico
+- **THEN** todas as páginas HTML exibem a navegação do Agendador com Pós-Procedimento ativo
+- **AND** não exibem links de Dashboard, Prompts, Usuários, PDFs ou detalhes gerenciais por meio do recurso
+- **AND** o papel ativo permanece `scheduler`
+
+#### Scenario: Erro de validação preserva a jornada
+
+- **GIVEN** um Agendador autorizado em formulário elegível
+- **WHEN** submete um desfecho inválido
+- **THEN** recebe os erros existentes sem gravação de versão/evento
+- **AND** o formulário reexibido mantém a navegação operacional
+
+### Requirement: O acesso ao Pós-Procedimento SHALL NOT liberar o dashboard ao Agendador
+
+Com papel ativo `scheduler`, o acesso ao Pós-Procedimento SHALL NOT conceder acesso ao dashboard, resumos gerenciais, detalhes de casos do dashboard, encerramento administrativo, PDFs/anexos e seus viewers gerenciais, ou gestão de prompts/usuários. O bloqueio SHALL valer também por URL direta e para contas multi-role usando `scheduler` ativo.
+
+#### Scenario: GET gerencial continua bloqueado
+
+- **GIVEN** um Agendador com acesso ao Pós-Procedimento, com ou sem outros papéis atribuídos
+- **AND** papel ativo `scheduler` e um caso/anexo existente
+- **WHEN** solicita diretamente dashboard, resumo, detalhe gerencial, PDF, anexo, viewer, Prompts ou Usuários
+- **THEN** os guards existentes negam acesso sem renderizar dados ou baixar documentos
+
+#### Scenario: POST gerencial continua bloqueado
+
+- **GIVEN** um Agendador autorizado ao Pós-Procedimento com papel ativo `scheduler`
+- **WHEN** tenta encerrar administrativamente um caso pelo endpoint gerencial com payload válido
+- **THEN** recebe bloqueio por autorização
+- **AND** o caso e seus eventos permanecem inalterados

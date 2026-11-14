@@ -29,6 +29,7 @@ As decisões do solicitante permanecem em `proposal.md`. Aplicação de `openspe
 
 - Gate final adicional, executado pelo controlador após os commits dos slices: suite completa **4.804 passed**, focused cumulativo **1.024 passed**, ruff check/format, mypy, Django check e OpenSpec strict verdes, todos com exit 0 e sem mutação autoral. Logs/manifest/results: `/tmp/pi-openspec-ats-web-grant-scheduler-post-procedure-access-78x58z1s/final-gates/initial/`. Nenhum ciclo de reparo final necessário.
 - Revisão final de escopo: deltas/contratos preservados, isolamento gerencial e rede mantidos; notas P2 não bloqueantes permanecem no checkpoint. O registro de política de acesso em ADR é recomendado antes de um futuro arquivamento; criação/aceite dessa ADR e atualização de Purpose na promoção das specs são condições futuras, não executadas nem autorizadas aqui. O checkbox 2.2 registra a revisão/rastreabilidade da execução, não afirma archive ou promoção canônica.
+- Condição pré-arquivamento cumprida em 2026-11-13 com autorização explícita do owner: **ADR-0013** (`docs/adr/ADR-0013-ampliacao-acesso-pos-procedimento-agendador.md`, Accepted) registra a ampliação da política de acesso; arquivamento do change com promoção das deltas às specs canônicas e atualização do Purpose de `supervisor-appointment-follow-up` e `supervisor-followup-history` executados na mesma data, após a publicação de `v0.11.0-rc.1`.
 
 ## Rastreabilidade das specs para as entregas
 

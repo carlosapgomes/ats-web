@@ -1,18 +1,13 @@
 # supervisor-followup-history Specification
 
 ## Purpose
-Disponibilizar a supervisores do CHD e administradores uma visão histórica e exportável dos desfechos pós-procedimento, sempre baseada na versão corrente de cada caso, com filtros, agregados e CSV consistentes. A leitura consolida causas legadas sob a taxonomia oficial quando há equivalência confirmada, preserva rows e eventos append-only e sinaliza combinações desconhecidas sem inventar equivalência.
+Disponibilizar ao Agendador (`scheduler` ativo), a supervisores do CHD e a administradores uma visão histórica e exportável dos desfechos pós-procedimento (ADR-0013), sempre baseada na versão corrente de cada caso e na mesma população global de elegíveis, com filtros, agregados e CSV idênticos para todos os papéis autorizados — sem filtro por agendador ou autoria. A leitura consolida causas legadas sob a taxonomia oficial quando há equivalência confirmada, preserva rows e eventos append-only, sinaliza combinações desconhecidas sem inventar equivalência e nunca modifica rows ou eventos.
 
 ## Requirements
 
 ### Requirement: A aba Pós-Procedimento SHALL organizar-se em sub-abas Registrar e Histórico
 
-A superfície Pós-Procedimento SHALL apresentar sub-abas "Registrar" (fluxo de
-registro existente em `/dashboard/follow-ups/`, comportamento inalterado) e
-"Histórico & Exportação" (`/dashboard/follow-ups/history/`), com estado ativo
-visível conforme a página corrente e acesso restrito a supervisores do CHD
-(`manager` ativo com papel `scheduler`) e `admin`. A aba SHALL ficar oculta na
-navegação para usuários sem acesso.
+A superfície Pós-Procedimento SHALL apresentar sub-abas "Registrar" (`/dashboard/follow-ups/`) e "Histórico & Exportação" (`/dashboard/follow-ups/history/`), com estado ativo conforme a página corrente. O acesso SHALL ser permitido a Agendador (`scheduler` ativo), supervisor do CHD (`manager` ativo com papel `scheduler`) e `admin`, autenticados e ativos, conforme a política de rede existente. A aba SHALL ficar oculta para usuários sem acesso.
 
 #### Scenario: Sub-abas visíveis e ativas
 
@@ -33,6 +28,13 @@ navegação para usuários sem acesso.
 - **WHEN** navega pelo dashboard e acessa diretamente as rotas de follow-up
 - **THEN** o pill Pós-Procedimento não aparece na navegação
 - **AND** as rotas o redirecionam com mensagem de erro, sem renderizar conteúdo
+
+#### Scenario: Agendador alterna as sub-abas sem acessar o dashboard
+
+- **GIVEN** um usuário autenticado e ativo apenas com papel `scheduler` ativo e dentro da intranet
+- **WHEN** abre Pós-Procedimento pela navegação do Agendador e alterna Registrar e Histórico & Exportação
+- **THEN** acessa ambas as sub-abas, com indicação ativa correta
+- **AND** mantém a navegação do Agendador sem links administrativos
 
 ### Requirement: O Histórico SHALL listar desfechos da versão corrente por data de grupo em janela de datas
 
@@ -113,7 +115,7 @@ Filtros de linha (`performed`, `reason`, `admitted`) SHALL aplicar-se à tabela 
 
 ### Requirement: O sistema SHALL exportar o Histórico em CSV fiel aos filtros
 
-`GET /dashboard/follow-ups/history/export/` SHALL aceitar os mesmos parâmetros da página e responder CSV UTF-8 com BOM, separador `;`, header em português, uma linha por desfecho de procedimento da versão corrente e nome de arquivo derivado da janela, sem criar eventos de auditoria.
+`GET /dashboard/follow-ups/history/export/` SHALL permitir Agendador, supervisor do CHD e admin autorizados ao Pós-Procedimento, aceitar os mesmos parâmetros da página e responder CSV UTF-8 com BOM, separador `;`, header em português, uma linha por desfecho de procedimento da versão corrente e nome de arquivo derivado da janela, sem criar eventos de auditoria.
 
 #### Scenario: CSV com filtros da página
 
@@ -131,9 +133,17 @@ Filtros de linha (`performed`, `reason`, `admitted`) SHALL aplicar-se à tabela 
 
 #### Scenario: Exportação sem papel é bloqueada
 
-- **GIVEN** usuário sem papel `manager`/`admin` (ou anônimo)
-- **WHEN** solicita a exportação
+- **GIVEN** usuário com papel ativo `doctor` ou `nir`, manager sem vínculo CHD, ou anônimo
+- **WHEN** solicita a exportação diretamente pela URL
 - **THEN** o acesso é negado e nenhum conteúdo de follow-up é baixado
+
+#### Scenario: Agendador exporta sem vínculo Supervisor
+
+- **GIVEN** um usuário autenticado e ativo apenas com papel `scheduler` ativo, dentro da intranet
+- **AND** desfechos elegíveis registrados por usuários distintos na janela escolhida
+- **WHEN** exporta com os filtros da página
+- **THEN** recebe o CSV completo da população filtrada, sem restrição ao responsável pelo agendamento ou autor do registro
+- **AND** os registros, versões e eventos persistidos permanecem inalterados
 
 ### Requirement: O Histórico SHALL projetar causas legadas sem reescrever auditoria
 
@@ -175,3 +185,22 @@ Para leitura analítica, o sistema SHALL projetar `absenteeism` como **Não comp
 - **THEN** o CSV mantém BOM, separador, header e ordem de colunas existentes
 - **AND** a row legada usa o label oficial projetado e submotivo vazio
 - **AND** o texto de **Outras causas** permanece corretamente escapado e parseável
+
+### Requirement: Agendador e supervisor SHALL consultar o mesmo histórico de pós-procedimento
+
+O Histórico & Exportação do Agendador SHALL usar os mesmos desfechos correntes, população global elegível, resumos e filtros do supervisor do CHD. Defaults, limites de período, paginação, projeção de causas legadas e formato CSV SHALL permanecer iguais, sem filtro por agendador ou autoria. Consultar/exportar SHALL NOT modificar rows ou eventos.
+
+#### Scenario: Paridade de consulta e CSV entre papéis
+
+- **GIVEN** casos elegíveis agendados por diferentes usuários e de vinda imediata, com versões registradas por supervisor e agendador
+- **WHEN** Agendador e supervisor do CHD consultam o mesmo período e busca e aplicam os mesmos filtros de desfecho, causa e internação
+- **THEN** recebem os mesmos resumos, linhas correntes e CSV
+- **AND** os filtros de linha não alteram os cards-resumo, conforme o comportamento atual
+- **AND** nenhum registro ou evento é criado, alterado ou removido por consulta/exportação
+
+#### Scenario: Versão criada pelo Agendador aparece para o supervisor
+
+- **GIVEN** um caso elegível com versão 1 registrada pelo supervisor e versão 2 pelo Agendador
+- **WHEN** ambos abrem o Histórico na janela do caso
+- **THEN** ambos veem somente a versão 2 na tabela analítica, com o mesmo autor e timestamp
+- **AND** a versão 1 permanece preservada no histórico de versões do formulário
