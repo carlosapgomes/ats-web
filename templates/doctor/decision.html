@@ -453,7 +453,7 @@
           </div>
           <div class="col-md-6">
             <label for="admission-flow" class="form-label">Fluxo de Admissão <span class="text-danger">*</span></label>
-            <select class="form-select{% if form.admission_flow.errors %} is-invalid{% endif %}" id="admission-flow" name="admission_flow">
+            <select class="form-select{% if form.admission_flow.errors %} is-invalid{% endif %}" id="admission-flow" name="admission_flow" data-mobile-reverse-options>
               <option value="" selected disabled>Selecione...</option>
               <option value="scheduled"{% if form.admission_flow.value == "scheduled" %} selected{% endif %}>Agendamento</option>
               <option value="immediate"{% if form.admission_flow.value == "immediate" %} selected{% endif %}>Vinda Imediata</option>
@@ -516,7 +516,7 @@
 
           <div class="col-md-6">
             <label for="admission-flow" class="form-label">Fluxo de Admissão <span class="text-danger">*</span></label>
-            <select class="form-select{% if form.admission_flow.errors %} is-invalid{% endif %}" id="admission-flow" name="admission_flow">
+            <select class="form-select{% if form.admission_flow.errors %} is-invalid{% endif %}" id="admission-flow" name="admission_flow" data-mobile-reverse-options>
               <option value="" selected disabled>Selecione...</option>
               <option value="scheduled"{% if form.admission_flow.value == "scheduled" %} selected{% endif %}>Agendamento</option>
               <option value="immediate"{% if form.admission_flow.value == "immediate" %} selected{% endif %}>Vinda Imediata</option>
@@ -622,5 +622,6 @@
 {% else %}
 <script src="{% static 'js/decision.js' %}"></script>
 {% endif %}
+<script src="{% static 'js/mobile_select_order.js' %}"></script>
 <script src="{% static 'js/work_lock.js' %}"></script>
 {% endblock %}
